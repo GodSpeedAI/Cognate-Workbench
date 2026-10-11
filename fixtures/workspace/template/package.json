@@ -1,0 +1,8 @@
+{
+  "name": "fixture-workspace",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic workspace fixture for reconstruction tests.",
+  "main": "src/greet.ts"
+}

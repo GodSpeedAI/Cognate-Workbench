@@ -1,0 +1,3 @@
+scratch notes:
+- nothing important yet
+- keep this file boring so diffs stay predictable
