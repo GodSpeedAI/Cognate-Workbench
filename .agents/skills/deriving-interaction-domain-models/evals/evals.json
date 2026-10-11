@@ -1,0 +1,63 @@
+{
+"skill_name": "deriving-interaction-domain-models",
+"evals": [
+{
+"id": 1,
+"prompt": "Given a product brief containing overlapping epics, user stories, screens, and API routes for account onboarding, derive the canonical Interaction Domain Model in .sea. Separate canonical journeys from variants and interface projections, create the required companion artifacts, and validate the model with the installed DomainForge CLI.",
+"expected_output": "A validated canonical Interaction Domain Model and companion artifacts that collapse overlapping source interactions into minimum sufficient canonical journeys while preserving meaningful variants, evidence classes, interface projections, assumptions, contradictions, and validation results.",
+"files": [],
+"expectations": [
+"Treats epics, user stories, screens, routes, and API calls as evidence rather than automatically canonical interaction identities.",
+"Separates canonical journeys from specializations, variants, compositions, duplicates, ambiguous interactions, and unsupported interactions.",
+"Uses explicit variation dimensions instead of creating unnecessary near-duplicate canonical journeys.",
+"Produces a source translation map that traces material source statements to modeled concepts and canonical journeys.",
+"Produces a canonical journey catalog with actors, initiating conditions, states, preconditions, actions, capabilities, authority, artifacts, outcomes, evidence, settlement criteria, recovery paths, and next affordances.",
+"Uses only locally supported .sea syntax after inspecting current DomainForge references and valid repository examples.",
+"Does not invent or modify the .sea grammar.",
+"Runs the installed DomainForge validation and parse equivalents and inspects semantic output rather than treating parser success as sufficient.",
+"Documents assumptions, contradictions, unknowns, semantic compromises, and genuine tool limitations.",
+"Ends with exactly one of the permitted canonicality conclusions.",
+"Uses the domainforge-sea skill as the authoritative source for .sea syntax, DomainForge CLI usage, and validation procedures rather than independently inventing or reconstructing them.",
+"Preserves the separation of responsibility: deriving-interaction-domain-models determines the canonical IDM semantics while domainforge-sea determines their valid .sea representation."
+]
+},
+{
+"id": 2,
+"prompt": "Translate a strategy memo whose stated direction is 'become the safest and fastest supplier in the market' together with stakeholder constraints, operating risks, current-state evidence, and several proposed initiatives into a canonical Interaction Domain Model. Distinguish the desired direction from actual spendable affordances and make the evidence and settlement paths explicit.",
+"expected_output": "An Interaction Domain Model that distinguishes strategic destination from reachable affordances and models the consequential paths through actors, intentions, preconditions, payment, authority, capabilities, state changes, evidence, settlement, decisions, and next affordances.",
+"files": [],
+"expectations": [
+"Models the strategic statement as a desired direction rather than incorrectly treating it as an affordance.",
+"Does not call a path an affordance unless required actors, preconditions, material payment, actions, authority, evidence, and settlement access are visible.",
+"Identifies the current condition and desired direction separately.",
+"Models relevant actors, roles, intentions, capabilities, actions, policies, resources, artifacts, outcomes, evidence, settlement conditions, and next decisions.",
+"Represents material payment such as time, money, risk, coordination, attention, effort, maintenance, or opportunity cost when it affects reachability.",
+"Classifies material conclusions as declared, observed, inferred, proposed, or unknown.",
+"Does not silently reconcile contradictory strategic claims or unsupported assumptions.",
+"Distinguishes initiatives and implementation choices from canonical interaction semantics.",
+"Documents unresolved semantic questions requiring domain-owner review.",
+"Validates the resulting .sea model with the installed DomainForge tooling before treating it as canonical.",
+"Uses the domainforge-sea skill as the authoritative source for .sea syntax, DomainForge CLI usage, and validation procedures rather than independently inventing or reconstructing them."
+]
+},
+{
+"id": 3,
+"prompt": "A repository contains an SOP, BPMN flow, agent mission, tool list, escalation policy, incident records, and closure requirements for handling customer incidents. Reconstruct the canonical Interaction Domain Model in .sea and identify which source elements are operational projections, capabilities, policies, evidence obligations, recovery paths, settlement conditions, and interface or tool bindings.",
+"expected_output": "A validated Interaction Domain Model that recovers the stable incident-handling interaction structure beneath the workflow and agent artifacts without confusing operational sequences, tools, interfaces, or implementation details with canonical semantics.",
+"files": [],
+"expectations": [
+"Treats the SOP and BPMN sequence as operational projections rather than automatically making every task box a canonical journey step.",
+"Recovers the underlying actor intentions, states, transformations, capabilities, policies, artifacts, evidence, exceptions, and settlement conditions.",
+"Does not equate agent tool access with capability.",
+"Models agent authority, evidence obligations, stop conditions, escalation paths, and recovery behavior.",
+"Preserves discretionary or exception-driven paths instead of forcing all incident handling into one rigid sequence.",
+"Distinguishes interface, tool, API, and workflow bindings from canonical interaction identities.",
+"Models failure and recovery paths or explicit terminal states.",
+"Makes closure or settlement conditions observable through evidence rather than assertion alone.",
+"Uses only supported .sea grammar and records any semantic compromises required by current DomainForge capabilities.",
+"Runs DomainForge validation and parse equivalents and records CLI versions, commands, diagnostics, corrections, and limitations.",
+"Uses the domainforge-sea skill as the authoritative source for .sea syntax, DomainForge CLI usage, and validation procedures rather than independently inventing or reconstructing them."
+]
+}
+]
+}
