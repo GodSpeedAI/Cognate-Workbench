@@ -1,0 +1,218 @@
+/* AutomationPanel: Layout composition. Adds no colors, rethemes, or decoration.
+ * Composes base.css primitives: wb-btn, wb-section, wb-field, wb-list, wb-chip, wb-error.
+ * Component prefix: wb-automation-* (layout only). */
+
+.wb-automation-header {
+  margin-bottom: 12px;
+}
+
+.wb-automation-header h3 {
+  margin: 0 0 4px 0;
+}
+
+.wb-automation-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+.wb-automation-runner {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.wb-automation-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  list-style: none;
+  margin: 0;
+  padding: 12px 0;
+}
+
+.wb-automation-track li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.wb-automation-step {
+  font-weight: 500;
+}
+
+.wb-automation-failed {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.wb-automation-receipt-note {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+.wb-automation-acceptance {
+  margin: 12px 0;
+}
+
+.wb-automation-acceptance h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+
+.wb-automation-acceptance .wb-list {
+  margin-bottom: 12px;
+}
+
+.wb-automation-acceptance .wb-list li {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.wb-automation-outputs {
+  margin: 12px 0;
+}
+
+.wb-automation-outputs h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+
+.wb-automation-outputs .wb-list {
+  margin-bottom: 12px;
+}
+
+.wb-automation-outputs .wb-list li {
+  font-size: 13px;
+}
+
+.wb-automation-nothing-produced {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+.wb-automation-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.wb-automation-actions .wb-btn {
+  align-self: flex-start;
+}
+
+.wb-automation-inline-input {
+  display: flex;
+  gap: 8px;
+}
+
+.wb-automation-inline-input input {
+  flex: 1;
+  min-width: 200px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  color: var(--cg-text);
+}
+
+.wb-automation-inline-input .wb-btn {
+  flex-shrink: 0;
+  align-self: auto;
+}
+
+.wb-automation-verification-gate {
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.wb-automation-verification-gate h5 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+
+.wb-automation-verification-gate .wb-list li {
+  padding: 4px 0;
+}
+
+.wb-automation-verification-gate label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wb-automation-verification-gate input[type="checkbox"] {
+  margin: 0;
+}
+
+.wb-automation-failure-input {
+  display: flex;
+  gap: 8px;
+}
+
+.wb-automation-failure-input input {
+  flex: 1;
+  min-width: 200px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  color: var(--cg-text);
+}
+
+.wb-automation-failure-input .wb-btn {
+  flex-shrink: 0;
+  align-self: auto;
+}
+
+.wb-automation-form-details {
+  margin-top: 16px;
+}
+
+.wb-automation-form-details > summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-weight: 500;
+  color: var(--cg-text);
+}
+
+.wb-automation-form {
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-sm);
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.wb-automation-form fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wb-automation-substrate-note {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  margin-top: 4px;
+}
+
+.wb-automation-honest-note {
+  font-size: 13px;
+  color: var(--cg-text-muted);
+  margin: 8px 0;
+}

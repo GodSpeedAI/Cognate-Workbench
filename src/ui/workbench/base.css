@@ -1,0 +1,87 @@
+/* Workbench primitives. Extends DESIGN.md (Cobalt: hairlines, one accent, graphite for agent data).
+ * Every workbench component composes these; component CSS adds layout only. Tokens are the app's
+ * existing --cg-* set. No side-stripe borders, no gradients, no decorative motion. */
+
+.wb-root { color: var(--cg-text); font-family: var(--cg-font); font-size: 14px; line-height: 1.5; }
+.wb-root h2, .wb-root h3 { font-family: var(--cg-font-display); letter-spacing: -0.02em; font-weight: 600; margin: 0; }
+.wb-root h2 { font-size: 20px; }
+.wb-root h3 { font-size: 15px; }
+.wb-muted { color: var(--cg-text-muted); }
+.wb-faint { color: var(--cg-text-faint); }
+.wb-mono { font-family: var(--cg-font-mono); font-size: 12px; }
+.wb-prose { max-width: 70ch; }
+
+/* Section: hairline-separated, never a nested card. */
+.wb-section { padding: 16px 0; border-top: 1px solid var(--cg-border); }
+.wb-section:first-child { border-top: 0; }
+.wb-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.wb-section-head .wb-hint { color: var(--cg-text-muted); font-size: 12px; }
+
+/* Buttons: ghost by default, exactly one .primary per surface. */
+.wb-btn {
+  font: inherit; font-size: 13px; line-height: 1; padding: 8px 12px; border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border-strong); background: transparent; color: var(--cg-text); cursor: pointer;
+  transition: background-color 150ms var(--cg-ease-out), border-color 150ms var(--cg-ease-out);
+}
+.wb-btn:hover:not(:disabled) { background: var(--cg-hover); }
+.wb-btn:active:not(:disabled) { background: var(--cg-active); }
+.wb-btn:disabled { color: var(--cg-text-faint); border-color: var(--cg-border); cursor: not-allowed; }
+.wb-btn.primary { background: var(--cg-accent); border-color: var(--cg-accent); color: var(--cg-accent-contrast); }
+.wb-btn.primary:hover:not(:disabled) { background: var(--cg-accent); filter: brightness(1.06); }
+.wb-btn.primary:disabled { background: var(--cg-surface-sunken); border-color: var(--cg-border); color: var(--cg-text-faint); }
+.wb-btn.danger { color: var(--cg-danger); border-color: var(--cg-danger); }
+.wb-btn:focus-visible, .wb-chip-btn:focus-visible, .wb-field input:focus-visible, .wb-field select:focus-visible,
+.wb-field textarea:focus-visible, .wb-node:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 2px; }
+.wb-btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Chips: the machine-readout voice (mono, uppercase, 0.06em, bordered; accent only on text). */
+.wb-chip {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--cg-font-mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--cg-border-strong); color: var(--cg-text-muted); background: transparent; white-space: nowrap;
+}
+.wb-chip.ok { color: var(--cg-success); border-color: var(--cg-success); }
+.wb-chip.warn { color: oklch(55% 0.13 75); border-color: oklch(55% 0.13 75); }
+.wb-chip.bad { color: var(--cg-danger); border-color: var(--cg-danger); }
+.wb-chip.live { color: var(--cg-accent); border-color: var(--cg-accent); }
+.wb-chip.missing { border-style: dashed; color: var(--cg-text-faint); }
+.wb-chip-btn { cursor: pointer; font: inherit; }
+.wb-chip-btn:hover { background: var(--cg-hover); }
+.wb-chip-btn[aria-pressed="true"], .wb-chip-btn[aria-expanded="true"] { background: var(--cg-active); color: var(--cg-text); }
+
+/* Marks always travel with a word, never colour alone. */
+.wb-mark { font-family: var(--cg-font-mono); font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+.wb-mark.pass { color: var(--cg-success); }
+.wb-mark.fail { color: var(--cg-danger); }
+.wb-mark.open { color: var(--cg-text-muted); }
+
+/* Fields */
+.wb-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.wb-field > label, .wb-field > .wb-label { font-size: 12px; color: var(--cg-text-muted); }
+.wb-field input, .wb-field select, .wb-field textarea {
+  font: inherit; font-size: 13px; padding: 8px 10px; border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border-strong); background: var(--cg-surface); color: var(--cg-text);
+}
+.wb-field textarea { min-height: 64px; resize: vertical; }
+.wb-field .wb-error { color: var(--cg-danger); font-size: 12px; }
+.wb-field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.wb-field-row > .wb-field { flex: 1 1 140px; }
+
+/* Empty states teach; they are never just "nothing here". */
+.wb-empty { padding: 24px 0; max-width: 56ch; color: var(--cg-text-muted); }
+.wb-empty strong { color: var(--cg-text); font-weight: 500; }
+
+/* Lists: rows separated by hairlines. */
+.wb-list { list-style: none; margin: 0; padding: 0; }
+.wb-list > li { padding: 10px 0; border-top: 1px solid var(--cg-border); }
+.wb-list > li:first-child { border-top: 0; }
+
+/* Agent-observed data uses graphite. Reserved for real tool/evidence data. */
+.wb-graphite { background: var(--cg-graphite); color: var(--cg-graphite-ink); border-radius: var(--cg-radius-lg); padding: 10px 12px; font-family: var(--cg-font-mono); font-size: 12px; overflow-x: auto; }
+
+/* Consequential register: review and approval surfaces only. */
+.wb-consequential { border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-lg); box-shadow: var(--cg-shadow-consequential); background: var(--cg-surface); padding: 16px; }
+
+.wb-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) { .wb-root * { transition: none !important; animation: none !important; } }
