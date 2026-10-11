@@ -25,14 +25,13 @@ export async function bootApp(home: string): Promise<{ readonly app: AppServer; 
   return { app, client };
 }
 
-const AIMOCK_FIXTURES = fileURLToPath(new URL("../../fixtures/aimock/fixtures.json", import.meta.url));
+const AIMOCK_FIXTURES = fileURLToPath(new URL("../fixtures/aimock/fixtures.json", import.meta.url));
 
 /** The `llmock` bin (`@copilotkit/aimock`): the app package's own node_modules first, then the
  *  workspace root's, then whatever resolves on PATH. */
 function resolveLlmockBin(): string {
   const candidates = [
     fileURLToPath(new URL("../node_modules/.bin/llmock", import.meta.url)),
-    fileURLToPath(new URL("../../../../../node_modules/.bin/llmock", import.meta.url)),
   ];
   for (const candidate of candidates) if (existsSync(candidate)) return candidate;
   return "llmock";
