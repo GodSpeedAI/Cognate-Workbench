@@ -9,7 +9,7 @@
     "test": "bun test test",
     "typecheck": "tsc -p tsconfig.json",
     "verify": "bun run typecheck && bun run test",
-    "test:smoke": "bun test test/workbench-contract.test.ts test/workbench-glob.test.ts"
+    "test:smoke": "bun test test/workbench-contract.test.ts test/workbench-glob.test.ts test/skill-bundle.test.ts"
   },
   "dependencies": {
     "@connectrpc/connect": "2.2.0",
