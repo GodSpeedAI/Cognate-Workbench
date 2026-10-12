@@ -103,19 +103,19 @@ Formats:
 - `calm`: FINOS CALM JSON
 - `kg`: single-file RDF (Turtle or RDF/XML by output extension)
 - `rdf`: RDF/OWL dataset — Turtle + JSON-LD + OWL ontology (directory output;
-  see [RDF/OWL Projection](docs/rdf-projections.md))
+  see [RDF/OWL Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/rdf-projections.md))
 - `bpmn`: BPMN 2.0 process XML (non-executable subset, directory output; see
-  [BPMN Projection](docs/bpmn-projections.md))
+  [BPMN Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/bpmn-projections.md))
 - `cmmn`: CMMN 1.1 case XML — case, roles, human tasks, milestones, and
   policy-derived sentries (directory output; see
-  [CMMN Projection](docs/cmmn-projections.md))
+  [CMMN Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/cmmn-projections.md))
 - `sbvr`: SBVR fact types
 - `dsl`: reformat the DSL (pretty-print)
 - `protobuf`: Protocol Buffer `.proto` files
 - `lean`: Lean 4 formal verification package (directory output; see
-  [Lean 4 Projection](docs/lean-projections.md))
+  [Lean 4 Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/lean-projections.md))
 - `ai-llm` / `ai-graph-ml` / `cep-eval` / `ai-learning`: AI learning datasets
-  (directory output; see [AI Learning Projections](docs/ai-learning-projections.md))
+  (directory output; see [AI Learning Projections](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/ai-learning-projections.md))
 
 ### Lean-specific behavior
 
@@ -140,7 +140,7 @@ generation timestamp and `--base-iri` overrides the `sea:` prefix expansion in
 the JSON-LD and OWL files (default: the canonical SEA vocabulary namespace).
 Output is byte-deterministic; validate the Turtle with
 `domainforge validate-kg output_dir/model.ttl` (requires the `shacl` feature).
-See [RDF/OWL Projection](docs/rdf-projections.md).
+See [RDF/OWL Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/rdf-projections.md).
 
 ### BPMN-specific behavior
 
@@ -155,7 +155,7 @@ become swimlanes, and resources become data objects. `--created-at` fixes the
 generation timestamp for byte-identical output. Validate with
 `xmllint --schema schemas/bpmn/BPMN20.xsd output_dir/model.bpmn --noout` or open
 directly in bpmn.io (which auto-lays-out the diagram). See
-[BPMN Projection](docs/bpmn-projections.md).
+[BPMN Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/bpmn-projections.md).
 
 ### CMMN-specific behavior
 
@@ -169,7 +169,7 @@ become human tasks, and authority policies become milestones gated by
 sentries derived from the policy's condition. `--created-at` fixes the
 generation timestamp for byte-identical output. Validate with
 `xmllint --schema schemas/cmmn/CMMN11.xsd output_dir/model.cmmn --noout`. See
-[CMMN Projection](docs/cmmn-projections.md).
+[CMMN Projection](https://github.com/GodSpeedAI/DomainForge/blob/main/docs/cmmn-projections.md).
 
 ### Protobuf-specific options
 

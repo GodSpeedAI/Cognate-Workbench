@@ -7,7 +7,7 @@ package (its `src/` ships in the npm tarball) before trusting this table for any
 
 Source citations like `@godspeedai/cognate-runtime-api/src/types.ts` point into the *installed*
 npm package (`node_modules/...`), not a Cognate checkout — the same files ship in every published
-tarball ([ADR-0012](../../../docs/decisions/ADR-0012-cognate-package-naming.md)).
+tarball ([ADR-0012](https://github.com/GodSpeedAI/Cognate/blob/main/docs/decisions/ADR-0012-cognate-package-naming.md)).
 
 ## What `@godspeedai/cognate-domainforge` actually does
 

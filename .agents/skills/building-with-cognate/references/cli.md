@@ -4,7 +4,7 @@ This file is the only place in the skill that says how the Cognate CLI is instal
 
 ## Distribution mode
 
-**Current mode: published.** The CLI ships as the [`@godspeedai/cognate-cli`](https://www.npmjs.com/package/@godspeedai/cognate-cli) npm package (current line: 0.1.x). All SDK packages publish under the `@godspeedai/cognate-*` convention ([ADR-0012](../../../docs/decisions/ADR-0012-cognate-package-naming.md)).
+**Current mode: published.** The CLI ships as the [`@godspeedai/cognate-cli`](https://www.npmjs.com/package/@godspeedai/cognate-cli) npm package (current SDK line: 0.2.x). All SDK packages publish under the `@godspeedai/cognate-*` convention ([ADR-0012](https://github.com/GodSpeedAI/Cognate/blob/main/docs/decisions/ADR-0012-cognate-package-naming.md)).
 
 | Setting | Published (current) | Registry-only `create` (future, DEBT-016) |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ This file is the only place in the skill that says how the Cognate CLI is instal
 | `create` package source | `--source $COGNATE_CHECKOUT` still required: `create` vendors the profile's packages from a Cognate checkout and pins them with `file:` tarballs | npm registry, pinned versions — no checkout needed |
 | Upgrade the app | re-run `create` against a newer checkout, or re-vendor; SDK deps inside a generated app update with `bun update` | `bun update @godspeedai/*` |
 
-Pin the major version in scripts (`bunx @godspeedai/cognate-cli@0.1`) so generated apps stay reproducible.
+Pin the major version in scripts (`bunx @godspeedai/cognate-cli@0.2`) so generated apps stay reproducible.
 
 ## Commands
 

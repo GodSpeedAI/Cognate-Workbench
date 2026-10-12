@@ -13,7 +13,7 @@ bun run test:smoke
 bun run dev
 ```
 
-For an existing PostgreSQL server, set `COGNATE_POSTGRES_URL` before running. Without it, `src/store.ts` selects the SDK's pg0-managed database. Database startup, migrations and persistence must be verified in the target environment.
+For an existing PostgreSQL server, set `COGNATE_POSTGRES_URL` before running. Set `COGNATE_WORKBENCH_HOME` to choose a persistent application home directory (legacy `COGNATE_HARNESS_HOME` remains accepted for migration). Without it, `src/store.ts` selects the SDK's pg0-managed database. Database startup, migrations and persistence must be verified in the target environment.
 
 Run `just setup-realitytrace` (requires Rust/Cargo) before the complete RealityTrace integration suite; `SXR_BIN` may alternatively point at a pinned, compatible CLI. The normal app still boots without it, but the actual delivery tests intentionally fail when it is absent. Run `bun run test` for the complete application tests. Browser tests require Chromium/Playwright. `just verify` runs typechecking and tests.
 

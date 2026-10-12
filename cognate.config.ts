@@ -5,5 +5,5 @@ import type { CognateConfig } from "@godspeedai/cognate-cli";
 
 export default {
   profile: "harness",
-  instructions: "DeepSeek Harness reconstruction: configure a model, choose a workspace, run a session.",
+  instructions: "Cognate Workbench: capability-native agent development, grounded task contracts, session orchestration and verification.",
 } satisfies CognateConfig;

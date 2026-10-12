@@ -296,11 +296,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         },
       });
     } catch (error) {
-      console.warn(`[deepseek-harness] realitytrace: wiring failed (${error instanceof Error ? error.message : String(error)}); observations stay queued`);
+      console.warn(`[cognate-workbench] realitytrace: wiring failed (${error instanceof Error ? error.message : String(error)}); observations stay queued`);
       observations = undefined;
     }
   } else {
-    console.warn("[deepseek-harness] realitytrace: SXR binary not found; observations stay queued (dev tools unaffected)");
+    console.warn("[cognate-workbench] realitytrace: SXR binary not found; observations stay queued (dev tools unaffected)");
   }
   // The read side is mounted unconditionally: the inspector shows honest queued states when no SXR
   // target is configured, instead of erroring.
@@ -398,8 +398,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
 
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 3180);
-  const home = process.env.COGNATE_HARNESS_HOME ?? join(dirname(fileURLToPath(new URL(".", import.meta.url))), "..", ".data");
+  const home = process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? join(dirname(fileURLToPath(new URL(".", import.meta.url))), "..", ".data");
   const app = await startServer({ port, home });
-  console.log(`[deepseek-harness] listening on ${app.url} (home: ${home})`);
-  console.log(`[deepseek-harness] dev auth: Authorization: Bearer ${devToken(LOCAL_OPERATOR)}`);
+  console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
+  console.log(`[cognate-workbench] dev auth: Authorization: Bearer ${devToken(LOCAL_OPERATOR)}`);
 }

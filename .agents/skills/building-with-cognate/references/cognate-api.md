@@ -5,7 +5,7 @@ the cited source file; where docs and code disagreed, code wins (noted inline). 
 details live only in `cli.md` — this file just says `cognate create` / `cognate dev`.
 
 **Reading source citations:** paths like `@godspeedai/cognate-runtime-api/src/types.ts` point into
-the *installed* npm package (published as `@godspeedai/cognate-*`, [ADR-0012](../../../docs/decisions/ADR-0012-cognate-package-naming.md)) —
+the *installed* npm package (published as `@godspeedai/cognate-*`, [ADR-0012](https://github.com/GodSpeedAI/Cognate/blob/main/docs/decisions/ADR-0012-cognate-package-naming.md)) —
 look in `node_modules/@godspeedai/cognate-runtime-api/src/types.ts`, or on npm for the versioned
 package page. No Cognate checkout is needed; the same files ship inside every published tarball.
 
