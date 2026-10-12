@@ -47,5 +47,7 @@ jobs:
         run: just smoke
       - name: Install Chromium
         run: bun x playwright install --with-deps chromium
+      - name: Install pinned RealityTrace CLI for integration tests
+        run: just setup-realitytrace
       - name: Run complete Workbench application test suite
         run: just test
