@@ -10,6 +10,10 @@ The `cognate/harness` branch is already merged into Cognate main (0 ahead, 33 be
 
 The source's runtime database files, historical screenshot captures, binary image diffs, and private donor checkout artifacts are intentionally excluded from the standalone application. Historical evidence remains in the originating repository. This GitHub-connector extraction copies current source content; its standalone repository commits do not retain the original files' per-path commit histories. Refer to the source commit for lineage.
 
+For the current state of this repository — its architecture, provenance donors, and which historical
+claims are recovered rather than verified — see
+[docs/explanation/evolution-and-provenance.md](docs/explanation/evolution-and-provenance.md).
+
 ## Required validation before cutover
 
 - [ ] Resolve all declared npm dependencies from the public registry, without a Cognate source checkout.

@@ -1,37 +1,151 @@
 # Cognate Workbench
 
-A capability-native agent development workbench built on the **published Cognate SDK**. This is an application, not a fork of the Cognate framework.
+An open-source coding agent harness for work that somebody is accountable for. Authority is declared before the agent acts. Traces are inspectable afterward. Settled work becomes reusable capability.
 
-## Development
+Bring your own models, change the tools, and inspect every tool call, approval, and state change. Built on the [Cognate SDK](https://github.com/GodSpeedAI/Cognate). Runs in the browser against local project directories.
 
-Requires Bun 1.4+ and PostgreSQL (either locally managed pg0 via the SDK or a configured server). The app uses pinned `@godspeedai/cognate-*` **0.2.0** packages.
+## Why it exists
 
-```sh
+Most agent tooling asks you to trust the agent. Workbench asks for the route, the evidence, and the trace. It keeps models, tools, environments, and workflows separate, so you can change one without redoing the rest.
+
+| Principle | What it means |
+| --- | --- |
+| Composable | Models, tool implementations, execution environments, and workflows are separate. Change one without touching the others. |
+| Observable | Model output, tool calls, agent activity, state changes, and approvals are recorded. The final chat message is not the only evidence. |
+| Durable | The Cognate runtime stores events and state in PostgreSQL. Sessions, approvals, and projections survive restarts. |
+| Explicit control | Authority, boundaries, task contracts, and acceptance evidence are defined in the system, not in prompt text. |
+| Usable out of the box | A browser coding agent with sessions, streaming, tools, plans, subagents, and approvals. Task and review workflows are optional. |
+
+## Who it is for
+
+- Power users who already customize prompts, tools, models, agent roles, and workflows.
+- Harness builders who need an observable environment for testing capabilities, delegation, execution, and verification.
+- Solo developers and small teams running long, multi-step projects where supervising agent activity matters.
+
+If you only need a chat box that edits files, Workbench is more than you need. If you need to answer "what did the agent do, and may it do that again", it fits.
+
+## What works today
+
+### Coding
+
+- File reading, editing, shell, and code-execution tools in real local project directories.
+- Streaming responses, session history, run cancellation, plans, and subagent delegation.
+- Model providers can be changed without restarting. Adapters: OpenAI-compatible, OpenAI Responses, Anthropic-compatible. Local and hosted endpoints both work.
+- Execution environments: local, SSH, and WSL where supported.
+
+### Traces
+
+- Inspect tool invocations, output, refusals, and event-backed session traces.
+- Follow durable events and projections through the PostgreSQL-backed runtime.
+- Optional **RealityTrace** adds observation receipts and evidence correlation. Workbench runs without it.
+
+### Structure
+
+- Task contracts that define goals, skills, authority, invariants, and acceptance criteria.
+- Task boards, a skill and capability catalog, and represented workflow dependencies.
+- Human approval gates and protected-evidence checks on supported write operations.
+- Steering of an active run at its next step boundary, with context preserved.
+- Recorded evidence, worker returns, and review decisions. "The agent says it's done" is not acceptance.
+
+### Known limits
+
+Some features record intent but do not act on it yet.
+
+| Feature | Current behavior |
+| --- | --- |
+| Capability substitution | Recorded. Does not rebind a running tool. |
+| Parallelism plans | Recorded. Do not start workers. |
+| Automation records | Stored. No background scheduler. |
+| Budget information | Informational. Not enforced as a runtime limit. |
+
+
+## Quick start
+
+**Requirements:** [Bun](https://bun.sh/) 1.4+, [Just](https://github.com/casey/just), and PostgreSQL 18 or the pinned [pg0](https://github.com/vectorize-io/pg0) distribution. The bundled pg0 installer targets Linux x86_64 and WSL.
+
+```bash
+git clone https://github.com/GodSpeedAI/Cognate-Workbench.git
+cd Cognate-Workbench
 bun install
-just db-setup # Linux x86_64 / WSL; install pinned, checksum-verified pg0
-bun run typecheck
-bun run test:smoke
-bun run dev
+just db-setup    # installs checksum-verified pg0 (Linux x86_64 / WSL)
+just dev
 ```
 
-For an existing PostgreSQL server, set `COGNATE_POSTGRES_URL` before running. Set `COGNATE_WORKBENCH_HOME` to choose a persistent application home directory (legacy `COGNATE_HARNESS_HOME` remains accepted for migration). Without it, `src/store.ts` selects the SDK's pg0-managed database. With pg0 installed, the SDK starts its named instance automatically. Alternatively, use `COGNATE_POSTGRES_URL` to connect to an existing PostgreSQL server; no pg0 installation is required. The pg0 bootstrap pin currently supports Linux x86_64 / WSL. Database startup, migrations and persistence must be verified in the target environment.
+Open **http://127.0.0.1:3180**. Set your model endpoint in **Settings → Models**, then select a workspace.
 
-Run `just setup-realitytrace` (requires Rust/Cargo) before the complete RealityTrace integration suite; `SXR_BIN` may alternatively point at a pinned, compatible CLI. The normal app still boots without it, but the actual delivery tests intentionally fail when it is absent. Run `bun run test` for the complete application tests. Browser tests require Chromium/Playwright. `just verify` runs typechecking and tests.
+To use an existing PostgreSQL instance, skip pg0 and set a connection URL:
 
-## Architecture
+```bash
+export COGNATE_POSTGRES_URL='postgres://USER:PASSWORD@HOST:5432/DATABASE'
+just dev
+```
 
-- App sources: `src/`
-- Semantic interaction domain: `.sea/interaction/`
-- Explicit capability bindings: `domain/index.ts`
-- Regression suites: `test/`
-- Mock-model fixtures: `fixtures/`
-- Model-first development skills: `.agents/skills/`
-- Original reconstruction decisions: `docs/reconstruction/`
+The app binds to `127.0.0.1` and stores local state in `.data/`. Set `COGNATE_WORKBENCH_HOME` to use a different data directory.
 
-Application runtime composes Cognate via `createRuntime`, not by forking `@godspeedai/cognate-profile-harness`.
+> **Warning:** The server uses a development authenticator. Do not expose it to untrusted networks or users.
 
-## Provenance and limitations
+### Optional: RealityTrace
 
-Extracted from [GodSpeedAI/Cognate](https://github.com/GodSpeedAI/Cognate) at commit `a4517d005c433d37a1b3ae7fb149c14e6ca8ec2c`, path `validation/reconstructions/deepseek-harness/cognate/`. The original remains in Cognate until independent validation completes. See [MIGRATION.md](MIGRATION.md). Known behavior and security gaps are tracked in `docs/reconstruction/WORKBENCH-DEVIATIONS.md`.
+Install the pinned CLI to enable RealityTrace and its evidence-delivery tests. Requires Rust and Cargo.
 
-This repository's development authentication is **not production authentication**. Do not expose the server to untrusted clients without hardening.
+```bash
+just setup-realitytrace
+```
+
+Alternatively, set `SXR_BIN` to an existing compatible executable. Without RealityTrace, observation delivery stays queued and is never reported as completed.
+
+### Commands
+
+| Command | Purpose |
+| --- | --- |
+| `just dev` | Start Workbench |
+| `just typecheck` | Check TypeScript |
+| `just smoke` | Run focused contract and configuration tests |
+| `just test` | Run the full suite. Needs optional integration prerequisites. |
+| `just verify` | Typecheck, then run the full suite |
+| `just db-status` | Inspect the local pg0 instance |
+| `just db-down` | Stop local pg0. Data is kept. |
+
+Full command, environment and configuration reference: [docs](docs/README.md).
+
+## Customize
+
+| Path | What you change |
+| --- | --- |
+| `.sea/interaction/` | Semantic interaction and domain model |
+| `domain/index.ts` | Semantic-to-capability bindings |
+| `src/capabilities/` | Agent actions and their enforcement boundaries |
+| `src/components/` | Model and other runtime components |
+| `src/workbench/` | Task, workflow, authority, skill, and review logic |
+| `src/projections/` | Derived views of durable activity |
+| `src/ui/` | Cockpit, panels, and interface behavior |
+| `.agents/skills/` | Development skills, including Building with Cognate and its modeling skills |
+| `test/` | Agent journeys, invariants, and browser tests |
+
+The design path is capability contract, then implementation binding, then executor binding. A capability keeps its meaning while its mechanism and execution environment change. Not all of this is wired into execution yet.
+
+
+## Origin
+
+Workbench began as a reconstruction of the DeepSeek Harness experience. It has since diverged into its own product, built on Cognate's event-sourced runtime and explicit semantic capabilities. The interface and workflow ideas are starting points. They do not require copying another harness's architecture.
+
+## Status
+
+Active development. Working today: coding-agent interactions, durable runtime state, traces, approval workflows, task contracts, and a browser cockpit. In progress: orchestration, automation, isolation, and execution-policy enforcement.
+
+The development authenticator and tool guards are not a production multi-user security boundary. Path checks and best-effort shell parsing are not a sandbox. Read the [known gaps and validation evidence](docs/known-gaps.md) before using Workbench with untrusted code or data.
+
+## Documentation
+
+[docs/README.md](docs/README.md) is the map of the system: orientation, architecture, subsystems, execution workflows, design explanation, tutorials, how-to guides and technical reference.
+
+- [Getting started](docs/getting-started.md)
+- [Mental model](docs/mental-model.md) and [architecture](docs/architecture.md)
+- [Glossary](docs/glossary.md)
+- [Known gaps](docs/known-gaps.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Source map](docs/source-map.md)
+
+## License
+
+[Apache License 2.0](LICENSE).
