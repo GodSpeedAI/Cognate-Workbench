@@ -25,7 +25,7 @@ import { aimockChatRequests, bootApp, bootAimock, withTempHome } from "./helpers
  *  truth) so the strict-prefix assertion below tracks the fixture, not a copy. */
 const INTERRUPT_CONTENT = (() => {
   const parsed = JSON.parse(
-    readFileSync(new URL("../../fixtures/aimock/fixtures.json", import.meta.url), "utf8"),
+    readFileSync(new URL("../fixtures/aimock/fixtures.json", import.meta.url), "utf8"),
   ) as { readonly fixtures: readonly { readonly match?: { readonly userMessage?: string }; readonly response?: { readonly content?: string } }[] };
   const content = parsed.fixtures.find((f) => f.match?.userMessage === "[[scenario:interrupt]]")?.response?.content;
   if (typeof content !== "string" || content.length === 0) throw new Error("interrupt fixture not found in fixtures/aimock/fixtures.json");

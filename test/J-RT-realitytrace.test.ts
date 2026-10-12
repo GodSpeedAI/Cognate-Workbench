@@ -16,7 +16,7 @@ import { LOCAL_OPERATOR } from "../src/server.ts";
 import { bootApp, bootAimock, withTempHome } from "./helpers.ts";
 
 // Phase-0 fixture contract: the pinned binary must exist — this test FAILS (not skips) without it.
-const SXR_BIN = process.env.SXR_BIN ?? join(import.meta.dir, "../../../../..", ".tmp", "realitytrace", "bin", "realitytrace");
+const SXR_BIN = process.env.SXR_BIN ?? join(import.meta.dir, "..", ".tmp", "realitytrace", "bin", "realitytrace");
 
 interface ObservationStatus {
   readonly eventId: string;

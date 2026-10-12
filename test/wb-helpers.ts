@@ -7,7 +7,7 @@ import { LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
 import type { AcceptanceCriterion, TaskContract } from "../src/workbench/types.ts";
 import type { TaskRecord } from "../src/workbench/state.ts";
 import { bootApp, bootAimock, withTempHome, type MockModel } from "./helpers.ts";
-import { makeWorkspace } from "../../fixtures/workspace/make-workspace.ts";
+import { makeWorkspace } from "../fixtures/workspace/make-workspace.ts";
 
 export { LOCAL_OPERATOR, bootApp, bootAimock, withTempHome };
 export type { AppServer, MockModel };

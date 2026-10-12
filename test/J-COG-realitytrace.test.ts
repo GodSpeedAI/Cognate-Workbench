@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import { bootApp, withTempHome } from "./helpers.ts";
 
-const SXR_BIN = process.env.SXR_BIN ?? join(import.meta.dir, "../../../../..", ".tmp", "realitytrace", "bin", "realitytrace");
+const SXR_BIN = process.env.SXR_BIN ?? join(import.meta.dir, "..", ".tmp", "realitytrace", "bin", "realitytrace");
 
 describe("J-COG-realitytrace", () => {
   test("verification + lineage facts are delivered to RealityTrace with correlation ids", async () => {

@@ -55,7 +55,7 @@ export function observationOutboxFor(
 export function defaultSxrBin(): string | undefined {
   const configured = process.env.SXR_BIN;
   if (configured) return existsSync(configured) ? configured : undefined;
-  const candidate = fileURLToPath(new URL("../../../../../.tmp/realitytrace/bin/realitytrace", import.meta.url));
+  const candidate = fileURLToPath(new URL("../.tmp/realitytrace/bin/realitytrace", import.meta.url));
   return existsSync(candidate) ? candidate : undefined;
 }
 

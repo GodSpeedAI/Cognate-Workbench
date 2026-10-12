@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { StoredEvent } from "@godspeedai/cognate-events";
 import { LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
 import { bootApp, bootAimock, withTempHome } from "./helpers.ts";
-import { makeWorkspace } from "../../fixtures/workspace/make-workspace.ts";
+import { makeWorkspace } from "../fixtures/workspace/make-workspace.ts";
 
 describe("J-C-tool-execution", () => {
   test("read -> bash -> edit -> final answer; the file is actually mutated", async () => {

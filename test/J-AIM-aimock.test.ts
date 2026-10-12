@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import { LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
 import { aimockChatRequests, bootApp, bootAimock, withTempHome } from "./helpers.ts";
-import { makeWorkspace } from "../../fixtures/workspace/make-workspace.ts";
+import { makeWorkspace } from "../fixtures/workspace/make-workspace.ts";
 
 const AIM_PLAIN_TEXT = "Hello from aimock. This completion was served by a fixture match.";
 const AIM_TOOL_FINAL_TEXT = "I read README.md and saw the fixture project's greeting.";

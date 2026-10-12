@@ -56,7 +56,7 @@ function fakeKernel(options: { readonly failComponentIds?: readonly string[] } =
           for (const [id, entry] of [...handlers]) if (entry.owner === owner) handlers.delete(id);
         },
         reset: async () => {},
-      } as ComponentHandle;
+      };\n      return handle as ComponentHandle;
       return handle;
     },
     resolve: (requirement: Requirement) => {
