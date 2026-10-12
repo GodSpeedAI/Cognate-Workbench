@@ -8,12 +8,13 @@ Requires Bun 1.4+ and PostgreSQL (either locally managed pg0 via the SDK or a co
 
 ```sh
 bun install
+just db-setup # Linux x86_64 / WSL; install pinned, checksum-verified pg0
 bun run typecheck
 bun run test:smoke
 bun run dev
 ```
 
-For an existing PostgreSQL server, set `COGNATE_POSTGRES_URL` before running. Set `COGNATE_WORKBENCH_HOME` to choose a persistent application home directory (legacy `COGNATE_HARNESS_HOME` remains accepted for migration). Without it, `src/store.ts` selects the SDK's pg0-managed database. Database startup, migrations and persistence must be verified in the target environment.
+For an existing PostgreSQL server, set `COGNATE_POSTGRES_URL` before running. Set `COGNATE_WORKBENCH_HOME` to choose a persistent application home directory (legacy `COGNATE_HARNESS_HOME` remains accepted for migration). Without it, `src/store.ts` selects the SDK's pg0-managed database. With pg0 installed, the SDK starts its named instance automatically. Alternatively, use `COGNATE_POSTGRES_URL` to connect to an existing PostgreSQL server; no pg0 installation is required. The pg0 bootstrap pin currently supports Linux x86_64 / WSL. Database startup, migrations and persistence must be verified in the target environment.
 
 Run `just setup-realitytrace` (requires Rust/Cargo) before the complete RealityTrace integration suite; `SXR_BIN` may alternatively point at a pinned, compatible CLI. The normal app still boots without it, but the actual delivery tests intentionally fail when it is absent. Run `bun run test` for the complete application tests. Browser tests require Chromium/Playwright. `just verify` runs typechecking and tests.
 
