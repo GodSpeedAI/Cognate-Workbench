@@ -56,8 +56,8 @@ function fakeKernel(options: { readonly failComponentIds?: readonly string[] } =
           for (const [id, entry] of [...handlers]) if (entry.owner === owner) handlers.delete(id);
         },
         reset: async () => {},
-      };\n      return handle as ComponentHandle;
-      return handle;
+      };
+      return handle as ComponentHandle;
     },
     resolve: (requirement: Requirement) => {
       const handler = handlers.get(requirement.capability);
@@ -81,6 +81,7 @@ const secrets: SecretStore = {
     return name === "model-provider:mock" ? "sk-test" : undefined;
   },
   async put() {},
+  async delete() {},
 };
 
 const config = (protocol: ModelConfig["protocol"], overrides: Partial<ModelConfig> = {}): ModelConfig => ({
