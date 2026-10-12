@@ -1,0 +1,2823 @@
+/*
+ * Hallmark · genre: modern-minimal · theme: cobalt (app-adapted) · designed-as-app
+ * Cognate Console — an independent visual system (see ../../DESIGN.md), no longer a forensic
+ * reconstruction of the DeepSeek Harness reference. Token NAMES are kept stable from the prior
+ * system (hundreds of rules below reference them); token VALUES and the radius/type scale are new.
+ * Geometry (sidebar widths, breakpoint) is retained from the settled reconstruction — it was judged
+ * structurally sound in redesign/hallmark-audit.md and is not part of this redesign's scope.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Cobalt palette (DESIGN.md § Theme) — cool engineered paper, one electric signal ---- */
+  --cg-bg: oklch(96.5% 0.006 250);
+  --cg-surface: oklch(98.5% 0.004 250);
+  --cg-surface-raised: oklch(99% 0.003 250);
+  --cg-surface-sunken: oklch(94% 0.008 250);
+  --cg-border: oklch(88% 0.008 255);
+  --cg-border-strong: oklch(80% 0.01 255);
+  --cg-text: oklch(24% 0.02 258);
+  --cg-text-muted: oklch(52% 0.014 257);
+  --cg-text-faint: oklch(64% 0.012 256);
+  /* One signal accent (Hallmark color.md: "one accent, ≤3-5% of viewport") — replaces the prior
+   * two-accent (near-black CTA / separate blue interactive) scheme; hallmark-audit.md finding 1.
+   * Lightness tuned to 52% (darker than Cobalt's reference 58%) so white button text clears
+   * WCAG 4.5:1 against it — color.md's own contrast table, not just the "large text" 3:1 floor. */
+  --cg-accent: oklch(52% 0.19 256);
+  --cg-accent-contrast: oklch(99% 0.006 256);
+  --cg-accent-interactive: var(--cg-accent);
+  --cg-accent-interactive-contrast: var(--cg-accent-contrast);
+  --cg-message-bubble-bg: oklch(94% 0.03 256);
+  --cg-message-bubble-text: var(--cg-text);
+  --cg-danger: oklch(52% 0.19 25);
+  --cg-danger-bg: oklch(96% 0.03 25);
+  --cg-success: oklch(55% 0.14 152);
+  --cg-code-bg: oklch(93% 0.01 255);
+  --cg-hover: oklch(24% 0.02 258 / 0.045);
+  --cg-active: oklch(24% 0.02 258 / 0.08);
+  --cg-shadow: 0 1px 2px oklch(24% 0.02 258 / 0.06), 0 1px 3px oklch(24% 0.02 258 / 0.08);
+  /* The "consequential" surface register (DESIGN.md § Surface/elevation) — approval + plan-review
+   * cards get a deliberately stronger lift than ambient cards; nothing else uses this token. */
+  --cg-shadow-consequential: 0 4px 16px oklch(24% 0.02 258 / 0.14), 0 1px 2px oklch(24% 0.02 258 / 0.1);
+  /* The "graphite" register — code/diff/tool-call surfaces (Cobalt's "code is the hero" move). */
+  --cg-graphite: oklch(22% 0.016 260);
+  --cg-graphite-ink: oklch(94% 0.01 258);
+
+  /* ---- Radii — Cobalt's tight technical scale, replacing the reference's 4/8/12/16/20/28 ---- */
+  --cg-radius-xs: 4px;
+  --cg-radius-sm: 6px;
+  --cg-radius-md: 8px;
+  --cg-radius-lg: 10px;
+  --cg-radius-xl: 12px;
+  --cg-radius-panel: 14px;
+
+  --cg-sidebar-width: 280px;
+  --cg-sidebar-min: 264px;
+  --cg-sidebar-max: 420px;
+  --cg-sidebar-collapsed: 56px;
+  --cg-center-min: 400px;
+  --cg-chat-column-max-width: 790px;
+
+  /* ---- Typography — Space Grotesk display, Inter body, JetBrains Mono outlier (DESIGN.md) ---- */
+  --cg-font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --cg-font: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --cg-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --cg-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --cg-bg: oklch(14% 0.01 258);
+    --cg-surface: oklch(16% 0.012 258);
+    --cg-surface-raised: oklch(19% 0.014 258);
+    --cg-surface-sunken: oklch(12% 0.01 258);
+    --cg-border: oklch(28% 0.012 258);
+    --cg-border-strong: oklch(36% 0.014 258);
+    --cg-text: oklch(94% 0.008 258);
+    --cg-text-muted: oklch(74% 0.012 257);
+    --cg-text-faint: oklch(58% 0.012 257);
+    --cg-accent: oklch(66% 0.17 256);
+    --cg-accent-contrast: oklch(14% 0.012 258);
+    --cg-accent-interactive: var(--cg-accent);
+    --cg-accent-interactive-contrast: var(--cg-accent-contrast);
+    --cg-message-bubble-bg: oklch(28% 0.05 256);
+    --cg-message-bubble-text: var(--cg-text);
+    --cg-danger: oklch(68% 0.17 25);
+    --cg-danger-bg: oklch(24% 0.05 25);
+    --cg-success: oklch(72% 0.15 152);
+    --cg-code-bg: oklch(19% 0.012 258);
+    --cg-hover: oklch(94% 0.008 258 / 0.06);
+    --cg-active: oklch(94% 0.008 258 / 0.14);
+    --cg-shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 1px 3px oklch(0% 0 0 / 0.5);
+    --cg-shadow-consequential: 0 4px 16px oklch(0% 0 0 / 0.5), 0 1px 2px oklch(0% 0 0 / 0.4);
+    /* Dark-mode recipe: elevated surfaces are lighter, not darker (color.md) — graphite becomes the
+     * *raised* surface here, the inverse of light mode where it's the one deliberate dark band. */
+    --cg-graphite: oklch(26% 0.018 260);
+    --cg-graphite-ink: oklch(94% 0.01 258);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --cg-bg: oklch(14% 0.01 258);
+  --cg-surface: oklch(16% 0.012 258);
+  --cg-surface-raised: oklch(19% 0.014 258);
+  --cg-surface-sunken: oklch(12% 0.01 258);
+  --cg-border: oklch(28% 0.012 258);
+  --cg-border-strong: oklch(36% 0.014 258);
+  --cg-text: oklch(94% 0.008 258);
+  --cg-text-muted: oklch(74% 0.012 257);
+  --cg-text-faint: oklch(58% 0.012 257);
+  --cg-accent: oklch(66% 0.17 256);
+  --cg-accent-contrast: oklch(14% 0.012 258);
+  --cg-accent-interactive: var(--cg-accent);
+  --cg-accent-interactive-contrast: var(--cg-accent-contrast);
+  --cg-message-bubble-bg: oklch(28% 0.05 256);
+  --cg-message-bubble-text: var(--cg-text);
+  --cg-danger: oklch(68% 0.17 25);
+  --cg-danger-bg: oklch(24% 0.05 25);
+  --cg-success: oklch(72% 0.15 152);
+  --cg-code-bg: oklch(19% 0.012 258);
+  --cg-hover: oklch(94% 0.008 258 / 0.06);
+  --cg-active: oklch(94% 0.008 258 / 0.14);
+  --cg-shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 1px 3px oklch(0% 0 0 / 0.5);
+  --cg-shadow-consequential: 0 4px 16px oklch(0% 0 0 / 0.5), 0 1px 2px oklch(0% 0 0 / 0.4);
+  --cg-graphite: oklch(26% 0.018 260);
+  --cg-graphite-ink: oklch(94% 0.01 258);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Hallmark mobile floor (responsive.md): no horizontal scroll, ever — `clip`, never `hidden`. */
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  font-family: var(--cg-font);
+  background: var(--cg-bg);
+  color: var(--cg-text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  min-width: 400px;
+  background: var(--cg-bg);
+}
+
+/* ---------- Sidebar ---------- */
+
+.sidebar {
+  width: var(--cg-sidebar-width);
+  min-width: var(--cg-sidebar-min);
+  max-width: var(--cg-sidebar-max);
+  border-right: 1px solid var(--cg-border);
+  background: var(--cg-surface);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed {
+  width: var(--cg-sidebar-collapsed);
+  min-width: var(--cg-sidebar-collapsed);
+  padding: 12px 8px;
+  align-items: center;
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.sidebar.collapsed .sidebar-top {
+  flex-direction: column;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cg-text);
+  overflow: hidden;
+}
+
+.brand-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--cg-font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.brand-chip {
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cg-text-muted);
+  background: var(--cg-surface-sunken);
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-xs);
+  padding: 2px 6px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  border-radius: var(--cg-radius-sm);
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--cg-text-muted);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--cg-hover);
+  color: var(--cg-text);
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-btn:focus-visible,
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--cg-accent);
+  outline-offset: 1px;
+}
+
+.new-session-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface-raised);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.sidebar.collapsed .new-session-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.new-session-btn:hover:not(:disabled) {
+  background: var(--cg-hover);
+}
+
+.new-session-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspaces-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  margin-top: 4px;
+}
+
+.workspaces-header {
+  position: relative; /* anchors .workspaces-view-options (usage pass U3) */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--cg-text-muted);
+}
+
+.session-tree {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.workspace-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-row-label {
+  position: relative; /* anchors the per-workspace actions menu (usage pass U3) */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cg-text-muted);
+  padding: 4px 6px;
+  overflow: visible; /* U3: the hover-revealed action buttons + menu live inside this row */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-row-label svg {
+  flex-shrink: 0;
+}
+
+.session-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: var(--cg-radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--cg-text);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.session-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.session-row-time {
+  font-size: 11px;
+  color: var(--cg-text-faint);
+  flex-shrink: 0;
+}
+
+.session-row.active,
+.session-row:hover {
+  background: var(--cg-hover);
+}
+
+.session-row.active {
+  background: var(--cg-active);
+}
+
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--cg-border);
+  padding-top: 8px;
+  margin-top: auto;
+}
+
+.sidebar-bottom .icon-btn {
+  justify-content: flex-start;
+}
+
+/* ---------- Center column ---------- */
+
+.center-column {
+  flex: 1;
+  min-width: var(--cg-center-min);
+  display: flex;
+  flex-direction: column;
+  /* Critic round-4 P1-2: the reference's center pane is pure white (`--cg-surface`) in every state
+   * — hero, pre-response, streaming, and completed — not the app-shell gray. */
+  background: var(--cg-surface);
+}
+
+.workspace-chooser {
+  margin: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.workspace-chooser-card {
+  max-width: 440px;
+  width: 100%;
+  padding: 24px;
+  border-radius: var(--cg-radius-xl);
+  border: 1px solid var(--cg-border);
+  background: var(--cg-surface);
+  box-shadow: var(--cg-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspace-chooser-card input {
+  padding: 9px 10px;
+  border-radius: var(--cg-radius-md);
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  color: var(--cg-text);
+}
+
+.workspace-chooser-card button {
+  padding: 9px 12px;
+  border-radius: var(--cg-radius-md);
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-accent);
+  color: var(--cg-accent-contrast);
+  border-color: var(--cg-accent);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.workspace-chooser-card button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-chooser-card button.mode-badge-btn {
+  align-self: flex-start;
+  background: var(--cg-surface-sunken);
+  color: var(--cg-text-muted);
+  border-color: var(--cg-border);
+  font-weight: 500;
+  opacity: 1;
+}
+
+/* ---------- Hero landing (04/05: workspace selected, no messages yet) ---------- */
+
+.hero-landing {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex: 1;
+  width: 100%;
+  max-width: 640px;
+  padding: 0 24px 48px;
+  text-align: center;
+}
+
+.hero-logo {
+  width: 40px;
+  height: 40px;
+}
+
+.hero-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Critic round-4 P2-1: the reference's hero heading is regular/medium weight, and the workspace/mode
+ * row beneath it is plain icon+text with no pill border/background — not bold/bordered chrome. */
+.hero-heading {
+  font-family: var(--cg-font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--cg-text);
+}
+
+.hero-preview-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cg-text-muted);
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+}
+
+.hero-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--cg-text-muted);
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+}
+
+.hero-pill svg {
+  width: 13px;
+  height: 13px;
+}
+
+.hero-composer {
+  width: 100%;
+  max-width: 560px;
+  margin-top: 8px;
+}
+
+.empty-state {
+  color: var(--cg-text-muted);
+  margin: 0;
+}
+
+.empty-state.small {
+  font-size: 12px;
+  padding: 6px;
+}
+
+/* ---------- Session header ---------- */
+
+.session-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--cg-border);
+  background: var(--cg-surface);
+  flex-wrap: wrap;
+}
+
+.breadcrumb {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40ch;
+}
+
+.mode-badge {
+  font-family: var(--cg-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cg-text-muted);
+  background: var(--cg-surface-sunken);
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-xs);
+  padding: 3px 8px;
+}
+
+.mode-badge-btn {
+  align-self: center;
+  cursor: default;
+}
+
+.appearance-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.work-details-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.work-details-dropdown > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-xs);
+  background: var(--cg-surface, #fff);
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.work-details-dropdown > button:hover {
+  background: var(--cg-hover);
+}
+
+.work-details-dropdown > button:focus-visible {
+  outline: 2px solid var(--cg-accent);
+  outline-offset: 2px;
+}
+
+.dropdown-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.work-details-dropdown > button[aria-expanded="true"] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.work-details-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 160px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-xs);
+  background: var(--cg-surface, #fff);
+  box-shadow: var(--cg-shadow);
+  padding: 4px 0;
+}
+
+.work-details-menu > button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.work-details-menu > button:hover {
+  background: var(--cg-hover);
+}
+
+.work-details-menu > button:focus-visible {
+  outline: 2px solid var(--cg-accent);
+  outline-offset: -2px;
+}
+
+.settings-description {
+  margin: 0 0 4px;
+  color: var(--cg-text-muted);
+  font-size: 12px;
+}
+
+.verbose-step-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+.verbose-step-failed {
+  color: var(--cg-danger, #c0392b);
+}
+
+.verbose-step-error {
+  color: var(--cg-danger, #c0392b);
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  border-radius: var(--cg-radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--cg-text-muted);
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--cg-text);
+  border-bottom-color: var(--cg-accent-interactive);
+  font-weight: 600;
+}
+
+.tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- Messages ---------- */
+
+/* Critic round-4 P1-1: the reference's message column (text, code blocks, composer) is capped at
+ * roughly 742px and horizontally centered, not stretched to the pane edges — measured against
+ * `reference/screenshots/desktop/15-completed-session.png`. Applied to `.messages` and, below, to
+ * every docked-at-the-composer-position element (`.composer-card`, `.approval-card`,
+ * `.plan-review-card`, `.todo-widget`) so the whole column stays visually aligned. */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: var(--cg-chat-column-max-width, 790px);
+  margin-inline: auto;
+  /* Settings → General → Font size (usage pass U2): conversation content only — message bodies
+   * inherit this; chrome (meta lines, tool labels, composer) keeps its own fixed sizes. */
+  font-size: var(--cg-content-font-size, 14px);
+}
+
+/* Usage pass U2 General-pane additions. */
+.settings-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+  cursor: pointer;
+  padding: 0;
+}
+.settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--cg-surface, #fff);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  transition: transform 0.15s ease;
+}
+.settings-switch[aria-checked="true"] {
+  background: var(--cg-accent-interactive, #4176e6);
+  border-color: var(--cg-accent-interactive, #4176e6);
+}
+.settings-switch[aria-checked="true"]::after {
+  transform: translateX(16px);
+}
+.font-size-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.font-size-value {
+  min-width: 2ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.font-size-unit {
+  color: var(--cg-fg-muted, #6b7280);
+}
+.composer-queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  background: var(--cg-paper-2, #f4f6f8);
+}
+.composer-queued-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--cg-fg-muted, #6b7280);
+}
+.settings-version {
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--cg-fg-muted, #6b7280);
+}
+
+/* Usage pass U3: Workspaces header controls, search row, per-workspace hover actions, and the
+ * floating menus (reference-behavior-matrix.md §12). Positioning anchors live on the original
+ * .workspaces-header / .workspace-row-label rules above. */
+.workspaces-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.workspaces-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+.workspaces-search-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 6px;
+  background: var(--cg-surface, #fff);
+  color: inherit;
+}
+.workspace-new-session-btn,
+.workspace-actions-btn {
+  display: none;
+  margin-left: auto;
+}
+.workspace-row:hover .workspace-new-session-btn,
+.workspace-row:hover .workspace-actions-btn,
+.workspace-row:focus-within .workspace-new-session-btn,
+.workspace-row:focus-within .workspace-actions-btn {
+  display: inline-flex;
+}
+.workspace-actions-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--cg-surface, #fff);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+.workspace-actions-menu button {
+  text-align: left;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+}
+.workspace-actions-menu button:hover:not([disabled]) {
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+}
+.workspaces-view-options {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 220px;
+  padding: 6px;
+  background: var(--cg-surface, #fff);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+.view-options-group-label {
+  font-size: 11px;
+  color: var(--cg-fg-muted, #6b7280);
+  padding: 6px 10px 2px;
+}
+.workspaces-view-options button {
+  text-align: left;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+}
+.workspaces-view-options button:hover:not([disabled]) {
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+}
+.workspaces-view-options button[aria-checked="true"] {
+  font-weight: 600;
+}
+.hero-pill-choice {
+  position: relative;
+  display: inline-flex;
+}
+.hero-pill-choice > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.hero-pill-choice > button:hover {
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+}
+.hero-choose-menu {
+  left: 0;
+  right: auto;
+}
+.workspace-dialog input {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  background: var(--cg-surface, #fff);
+  color: inherit;
+}
+.workspace-dialog .btn-primary {
+  background: var(--cg-accent, #1b1d22);
+  color: var(--cg-surface, #fff);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.workspace-dialog .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  max-width: 720px;
+  animation: cg-rise-in 180ms var(--cg-ease-out);
+}
+
+/* DESIGN.md § Motion — the one deliberate motion in this app besides streaming text itself: a
+   short opacity+rise on new content (messages, disclosure reveals). Nothing else animates. */
+@keyframes cg-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+.message-user {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: 70%;
+}
+
+.message-assistant {
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.message-system {
+  align-self: center;
+  font-size: 12px;
+  color: var(--cg-text-faint);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-sm);
+  padding: 4px 10px;
+}
+
+.message-bubble {
+  background: var(--cg-message-bubble-bg);
+  color: var(--cg-message-bubble-text);
+  border-radius: var(--cg-radius-xl);
+  padding: 10px 14px;
+}
+
+.message-bubble .message-body :is(p, li) {
+  margin: 0;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.meta-time {
+  font-size: 11px;
+  color: var(--cg-text-faint);
+}
+
+.meta-action {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-faint);
+  padding: 3px;
+  border-radius: var(--cg-radius-xs);
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.meta-action:hover:not(:disabled) {
+  background: var(--cg-hover);
+  color: var(--cg-text);
+}
+
+.meta-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.message-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Critic round-4 P1-5: the reference's per-turn status row carries no visible dot at all — the
+ * "Worked"/"Failed"/"Stopped" text is accessible (`role="status"`, `.sr-only` label) but not painted
+ * as a colored circle. Only the still-streaming state ("Deep diving for Ns") keeps a visible pill. */
+.status-pill {
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.status-pill.status-streaming {
+  width: 14px;
+  height: 14px;
+  background: var(--cg-text-faint, #999);
+}
+
+/* The in-progress "Deep diving" tool-activity indicator (08-tool-running/14b) keeps a visible green
+ * dot — critic round-4 batch B confirmed this is genuinely present in the reference, distinct from
+ * the completed/failed "Took Ns" line's now-invisible dot above. */
+.status-pill.status-active {
+  width: 14px;
+  height: 14px;
+  background: var(--cg-success);
+}
+
+.status-pill.status-cancelled {
+  background: transparent;
+  width: 0;
+  height: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Critic round-4 P1-5: plain unstyled text ("Took 6s"), no pill border/background — matches the
+ * reference for both completed and failed turns (cancelled's "Stopped" chip was already plain). */
+.took-btn {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  padding: 0;
+  font-size: 12px;
+}
+
+.message-divider {
+  height: 1px;
+  background: var(--cg-border);
+  margin-bottom: 10px;
+}
+
+.message-failed .message-body {
+  color: var(--cg-danger);
+  background: var(--cg-danger-bg);
+  border-radius: var(--cg-radius-md);
+  padding: 10px 12px;
+}
+
+.message-body :is(p, li) {
+  line-height: 1.6;
+}
+
+.message-body h1,
+.message-body h2,
+.message-body h3 {
+  margin: 0 0 8px;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.cancelled-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cg-text-muted);
+}
+
+/* Tool activity, approval card, edit diff (T7-T8) */
+
+.tool-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.tool-activity-btn {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  padding: 0;
+  font-size: 13px;
+  text-align: left;
+}
+
+/* The "consequential" surface register (DESIGN.md § Surface/elevation) — the one place a deliberate
+   accent-colored edge + a stronger shadow appear, so "the agent is blocked on your decision" reads
+   as a different kind of space than an ordinary ambient card. Shared by ApprovalBar and
+   PlanReviewCard; replaces two separately hand-tuned amber treatments with one system rule. */
+.surface-consequential {
+  /* Impeccable's mechanical detector (redesign/impeccable-detect-report.json) flagged an earlier
+     draft's accent-colored left border as the "side-tab accent border" AI-slop tell — the signal
+     comes from the header dot/label + a genuinely stronger lift instead, not a colored edge. */
+  background: var(--cg-surface);
+  border: 1px solid var(--cg-border-strong);
+  border-radius: var(--cg-radius-lg);
+  box-shadow: var(--cg-shadow-consequential);
+}
+
+/* Docked where the composer sits (replaces the composer at the bottom of the chat pane). */
+.approval-card {
+  width: calc(100% - 48px);
+  max-width: calc(var(--cg-chat-column-max-width) - 48px);
+  margin: 0 auto 20px;
+  overflow: hidden;
+}
+
+.approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--cg-surface-sunken);
+}
+
+.approval-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cg-accent);
+  flex-shrink: 0;
+}
+
+.approval-waiting {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cg-text);
+}
+
+.approval-details {
+  font-size: 13px;
+  color: var(--cg-text);
+  padding: 14px 16px 0;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.approval-btn {
+  border-radius: var(--cg-radius-sm);
+  padding: 6px 16px;
+  font-size: 13px;
+  border: 1px solid var(--cg-border);
+}
+
+.approval-btn.approval-allow {
+  background: var(--cg-accent);
+  color: var(--cg-accent-contrast);
+  border-color: var(--cg-accent);
+}
+
+.approval-btn.approval-reject {
+  background: var(--cg-surface);
+  color: var(--cg-text);
+}
+
+.plan-review-card {
+  width: calc(100% - 48px);
+  max-width: calc(var(--cg-chat-column-max-width) - 48px);
+  margin: 0 auto 20px;
+  padding: 14px 16px;
+}
+
+.plan-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.plan-review-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cg-accent);
+  flex-shrink: 0;
+}
+
+.plan-review-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cg-text);
+}
+
+.plan-review-disclosure {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  padding: 0;
+  font-size: 12px;
+  text-align: left;
+  margin-bottom: 8px;
+}
+
+.plan-review-heading {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.plan-review-preview {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--cg-text);
+}
+
+.plan-review-body {
+  font-size: 13px;
+  color: var(--cg-text);
+  margin-bottom: 8px;
+}
+
+.plan-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.plan-review-btn {
+  border-radius: var(--cg-radius-sm);
+  padding: 6px 16px;
+  font-size: 13px;
+  border: 1px solid var(--cg-border);
+}
+
+.plan-review-btn.plan-review-approve {
+  background: var(--cg-accent);
+  color: var(--cg-accent-contrast);
+  border-color: var(--cg-accent);
+}
+
+.plan-review-btn.plan-review-changes {
+  background: var(--cg-surface);
+  color: var(--cg-text);
+}
+
+/* "To-dos" region (reference-behavior-matrix.md §6.3: `region "To-dos"` with a single summary
+   button). */
+.todo-widget {
+  width: calc(100% - 48px);
+  max-width: calc(var(--cg-chat-column-max-width) - 48px);
+  margin: 0 auto;
+  padding: 8px 0;
+}
+
+.todo-widget > button {
+  border: 1px solid var(--cg-border);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-xs);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Right-hand panel: reused across features that need one (currently only J-F-delegation's "Open
+   ... in sidebar" populates it). */
+.right-panel {
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--cg-border);
+  background: var(--cg-surface, #fff);
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--cg-border);
+  padding: 8px 12px;
+}
+
+.right-panel-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.right-panel-tab button {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--cg-text-muted);
+}
+
+.right-panel-body {
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* J-F-delegation (reference-behavior-matrix.md §6.4). */
+.subagent-count-wrap {
+  position: relative;
+  display: inline-flex;
+  margin-left: 8px;
+}
+
+.subagent-count-btn {
+  border: 1px solid var(--cg-border);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-xs);
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* Anchored dropdown popover under the header's "N subagent(s)" badge (critic round-2 batch B P1) —
+ * a small floating card, not a full-width banner fixed above the composer. */
+.subagent-tree {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 280px;
+  max-width: 360px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-md);
+  background: var(--cg-surface, #fff);
+  box-shadow: var(--cg-shadow);
+  padding: 8px 0;
+}
+
+/* Critic round-4 P1: a single flat, ellipsis-truncated row — the whole row is one click target
+ * ("Open ... in sidebar"), no internal divider/second box (that was a two-column split with a hard
+ * vertical divider, wrapping the description across 4 lines instead of truncating it). */
+.subagent-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subagent-row:hover {
+  background: var(--cg-hover);
+}
+
+.subagent-row-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--cg-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-row-stat {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--cg-text-faint);
+}
+
+.subagent-tree svg {
+  flex-shrink: 0;
+  color: var(--cg-text-faint);
+}
+
+.plan-mode-toggle {
+  border: 1px solid var(--cg-border);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-xs);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.todo-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.edit-diff {
+  margin-top: 8px;
+}
+
+.edit-diff-toggle {
+  border: 1px solid var(--cg-border);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-xs);
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* File-icon card layout (critic round-3 P1): icon + filename heading + "+N -M" stat line, matching
+ * reference/screenshots/*​/10-file-change-expanded.png instead of the old single-line text pill. */
+.edit-diff-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.edit-diff-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--cg-radius-xs);
+  background: var(--cg-surface-raised);
+  color: var(--cg-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Colored-by-extension glyphs (critic round-4 P2): matches the reference's blue "TS" square,
+ * regardless of viewport width. */
+.edit-diff-icon[data-ext="ts"],
+.edit-diff-icon[data-ext="tsx"] {
+  background: #3178c6;
+  color: #ffffff;
+}
+
+.edit-diff-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.3;
+}
+
+.edit-diff-heading {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.edit-diff-stat {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+}
+
+.edit-diff-body {
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-xs);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.diff-add {
+  color: var(--cg-success);
+}
+
+.diff-del {
+  color: var(--cg-danger);
+}
+
+.diff-ctx {
+  color: var(--cg-text-muted);
+}
+
+/* Code blocks */
+
+.message-body pre.code-block {
+  background: var(--cg-code-bg);
+  border: 1px solid var(--cg-border);
+  border-radius: 0 0 var(--cg-radius-md) var(--cg-radius-md);
+  padding: 12px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  font-family: var(--cg-font-mono);
+  font-size: 12.5px;
+  white-space: pre;
+}
+
+.message-body pre.code-block.wrap-lines {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--cg-surface-sunken);
+  border: 1px solid var(--cg-border);
+  border-bottom: none;
+  border-radius: var(--cg-radius-md) var(--cg-radius-md) 0 0;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.code-block-lang {
+  color: var(--cg-text-muted);
+  font-family: var(--cg-font-mono);
+  margin-right: auto;
+}
+
+.code-block-action {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--cg-radius-xs);
+  cursor: pointer;
+}
+
+.code-block-action:hover {
+  background: var(--cg-hover);
+  color: var(--cg-text);
+}
+
+.code-block-action[aria-pressed="true"] {
+  color: var(--cg-accent);
+}
+
+.message-body :not(pre) > code {
+  background: var(--cg-code-bg);
+  border-radius: var(--cg-radius-xs);
+  padding: 1px 4px;
+  font-family: var(--cg-font-mono);
+  font-size: 0.92em;
+}
+
+/* ---------- Composer ---------- */
+
+.composer-card {
+  width: calc(100% - 48px);
+  max-width: calc(var(--cg-chat-column-max-width) - 48px);
+  margin: 0 auto 20px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-panel);
+  background: var(--cg-surface);
+  box-shadow: var(--cg-shadow);
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.composer-card textarea {
+  border: none;
+  background: transparent;
+  color: var(--cg-text);
+  resize: none;
+  min-height: 44px;
+  max-height: 200px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.composer-card textarea:focus-visible {
+  outline: none;
+}
+
+.composer-card textarea::placeholder {
+  color: var(--cg-text-faint);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dropdown-btn,
+.composer-info-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--cg-border);
+  background: var(--cg-surface-sunken);
+  color: var(--cg-text-muted);
+  border-radius: var(--cg-radius-sm);
+  padding: 5px 9px;
+  font-family: var(--cg-font-mono);
+  font-size: 11px;
+}
+
+.dropdown-btn {
+  cursor: pointer;
+}
+
+.dropdown-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.composer-spacer {
+  flex: 1;
+}
+
+.send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--cg-accent-interactive);
+  color: var(--cg-accent-interactive-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.send-btn.stop {
+  background: var(--cg-text);
+  color: var(--cg-surface);
+}
+
+.composer-stats {
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 2px 6px 4px;
+  font-family: var(--cg-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--cg-text-faint);
+}
+
+/* ---------- Settings modal ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 21, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal {
+  background: var(--cg-surface);
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-panel);
+  box-shadow: var(--cg-shadow);
+  padding: 20px 24px;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--cg-text);
+}
+
+.modal.settings-panel {
+  width: 760px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-titlebar {
+  padding: 18px 24px 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-titlebar h2 {
+  margin: 0;
+  font-family: var(--cg-font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: 16px;
+  flex: 1;
+}
+
+.open-config-file-btn {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.open-config-file-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-body {
+  display: flex;
+  min-height: 480px;
+  max-height: 72vh;
+}
+
+.settings-nav {
+  width: 180px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--cg-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+
+.settings-nav-item {
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: var(--cg-radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--cg-text-muted);
+}
+
+.settings-nav-item:hover:not(:disabled) {
+  background: var(--cg-hover);
+}
+
+.settings-nav-item.active {
+  background: var(--cg-active);
+  color: var(--cg-text);
+  font-weight: 600;
+}
+
+.settings-nav-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-content {
+  flex: 1;
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-content h3 {
+  margin: 0;
+  font-family: var(--cg-font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: 15px;
+}
+
+.settings-subtitle {
+  margin: 0 0 4px;
+  color: var(--cg-text-muted);
+  font-size: 12px;
+}
+
+.provider-card {
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--cg-surface-sunken);
+}
+
+.add-provider-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  border: 1px dashed var(--cg-border-strong);
+  background: transparent;
+  border-radius: var(--cg-radius-md);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+  cursor: pointer;
+}
+
+.add-provider-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal h2 {
+  margin: 0;
+  font-family: var(--cg-font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-size: 16px;
+}
+
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+.modal input {
+  padding: 8px 10px;
+  border-radius: var(--cg-radius-md);
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  color: var(--cg-text);
+}
+
+.modal input:disabled {
+  opacity: 0.6;
+}
+
+.modal .modal-actions {
+  padding: 12px 24px 18px;
+  margin-top: 0;
+  border-top: 1px solid var(--cg-border);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-actions button {
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-sm);
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.modal-actions button:last-child {
+  background: var(--cg-accent);
+  color: var(--cg-accent-contrast);
+  border-color: var(--cg-accent);
+}
+
+.modal-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-error {
+  color: var(--cg-danger);
+  font-size: 12px;
+  margin: 0;
+}
+
+.form-success {
+  color: var(--cg-success);
+  font-size: 12px;
+  margin: 0;
+}
+
+.muted {
+  color: var(--cg-text-muted);
+}
+
+/* ---------- Sidebar approval badge (critic round-1 P0-5) ---------- */
+
+.approval-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-family: var(--cg-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cg-accent);
+  background: var(--cg-surface-sunken);
+  border: 1px solid var(--cg-border-strong);
+  border-radius: var(--cg-radius-xs);
+  padding: 1px 6px;
+}
+
+.approval-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cg-accent);
+  flex-shrink: 0;
+}
+
+/* ---------- Review split-diff panel (critic round-2 batch B P0, 10-file-change-expanded) ----------
+ * A real right-hand pane beside the chat, reusing the same `.right-panel` shell the subagent child
+ * view opens (`RightPanel`/`ReviewPanel` in App.tsx). Geometry per product-characterization.md §2:
+ * RIGHTBAR_MIN=300px, RIGHTBAR_MAX_RATIO=0.7, RIGHTBAR_DEFAULT_RATIO=0.45 of the frame. */
+
+.review-right-panel {
+  width: 45vw;
+  min-width: 300px;
+  max-width: 70vw;
+}
+
+.right-panel-add-tab {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+}
+
+.review-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--cg-border);
+  background: var(--cg-surface-sunken);
+  flex-wrap: wrap;
+}
+
+.review-panel-file {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-panel-stat {
+  font-size: 11px;
+  color: var(--cg-text-faint);
+  margin-right: auto;
+}
+
+.review-toolbar-btn {
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-xs);
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.review-toolbar-btn[aria-pressed="true"] {
+  background: var(--cg-active);
+}
+
+.review-toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.review-panel-body {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--cg-font-mono);
+  font-size: 12px;
+}
+
+.review-hunk-header {
+  padding: 4px 10px;
+  color: var(--cg-text-faint);
+  background: var(--cg-surface-sunken);
+  border-bottom: 1px solid var(--cg-border);
+}
+
+.review-diff-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--cg-border);
+}
+
+.review-diff-pane {
+  background: var(--cg-surface);
+  overflow-x: auto;
+}
+
+.review-diff-unified {
+  background: var(--cg-surface);
+  overflow-x: auto;
+}
+
+.review-diff-split.wrap-lines .review-diff-pane,
+.review-diff-unified.wrap-lines {
+  overflow-x: hidden;
+}
+
+.review-diff-split.wrap-lines .review-diff-text,
+.review-diff-unified.wrap-lines .review-diff-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.review-diff-row {
+  display: flex;
+  align-items: flex-start;
+  white-space: pre;
+}
+
+.review-diff-gutter {
+  flex-shrink: 0;
+  width: 36px;
+  padding: 0 6px;
+  text-align: right;
+  color: var(--cg-text-faint);
+  user-select: none;
+}
+
+.review-diff-text {
+  flex: 1;
+  padding-right: 8px;
+}
+
+.review-diff-row.diff-add {
+  background: rgba(26, 127, 55, 0.08);
+}
+
+.review-diff-row.diff-del {
+  background: rgba(217, 48, 37, 0.08);
+}
+
+/* ---------- First-run dialogs (critic round-1 P0-1) ---------- */
+
+.first-run-dialog {
+  width: 480px;
+}
+
+.first-run-dialog p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+  line-height: 1.5;
+}
+
+/* ---------- Settings > Models: add-provider wizard (critic round-1 P0-4) ---------- */
+
+.add-provider-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--cg-border);
+}
+
+.add-provider-tabs .tab {
+  border: none;
+  background: transparent;
+  padding: 8px 4px;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.add-provider-tabs .tab.active {
+  color: var(--cg-text);
+  border-bottom-color: var(--cg-accent-interactive);
+  font-weight: 600;
+}
+
+.third-party-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--cg-text-faint);
+}
+
+.models-region {
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-sm);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.models-region-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.models-region-header div {
+  display: flex;
+  gap: 6px;
+}
+
+.models-region-header button {
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-xs);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.model-row {
+  display: flex;
+  gap: 8px;
+}
+
+.model-row input {
+  flex: 1;
+}
+
+.provider-card-configured .provider-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.provider-card-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.provider-card-key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--cg-success);
+}
+
+.provider-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.provider-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-xs);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.provider-card-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.disclosure-btn {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.provider-customized {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-card-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.provider-card-row-actions button:last-child {
+  background: var(--cg-accent);
+  color: var(--cg-accent-contrast);
+  border-color: var(--cg-accent);
+}
+
+.provider-card-row-actions button {
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-sm);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+/* Critic round-5 P1-1: constrain the flex layout (main + .right-panel) within the viewport
+ * at narrow viewports (1024px) so the page does not overflow horizontally. The chat column
+ * and Review panel must share the fixed viewport width instead of forcing it wider. */
+@media (max-width: 1024px) {
+  main {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .right-panel-body {
+    overflow-x: auto;
+  }
+
+  .right-panel {
+    width: 340px;
+  }
+}
+
+/* DESIGN.md § Responsive principles — narrow register (Phase 7). `--cg-center-min` (400px) is a
+   desktop layout floor inherited from the settled reconstruction's own product-characterization
+   geometry; it must not apply once the viewport itself is narrower than that. */
+@media (max-width: 640px) {
+  .center-column {
+    min-width: 0;
+  }
+
+  .hero-landing {
+    padding: 0 16px 32px;
+  }
+
+  .hero-heading-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .hero-pills {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .composer-toolbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .composer-spacer {
+    display: none;
+  }
+
+  .send-btn {
+    margin-left: auto;
+  }
+
+  .session-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .modal.settings-panel {
+    width: 100%;
+  }
+
+  .settings-body {
+    flex-direction: column;
+    max-height: none;
+  }
+
+  .settings-nav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--cg-border);
+  }
+
+  .right-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    z-index: 30;
+  }
+}
+
+/* Usage pass U4: Built-in plugins / Agent presets panes, the sidebar Plugins panel, and the
+ * header preset selector (reference-behavior-matrix.md §14–15). */
+.plugins-search {
+  width: 100%;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  background: var(--cg-surface, #fff);
+  color: inherit;
+  margin-bottom: 12px;
+}
+.plugins-list {
+  list-style: none;
+  margin: 8px 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plugin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 10px;
+}
+.plugin-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.plugin-row-text strong {
+  font-size: 13px;
+}
+.plugin-state {
+  font-size: 11px;
+  color: var(--cg-success, #1a7f37);
+}
+.plugin-state.off {
+  color: var(--cg-fg-muted, #6b7280);
+}
+.plugin-description {
+  font-size: 12px;
+  color: var(--cg-fg-muted, #6b7280);
+}
+.plugin-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.preset-card {
+  flex-direction: column;
+  align-items: stretch;
+}
+.global-panels {
+  margin: 8px 0;
+}
+.global-panel-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.global-panel-btn:hover {
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+}
+.global-panel-btn.active {
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+  font-weight: 600;
+}
+.plugins-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 36px;
+  max-width: 860px;
+  margin-inline: auto;
+  width: 100%;
+}
+.plugins-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.plugins-panel-header h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+.plugins-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plugins-panel .btn-primary {
+  background: var(--cg-accent, #1b1d22);
+  color: var(--cg-surface, #fff);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.plugins-panel .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.mode-badge-btn {
+  cursor: pointer;
+  border: 0;
+  background: none;
+  font: inherit;
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+.mode-badge-btn:hover {
+  background: var(--cg-active, rgba(27, 29, 34, 0.08));
+}
+.preset-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.preset-menu {
+  top: 100%;
+  right: 0;
+}
+
+/* Usage pass U5: session Chat/Trajectory tab strip, the trajectory table, and the Event details
+ * panel (reference-behavior-matrix.md §13). Cobalt voice: hairline rows, mono for tool data. */
+.session-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 12px;
+}
+.session-tabs button {
+  border: 0;
+  background: none;
+  color: var(--cg-text-muted, #6b7280);
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.session-tabs button[aria-selected="true"] {
+  color: var(--cg-accent-interactive, #4176e6);
+  font-weight: 600;
+}
+.trajectory-view {
+  flex: 1;
+  overflow-y: auto;
+  width: 100%;
+  max-width: var(--cg-chat-column-max-width, 790px);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 24px;
+}
+.trajectory-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.trajectory-toolbar button {
+  border: 1px solid var(--cg-border, #d7dbe0);
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.trajectory-toolbar button[aria-pressed="true"] {
+  background: var(--cg-accent-interactive, #4176e6);
+  border-color: var(--cg-accent-interactive, #4176e6);
+  color: var(--cg-accent-contrast, #fff);
+}
+.trajectory-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  background: var(--cg-surface-sunken, #eef0f3);
+}
+.trajectory-timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.trajectory-timeline-label {
+  flex-shrink: 0;
+  width: 42px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--cg-fg-muted, #6b7280);
+}
+.trajectory-timeline-track {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--cg-surface, #f7f8fa);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  overflow: hidden;
+}
+.trajectory-timeline-seg {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 2px;
+}
+.tl-input .trajectory-timeline-seg {
+  background: var(--cg-accent-interactive, #4176e6);
+}
+.tl-model .trajectory-timeline-seg {
+  background: oklch(52% 0.15 305);
+}
+.tl-tools .trajectory-timeline-seg {
+  background: #b07b10;
+}
+.trace-duration {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--cg-fg-muted, #6b7280);
+}
+.plugin-off-banner {
+  border: 1px dashed var(--cg-border-strong, #c3c8cf);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.trajectory-toolbar input {
+  flex: 1;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 6px;
+  background: var(--cg-surface, #fff);
+  color: inherit;
+}
+.trajectory-table {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--cg-border, #d7dbe0);
+}
+.trace-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--cg-border, #d7dbe0);
+}
+.trace-role-badge {
+  flex-shrink: 0;
+  min-width: 84px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--cg-fg-muted, #6b7280);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.trace-role-badge.role-user {
+  color: var(--cg-accent-interactive, #4176e6);
+}
+.trace-role-badge.role-tool {
+  color: #b07b10;
+}
+.trace-cell {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.trace-cell code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--cg-accent, #1b1d22);
+}
+.trace-request-btn {
+  border: 1px solid var(--cg-border, #d7dbe0);
+  background: none;
+  border-radius: 5px;
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  color: inherit;
+}
+.trace-tool-btn {
+  flex: 1;
+  display: inline-flex;
+  gap: 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  min-width: 0;
+}
+.trace-tool-btn:hover .trace-tool-result {
+  text-decoration: underline;
+}
+.trace-tool-result {
+  color: var(--cg-fg-muted, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-collapsed .trace-cell {
+  font-style: italic;
+}
+.trace-details {
+  width: min(420px, 40vw);
+}
+.trace-details-heading {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.trace-details-tabs {
+  display: inline-flex;
+  gap: 2px;
+  flex: 1;
+}
+.trace-details-tabs button {
+  border: 0;
+  background: none;
+  color: var(--cg-text-muted, #6b7280);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.trace-details-tabs button[aria-selected="true"] {
+  color: var(--cg-accent-interactive, #4176e6);
+  font-weight: 600;
+}
+.trace-details .right-panel-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.trace-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.trace-kv dt {
+  color: var(--cg-fg-muted, #6b7280);
+}
+.trace-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trace-json {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  background: var(--cg-paper-2, #f4f6f8);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: 8px;
+  padding: 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- CognitiveFrame (cognitive-navigation proof) -------------------------------------------------
+   Same Cobalt tokens as the rest of the console. System-observed facts carry a RECORDED label and
+   monospace/hairline structure; generated prose never does. Meaning never rests on colour alone. */
+.cognitive-frame { width: 380px; }
+.cognitive-frame .right-panel-body { gap: 18px; }
+.cognitive-frame section { border-bottom: 1px solid var(--cg-border); padding-bottom: 14px; }
+.cognitive-frame section:last-child { border-bottom: none; }
+.cf-h { font-family: var(--cg-font-display); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cg-text-muted); margin: 0 0 6px; font-weight: 600; }
+.cognitive-frame p { margin: 4px 0; font-size: 13px; color: var(--cg-text); }
+.cf-quiet { color: var(--cg-text-muted) !important; font-size: 12px !important; }
+.cf-deviation { color: var(--cg-danger) !important; font-weight: 500; }
+.cf-worlds { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.cf-hash { display: flex; gap: 8px; align-items: baseline; text-align: left; font: inherit; font-size: 12px; background: transparent; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); padding: 4px 8px; color: var(--cg-text); cursor: pointer; }
+.cf-hash code, .cognitive-frame code { font-family: var(--cg-font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.cf-hash-settled { border-style: solid; }
+.cf-hash-candidate { border-style: dashed; border-color: var(--cg-accent); }
+.cf-hash-label { font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
+.cf-recorded { font-family: var(--cg-font-mono); font-size: 9px; letter-spacing: 0.08em; padding: 1px 4px; border: 1px solid var(--cg-border-strong); border-radius: 3px; color: var(--cg-text-muted); font-weight: 500; }
+.cognitive-frame ul, .cognitive-frame ol { list-style: none; margin: 0; padding: 0; }
+.cf-row { width: 100%; text-align: left; font: inherit; font-size: 12.5px; background: transparent; border: 1px solid transparent; border-left: 2px solid var(--cg-border-strong); border-radius: 0; padding: 5px 8px; color: var(--cg-text); cursor: pointer; }
+.cf-row:hover { background: var(--cg-hover); }
+.cf-row[aria-pressed="true"] { background: var(--cg-active); border-left-color: var(--cg-accent); }
+.cf-row-fail { border-left-color: var(--cg-danger); }
+.cf-row:focus-visible, .cf-btn:focus-visible, .cf-hash:focus-visible, .cf-actions button:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 2px; }
+.cf-focused { color: var(--cg-accent); font-weight: 500; }
+.cf-primary { border-left: 2px solid var(--cg-accent); padding-left: 10px; }
+.cf-reachable { font-weight: 600; }
+.cf-unreachable { color: var(--cg-text-muted) !important; }
+.cf-btn, .cf-actions button { font: inherit; font-size: 12.5px; padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); background: var(--cg-surface-raised); color: var(--cg-text); cursor: pointer; }
+.cf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cf-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.cf-timeline li { font-size: 12px; padding: 2px 0; font-family: var(--cg-font-mono); }
+.cf-pos { color: var(--cg-text-muted); }
+.cf-rejected { color: var(--cg-danger) !important; }
+.cf-method { border: 1px dashed var(--cg-border-strong); padding: 10px !important; border-radius: var(--cg-radius-sm); }
+.cf-view { border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); padding: 10px; margin-top: 8px; background: var(--cg-surface-raised); }
+.cf-view-head { display: flex; justify-content: space-between; align-items: center; }
+.cf-view-head h3 { margin: 0; font-size: 13px; }
+.cf-surface dl, .cf-entity, .cf-compare dl { margin: 6px 0; font-size: 12.5px; }
+.cf-surface dl > div, .cf-entity > div { display: flex; gap: 8px; }
+.cf-surface dt { color: var(--cg-text-muted); min-width: 84px; }
+.cf-surface dd { margin: 0; overflow-wrap: anywhere; }
+.cf-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cf-table { border-collapse: collapse; font-size: 12px; }
+.cf-table th, .cf-table td { border: 1px solid var(--cg-border); padding: 3px 6px; text-align: left; }
+.cf-callout { border-left: 3px solid var(--cg-border-strong); padding: 6px 10px; font-size: 13px; }
+.cf-tone-fail { border-left-color: var(--cg-danger); }
+.cf-preflight h4 { margin: 0 0 4px; font-size: 12px; letter-spacing: 0.06em; }
+@media (max-width: 1100px) { .cognitive-frame { width: 300px; } }
+
+/* ---- Remote Workspaces (Add workspace dialog, world badge, unreachable banner) ------------------- */
+.rw-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--cg-border); margin: 4px 0 12px; }
+.rw-tab { font: inherit; font-size: 13px; padding: 6px 12px; border: none; border-bottom: 2px solid transparent; background: transparent; color: var(--cg-text-muted); cursor: pointer; }
+.rw-tab[aria-selected="true"] { color: var(--cg-text); border-bottom-color: var(--cg-accent); font-weight: 500; }
+.rw-tab:focus-visible, .rw-saved-btn:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 2px; }
+.rw-step { display: flex; flex-direction: column; gap: 12px; }
+.rw-row { display: flex; gap: 10px; }
+.rw-row .rw-field:first-child { flex: 1; }
+.rw-port { width: 84px; }
+.rw-field { display: flex; flex-direction: column; gap: 4px; }
+.rw-label { font-size: 12px; font-weight: 500; color: var(--cg-text-muted); }
+.rw-hint { font-size: 12px; color: var(--cg-text-muted); }
+.rw-auth { border: none; padding: 0; margin: 0; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.rw-auth .rw-label { width: 100%; margin-bottom: 2px; padding: 0; }
+.rw-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.rw-fingerprint { border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--cg-surface-sunken); }
+.rw-fingerprint p { margin: 0; font-size: 13px; }
+.rw-fp, .rw-fingerprint code { font-family: var(--cg-font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.rw-warn { color: var(--cg-text); font-size: 13px; border-left: 3px solid var(--cg-danger); padding-left: 8px; }
+.rw-ok { font-size: 13px; border-left: 3px solid var(--cg-success); padding-left: 8px; }
+.rw-connected { margin: 0; font-size: 13px; }
+.rw-saved { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--cg-border); }
+.rw-saved-btn { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; text-align: left; font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); background: var(--cg-surface-raised); color: var(--cg-text); cursor: pointer; }
+.rw-saved-btn:disabled { opacity: 0.6; cursor: wait; }
+.workspace-world-badge { margin-left: 6px; font-family: var(--cg-font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 1px 5px; border: 1px solid var(--cg-border-strong); border-radius: 3px; color: var(--cg-text-muted); font-weight: 500; white-space: nowrap; }
+.world-banner { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin: 0 auto 8px; max-width: var(--cg-chat-column-max-width, 790px); width: calc(100% - 32px); border: 1px solid var(--cg-danger); background: var(--cg-danger-bg); color: var(--cg-text); border-radius: var(--cg-radius-md); padding: 10px 14px; font-size: 13px; }
+.world-banner button { font: inherit; font-size: 12.5px; padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); background: var(--cg-surface-raised); color: var(--cg-text); cursor: pointer; flex-shrink: 0; }
+.world-banner button:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 2px; }
+
+/* Remote Workspaces polish: the dialog's generic full-width input style must not apply to radios and
+   checkboxes, and the dialog header keeps its close button on the title line. */
+.workspace-dialog .rw-radio input { width: auto; margin: 0; padding: 0; flex-shrink: 0; }
+.workspace-dialog .rw-radio { display: flex; flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.workspace-dialog .rw-auth { flex-direction: row; }
+.workspace-dialog .rw-field input, .workspace-dialog .rw-field select { margin-top: 0; }
+.workspace-dialog .rw-field select { width: 100%; font-size: 13px; padding: 8px 10px; border: 1px solid var(--cg-border, #d7dbe0); border-radius: 8px; background: var(--cg-surface-raised); color: var(--cg-text); }
+.workspace-dialog .dialog-banner { display: flex; justify-content: space-between; align-items: center; }
+.workspace-dialog .rw-port { width: 84px; }
+.workspace-world-badge { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }

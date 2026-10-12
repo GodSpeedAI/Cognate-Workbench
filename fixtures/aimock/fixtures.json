@@ -1,0 +1,610 @@
+{
+  "_comment": "aimock (@copilotkit/aimock `llmock`) fixtures for the DeepSeek Harness reconstruction — the simulated OpenAI endpoint for cognate/test/J-*.test.ts, screenshot captures, and `just harness-up` (U1 of deepseek-harness-usage-features.md). Scenarios keep the old fixtures/mock-model/server.ts `[[scenario:<name>]]` markers as `match.userMessage` keys (aimock matches by substring against the last user turn). Multi-round tool loops use `toolCallId`-anchored follow-ups (ordered BEFORE their leg-1 fixture; leg 1 gated `hasToolResult: false`) with stable fixture-authored tool-call ids, so replay/restart serves the same script. Texts and tool arguments are copied byte-identically from the old mock where tests assert on them. Two honest divergences, both forced by aimock's static fixtures: (1) the old mock's `__REFLECT_TOOL_RESULT__` dynamic reflection is reproduced as static text — exact for every branch the tests exercise (allow/deny, approve/fail) thanks to `toolResultContains` gating, EXCEPT `delegate`, whose final text echoed a runtime-minted child run id (see the `delegate` entries); (2) a marker-less message no longer falls back to `plain` — aimock 404s it (`No fixture matched`), which J-AIM proves is surfaced as a run failure.",
+  "fixtures": [
+    {
+      "_comment": "workbench steering (J-WB-steering, V-004): the request that carries an injected '[user steering]' message gets this scripted answer; proves the model saw the steering inside the running trajectory.",
+      "match": {
+        "userMessage": "[user steering]"
+      },
+      "response": {
+        "content": "Steered: following the new instruction (use Howdy)."
+      }
+    },
+    {
+      "_comment": "remote-slow: one long bash call, for cancellation/timeout journeys (J-RW-cancel-timeout).",
+      "match": {
+        "toolCallId": "call_slow_bash_1"
+      },
+      "response": {
+        "content": "The slow command finished."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:slowbash]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_slow_bash_1",
+            "name": "bash",
+            "arguments": "{\"command\": \"sleep 4901.3\", \"description\": \"A long-running command\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "cognitive-liveverify: break (BROKEN->STALE) then mend (STALE->FIXED), each read-before-edit.",
+      "match": {
+        "toolCallId": "call_break_edit_1"
+      },
+      "response": {
+        "content": "Changed rebuild.txt."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_break_read_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_break_edit_1",
+            "name": "edit",
+            "arguments": "{\"file_path\": \"rebuild.txt\", \"old_string\": \"BROKEN\", \"new_string\": \"STALE\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:break]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_break_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\": \"rebuild.txt\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_mend_edit_1"
+      },
+      "response": {
+        "content": "Mended rebuild.txt."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_mend_read_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_mend_edit_1",
+            "name": "edit",
+            "arguments": "{\"file_path\": \"rebuild.txt\", \"old_string\": \"STALE\", \"new_string\": \"FIXED\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:mend]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_mend_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\": \"rebuild.txt\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "cognitive-attention: 'why did this fail?' resolves 'this' from the human's focused evidence via ui_context; the answer quotes the recorded failure, so it must differ per focus.",
+      "match": {
+        "toolCallId": "call_why_tl_A"
+      },
+      "response": {
+        "content": "It failed because the unit check recorded: expected 2 got 3."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_why_tl_B"
+      },
+      "response": {
+        "content": "It failed because the integration check recorded: timeout in guest path."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_why_ctx_1",
+        "toolResultContains": "expected 2 got 3"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_why_tl_A",
+            "name": "ui_timeline",
+            "arguments": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_why_ctx_1",
+        "toolResultContains": "timeout in guest path"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_why_tl_B",
+            "name": "ui_timeline",
+            "arguments": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_why_ctx_1"
+      },
+      "response": {
+        "content": "Nothing is focused, so I cannot tell which item you mean."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "why did this fail",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_why_ctx_1",
+            "name": "ui_context",
+            "arguments": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "cognitive-cleanup: a destructive rm -rf proposed by the agent; RiskPreflight/Sentinel mediate it before it can run.",
+      "match": {
+        "toolCallId": "call_cleanup_bash_1"
+      },
+      "response": {
+        "content": "Removed the generated output."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:cleanup]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_cleanup_bash_1",
+            "name": "bash",
+            "arguments": "{\"command\": \"rm -rf generated\", \"description\": \"Remove generated output before rebuild\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "cognitive-repair: read-before-edit repair of the candidate (BROKEN -> FIXED in rebuild.txt).",
+      "match": {
+        "toolCallId": "call_repair_edit_1"
+      },
+      "response": {
+        "content": "Repaired rebuild.txt."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_repair_read_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_repair_edit_1",
+            "name": "edit",
+            "arguments": "{\"file_path\": \"rebuild.txt\", \"old_string\": \"BROKEN\", \"new_string\": \"FIXED\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:repair]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_repair_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\": \"rebuild.txt\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "retry: attempt 1 fails 500, attempt 2 succeeds (sequenceIndex variants share one counter bucket per llmock process; a fresh llmock per test keeps it clean — the app's own retry budget supplies the second request).",
+      "match": {
+        "userMessage": "[[scenario:retry]]",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "status": 500,
+        "error": {
+          "message": "Mock model server: scripted transient failure (retry to succeed)",
+          "type": "server_error",
+          "code": "mock_retry_error"
+        }
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:retry]]",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "# Summary\n\nHere is what I found:\n\n- first point\n- second point\n\n```ts\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n```"
+      }
+    },
+    {
+      "_comment": "multi (J-C): read -> bash -> edit -> final answer.",
+      "match": {
+        "toolCallId": "call_multi_edit_1"
+      },
+      "response": {
+        "content": "Read greet.ts, confirmed a clean tree, then updated the greeting from \"Hello\" to \"Howdy\"."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_multi_bash_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_multi_edit_1",
+            "name": "edit",
+            "arguments": "{\"file_path\":\"src/greet.ts\",\"old_string\":\"Hello\",\"new_string\":\"Howdy\",\"replace_all\":false}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_multi_read_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_multi_bash_1",
+            "name": "bash",
+            "arguments": "{\"command\":\"git status --short\",\"description\":\"Show working tree status\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:multi]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_multi_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\":\"src/greet.ts\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "edit: read -> edit -> final answer (J-D's replay test drives this in a bare workspace where both tools fail; the anchored legs still fire off the recorded tool results).",
+      "match": {
+        "toolCallId": "call_edit_edit_1"
+      },
+      "response": {
+        "content": "Updated the greeting in src/greet.ts from \"Hello\" to \"Howdy\"."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_edit_read_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_edit_edit_1",
+            "name": "edit",
+            "arguments": "{\"file_path\":\"src/greet.ts\",\"old_string\":\"Hello\",\"new_string\":\"Howdy\",\"replace_all\":false}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:edit]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_edit_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\":\"src/greet.ts\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "read: one read then the summary (kept from the old mock's scenario set; no journey test drives it).",
+      "match": {
+        "toolCallId": "call_read_read_1"
+      },
+      "response": {
+        "content": "The README describes a tiny fixture project used to exercise read/edit/shell tool flows."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:read]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_read_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\":\"README.md\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "shell: two bash calls then the summary (kept from the old mock's scenario set; no journey test drives it).",
+      "match": {
+        "toolCallId": "call_shell_bash_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_shell_bash_2",
+            "name": "bash",
+            "arguments": "{\"command\":\"ls\",\"description\":\"List files in current directory\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:shell]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_shell_bash_1",
+            "name": "bash",
+            "arguments": "{\"command\":\"git status --short\",\"description\":\"Show working tree status\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "approval (J-D): run_code escalation -> reflect the tool result. Deny branch is gated on the rejection text the app feeds back; the allow branch (ungated, ordered after) reflects run_code's no-output result. Both are the old mock's __REFLECT_TOOL_RESULT__ materialization for their branch, verbatim.",
+      "match": {
+        "toolCallId": "call_approval_runcode_1",
+        "toolResultContains": "the user rejected"
+      },
+      "response": {
+        "content": "Tool result: Error: the user rejected escalating this program to \"workspace-write\"; it stays denied, so stop and explain instead of working around it"
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_approval_runcode_1"
+      },
+      "response": {
+        "content": "Tool result: (run_code completed with no output)"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:approval]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_approval_runcode_1",
+            "name": "run_code",
+            "arguments": "{\"code\":\"await tools.bash({ command: 'rm -rf /tmp/scratch-cache', description: 'Clear stale scratch cache' })\",\"description\":\"Clear stale scratch cache outside the workspace\",\"sandbox_permissions\":\"workspace-write\",\"justification\":\"Need to remove a stale cache directory outside the default workspace sandbox.\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "plan (J-E): todo_write -> exit_plan_mode -> reflect. The fail branch (exit_plan_mode outside plan mode) is gated on the app's fixed error text; the approve branch reflects PLAN_APPROVED_TOOL_RESULT verbatim (J-E asserts the final text byte-exactly).",
+      "match": {
+        "toolCallId": "call_plan_exit_1",
+        "toolResultContains": "only available in plan mode"
+      },
+      "response": {
+        "content": "Tool result: Error: exit_plan_mode is only available in plan mode"
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_plan_exit_1"
+      },
+      "response": {
+        "content": "Tool result: Plan approved — plan mode exited; carry out the plan starting with your next step."
+      }
+    },
+    {
+      "match": {
+        "toolCallId": "call_plan_todo_1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_plan_exit_1",
+            "name": "exit_plan_mode",
+            "arguments": "{\"plan\":\"# Update greeting\\n\\n1. Read src/greet.ts\\n2. Change \\\"Hello\\\" to \\\"Howdy\\\"\\n3. Report the change\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:plan]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_plan_todo_1",
+            "name": "todo_write",
+            "arguments": "{\"todos\":[{\"content\":\"Investigate current greet.ts implementation\",\"status\":\"in_progress\"},{\"content\":\"Propose the greeting change\",\"status\":\"pending\"}]}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "delegate (J-F): subagent -> reflect. DIVERGENCE: the old mock reflected the tool result verbatim, i.e. `Tool result: started subagent <runtime-minted child run id>`; aimock fixtures are static, so the id cannot be echoed. The test derives the child run id from the subagents projection / listRuns instead and asserts only the stable prefix.",
+      "match": {
+        "toolCallId": "call_delegate_subagent_1"
+      },
+      "response": {
+        "content": "Tool result: started subagent <child-run-id>"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:delegate]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_delegate_subagent_1",
+            "name": "subagent",
+            "arguments": "{\"description\":\"Summarize project status\",\"prompt\":\"Summarize the current state of the fixture workspace in one sentence. [[scenario:child]]\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "child: the subagent's own reply (the app sends the delegated prompt — which carries this marker — as the child's user message).",
+      "match": {
+        "userMessage": "[[scenario:child]]"
+      },
+      "response": {
+        "content": "The fixture workspace is a tiny, clean project with a README, a greet() helper, and no pending changes."
+      }
+    },
+    {
+      "_comment": "interrupt (J-H-cancellation): a deliberately slow stream (per-fixture latency/chunkSize) so a UI Stop / run cancellation can land mid-stream.",
+      "match": {
+        "userMessage": "[[scenario:interrupt]]"
+      },
+      "latency": 60,
+      "chunkSize": 6,
+      "response": {
+        "content": "Working on a long task. This task is deliberately slow so a cancellation arriving mid-stream cuts it off well before the final answer; the remaining work would have continued for a while longer."
+      }
+    },
+    {
+      "_comment": "error (J-H-provider-error): honest HTTP 500 on every request — the app retries 5 times, then turn.failed with HTTP_500.",
+      "match": {
+        "userMessage": "[[scenario:error]]"
+      },
+      "response": {
+        "status": 500,
+        "error": {
+          "message": "Mock model server: scripted server_error",
+          "type": "server_error",
+          "code": "mock_server_error"
+        }
+      }
+    },
+    {
+      "_comment": "J-AIM tool round-trip: read README.md -> final answer naming the fed-back result.",
+      "match": {
+        "toolCallId": "call_aim_read_1"
+      },
+      "response": {
+        "content": "I read README.md and saw the fixture project's greeting."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "[[scenario:aim-tool]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_aim_read_1",
+            "name": "read",
+            "arguments": "{\"file_path\":\"README.md\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "J-AIM plain completion.",
+      "match": {
+        "userMessage": "[[scenario:aim-plain]]"
+      },
+      "response": {
+        "content": "Hello from aimock. This completion was served by a fixture match."
+      }
+    },
+    {
+      "_comment": "plain: the old mock's default scenario text, byte-identical (J-B/J-G/J-H assert on it).",
+      "match": {
+        "userMessage": "[[scenario:plain]]"
+      },
+      "response": {
+        "content": "# Summary\n\nHere is what I found:\n\n- first point\n- second point\n\n```ts\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n```"
+      }
+    },
+    {
+      "_comment": "Marker-less model.generate probes (J-CFG invokes model.generate directly with these). Ordered before the shorter \"hello\" so \"hello again\" wins its own fixture; any other marker-less message matches nothing and 404s (proven surfaced by J-AIM).",
+      "match": {
+        "userMessage": "hello again"
+      },
+      "response": {
+        "content": "# Summary\n\nHere is what I found:\n\n- first point\n- second point\n\n```ts\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n```"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "hello"
+      },
+      "response": {
+        "content": "# Summary\n\nHere is what I found:\n\n- first point\n- second point\n\n```ts\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n```"
+      }
+    }
+  ]
+}

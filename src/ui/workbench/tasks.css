@@ -1,0 +1,105 @@
+/* Component layout styles for DoneLadder, TaskList, RuntimeStrip.
+ * Inherits primitives from base.css; these classes add layout only. */
+
+/* DoneLadder: stages in a vertical list with explanatory text. */
+.wb-doneLadder-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-doneLadder-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-doneLadder-explanation {
+  margin-top: 12px;
+  margin-bottom: 0;
+  font-size: 12px;
+}
+
+/* TaskList: grouped tasks with status headers. */
+.wb-taskList-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wb-taskList-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wb-taskList-groupHead {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cg-text-muted);
+  margin: 0;
+  padding: 4px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wb-taskList-taskList {
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-taskList-taskButton {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.wb-taskList-taskTitle {
+  flex: 1 1 auto;
+  min-width: 120px;
+  color: var(--cg-text);
+}
+
+.wb-taskList-taskButton[aria-pressed="true"] .wb-taskList-taskTitle {
+  font-weight: 500;
+  color: var(--cg-accent);
+}
+
+.wb-taskList-missing {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  flex: 0 1 auto;
+}
+
+/* RuntimeStrip: inline status fields. */
+.wb-runtimeStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.wb-runtimeStrip-taskTitle {
+  font-weight: 500;
+  color: var(--cg-text);
+  flex: 0 1 auto;
+}
+
+.wb-runtimeStrip-field {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  white-space: nowrap;
+}
+
+.wb-runtimeStrip-provenance {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  flex: 0 1 auto;
+}

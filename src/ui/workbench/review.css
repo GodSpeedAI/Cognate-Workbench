@@ -1,0 +1,170 @@
+/* Review component styles: LedgerPanel, WorkerReturnForm, ReviewCard.
+ * Layout and component-specific arrangements only. Extends base.css primitives. */
+
+/* ---- LedgerPanel --------------------------------------------------------- */
+
+.wb-ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.wb-ledger-table th {
+  text-align: left;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--cg-border);
+  font-weight: 600;
+  color: var(--cg-text-muted);
+  font-size: 12px;
+}
+
+.wb-ledger-table td {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cg-border);
+}
+
+.wb-ledger-table th:not(:first-child),
+.wb-ledger-table td:not(:first-child) {
+  padding-left: 12px;
+}
+
+.wb-mark-text {
+  display: inline;
+  margin-left: 0;
+}
+
+.wb-ledger-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wb-ledger-group h4 {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.wb-ledger-form {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.wb-ledger-form legend {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+/* ---- WorkerReturnForm ---------------------------------------------------- */
+
+.wb-worker-return-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-worker-return-form .wb-field label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.wb-worker-return-form input[type="checkbox"] {
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+/* ---- ReviewCard ---------------------------------------------------------- */
+
+.wb-review-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.wb-review-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-review-section h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+  font-weight: 600;
+}
+
+.wb-review-section p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.wb-review-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wb-review-section ul li {
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.wb-review-blockers {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--cg-surface-sunken);
+  border-radius: var(--cg-radius-sm);
+}
+
+.wb-review-blockers p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wb-review-blockers ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wb-review-blockers ul li {
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--cg-text);
+}
+
+.wb-review-controls {
+  border-top: 1px solid var(--cg-border);
+  padding-top: 16px;
+}
+
+.wb-review-controls .wb-field {
+  margin-bottom: 12px;
+}
+
+.wb-review-controls textarea {
+  min-height: 64px;
+}
+
+/* ---- Accessibility & Responsive ----------------------------------------- */
+
+@media (max-width: 600px) {
+  .wb-ledger-table {
+    font-size: 12px;
+  }
+
+  .wb-ledger-table th,
+  .wb-ledger-table td {
+    padding: 8px 0;
+  }
+
+  .wb-ledger-table th:not(:first-child),
+  .wb-ledger-table td:not(:first-child) {
+    padding-left: 8px;
+  }
+}

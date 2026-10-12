@@ -1,0 +1,97 @@
+/* Cockpit shell layout: head, tabs, notice line, and the two-pane task view. Layout only; every
+ * primitive comes from base.css. */
+.wb-cockpit { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: 24px clamp(16px, 4vw, 40px) 0; overflow: hidden; }
+.wb-cockpit-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.wb-cockpit-head p { margin: 4px 0 0; max-width: 62ch; }
+.wb-cockpit-tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--cg-border); overflow-x: auto; }
+.wb-cockpit-tab { font: inherit; font-size: 13px; padding: 10px 14px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--cg-text-muted); cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
+.wb-cockpit-tab:hover { color: var(--cg-text); background: var(--cg-hover); }
+.wb-cockpit-tab.active { color: var(--cg-text); border-bottom-color: var(--cg-accent); }
+.wb-cockpit-tab:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: -2px; }
+.wb-cockpit-notice { min-height: 28px; padding: 6px 0; font-size: 13px; }
+.wb-error { color: var(--cg-danger); }
+.wb-cockpit-body { flex: 1; min-height: 0; overflow: auto; padding-bottom: 48px; }
+.wb-tasks { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 32px; align-items: start; }
+.wb-tasks-list { position: sticky; top: 0; }
+.wb-tasks-detail { min-width: 0; }
+.wb-task-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.wb-task-head p { margin: 2px 0 0; }
+.wb-task-actions { margin-top: 12px; }
+.wb-workflows { display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 900px) {
+  .wb-tasks { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .wb-tasks-list { position: static; }
+}
+
+/* Composer bar: task binding and runtime strip above the composer. */
+.wb-composerbar { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 8px; max-width: var(--cg-chat-column-max-width, 790px); width: 100%; margin: 0 auto; }
+.wb-composerbar-task { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.wb-composerbar-task select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: var(--cg-radius-sm); border: 1px solid var(--cg-border-strong); background: var(--cg-surface); color: var(--cg-text); max-width: 100%; min-width: 0; }
+.wb-composerbar-task select:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 2px; }
+
+/* ---- Refinements from the visual review (real-browser screenshots) -------------------------- */
+
+/* Workflow graph: SVG elements have no default fill that reads; give nodes a surface and text ink. */
+.wb-wf-node rect { fill: var(--cg-surface); stroke-width: 1.5px; }
+.wb-wf-node:hover rect { opacity: 1; fill: var(--cg-hover); }
+.wb-wf-node[aria-pressed="true"] rect { stroke: var(--cg-accent); stroke-width: 2.5px; fill: var(--cg-surface-sunken); opacity: 1; }
+.wb-wf-node.done rect { fill: var(--cg-surface-sunken); }
+.wb-wf-node text { fill: var(--cg-text-muted); font-family: var(--cg-font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.wb-wf-node g text { fill: var(--cg-text); font-family: var(--cg-font); font-size: 13px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.wb-wf-node.failed text { fill: var(--cg-danger); }
+.wb-wf-node.running > text:nth-of-type(1) { fill: var(--cg-accent); }
+.wb-wf-edge { stroke: var(--cg-border-strong); }
+.wb-wf-marker { fill: var(--cg-border-strong); }
+.wb-wf-container { background: var(--cg-surface); border-radius: var(--cg-radius-lg); }
+.wb-wf-svg { min-width: 100%; }
+
+/* Contract chips: label small, value in the UI face (the machine-readout voice is for statuses). */
+.wb-contract-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wb-contract-chips .wb-chip { flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 12px; border-radius: var(--cg-radius-md); text-transform: none; letter-spacing: 0; font-family: var(--cg-font); }
+.wb-contract-chips .wb-chip-label { font-family: var(--cg-font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cg-text-muted); }
+.wb-contract-chips .wb-chip-value { font-size: 13px; color: var(--cg-text); max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
+.wb-contract-chips .wb-chip.missing .wb-chip-value { color: var(--cg-text-faint); }
+.wb-contract-status { margin: 8px 0 0; font-size: 13px; color: var(--cg-text-muted); }
+
+/* Task list: quiet rows, hairlines, selection by tint. */
+.wb-taskList-groupHead { margin: 16px 0 4px; font-family: var(--cg-font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cg-text-muted); font-weight: 500; }
+.wb-taskList-taskList { margin: 0; }
+.wb-taskList-taskList > li { padding: 0; border-top: 1px solid var(--cg-border); }
+.wb-taskList-taskList > li:first-child { border-top: 0; }
+.wb-taskList-taskButton { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; width: 100%; text-align: left; font: inherit; font-size: 13px; padding: 10px 8px; border: 0; background: transparent; color: var(--cg-text); cursor: pointer; border-radius: var(--cg-radius-sm); }
+.wb-taskList-taskButton:hover { background: var(--cg-hover); }
+.wb-taskList-taskButton[aria-pressed="true"] { background: var(--cg-active); }
+.wb-taskList-taskButton:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: -2px; }
+.wb-taskList-taskTitle { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.wb-taskList-missing { flex-basis: 100%; font-size: 12px; color: var(--cg-text-muted); }
+
+/* Done ladder: one horizontal line, not a column. */
+.wb-doneLadder-stages { display: flex; flex-wrap: wrap; gap: 4px 20px; list-style: none; margin: 0 0 8px; padding: 0; }
+.wb-doneLadder-stage { display: inline-flex; gap: 6px; align-items: baseline; font-size: 13px; color: var(--cg-text-muted); }
+.wb-doneLadder-stage[aria-current="step"] { color: var(--cg-text); font-weight: 600; }
+.wb-doneLadder-explanation { font-size: 12px; margin: 0; }
+
+/* Evidence form: a compact grid, not a stack of full-width controls. */
+.wb-ledger-form { border: 0; padding: 12px 0 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 16px; }
+.wb-ledger-form legend { padding: 0; font-weight: 500; margin-bottom: 8px; }
+.wb-ledger-form .wb-field:has(textarea), .wb-ledger-form .wb-btn-row, .wb-ledger-form > p { grid-column: 1 / -1; }
+.wb-ledger-form .wb-field textarea { min-height: 48px; }
+
+/* Capabilities: category is a quiet label, capability is the heading; stepper runs horizontally. */
+.wb-capability-list h3 { font-family: var(--cg-font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cg-text-muted); font-weight: 500; margin: 24px 0 4px; }
+.wb-capability-title { font-size: 15px; font-weight: 600; font-family: var(--cg-font-display); letter-spacing: -0.01em; }
+.wb-capability-authorities .wb-chip { color: var(--cg-text-muted); border-color: var(--cg-border-strong); }
+.wb-lifecycle-stepper { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 8px 0; padding: 0; }
+.wb-lifecycle-step { display: inline-flex; gap: 5px; font-size: 12px; color: var(--cg-text-muted); }
+.wb-lifecycle-step.complete { color: var(--cg-text); }
+.wb-lifecycle-step[aria-current="step"], .wb-lifecycle-step[aria-current="step"] .wb-lifecycle-label { color: var(--cg-accent); font-weight: 600; }
+.wb-implementation-item { padding: 10px 0 10px 12px; border-top: 1px solid var(--cg-border); }
+.wb-doneLadder .wb-doneLadder-stages { flex-direction: row; }
+.wb-cockpit .wb-taskList-taskButton[aria-pressed="true"], .wb-cockpit .wb-taskList-taskButton[aria-pressed="true"] .wb-taskList-taskTitle { color: var(--cg-text); }
+
+/* Authority notice in the transcript: a refused call is shown whatever the verbosity, stated plainly. */
+.authority-notice { margin: 8px 0; padding: 10px 14px; border: 1px solid var(--cg-danger); border-radius: var(--cg-radius-md); background: var(--cg-danger-bg); color: var(--cg-text); font-size: 13px; max-width: 70ch; }
+.authority-notice ul { margin: 6px 0; padding-left: 18px; }
+.authority-notice p { margin: 4px 0 0; color: var(--cg-text-muted); }
+.authority-notice-tool { font-family: var(--cg-font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.wb-composerbar-focus { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }

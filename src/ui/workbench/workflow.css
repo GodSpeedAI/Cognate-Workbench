@@ -1,0 +1,287 @@
+/* Workflow graph and node inspector layout. */
+
+/* WorkflowGraph summary status area */
+.wb-wf-summary {
+  margin-bottom: 12px;
+}
+
+.wb-wf-summary [role="status"] {
+  font-size: 13px;
+  color: var(--cg-text);
+}
+
+/* Scrollable graph container */
+.wb-wf-container {
+  overflow: auto;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-lg);
+  background: var(--cg-surface);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+/* SVG styling for nodes and edges */
+.wb-wf-svg {
+  display: block;
+  min-width: 100%;
+}
+
+.wb-wf-node {
+  cursor: pointer;
+}
+
+.wb-wf-node:hover rect {
+  opacity: 0.85;
+}
+
+.wb-wf-node rect {
+  stroke-width: 2px;
+  stroke: var(--cg-border);
+}
+
+.wb-wf-node.pending rect {
+  stroke: var(--cg-text-muted);
+}
+
+.wb-wf-node.ready rect {
+  stroke: var(--cg-text-muted);
+}
+
+.wb-wf-node.running rect {
+  stroke: var(--cg-accent);
+}
+
+.wb-wf-node.blocked rect {
+  stroke: var(--cg-text-muted);
+}
+
+.wb-wf-node.review rect {
+  stroke: var(--cg-accent);
+}
+
+.wb-wf-node.done rect {
+  stroke: var(--cg-success);
+}
+
+.wb-wf-node.failed rect {
+  stroke: var(--cg-danger);
+}
+
+.wb-wf-node.skipped rect {
+  stroke: var(--cg-text-muted);
+}
+
+.wb-wf-node[aria-pressed="true"] rect {
+  opacity: 0.9;
+}
+
+.wb-wf-node text {
+  pointer-events: none;
+  font-size: 12px;
+}
+
+.wb-wf-node .wb-wf-node-id {
+  font-weight: 500;
+}
+
+.wb-wf-node .wb-wf-node-status {
+  font-size: 11px;
+  fill: var(--cg-text-muted);
+}
+
+.wb-wf-node .wb-wf-node-tag {
+  font-size: 10px;
+  fill: var(--cg-text-muted);
+}
+
+/* Edge styling */
+.wb-wf-edge {
+  fill: none;
+  stroke-width: 1.5px;
+  stroke: var(--cg-border-strong);
+}
+
+.wb-wf-edge.needs {
+  stroke: var(--cg-border-strong);
+  stroke-dasharray: none;
+}
+
+.wb-wf-edge.after {
+  stroke: var(--cg-border-strong);
+  stroke-dasharray: 4, 4;
+}
+
+.wb-wf-marker {
+  fill: var(--cg-border-strong);
+}
+
+/* Legend */
+.wb-wf-legend {
+  border-top: 1px solid var(--cg-border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.wb-wf-legend ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--cg-text-muted);
+}
+
+.wb-wf-legend li {
+  margin: 4px 0;
+}
+
+/* NodeInspector sections */
+.wb-ni-header {
+  margin-bottom: 16px;
+}
+
+.wb-ni-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.wb-ni-heading h2 {
+  margin: 0;
+}
+
+.wb-ni-status-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--cg-radius-sm);
+  font-size: 12px;
+  background: var(--cg-hover);
+  color: var(--cg-text);
+}
+
+.wb-ni-section {
+  margin-bottom: 16px;
+}
+
+.wb-ni-section-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cg-text-muted);
+  margin-bottom: 8px;
+}
+
+.wb-ni-definition-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+
+.wb-ni-definition-list dt {
+  font-weight: 500;
+  color: var(--cg-text);
+  white-space: nowrap;
+}
+
+.wb-ni-definition-list dd {
+  margin: 0;
+  color: var(--cg-text);
+  word-break: break-word;
+}
+
+.wb-ni-definition-list .evidence-open {
+  color: var(--cg-text-muted);
+}
+
+.wb-ni-definition-list .evidence-closed {
+  color: var(--cg-success);
+}
+
+/* Evidence list */
+.wb-ni-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.wb-ni-evidence-list li {
+  margin-bottom: 4px;
+}
+
+.wb-ni-evidence-list .evidence-closed::before {
+  content: "✓ ";
+  color: var(--cg-success);
+  margin-right: 4px;
+}
+
+.wb-ni-evidence-list .evidence-open::before {
+  content: "○ ";
+  color: var(--cg-text-muted);
+  margin-right: 4px;
+}
+
+/* Transitions list */
+.wb-ni-transition-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.wb-ni-transition-list li {
+  margin-bottom: 4px;
+}
+
+.wb-ni-transition-arrow::before {
+  content: "→ ";
+  margin-right: 4px;
+}
+
+/* Actions section */
+.wb-ni-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--cg-border);
+}
+
+.wb-ni-actions .wb-btn {
+  flex: 0 1 auto;
+}
+
+.wb-ni-disabled-reason {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  margin-top: 4px;
+}
+
+.wb-ni-waiting-on {
+  padding: 12px;
+  background: var(--cg-hover);
+  border-radius: var(--cg-radius-sm);
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+/* Attest checklist */
+.wb-ni-attest {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.wb-ni-attest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.wb-ni-attest-item input[type="checkbox"] {
+  flex: 0 0 auto;
+}

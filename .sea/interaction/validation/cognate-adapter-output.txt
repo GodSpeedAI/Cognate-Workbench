@@ -1,0 +1,36 @@
+== bun .sea/interaction/validation/check-cognate-adapter.ts ==
+errors: 0
+Total objects: 80
+By kind: {
+  "Entity": 17,
+  "Resource": 18,
+  "Role": 3,
+  "Flow": 18,
+  "Relation": 2,
+  "Policy": 1,
+  "Metric": 1,
+  "EntityInstance": 20
+}
+Relations (edges): 58
+Journey ids (20 expected: 10 product + 10 Remote Workspaces): [
+  "J-A-first-use",
+  "J-B-basic-session",
+  "J-C-tool-execution",
+  "J-CFG-model-provider",
+  "J-D-approval",
+  "J-E-plan",
+  "J-F-delegation",
+  "J-G-persistence",
+  "J-H-cancellation",
+  "J-RW-add-workspace",
+  "J-RW-cancel-timeout",
+  "J-RW-coexist",
+  "J-RW-conn-failure",
+  "J-RW-edit-remote",
+  "J-RW-exec-remote",
+  "J-RW-read-remote",
+  "J-RW-reconnect",
+  "J-RW-select-world",
+  "J-RW-switch",
+  "J-WS-select"
+]

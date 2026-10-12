@@ -1,0 +1,67 @@
+{
+  "repository": "deepseek-ai/deepseek-harness",
+  "clonePath": "/home/sprime01/projects/cognate/.tmp/ref/deepseek-harness",
+  "commit": "477b4f420553e8a52c2fbccc464d7561b239c443",
+  "packageName": "@deepseek-ai/dsh-root",
+  "packageVersion": "0.1.7-rc.2",
+  "captureDate": "2026-09-26",
+  "requirements": {
+    "node": "^22.19.0 || >=24.0.0",
+    "packageManager": "pnpm@11.7.0"
+  },
+  "versionsUsed": {
+    "node": "v26.8.2",
+    "npm": "12.0.2",
+    "pnpm": "11.7.0",
+    "bun": "1.4.0 (not used for this app; present on host)",
+    "os": "Linux 6.18.35.2-microsoft-standard-WSL2 (WSL2) x86_64"
+  },
+  "commands": {
+    "install": "pnpm install --frozen-lockfile",
+    "build": "pnpm run build",
+    "launch": "DSH_HOME=<isolated-dir> pnpm dsh web --no-open --port 3080"
+  },
+  "pnpmNotes": "The host has a 'nub' shim at ~/.nub/shims/pnpm that intercepts `pnpm` and refuses to run when invoked from a directory containing a bun lockfile (e.g. the cognate repo root, which has bun.lock). Running pnpm from inside the deepseek-harness clone (which has its own pnpm-lock.yaml, no bun.lock) works fine through the same shim (auto-installs pnpm 11.7.0 on first use). `npx -y pnpm@11.7.0` also works as a fallback. `corepack` on this host points at a Windows path with CRLF line endings and is broken (bad interpreter) — not needed since the nub shim/npx path works.",
+  "installDurationApprox": "2m47s",
+  "buildDurationApprox": "under 1 minute for build:web portion (full `pnpm run build` includes native addon + host/client lib builds; total run completed within the 590s timeout)",
+  "webUrl": "http://127.0.0.1:3080/",
+  "port": 3080,
+  "authHandoff": {
+    "mechanism": "token-in-URL, cookie-backed session",
+    "details": "On `dsh web` startup the process prints exactly one line to stdout: `dsh web: http://127.0.0.1:3080/?token=<random>`. Visiting that URL (GET / with ?token=... query param) establishes a session (sets a cookie); the plain root URL without the token responds 68-byte plain text: 'dsh web authentication required; reopen the URL printed by dsh web.' A bare HTTP fetch (node fetch / curl) to the token URL does NOT itself authenticate for a *subsequent* bare request unless cookies are preserved across requests (fetch/curl without a cookie jar re-sends no cookie). A real browser (Playwright) navigating to the token URL succeeds and is redirected/left at the clean root URL with the session established, confirmed by the smoke screenshot (page title 'DSH Local Build').",
+    "tokenSource": "printed once to stdout on process start; not derivable from a config file; changes every launch"
+  },
+  "dataDirIsolation": {
+    "envVar": "DSH_HOME",
+    "verifiedIsolated": true,
+    "isolatedPath": "/home/sprime01/projects/cognate/.tmp/ref/dsh-home",
+    "writtenContents": [
+      ".anonymous-user-id",
+      ".credentials.yaml",
+      "storages/workspace.json",
+      "profiles/web/cordis.yml",
+      "profiles/web/cordis.patch.yml (per-profile config override, written by Settings UI and hand-editable)",
+      "profiles/web/package.json",
+      "profiles/web/pnpm-workspace.yaml"
+    ],
+    "note": "Nothing was written under the real $HOME during this run; DSH_HOME fully redirects state. Profile name defaults to 'web' for `dsh web` launches, so the live-editable config path is $DSH_HOME/profiles/web/cordis.patch.yml."
+  },
+  "browser": {
+    "tool": "Playwright",
+    "packageVersionInRepo": "playwright@1.61.1 and playwright@1.63.0-alpha (both present only inside the pnpm virtual store, not hoisted to root node_modules)",
+    "chromiumUsed": "chromium-1243 (host cache at ~/.cache/ms-playwright/chromium-1243), launched via explicit executablePath because playwright@1.61.1's own expected revision (chromium_headless_shell-1228) was not present on the host",
+    "screenshot": "/home/sprime01/projects/cognate/validation/reconstructions/deepseek-harness/reference/screenshots/00-smoke.png"
+  },
+  "os": {
+    "platform": "linux",
+    "kernel": "6.18.35.2-microsoft-standard-WSL2",
+    "arch": "x86_64",
+    "distro": "WSL2 host"
+  },
+  "cleanup": {
+    "processesKilled": true,
+    "trackedFilesModified": false,
+    "commitsCreated": false,
+    "gitRefsChanged": false
+  }
+}

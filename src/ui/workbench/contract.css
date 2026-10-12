@@ -1,0 +1,231 @@
+/* Contract components: layout only. Base class styling in base.css */
+
+/* ContractBar: chip grid with status line */
+.wb-contract-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wb-contract-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-chip-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  text-align: left;
+  min-width: 120px;
+}
+
+.wb-chip-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--cg-text-muted);
+}
+
+.wb-chip-value {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-chip.missing .wb-chip-value {
+  color: var(--cg-danger);
+}
+
+.wb-contract-status {
+  font-size: 13px;
+  color: var(--cg-text-muted);
+  line-height: 1.5;
+}
+
+/* ContractEditor: inline panel with field groups */
+.wb-contract-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wb-contract-editor h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wb-contract-locked-notice {
+  padding: 12px;
+  background: var(--cg-surface-secondary);
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-sm);
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+.wb-contract-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Skills fieldsets */
+.wb-contract-field-group fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.wb-contract-field-group fieldset legend {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.wb-skills-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.wb-skill-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wb-skill-checkbox input {
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+.wb-skill-id {
+  font-weight: 500;
+  color: var(--cg-text);
+}
+
+.wb-skill-purpose {
+  color: var(--cg-text-muted);
+  font-size: 12px;
+}
+
+/* Executor rows */
+.wb-executor-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--cg-surface-secondary);
+  border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border);
+}
+
+.wb-executor-remove {
+  align-self: flex-start;
+}
+
+/* Invariant rows */
+.wb-invariant-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--cg-surface-secondary);
+  border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border);
+}
+
+.wb-invariant-remove {
+  align-self: flex-start;
+}
+
+/* Acceptance rows */
+.wb-acceptance-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--cg-surface-secondary);
+  border-radius: var(--cg-radius-sm);
+  border: 1px solid var(--cg-border);
+}
+
+.wb-acceptance-row > .wb-field-row {
+  align-items: flex-end;
+}
+
+.wb-required-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wb-required-checkbox input {
+  cursor: pointer;
+}
+
+.wb-acceptance-remove {
+  align-self: flex-start;
+}
+
+.wb-hint {
+  font-size: 12px;
+  color: var(--cg-text-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* Contract actions */
+.wb-contract-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cg-border);
+}
+
+.wb-contract-error {
+  font-size: 12px;
+  color: var(--cg-danger);
+}
+
+.wb-required {
+  color: var(--cg-danger);
+}
+
+/* Responsive: wrap field rows at smaller widths */
+@media (max-width: 640px) {
+  .wb-field-row {
+    flex-direction: column;
+  }
+
+  .wb-field-row > .wb-field {
+    flex: auto;
+  }
+
+  .wb-contract-chips {
+    gap: 6px;
+  }
+
+  .wb-chip-btn {
+    min-width: 100px;
+    padding: 6px 10px;
+  }
+}
