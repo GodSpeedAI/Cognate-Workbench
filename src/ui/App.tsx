@@ -4,6 +4,7 @@ import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
 import { WorkbenchView, useBindableTasks } from "./workbench/Workbench.tsx";
+import { ExpertsTeamsPanel } from "./experts/ExpertsTeamsPanel.tsx";
 import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "../workbench/focus.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
@@ -4454,6 +4455,7 @@ export function App() {
   // column for the plugin manager (the reference's panel replaces the session surface, per the
   // 25b checkpoint's aria tree).
   const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
+  const [expertsPanelOpen, setExpertsPanelOpen] = useState(false);
   // T11: `#plugins/<id>` is the panel's only route. The hash is the source of truth, so Back,
   // Forward and a reload all restore the same view; opening pushes one history entry and closing
   // unwinds it (or replaces it when the page was deep-linked).
@@ -4879,7 +4881,7 @@ export function App() {
               </span>
             )}
           </div>
-          <button type="button" className="icon-btn" aria-label="Collapse sidebar" onClick={() => setCollapsed((c) => !c)}>
+          <button type="button" className="icon-btn" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((c) => !c)}>
             <CollapseIcon />
           </button>
         </div>
@@ -4893,10 +4895,27 @@ export function App() {
           <nav className="global-panels" aria-label="Global panels">
             <button
               type="button"
+              className={expertsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
+              aria-label="Experts and Teams"
+              aria-pressed={expertsPanelOpen}
+              onClick={() => {
+                setExpertsPanelOpen((open) => !open);
+                setPluginsPanelOpen(false);
+                setWorkbenchOpen(false);
+                if (window.matchMedia("(max-width: 1023px)").matches) setCollapsed(true);
+              }}
+            >
+              Experts &amp; Teams
+            </button>
+            <button
+              type="button"
               className={pluginsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
               aria-label="Plugins"
               aria-pressed={pluginsPanelOpen}
-              onClick={() => (pluginsPanelOpen ? closePluginsPanel() : setPluginsPanelOpen(true))}
+              onClick={() => {
+                if (pluginsPanelOpen) closePluginsPanel();
+                else { setPluginsPanelOpen(true); setExpertsPanelOpen(false); setWorkbenchOpen(false); }
+              }}
             >
               <PluginIcon />
               Plugins
@@ -4907,7 +4926,7 @@ export function App() {
               aria-label="Workbench"
               aria-pressed={workbenchOpen}
               disabled={!currentWorkspaceId}
-              onClick={() => setWorkbenchOpen((v) => !v)}
+              onClick={() => { setWorkbenchOpen((v) => !v); setExpertsPanelOpen(false); setPluginsPanelOpen(false); }}
             >
               <WorkbenchIcon />
               Workbench
@@ -5192,7 +5211,9 @@ export function App() {
       </aside>
 
       <main className="center-column">
-        {pluginsPanelOpen ? (
+        {expertsPanelOpen ? (
+          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onClose={() => setExpertsPanelOpen(false)} onOpenNavigation={() => setCollapsed(false)} onOpenSettings={() => setShowSettings(true)} />
+        ) : pluginsPanelOpen ? (
           <PluginsPanel
             detailId={detailPluginId}
             onClose={closePluginsPanel}

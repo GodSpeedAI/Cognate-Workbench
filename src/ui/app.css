@@ -2315,6 +2315,10 @@ input:focus-visible {
    desktop layout floor inherited from the settled reconstruction's own product-characterization
    geometry; it must not apply once the viewport itself is narrower than that. */
 @media (max-width: 640px) {
+  .app-shell {
+    min-width: 0;
+  }
+
   .center-column {
     min-width: 0;
   }
