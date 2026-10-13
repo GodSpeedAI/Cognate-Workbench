@@ -266,6 +266,7 @@ export function expertEffectComponent(options: {
         const commitments = await commitmentsRef;
         const state = await experts.state(ctx.tenant);
         const assignment = state.assignments[value.assignmentId];
+        if(assignment && ["queued","running","waiting"].includes(assignment.status))throw new Error("Stop or wait for this Assignment before reconciling its effect; a live dispatch cannot be overwritten");
         const effectKeyValue = requiredText(value.toolCallId, "toolCallId", 300);
         const effect = assignment?.effects?.[effectKeyValue];
         if (!assignment || !effect || !["DISPATCHING", "UNKNOWN_RECONCILIATION_REQUIRED"].includes(effect.state) && !(effect.resolvedBy===ctx.actor.id && effect.state===(value.outcome==="succeeded" ? "SUCCEEDED":"FAILED"))) throw new Error("No ambiguous effect exists for this Assignment");

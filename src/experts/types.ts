@@ -27,6 +27,7 @@ export interface Team {
 export interface Conversation {
   id: string; scope: "solo" | "team" | "private-team"; expertId: string | null; teamId: string | null;
   workspaceId: string; title: string; messageIds: string[]; assignmentIds: string[];
+  createdAt?: string; updatedAt?: string;
 }
 export interface ExpertMessage {
   id: string; conversationId: string; assignmentId: string | null;

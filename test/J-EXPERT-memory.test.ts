@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Assignment, ExpertState } from "../src/experts/types.ts";
+import type { Assignment, Conversation, ExpertState } from "../src/experts/types.ts";
 import { publicExperts } from "../src/experts/state.ts";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import {
@@ -69,6 +69,9 @@ test("J-EXPERT-MEMORY: provenance and scope isolate personal, private-Team and s
     expect(soloContext).toContain("Builder personal note with provenance.");
     expect(soloContext).not.toContain("Builder private Team observation.");
     expect(soloContext).not.toContain("Cognate Team shared convention.");
+    const privateOrchestrator=await completedAssignment(testApp,{expertId:"product-manager",teamId:"cognate-team",message:"Private discussion must not expose coordinating or addressed-delivery tools."});
+    expect(privateOrchestrator.execution.tools).not.toContain("team_delegate");
+    expect(privateOrchestrator.execution.tools).not.toContain("team_message");
 
     const privateState = await waitForState(testApp, (state) => Object.keys(state.memory).length > 0, "memory records");
     const publicView = publicExperts(privateState);
@@ -92,5 +95,11 @@ test("J-EXPERT-MEMORY: provenance and scope isolate personal, private-Team and s
     expect(Object.values(projected!.conversations).some((conversation) => conversation.scope === "private-team")).toBe(false);
     expect(Object.values(projected!.assignments).every((assignment) => assignment.execution.context.length === 0)).toBe(true);
     expect(projected?.experts.builder?.name).toBe("Builder");
+    const history=await invoke(testApp,"expert.context",{list:true,scope:"private-team",expertId:"builder",teamId:"cognate-team"}) as unknown as {conversations:Conversation[]};
+    expect(history.conversations.some(c=>c.id===firstPrivate.conversationId)).toBe(true);
+    expect(history.conversations.every(c=>c.scope==="private-team" && c.expertId==="builder" && c.teamId==="cognate-team")).toBe(true);
+    const reopened=await invoke(testApp,"expert.context",{conversationId:firstPrivate.conversationId}) as unknown as {conversation:Conversation;messages:{text:string}[]};
+    expect(reopened.conversation.workspaceId).toBe(testApp.workspaceId);
+    expect(reopened.messages.some(m=>m.text.includes("Create a source for private Team context"))).toBe(true);
   });
 }, 60_000);

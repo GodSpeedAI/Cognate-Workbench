@@ -287,5 +287,10 @@ test("J-TEAM-EVIDENCE: Builder edits through the durable effect boundary and Ver
     expect(readReceipts).toHaveLength(1);
     expect(JSON.stringify(readReceipts[0])).toContain("new");
     expect(parent.handoff?.output).toContain("independent read");
+    await invoke(testApp,"team.review",{assignmentId:parent.id,verdict:"accept",rationale:"Independent file read confirms the requested change and the Builder effect receipt succeeded",evidence:[verifier.id],requestId:"evidence-review"});
+    await invoke(testApp,"team.settle",{assignmentId:parent.id,decision:"accepted",rationale:"The observed file and independent receipt support this objective",requestId:"evidence-settlement"});
+    const accepted=(await testApp.state()).assignments[parent.id]!;
+    expect(accepted.status).toBe("completed");
+    expect(accepted.settlement?.by).toBe("operator");
   });
 }, 60_000);

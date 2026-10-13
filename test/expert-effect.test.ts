@@ -74,6 +74,7 @@ function harness(options: { readonly failAfterEffect?: boolean; readonly allowed
       if (effect) assignment.effects![toolCallId] = { ...effect, state };
     },
     clearEffects() { assignment.effects = {}; },
+    setAssignmentStatus(status:Assignment["status"]){assignment.status=status;},
     get effects() { return effects; },
     get assignment() { return structuredClone(assignment); },
   };
@@ -152,6 +153,8 @@ describe("Expert effect replay guard", () => {
     const h = harness({ failAfterEffect: true });
     await expect(h.invoke()).rejects.toBeInstanceOf(ExpertEffectReconciliationRequired);
     const effect = Object.entries(h.assignment.effects ?? {})[0]!;
+    await expect(h.resolve({ assignmentId: "assignment-1", toolCallId: effect[0], outcome: "failed", reason: "Attempting to race a live dispatch" })).rejects.toThrow("Stop or wait");
+    h.setAssignmentStatus("failed");
     const resolved = await h.resolve({ assignmentId: "assignment-1", toolCallId: effect[0], outcome: "failed", reason: "Verified the requested file did not change" });
     expect((resolved as { state: string }).state).toBe("FAILED");
     expect(h.effects).toBe(1);
