@@ -345,6 +345,28 @@ input:focus-visible {
   gap: 2px;
 }
 
+/* One session row: a wrapper holding the open button and (T11) the archive/restore toggle, so the
+   row keeps `role="treeitem"` while the actions remain separate, focusable buttons. */
+.session-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--cg-radius-sm);
+}
+
+.session-row-wrap:hover {
+  background: var(--cg-hover);
+}
+
+.session-row-wrap.active {
+  background: var(--cg-active);
+}
+
+.session-row-wrap .session-row {
+  flex: 1;
+  min-width: 0;
+}
+
 .session-row {
   display: flex;
   align-items: center;
@@ -373,13 +395,17 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
-.session-row.active,
-.session-row:hover {
-  background: var(--cg-hover);
+/* The archive/restore toggle stays in the tab order and the a11y tree at all times; it only
+   becomes visible once the row is hovered or anything inside it has focus. */
+.session-row-archive {
+  opacity: 0;
+  flex-shrink: 0;
+  font-size: 13px;
 }
 
-.session-row.active {
-  background: var(--cg-active);
+.session-row-wrap:hover .session-row-archive,
+.session-row-wrap:focus-within .session-row-archive {
+  opacity: 1;
 }
 
 .sidebar-bottom {
@@ -459,6 +485,12 @@ input:focus-visible {
   border-color: var(--cg-border);
   font-weight: 500;
   opacity: 1;
+}
+
+/* The badge is now wrapped by the preset menu, so the wrap (not the button) aligns to the card's
+   start edge. */
+.workspace-chooser-card .preset-menu-wrap {
+  align-self: flex-start;
 }
 
 /* ---------- Hero landing (04/05: workspace selected, no messages yet) ---------- */
@@ -2821,3 +2853,268 @@ input:focus-visible {
 .workspace-dialog .dialog-banner { display: flex; justify-content: space-between; align-items: center; }
 .workspace-dialog .rw-port { width: 84px; }
 .workspace-world-badge { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+
+/* ---------- T11: sidebar archive state + keyboard-shortcut editing ---------- */
+
+/* Inline text link used inside notices (a real button, so it is keyboard reachable). */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--cg-accent, #2f6feb);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-btn:hover { color: var(--cg-accent-hover, #1f57c3); }
+.link-btn:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+
+/* The "N archived conversations hidden" notice sits where the list would be. */
+.archive-hidden-notice {
+  padding: 8px;
+  color: var(--cg-text-muted, #6b7280);
+  text-align: left;
+}
+
+/* Keyboard shortcuts dialog: capture row, its status line, and any validation refusal. */
+.shortcuts-dialog { max-width: 560px; }
+.shortcuts-region h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cg-text-faint, #9aa0a6); margin: 12px 0 6px; }
+.shortcuts-region ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.shortcuts-region li { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.shortcuts-row-text { flex: 1; font-size: 13px; color: var(--cg-text, #1f2328); }
+.shortcuts-edit-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  background: var(--cg-surface-raised, #ffffff);
+  color: var(--cg-text, #1f2328);
+  cursor: pointer;
+}
+.shortcuts-edit-btn:hover:not(:disabled) { background: var(--cg-hover, #f3f4f6); }
+.shortcuts-edit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.shortcuts-edit-btn:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+.shortcuts-capture { display: flex; align-items: center; gap: 8px; }
+.shortcuts-capture-hint {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px dashed var(--cg-accent, #2f6feb);
+  border-radius: var(--cg-radius-sm, 6px);
+  color: var(--cg-text, #1f2328);
+  background: var(--cg-surface-sunken, #f6f8fa);
+  min-width: 96px;
+}
+.shortcuts-capture-status { font-size: 12px; color: var(--cg-text-muted, #6b7280); margin: 6px 0 0; }
+.shortcuts-error { margin: 8px 16px 0; }
+.shortcuts-footer { display: flex; justify-content: flex-start; padding: 12px 16px; border-top: 1px solid var(--cg-border, #d7dbe0); }
+.shortcuts-footer button {
+  font-size: 13px;
+  padding: 7px 12px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  background: var(--cg-surface-raised, #ffffff);
+  color: var(--cg-text, #1f2328);
+  cursor: pointer;
+}
+.shortcuts-footer button:disabled { opacity: 0.5; cursor: not-allowed; }
+.shortcuts-footer button:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+.shortcuts-search { padding: 0 16px; }
+.shortcuts-body { padding: 0 16px 8px; }
+
+/* ---------- T11: Settings -> Models actions (config file, delete, fetch models) ---------- */
+
+/* A destructive action states the consequence in words and keeps the confirm/cancel pair together. */
+.provider-delete-confirm { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.provider-delete-confirm-text { font-size: 12px; color: var(--cg-text-muted, #6b7280); max-width: 260px; }
+.provider-delete-confirm button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  background: var(--cg-surface-raised, #ffffff);
+  color: var(--cg-text, #1f2328);
+  cursor: pointer;
+}
+.provider-delete-confirm button:disabled { opacity: 0.5; cursor: not-allowed; }
+.provider-delete-confirm button:focus-visible,
+.danger-btn:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+.danger-btn {
+  border-color: var(--cg-danger-border, #d1242f);
+  color: var(--cg-danger-text, #b62324);
+  background: var(--cg-surface-raised, #ffffff);
+}
+
+/* "Open configuration file" dialog. */
+.config-file-dialog { max-width: 640px; max-height: 80vh; overflow: auto; }
+.config-file-body { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.config-file-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.config-file-facts dt { font-size: 12px; color: var(--cg-text-muted, #6b7280); }
+.config-file-facts dd { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.config-file-facts code { word-break: break-all; }
+.config-file-exists { font-size: 12px; color: var(--cg-text-muted, #6b7280); }
+.config-file-missing { font-size: 12px; color: var(--cg-text-muted, #6b7280); font-style: italic; }
+.config-file-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.config-file-actions button {
+  font-size: 13px;
+  padding: 7px 12px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  background: var(--cg-surface-raised, #ffffff);
+  color: var(--cg-text, #1f2328);
+  cursor: pointer;
+}
+.config-file-actions button:hover { background: var(--cg-hover, #f3f4f6); }
+.config-file-actions button:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+.config-file-body h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cg-text-faint, #9aa0a6); margin: 4px 0 0; }
+.config-file-pre {
+  margin: 0;
+  padding: 10px;
+  background: var(--cg-surface-sunken, #f6f8fa);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  font-size: 12px;
+  overflow: auto;
+  max-height: 220px;
+}
+.config-file-env { width: 100%; border-collapse: collapse; font-size: 12px; }
+.config-file-env th { text-align: left; color: var(--cg-text-muted, #6b7280); font-weight: 600; padding: 4px 8px 4px 0; }
+.config-file-env td { padding: 4px 8px 4px 0; border-top: 1px solid var(--cg-border, #d7dbe0); vertical-align: top; }
+
+/* Result line under "Fetch available models". */
+.catalog-status { margin: 6px 0 0; }
+
+/* ---------- T11: Plugins panel (server-authoritative list, detail route, add dialog) ---------- */
+
+.plugins-status { font-size: 12px; color: var(--cg-text-muted, #6b7280); margin: 4px 0 0; padding: 0 2px; }
+.plugins-panel .form-error { margin: 6px 0; }
+
+/* Every row states its status in words — a row without a switch explains why, in the layout. */
+.plugin-status-line { font-size: 11px; color: var(--cg-text-faint, #9aa0a6); }
+.plugin-not-toggleable {
+  font-size: 11px;
+  color: var(--cg-text-muted, #6b7280);
+  max-width: 320px;
+  text-align: right;
+  line-height: 1.35;
+}
+.plugin-row-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.plugin-row-actions button:not(.settings-switch) {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  background: var(--cg-surface-raised, #ffffff);
+  color: var(--cg-text, #1f2328);
+  cursor: pointer;
+}
+.plugin-row-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.plugin-row-actions button:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+
+.plugin-detail { padding: 8px 2px; display: flex; flex-direction: column; gap: 12px; }
+.plugin-detail-description { font-size: 14px; color: var(--cg-text, #1f2328); margin: 0; }
+.plugin-detail-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+.plugin-detail-facts dt { font-size: 12px; color: var(--cg-text-muted, #6b7280); }
+.plugin-detail-facts dd { margin: 0; font-size: 13px; color: var(--cg-text, #1f2328); }
+.plugin-detail-reason {
+  font-size: 13px;
+  color: var(--cg-text-muted, #6b7280);
+  background: var(--cg-surface-sunken, #f6f8fa);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius-sm, 6px);
+  padding: 8px 10px;
+  margin: 0;
+}
+.plugin-detail-actions { display: flex; gap: 8px; }
+
+.add-plugin-dialog { max-width: 520px; }
+.add-plugin-body { padding: 0 16px 16px; }
+
+/* ---------- T11: Review panel layout controls, menus and location line ---------- */
+
+/* Fullscreen: the panel covers the frame instead of sitting beside the chat. */
+.review-right-panel.review-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0;
+  border-left: none;
+}
+
+/* Collapsed: a rail with one control that puts it back. */
+.review-right-panel.review-collapsed {
+  width: 36px !important;
+  min-width: 36px;
+  flex: 0 0 36px;
+  align-items: center;
+  padding-top: 8px;
+  overflow: hidden;
+}
+.review-expand-btn {
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted, #6b7280);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--cg-radius-sm, 6px);
+}
+.review-expand-btn:hover { background: var(--cg-hover, #f3f4f6); }
+.review-expand-btn:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: 2px; }
+
+/* The tab strip now holds several tabs plus two dropdown menus. */
+.right-panel-tabs { position: relative; flex-wrap: wrap; }
+.right-panel-tab.inactive { opacity: 0.7; cursor: pointer; }
+.right-panel-tab.inactive:hover { opacity: 1; }
+.right-panel-tab-menu,
+.review-more-menu {
+  position: absolute;
+  top: 100%;
+  z-index: 5;
+  min-width: 240px;
+  background: var(--cg-surface-raised, #ffffff);
+  border: 1px solid var(--cg-border, #d7dbe0);
+  border-radius: var(--cg-radius, 8px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.right-panel-tab-menu { left: 0; }
+.review-more-menu { right: 0; top: calc(100% + 4px); }
+.right-panel-tab-menu button,
+.review-more-menu button {
+  text-align: left;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--cg-radius-sm, 6px);
+  background: transparent;
+  color: var(--cg-text, #1f2328);
+  cursor: pointer;
+}
+.right-panel-tab-menu button:hover:not(:disabled),
+.review-more-menu button:hover:not(:disabled) { background: var(--cg-hover, #f3f4f6); }
+.right-panel-tab-menu button:disabled,
+.review-more-menu button:disabled { opacity: 0.5; cursor: not-allowed; }
+.right-panel-tab-menu button:focus-visible,
+.review-more-menu button:focus-visible { outline: 2px solid var(--cg-accent, #2f6feb); outline-offset: -2px; }
+.right-panel-tab-menu-empty {
+  font-size: 12px;
+  color: var(--cg-text-muted, #6b7280);
+  padding: 6px 10px;
+  max-width: 260px;
+}
+
+/* "Show file location" / status lines under the toolbar. */
+.review-panel-location {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--cg-text-muted, #6b7280);
+  background: var(--cg-surface-sunken, #f6f8fa);
+  border-bottom: 1px solid var(--cg-border, #d7dbe0);
+  word-break: break-all;
+}

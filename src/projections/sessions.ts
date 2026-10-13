@@ -27,14 +27,27 @@ function sessionIdFromCorrelation(correlationId: string): string | undefined {
 
 export const sessionsProjection: Projection = {
   name: "sessions",
-  version: "1.0.0",
+  version: "1.1.0",
   apply(event, state) {
+    // T11 (J-SESSION-archive): archiving is recorded by an `agent.config` run, so this event is NOT
+    // "session:"-correlated and would fall through the guard below. Handle it first. The fold only
+    // ever rewrites the row's `archived` flag — turns, runs and events are never deleted, and the
+    // row itself survives so an archived conversation is fully restorable from history.
+    if (event.eventType === "session.archived") {
+      const payload = event.payload as { readonly sessionId: string; readonly archived: boolean };
+      const key = `${event.tenant}/${payload.sessionId}`;
+      const existing = state.get(key) as Record<string, Json> | undefined;
+      // Defensive: archiving a session this projection has never seen must not invent a row with no
+      // workspaceId/title. The capability validates existence first; this keeps the fold total.
+      if (!existing) return [];
+      return [{ key, value: { ...existing, archived: payload.archived } }];
+    }
+    if (!event.correlationId.startsWith("session:")) return [];
     // T10 (J-F-delegation): a subagent's child run is `agent.coding` too, so it emits the same
     // `session.turn.started`/`message.completed` event types as a real session turn — but
     // correlated `subagent:<parentRunId>:<id>`, not `session:<id>`. Excluding anything not
     // "session:"-correlated is what keeps children out of the sidebar's session tree (they are
     // tracked instead by the `subagents` projection — see `src/projections/subagents.ts`).
-    if (!event.correlationId.startsWith("session:")) return [];
     if (event.eventType === "session.turn.started") {
       const payload = event.payload as { readonly sessionId: string; readonly workspaceId: string; readonly message: string; readonly mode?: string; readonly preset?: string };
       const key = `${event.tenant}/${payload.sessionId}`;
@@ -63,6 +76,9 @@ export const sessionsProjection: Projection = {
             lastStatus: "running",
             runId: event.runId,
             updatedAt: event.recordedAt,
+            // T11: this fold rebuilds the row rather than spreading it, so the durable archive flag
+            // must be carried forward explicitly or a new turn would silently un-archive the session.
+            ...(existing?.archived === true ? { archived: true } : {}),
             ...(accessMode !== undefined ? { accessMode } : {}),
             ...(preset !== undefined ? { mode: preset } : {}),
           },
@@ -87,6 +103,8 @@ export const sessionsProjection: Projection = {
             lastStatus: "completed",
             runId: event.runId,
             updatedAt: event.recordedAt,
+            // T11: same carry-forward as `session.turn.started` above — this fold also rebuilds.
+            ...(existing?.archived === true ? { archived: true } : {}),
             ...(existing?.accessMode !== undefined ? { accessMode: existing.accessMode } : {}),
             // Usage pass U4: the folded preset (the row's `mode` badge field) persists across the
             // turn's completion the same way `accessMode` does.

@@ -244,3 +244,38 @@ export function bindWorkbench(domain: Domain): Readonly<Record<string, Capabilit
   if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} workbench contracts, got ${contracts.length}`);
   return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef]));
 }
+
+/**
+ * T11: the completion of the workbench's disabled controls. Six capabilities, each anchored on an
+ * IDM entity that already described the concept (the `Plugin` entity was added to the model this
+ * tranche; the rest predate it):
+ *
+ * - `session.setArchived` on `Session` — J-SESSION-archive
+ * - `settings.changeShortcuts` and `config.path` on `UserPreferences` — J-PREFS-shortcuts,
+ *   J-CFG-config-path (both are operator preference/config surfaces)
+ * - `provider.delete` and `model.catalog` on `ModelProvider` — J-CFG-provider-delete,
+ *   J-CFG-model-catalog
+ * - `plugin.install` and `plugin.uninstall` on `Plugin` — J-PLG-install
+ *
+ * Order matches `TRANCHE11_CAPABILITIES` in `src/server.ts`.
+ */
+export const TRANCHE11_ANCHORS: readonly (readonly [string, string])[] = [
+  ["session.setArchived", "Session"],
+  ["settings.changeShortcuts", "UserPreferences"],
+  ["provider.delete", "ModelProvider"],
+  ["model.catalog", "ModelProvider"],
+  ["config.path", "UserPreferences"],
+  ["plugin.install", "Plugin"],
+  ["plugin.uninstall", "Plugin"],
+];
+
+export function tranche11Bindings(domain: Domain): readonly CapabilityBinding[] {
+  return TRANCHE11_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+}
+
+export function bindTranche11(domain: Domain) {
+  const bindings = tranche11Bindings(domain);
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} tranche-11 contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}

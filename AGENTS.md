@@ -7,3 +7,7 @@ Read `.agents/skills/building-with-cognate/SKILL.md` and its two companion skill
 Use Bun 1.4+, Just, and `just verify`. Run `just typecheck` and targeted `bun test` suites before changing UI or agent behavior. Default persistence is PostgreSQL/pg0 via `src/store.ts`; CI may set `COGNATE_POSTGRES_URL` to use an externally managed PostgreSQL service.
 
 Keep feature changes separate from migration cleanup. Do not remove Cognate's original reconstruction until standalone verification passes. See `MIGRATION.md` for the provenance snapshot and exclusions. Treat the single-operator development authenticator as a known security limitation; do not claim the app is production hardened.
+
+Commit often at meaningful milestones.
+
+Check and update `CURRENT_STATUS.md` and `.agents/CURRENT_STATUS.jsonl` frequently during development and before starting work.

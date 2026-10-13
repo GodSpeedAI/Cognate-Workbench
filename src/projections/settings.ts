@@ -11,18 +11,26 @@ import type { Projection } from "@godspeedai/cognate-projections";
 
 export const settingsProjection: Projection = {
   name: "settings",
-  version: "1.1.0",
+  version: "1.2.0",
   apply(event, state) {
     if (event.eventType !== "settings.changed") return [];
     const payload = event.payload as Record<string, Json>;
     const key = `${event.tenant}/current`;
     const existing = state.get(key) as Record<string, Json> | undefined;
-    // The `plugins` map merges PER KEY (usage pass U7): a `settings.changePlugin` event carries
-    // only the plugin ids it toggles, and merging it wholesale would clobber every other
-    // plugin's durable state. Every other field stays whole-value (the last write wins).
-    const patch = payload.plugins !== undefined && payload.plugins !== null && typeof payload.plugins === "object" && !Array.isArray(payload.plugins)
-      ? { ...payload, plugins: { ...((existing?.plugins as Record<string, Json> | undefined) ?? {}), ...(payload.plugins as Record<string, Json>) } }
-      : payload;
+    // The `plugins` and `shortcuts` maps merge PER KEY (usage pass U7, T11): those capabilities
+    // carry only the ids they toggle/bind, and merging them wholesale would clobber every other
+    // entry's durable state — a patch that rebinds one shortcut would silently unbind the rest.
+    // Every other field stays whole-value (the last write wins).
+    let patch: Record<string, Json> = payload;
+    for (const mapField of ["plugins", "shortcuts"] as const) {
+      const value = payload[mapField];
+      if (value !== undefined && value !== null && typeof value === "object" && !Array.isArray(value)) {
+        patch = {
+          ...patch,
+          [mapField]: { ...(((existing?.[mapField] as Record<string, Json> | undefined) ?? {})), ...(value as Record<string, Json>) },
+        };
+      }
+    }
     return [
       {
         key,

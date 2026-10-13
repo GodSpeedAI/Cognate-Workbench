@@ -73,6 +73,12 @@ Entity "UsageLedger"
 // frozen when a message is sent, so a referent never silently changes while an agent works.
 Entity "AttentionFocus"
 
+// Plugins (T11). A plugin is a catalogued extension the operator can install, enable and inspect.
+// Installation registers the plugin and activates whatever implementation the catalog entry declares;
+// a catalog entry with no executable implementation installs as inert and says so, rather than
+// pretending to work. Trust is an explicit boundary: this app never executes downloaded plugin code.
+Entity "Plugin"
+
 Resource "ModelConfig" units
 
 Resource "WorkspaceSelection" units
@@ -634,6 +640,84 @@ Instance j_wb_focus of "CanonicalJourney" {
     settlement: "The agent receives the referent chosen by fixed precedence (explicit selection, keyboard focus, active run, pinned focus, workspace) as a frozen focus line, only when the message refers to something; the person can see what this means and clear an explicit selection",
     steps: "person selects a task or stage -> the composer bar states what this means and why -> the person sends a message that says this -> the referent is frozen into the run input -> clearing the selection falls back to the bound task",
     variants: "explicit selection; fallback to the bound task; nothing in focus; a message that refers to nothing carries no focus line; a selection in another workspace is ignored"
+}
+
+Instance j_session_archive of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.setArchived",
+    evidence_class: "declared",
+    initiating_condition: "A conversation is finished but the operator wants it out of the working list without losing it",
+    journey_id: "J-SESSION-archive",
+    precondition: "The session exists in the sessions projection",
+    purpose: "Let the operator set a session aside reversibly, and choose whether archived conversations are visible",
+    settlement: "The session's archived flag is durable across restart, the filter immediately changes what the sidebar lists, and no history is deleted",
+    steps: "user archives a session -> the archived flag is recorded as an event -> the sessions projection folds it -> Hide archived removes it from the sidebar and All conversations restores it -> unarchive reverses it",
+    variants: "archive then restart, still archived; archive the currently open session; unarchive while hidden behind the filter; archiving never deletes turns or events"
+}
+
+Instance j_prefs_shortcuts of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "settings.changeShortcuts",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants a keyboard shortcut to mean something different, or to restore the defaults",
+    journey_id: "J-PREFS-shortcuts",
+    precondition: "The Keyboard shortcuts dialog is open",
+    purpose: "Make shortcut editing real, durable and conflict-aware without intercepting typing or overriding browser-reserved chords",
+    settlement: "The edited chord is durable across restart, fires its action, conflicts are reported before they are accepted, and Restore all defaults returns every editable action to its shipped chord",
+    steps: "user edits a shortcut -> the chord is captured -> conflicts and reserved chords are refused with a reason -> the binding is recorded -> the chord fires the action -> restore defaults rewrites them all",
+    variants: "conflict with another action; browser-reserved chord refused; a chord that types into a text field must not fire; restore defaults with no overrides still succeeds"
+}
+
+Instance j_cfg_provider_delete of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "provider.delete",
+    evidence_class: "declared",
+    initiating_condition: "The configured model provider is no longer wanted",
+    journey_id: "J-CFG-provider-delete",
+    precondition: "A provider configuration exists",
+    purpose: "Remove a provider and everything that was stored for it, without leaving an orphaned secret or a dangling active route",
+    settlement: "The provider configuration and its stored secret are gone, the active route is cleared so the UI returns to the unconfigured state, and nothing later resolves to the deleted provider",
+    steps: "user confirms deletion -> the provider's secret is removed -> the configuration is removed -> the active route is cleared -> Settings shows no configured provider",
+    variants: "deleting the active provider; deleting when already unconfigured refuses; a failure while removing the secret aborts before the configuration is removed"
+}
+
+Instance j_cfg_model_catalog of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "model.catalog",
+    evidence_class: "declared",
+    initiating_condition: "A base URL is entered and the operator wants the provider's real model list instead of typing one",
+    journey_id: "J-CFG-model-catalog",
+    precondition: "A protocol and base URL are present",
+    purpose: "Discover models from the provider where discovery is supported, and say so plainly where it is not",
+    settlement: "Supported providers return their real model ids into the editor; unsupported providers report that discovery is unavailable and offer manual entry; no model list is ever invented",
+    steps: "user requests the catalog -> the provider's discovery endpoint is queried -> real ids populate the list -> a discovery failure or an unsupported protocol reports a specific reason",
+    variants: "openai-compatible list endpoint supported; provider returns an error; protocol has no discovery; base URL empty refuses before any request"
+}
+
+Instance j_cfg_config_path of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "config.path",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants to read or edit the configuration outside the app",
+    journey_id: "J-CFG-config-path",
+    precondition: "The app is running",
+    purpose: "Give the operator a working way to reach the configuration file, respecting the browser/server filesystem boundary and never exposing secret values",
+    settlement: "The operator can obtain the configuration file's location and its non-secret contents, with a stated reason where the environment offers no safe path",
+    steps: "user asks to open the configuration -> the file location is resolved -> the path and a non-secret view of the contents are offered -> a missing or unwritable file reports that state instead of failing silently",
+    variants: "file exists; file absent, the default location is still reported; the host offers no filesystem handoff, so copy is the offered action; secret values are never returned"
+}
+
+Instance j_plg_install of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "plugin.install, plugin.uninstall",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants a catalogued plugin active in this deployment",
+    journey_id: "J-PLG-install",
+    precondition: "The Plugins panel is open",
+    purpose: "Make installation a real lifecycle step: register, activate what the catalog declares, and be honest about what cannot run",
+    settlement: "An installed plugin is durable, its enable state is honoured by whatever it actually drives, and a catalog entry with no executable implementation installs as inert and says so",
+    steps: "operator chooses a catalog entry -> installs -> the plugin is registered and its declared implementation activated -> its enable switch now drives real behavior -> uninstalling reverses registration",
+    variants: "entry with an executable implementation becomes toggleable; entry without one installs inert with a stated reason; installing an already-installed plugin is refused; arbitrary downloaded code is never executed"
 }
 
 Policy every_canonical_flow_recorded as:

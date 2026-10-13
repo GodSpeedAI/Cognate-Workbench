@@ -6,6 +6,7 @@
 // (generic single words / mode names); surrounding descriptions are §11's short functional
 // sentences, same precedent as Work details' own "Choose how much detail to show for tool calls".
 import { isWorkDetailsMode, type WorkDetailsMode } from "./workDetails.ts";
+import { isShortcutOverrides, type ShortcutOverrides } from "./shortcuts.ts";
 
 // -- Permission (default access mode for NEW sessions) -----------------------------------------
 
@@ -138,6 +139,10 @@ export interface SettingsPatch {
    *  behavior behind them are toggleable (`TOGGLEABLE_PLUGINS`); a plugin absent from the map is
    *  disabled. The projection fold merges this map per key (see projections/settings.ts). */
   readonly plugins?: Record<string, boolean>;
+  /** T11 (J-PREFS-shortcuts): durable per-action keyboard-shortcut overrides. Whole-value write
+   *  (the last write wins). Absent or a missing action id means "use the shipped default";
+   *  `null` means explicitly unbound. See `src/shortcuts.ts`. */
+  readonly shortcuts?: ShortcutOverrides;
 }
 
 /** Every General setting, fully resolved with defaults — the read-side shape the UI consumes. */
@@ -191,5 +196,8 @@ export function resolveGeneralSettings(value: unknown, legacyAppearance?: string
     sendBehavior: isSendBehavior(row.sendBehavior) ? row.sendBehavior : DEFAULT_SEND_BEHAVIOR,
     preset: isAgentPreset(row.preset) ? row.preset : DEFAULT_AGENT_PRESET,
     plugins: isPluginStatePatch(row.plugins) ? row.plugins : {},
+    // T11: an absent shortcuts field means "no overrides", which resolveAll() falls back to the
+    // shipped defaults for — so a fresh home behaves exactly as before editing existed.
+    shortcuts: isShortcutOverrides(row.shortcuts) ? row.shortcuts : {},
   };
 }

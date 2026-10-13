@@ -23,6 +23,7 @@ import {
   isSendBehavior,
   type SettingsPatch,
 } from "../settings.ts";
+import { isShortcutOverrides, validateAssignment } from "../shortcuts.ts";
 
 /** One descriptor per capability: the durable field it writes and the guard that validates the
  *  client's value before any event is recorded. Kept declarative so the component's `provides`
@@ -53,15 +54,18 @@ export function settingsChangeComponent(options: {
   readonly systemCaller: Caller;
   /** Per-capability semantic refs from `bindUsage2` (`domain/index.ts`), in SETTING_FIELDS order. */
   readonly semanticRefs: readonly (SemanticRef | undefined)[];
+  /** T11: `settings.changeShortcuts` is bound in tranche 11, not usage 2, so its ref arrives here. */
+  readonly shortcutsSemanticRef?: SemanticRef | undefined;
 }): Component {
   const contract = (index: number) => ({
     id: SETTING_FIELDS[index]!.capability,
     version: "1.0.0",
     semanticRef: options.semanticRefs[index],
   });
+  const shortcutsContract = { id: "settings.changeShortcuts", version: "1.0.0", semanticRef: options.shortcutsSemanticRef };
   return {
     id: "settings:change",
-    provides: SETTING_FIELDS.map((_, i) => contract(i)),
+    provides: [...SETTING_FIELDS.map((_, i) => contract(i)), shortcutsContract],
     activate(fiber) {
       SETTING_FIELDS.forEach((field, i) => {
         fiber.provide(contract(i), async (rawInput) => {
@@ -80,6 +84,39 @@ export function settingsChangeComponent(options: {
           });
           return { ok: true };
         });
+      });
+      // T11 (J-PREFS-shortcuts): structurally valid overrides are not enough — two actions bound to
+      // the same chord would make the binding ambiguous, and a later write would silently steal an
+      // earlier action's chord. The patch is therefore validated against the *durable, currently
+      // applied* overrides, not against an empty starting map: a patch that only rebinds one action
+      // must still be refused when the chord it wants is already held by another action's standing
+      // override or default, and unbinding one action must free its chord for the next patch.
+      fiber.provide(shortcutsContract, async (rawInput) => {
+        const input = rawInput as { readonly shortcuts?: unknown };
+        const value = input.shortcuts;
+        if (!isShortcutOverrides(value)) {
+          throw new Error("settings.changeShortcuts: shortcuts must map known action ids to a chord string or null");
+        }
+        const service = options.getService();
+        // Start from what is actually in force, so the simulation sees the real conflict surface.
+        const rows = (await service.readProjection(options.systemCaller, { name: "settings" })).rows;
+        // `readProjection` returns tenant-relative keys ("current"), so match both forms.
+        const current = rows.find((r) => r.key === "current" || r.key.endsWith("/current"))?.value as { readonly shortcuts?: unknown } | undefined;
+        const applied: Record<string, string | null> = { ...(isShortcutOverrides(current?.shortcuts) ? current.shortcuts : {}) };
+        // Simulate the patch in turn against the standing overrides so a patch that binds two
+        // actions to the same chord fails, and so a chord freed by this same patch is reusable.
+        for (const [actionId, chord] of Object.entries(value)) {
+          applied[actionId] = chord;
+          if (chord === null) continue;
+          const decision = validateAssignment(actionId, chord, applied);
+          if (!decision.ok) throw new Error(`settings.changeShortcuts: ${decision.reason}`);
+        }
+        await service.startRun(options.systemCaller, {
+          agent: AGENT_CONFIG,
+          input: { kind: "settings.changed", shortcuts: value } as unknown as Json,
+          idempotencyKey: randomUUID(),
+        });
+        return { ok: true, shortcuts: value };
       });
     },
   };

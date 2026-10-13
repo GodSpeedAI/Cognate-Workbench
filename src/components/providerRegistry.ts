@@ -39,6 +39,15 @@ export class ProviderRegistry {
     this.#kernel = kernel; this.#semanticRef = semanticRef;
   }
   get current(): ModelConfig | undefined { return this.#current; }
+  /** T11 (J-CFG-provider-delete): dismounts whatever is mounted and clears the active route, so a
+   *  deleted provider can never answer a later generate call. Idempotent — clearing an already
+   *  empty registry is a no-op rather than an error. */
+  async clear(reason: string): Promise<void> {
+    const previous = this.#handle;
+    this.#handle = undefined;
+    this.#current = undefined;
+    if (previous) await previous.dispose(reason).catch(() => {});
+  }
   async swap(config: ModelConfig, secrets: SecretStore): Promise<void> {
     const provider = buildProvider(config, secrets);
     const nextHandle = await this.#kernel.mount(streamingProviderComponent(provider, this.#semanticRef));

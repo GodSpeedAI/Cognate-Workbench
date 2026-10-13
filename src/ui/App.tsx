@@ -66,6 +66,37 @@ import {
   StopIcon,
   TrashIcon,
 } from "./icons.tsx";
+import {
+  ARCHIVE_FILTER_LABELS,
+  GROUP_BY_LABELS,
+  applyArchiveFilter,
+  groupSessions,
+  hiddenArchiveCount,
+  orderSessions,
+  sessionMatchesSearch,
+  type ArchiveFilter,
+  type GroupBy,
+  type OrderBy,
+  type SessionRow,
+  type SessionGroup,
+} from "../sidebarView.ts";
+import {
+  SHORTCUT_ACTIONS,
+  chordFromKeyboardEvent,
+  describeChord,
+  effectiveChord,
+  isChord,
+  isDefault,
+  restoreDefaults,
+  validateAssignment,
+} from "../shortcuts.ts";
+import type { ConfigPathResult } from "../capabilities/configPath.ts";
+import { copyToClipboard, downloadTextFile } from "./download.ts";
+import type { ModelCatalogResult } from "../modelCatalog.ts";
+import type { PluginCatalogResult } from "../capabilities/pluginInstall.ts";
+import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView } from "../plugins.ts";
+import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
+import type { ShortcutOverrides } from "../shortcuts.ts";
 
 interface WorkspaceRow {
   readonly id: string;
@@ -75,29 +106,8 @@ interface WorkspaceRow {
   readonly executionWorldId?: string;
 }
 
-interface SessionRow {
-  readonly id: string;
-  readonly workspaceId: string;
-  readonly title: string;
-  readonly lastStatus: string;
-  readonly updatedAt: string;
-  readonly runId?: string | null;
-  /** "ptc" once this session has ever needed a tool-approval escalation (sessions.ts) — drives the
-   *  header's "PTC mode" vs "Standard mode" badge. */
-  readonly mode?: string;
-  /** The session's CURRENT access mode ("read-only"/"workspace-write"/"full-access"), folded by the
-   *  `sessions` projection from the run input of its latest turn (usage pass U2 — the composer's
-   *  access-mode dropdown). Absent for a session whose runs never carried a mode (direct API runs)
-   *  or before its first run; the UI then falls back to the settings default. */
-  readonly accessMode?: string;
-}
-
-interface EditSummary {
-  readonly file_path: string;
-  readonly additions: number;
-  readonly deletions: number;
-  readonly diffLines: readonly string[];
-}
+// `SessionRow` now comes from `src/sidebarView.ts` (T11): the same shape plus the durable
+// `archived` flag, so the sidebar's grouping/filter/order logic is shared with its unit tests.
 
 interface ChatMessage {
   readonly role: "user" | "assistant" | "system";
@@ -169,7 +179,8 @@ interface ModelConfigRow {
   readonly configuredAt: string;
 }
 
-const NOT_IMPLEMENTED = "Not implemented in this tranche — see APP/DEVIATIONS.md";
+// T11 removed the `NOT_IMPLEMENTED` "disabled control" marker: every control it guarded is now
+// wired to a real capability, so no surface ships a button that explains itself only via tooltip.
 
 function useCurrentWorkspaceId(): string | undefined {
   const rows = useProjection("workspaces");
@@ -345,55 +356,57 @@ function relativeTime(iso: string, nowMs: number = Date.now()): string {
   return `${diffDay}d`;
 }
 
-/** Usage pass U3 (§12): the sidebar session search matches session titles case-insensitively; an
- *  empty query matches everything. */
-function sessionMatchesSearch(session: SessionRow, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return (session.title || "New Session").toLowerCase().includes(q);
-}
-
-/** Usage pass U3 (§12): "Order by" — Manual keeps the `sessions` projection's own order (newest
- *  session first, as recorded); Last updated sorts by each row's `updatedAt` descending. */
-function orderSessions(rows: readonly SessionRow[], orderBy: "manual" | "last-updated"): readonly SessionRow[] {
-  if (orderBy !== "last-updated") return rows;
-  return [...rows].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-}
+// The sidebar's search/order/group/archive logic now lives in `src/sidebarView.ts` (T11), imported
+// above and unit-tested in test/workbench-sidebar-view.test.ts.
 
 /** One sidebar session row (usage pass U3 refactor of the former inline map — shared by the
- *  workspace-tree grouping and the "In one list" grouping). */
-function SessionRowButton({
+ *  workspace-tree grouping and the "In one list" grouping).
+ *
+ *  T11 (J-SESSION-archive): the row gained an archive/restore toggle. It is a sibling of the
+ *  row's own open button rather than nested inside it (a button may not contain a button), with
+ *  `role="treeitem"` lifted onto the wrapper — the same shape the workspace rows already use. */
+export function SessionRowButton({
   session,
   active,
   planPending,
   onOpen,
+  onToggleArchive,
 }: {
   readonly session: SessionRow;
   readonly active: boolean;
   readonly planPending: boolean;
   readonly onOpen: () => void;
+  readonly onToggleArchive: () => void;
 }) {
+  const archived = session.archived === true;
+  const label = session.title || "New Session";
   return (
-    <button
-      type="button"
-      role="treeitem"
-      aria-selected={active}
-      className={active ? "session-row active" : "session-row"}
-      onClick={onOpen}
-      title={session.title}
-    >
-      <span className="session-row-title">
-        {planPending ? "Plan awaiting review " : session.lastStatus === "waiting" && !planPending ? "Waiting for approval " : ""}
-        {session.title || "New Session"}
-      </span>
-      {session.lastStatus === "waiting" && !planPending && (
-        <span className="approval-badge" title="Waiting for approval">
-          <span className="approval-badge-dot" aria-hidden="true" />
-          Approval
+    <div role="treeitem" aria-selected={active} className={active ? "session-row-wrap active" : "session-row-wrap"}>
+      <button type="button" className="session-row" onClick={onOpen} title={session.title}>
+        <span className="session-row-title">
+          {planPending ? "Plan awaiting review " : session.lastStatus === "waiting" && !planPending ? "Waiting for approval " : ""}
+          {label}
+          {archived ? " (archived)" : ""}
         </span>
-      )}
-      <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
-    </button>
+        {session.lastStatus === "waiting" && !planPending && (
+          <span className="approval-badge" title="Waiting for approval">
+            <span className="approval-badge-dot" aria-hidden="true" />
+            Approval
+          </span>
+        )}
+        <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
+      </button>
+      <button
+        type="button"
+        className="icon-btn session-row-archive"
+        aria-label={archived ? `Restore ${label} from the archive` : `Archive ${label}`}
+        title={archived ? "Restore from archive" : "Archive"}
+        aria-pressed={archived}
+        onClick={onToggleArchive}
+      >
+        {archived ? "↺" : "⌫"}
+      </button>
+    </div>
   );
 }
 
@@ -543,6 +556,7 @@ function FirstRunDialogs() {
 
 function WorkspaceChooser() {
   const client = useCognate();
+  const settings = useGeneralSettings();
   const [path, setPath] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -568,9 +582,15 @@ function WorkspaceChooser() {
         <p role="alert" className="empty-state">
           Unable to create default workspace. Use Choose workspace to select a folder.
         </p>
-        <button type="button" className="mode-badge mode-badge-btn" disabled title={NOT_IMPLEMENTED}>
-          Standard mode
-        </button>
+        {/* No session exists yet, so the badge reflects the durable DEFAULT preset for new sessions
+            (settings.changePreset) rather than a dead "Standard mode" label. */}
+        <PresetMenu
+          current={undefined}
+          fallback={settings.preset}
+          onPick={(preset) => {
+            void client.invoke("settings.changePreset", { preset } as never).catch((e) => console.error("settings.changePreset failed", e));
+          }}
+        />
         <input
           aria-label="Workspace directory path"
           placeholder="/path/to/project"
@@ -801,16 +821,9 @@ function FullAccessConfirmDialog({
 }
 
 /** This app's REAL keyboard actions and fixed bindings (usage pass U2, checkpoint 22d) — the
- *  Keyboard shortcuts dialog's data. Editable actions (the "Application" region) each render an
- *  Edit button; editing itself is inert this pass (DEVIATIONS.md). Only actions that genuinely
- *  exist here are listed — nothing is copied from the reference's longer action list. */
-const SHORTCUT_ACTIONS: readonly { readonly action: string; readonly binding: string | undefined }[] = [
-  { action: "Open keyboard shortcuts", binding: "Ctrl /" },
-  { action: "New Session", binding: undefined },
-  { action: "Toggle left sidebar", binding: undefined },
-  { action: "Open settings", binding: undefined },
-];
-
+ *  Keyboard shortcuts dialog's data. The editable action list itself lives in `src/shortcuts.ts`
+ *  (T11) so the dialog, the conflict rules and their unit tests share one source of truth; this
+ *  module keeps only the read-only regions that are UI presentation. */
 const SHORTCUT_FIXED_REGIONS: readonly { readonly region: string; readonly rows: readonly { readonly label: string; readonly keys: string }[] }[] = [
   {
     region: "Message input",
@@ -836,22 +849,116 @@ const SHORTCUT_FIXED_REGIONS: readonly { readonly region: string; readonly rows:
   },
 ];
 
-/** `dialog "Keyboard shortcuts"` (usage pass U2, checkpoint 22d): a searchable list of this app's
- *  real actions/bindings, grouped "Application" (editable, per-action Edit buttons — inert this
- *  pass) / "Message input" / "Menus and dialogs" / "Approval area", with a contentinfo
- *  "Restore all defaults" (disabled — editing is inert, so there is nothing to restore). Opened
- *  from Settings → General → Keyboard shortcuts → "Edit shortcuts", or Ctrl / anywhere. */
-function ShortcutsDialog({ onClose }: { readonly onClose: () => void }) {
+/** `dialog "Keyboard shortcuts"` (usage pass U2, checkpoint 22d; made real in T11): a searchable
+ *  list of this app's real actions/bindings grouped "Application" (editable) / "Message input" /
+ *  "Menus and dialogs" / "Approval area", plus a contentinfo "Restore all defaults".
+ *
+ *  Editing reads the DURABLE overrides from the `settings` projection (survives reload and restart)
+ *  and writes them through `settings.changeShortcuts`, so the dialog and the global key listener
+ *  always agree. Capture happens in the capture phase on `window` so neither the dialog's own
+ *  Escape handling nor the global shortcut listener can fire while a chord is being typed. */
+export function ShortcutsDialog({
+  overrides,
+  onChangeShortcuts,
+  onClose,
+}: {
+  /** Durable per-action overrides from the `settings` projection. */
+  readonly overrides: ShortcutOverrides;
+  /** Writes one whole-value shortcut patch through `settings.changeShortcuts`. */
+  readonly onChangeShortcuts: (shortcuts: ShortcutOverrides) => Promise<void>;
+  readonly onClose: () => void;
+}) {
   const [query, setQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | undefined>(undefined);
+  const [capture, setCapture] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelEditing = useCallback(() => {
+    setEditingId(undefined);
+    setCapture(undefined);
+    setError(undefined);
+  }, []);
+
+  const commit = useCallback(
+    async (chord: string) => {
+      if (editingId === undefined) return;
+      const decision = validateAssignment(editingId, chord, overrides);
+      if (!decision.ok) {
+        setError(decision.reason);
+        return;
+      }
+      setSaving(true);
+      try {
+        await onChangeShortcuts({ [editingId]: chord });
+        cancelEditing();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [editingId, overrides, onChangeShortcuts, cancelEditing],
+  );
+
+  const restore = useCallback(async () => {
+    setSaving(true);
+    setError(undefined);
+    try {
+      await onChangeShortcuts(restoreDefaults());
+      cancelEditing();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [onChangeShortcuts, cancelEditing]);
+
   useModalFocus(dialogRef, onClose);
+
+  // Chord capture: window + capture phase so this handler runs before every other keydown listener
+  // in the app, and `stopImmediatePropagation` keeps them all from acting on the same keystroke.
+  useEffect(() => {
+    if (editingId === undefined) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        cancelEditing();
+        return;
+      }
+      if (e.key === "Enter" && capture !== undefined && isChord(capture)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        void commit(capture);
+        return;
+      }
+      const chord = chordFromKeyboardEvent(e);
+      if (!chord) {
+        // Modifier-only presses (Ctrl, Shift…) are on the way to a chord — swallow them silently.
+        if (e.key === "Control" || e.key === "Shift" || e.key === "Alt" || e.key === "Meta") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setCapture(chord);
+      setError(undefined);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [editingId, capture, cancelEditing, commit]);
+
   const q = query.trim().toLowerCase();
   const matches = (...texts: readonly string[]) => q.length === 0 || texts.some((t) => t.toLowerCase().includes(q));
-  const actions = SHORTCUT_ACTIONS.filter((a) => matches(a.action, a.binding ?? "No shortcut"));
+  const actions = SHORTCUT_ACTIONS.filter((a) => matches(a.label, describeChord(effectiveChord(a.id, overrides))));
   const regions = SHORTCUT_FIXED_REGIONS.map((g) => ({
     ...g,
     rows: g.rows.filter((r) => matches(r.label, r.keys)),
   })).filter((g) => g.rows.length > 0);
+  const atDefaults = isDefault(overrides);
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div
@@ -874,18 +981,49 @@ function ShortcutsDialog({ onClose }: { readonly onClose: () => void }) {
         <div className="shortcuts-body">
           {actions.length > 0 && (
             <div role="region" aria-label="Application" className="shortcuts-region">
+              <h3>Application</h3>
               <ul>
-                {actions.map((a) => (
-                  <li key={a.action}>
-                    <button type="button" className="shortcuts-edit-btn" disabled title={NOT_IMPLEMENTED} aria-label={`Edit shortcut for ${a.action}`}>
-                      Edit
-                    </button>
-                    <span className="shortcuts-row-text">
-                      {a.action} {a.binding ?? "No shortcut"}
-                    </span>
-                  </li>
-                ))}
+                {actions.map((a) => {
+                  const editing = editingId === a.id;
+                  const current = effectiveChord(a.id, overrides);
+                  return (
+                    <li key={a.id}>
+                      {editing ? (
+                        <span className="shortcuts-capture">
+                          <span className="shortcuts-capture-hint">
+                            {capture === undefined ? "Press keys…" : describeChord(capture)}
+                          </span>
+                          <button type="button" className="shortcuts-edit-btn" onClick={cancelEditing}>
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="shortcuts-edit-btn"
+                          aria-label={`Edit shortcut for ${a.label}`}
+                          disabled={saving}
+                          onClick={() => {
+                            setEditingId(a.id);
+                            setCapture(undefined);
+                            setError(undefined);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                      <span className="shortcuts-row-text">
+                        {a.label} {describeChord(current)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
+              {editingId !== undefined && (
+                <p role="status" className="shortcuts-capture-status">
+                  Press the key combination you want, then Enter to save. Escape cancels.
+                </p>
+              )}
             </div>
           )}
           {regions.map((g) => (
@@ -902,10 +1040,18 @@ function ShortcutsDialog({ onClose }: { readonly onClose: () => void }) {
               </ul>
             </div>
           ))}
+          {actions.length === 0 && regions.length === 0 && (
+            <p className="empty-state small">No shortcuts match “{query}”.</p>
+          )}
         </div>
+        {error && (
+          <p role="alert" className="form-error shortcuts-error">
+            {error}
+          </p>
+        )}
         <div className="shortcuts-footer" role="contentinfo">
-          <button type="button" disabled title={NOT_IMPLEMENTED}>
-            Restore all defaults
+          <button type="button" disabled={atDefaults || saving} onClick={() => void restore()}>
+            {atDefaults ? "Defaults in use" : "Restore all defaults"}
           </button>
         </div>
       </div>
@@ -1361,6 +1507,116 @@ function GeneralPane({
  *  prefilled with the current config and "Delete" is present but disabled (no backend
  *  "unconfigure" capability exists this tranche) — same "control present, feature stubbed" pattern
  *  used throughout this app (see the Settings nav's inert items below). */
+/** "Open configuration file" (T11, J-CFG-config-path): the browser cannot open a local file, so the
+ *  button resolves where configuration lives and hands over the real, non-secret bytes — the path to
+ *  copy, the recognised environment variables with sensitive values already redacted, and a
+ *  download of the exact file. Nothing secret is ever fetched or rendered. */
+export function ConfigFileDialog({
+  onResolve,
+  onClose,
+}: {
+  /** Resolves the configuration facts (`config.path`). Injected so this dialog is testable. */
+  readonly onResolve: () => Promise<ConfigPathResult>;
+  readonly onClose: () => void;
+}) {
+  const [info, setInfo] = useState<ConfigPathResult | undefined>(undefined);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [copied, setCopied] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await onResolve();
+        if (!cancelled) setInfo(result);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onResolve]);
+
+  return (
+    <div className="modal-backdrop modal-backdrop-stacked">
+      <div className="modal config-file-dialog" role="dialog" aria-modal="true" aria-labelledby="config-file-heading" tabIndex={-1} ref={dialogRef}>
+        <div className="dialog-banner">
+          <h2 id="config-file-heading">Configuration file</h2>
+          <button type="button" className="icon-btn" aria-label="Close configuration file" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        {busy && <p className="empty-state small">Resolving configuration location…</p>}
+        {!busy && error && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        {!busy && info && (
+          <div className="config-file-body">
+            <dl className="config-file-facts">
+              <dt>Home directory</dt>
+              <dd>
+                <code>{info.home}</code>
+              </dd>
+              <dt>Configuration file</dt>
+              <dd>
+                <code>{info.configFile}</code>
+                <span className={info.configFileExists ? "config-file-exists" : "config-file-missing"}>
+                  {info.configFileExists ? "Exists" : "Not present yet — the download below creates it"}
+                </span>
+              </dd>
+            </dl>
+            <div className="config-file-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  void copyToClipboard(info.configFile).then((ok) => setCopied(ok));
+                }}
+              >
+                {copied ? "Path copied" : "Copy path"}
+              </button>
+              <button type="button" onClick={() => downloadTextFile("cognate.config.json", info.export)}>
+                Download configuration
+              </button>
+            </div>
+            <h3>Settings in effect</h3>
+            <pre className="config-file-pre">{JSON.stringify(info.settings, null, 2)}</pre>
+            <h3>Environment</h3>
+            <table className="config-file-env">
+              <thead>
+                <tr>
+                  <th scope="col">Variable</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {info.environment.map((entry) => (
+                  <tr key={entry.name}>
+                    <td>
+                      <code>{entry.name}</code>
+                    </td>
+                    <td>
+                      <code>{entry.value}</code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="settings-description">Secrets are never included in this view or in the download.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SettingsModels({
   onClose,
   settings,
@@ -1400,6 +1656,12 @@ function SettingsModels({
   // Quick "Apply" from the list-view row: just the API key, reusing the already-configured
   // provider/base URL/model.
   const [rowApiKey, setRowApiKey] = useState("");
+  // T11: "Open configuration file" (config.path), provider Delete (confirmed, secret-first) and
+  // "Fetch models" (model.catalog) — the three Settings -> Models actions that were inert.
+  const [configFileOpen, setConfigFileOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [catalog, setCatalog] = useState<ModelCatalogResult | undefined>(undefined);
+  const [catalogBusy, setCatalogBusy] = useState(false);
 
   const resetWizard = useCallback((prefillFromConfig: boolean) => {
     setAddTab("custom");
@@ -1514,6 +1776,58 @@ function SettingsModels({
     }
   }, [client, config, rowApiKey]);
 
+  /** Deletes the single live provider configuration. Destructive, so it is a two-step control:
+   *  the first press states exactly what will happen, the second commits. `provider.delete` removes
+   *  the stored secret first, so a failure leaves the configuration intact. */
+  const deleteProvider = useCallback(async () => {
+    if (!config) return;
+    setBusy(true);
+    setError(undefined);
+    setSaved(false);
+    try {
+      await client.invoke("provider.delete", { providerId: config.providerId } as never);
+      setDeleteConfirm(false);
+      setRowApiKey("");
+      setCustomizedOpen(false);
+      setCatalog(undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleteConfirm(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [client, config]);
+
+  /** Discovers real model ids for the provider being added. Read-only: nothing is configured or
+   *  recorded until the operator chooses a row and saves. */
+  const fetchModels = useCallback(async () => {
+    setCatalogBusy(true);
+    setCatalog(undefined);
+    setModelError(undefined);
+    try {
+      const result = (await client.invoke("model.catalog", {
+        protocol: protocolToWire(protocol),
+        baseURL,
+        ...(apiKey.trim().length > 0 ? { apiKey } : {}),
+      } as never)) as unknown as ModelCatalogResult;
+      setCatalog(result);
+      if (result.ok) {
+        // Append only: fetching must never discard ids the operator typed by hand.
+        setModels((prev) => {
+          const have = new Set(prev.map((m) => m.modelId.trim()).filter((v) => v.length > 0));
+          const added = result.models
+            .filter((id) => !have.has(id))
+            .map((modelId) => ({ id: crypto.randomUUID(), modelId, displayName: "" }));
+          return [...prev, ...added];
+        });
+      }
+    } catch (err) {
+      setCatalog({ ok: false, reason: err instanceof Error ? err.message : String(err), models: [] });
+    } finally {
+      setCatalogBusy(false);
+    }
+  }, [client, protocol, baseURL, apiKey]);
+
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef, onClose);
   return (
@@ -1521,13 +1835,19 @@ function SettingsModels({
       <div className="modal settings-panel" role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} ref={dialogRef}>
         <div className="settings-titlebar">
           <h2>Settings</h2>
-          <button type="button" className="open-config-file-btn" disabled title={NOT_IMPLEMENTED}>
+          <button type="button" className="open-config-file-btn" onClick={() => setConfigFileOpen(true)}>
             Open configuration file
           </button>
           <button type="button" className="icon-btn" aria-label="Close settings" onClick={onClose}>
             ×
           </button>
         </div>
+        {configFileOpen && (
+          <ConfigFileDialog
+            onResolve={() => client.invoke("config.path", {}) as unknown as Promise<ConfigPathResult>}
+            onClose={() => setConfigFileOpen(false)}
+          />
+        )}
         <div className="settings-body">
           <nav className="settings-nav" aria-label="Settings sections">
             <button
@@ -1591,9 +1911,31 @@ function SettingsModels({
                         <button type="button" aria-label={`Edit ${config.providerId} (${config.providerId})`} onClick={openEditWizard}>
                           <EditIcon /> Edit
                         </button>
-                        <button type="button" aria-label={`Delete ${config.providerId} (${config.providerId})`} disabled title={NOT_IMPLEMENTED}>
-                          <TrashIcon /> Delete
-                        </button>
+                        {deleteConfirm ? (
+                          <span className="provider-delete-confirm">
+                            <span role="status" className="provider-delete-confirm-text">
+                              Delete {config.providerId} and its stored key? This cannot be undone.
+                            </span>
+                            <button type="button" className="danger-btn" disabled={busy} onClick={() => void deleteProvider()}>
+                              Yes, delete
+                            </button>
+                            <button type="button" disabled={busy} onClick={() => setDeleteConfirm(false)}>
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={`Delete ${config.providerId} (${config.providerId})`}
+                            disabled={busy}
+                            onClick={() => {
+                              setError(undefined);
+                              setDeleteConfirm(true);
+                            }}
+                          >
+                            <TrashIcon /> Delete
+                          </button>
+                        )}
                       </div>
                     </div>
                     <label>
@@ -1717,14 +2059,28 @@ function SettingsModels({
                       <div className="models-region-header">
                         <span>Models</span>
                         <div>
-                          <button type="button" disabled={baseURL.trim().length === 0} title={NOT_IMPLEMENTED}>
-                            Fetch available models
+                          <button
+                            type="button"
+                            disabled={baseURL.trim().length === 0 || catalogBusy}
+                            onClick={() => void fetchModels()}
+                          >
+                            {catalogBusy ? "Fetching…" : "Fetch available models"}
                           </button>
                           <button type="button" onClick={addModelRow}>
                             Add model
                           </button>
                         </div>
                       </div>
+                      {catalog !== undefined && !catalog.ok && (
+                        <p role="alert" className="form-error">
+                          {catalog.reason}
+                        </p>
+                      )}
+                      {catalog !== undefined && catalog.ok && (
+                        <p role="status" className="settings-subtitle catalog-status">
+                          Found {catalog.models.length} model{catalog.models.length === 1 ? "" : "s"} — added below, unrecognised duplicates were skipped.
+                        </p>
+                      )}
                       {models.map((m, i) => (
                         <div key={m.id} className="model-row">
                           <input
@@ -2270,89 +2626,214 @@ function EditDiff({
   );
 }
 
-/** Splits `EditSummary.diffLines` (context/`-`/`+` prefixed, no line numbers) into gutter'd rows for
- *  `ReviewPanel` — a single hunk covering the whole reconstructed file (this app's `diffLines`
- *  algorithm in `capabilities/tools.ts` always produces one contiguous change region bounded by
- *  context on both sides, so one `@@` header for the full old/new line counts is accurate, not an
- *  approximation). */
-function diffHunk(diffLines: readonly string[]) {
-  let oldNo = 1;
-  let newNo = 1;
-  const rows: { readonly kind: "ctx" | "add" | "del"; readonly oldNo?: number; readonly newNo?: number; readonly text: string }[] = [];
-  for (const line of diffLines) {
-    const text = line.slice(1);
-    if (line.startsWith("+")) {
-      rows.push({ kind: "add", newNo, text });
-      newNo++;
-    } else if (line.startsWith("-")) {
-      rows.push({ kind: "del", oldNo, text });
-      oldNo++;
-    } else {
-      rows.push({ kind: "ctx", oldNo, newNo, text });
-      oldNo++;
-      newNo++;
-    }
-  }
-  const oldCount = oldNo - 1;
-  const newCount = newNo - 1;
-  return { rows, header: `@@ -1,${oldCount} +1,${newCount} @@` };
-}
-
-/** The Review split-diff panel (critic round-2 batch B P0, `10-file-change-expanded`): a real
- *  right-hand pane beside the chat — tab strip (`Review · turn N` + close + disabled "+" add-tab),
- *  a toolbar (list/split/code view toggles + Line wrap), and a two-column diff with a line-number
- *  gutter and an `@@` hunk header, matching reference/screenshots/*​/10-file-change-expanded.png's
- *  layout. Geometry per product-characterization.md §2: `RIGHTBAR_MIN=300px`,
- *  `RIGHTBAR_MAX_RATIO=0.7`, `RIGHTBAR_DEFAULT_RATIO=0.45` of the frame (see `.review-right-panel`
- *  in app.css). Reuses the same `<aside class="right-panel">` shell the subagent child view
- *  (`RightPanel` below) already opens beside the chat. */
-function ReviewPanel({
-  summary,
-  turnNumber,
+/** The Review split-diff panel (critic round-2 batch B P0, `10-file-change-expanded`; layout and
+ *  view controls completed in T11): a right-hand pane beside the chat with a real tab strip (open,
+ *  switch and close file changes), layout controls (split / fullscreen / collapse), three view
+ *  modes (list, split, code), a visible file-location line, and a "More ways to open" menu that
+ *  copies the path or hands the patch to another browser tab. Geometry per
+ *  product-characterization.md §2 (see `.review-right-panel` in app.css). */
+export function ReviewPanel({
+  initialTab,
+  availableTabs,
+  workspaceRoot,
   onClose,
 }: {
-  readonly summary: EditSummary;
-  readonly turnNumber: number;
+  readonly initialTab: ReviewTab;
+  /** Every other edit in this session — the "Add tab" picker. */
+  readonly availableTabs: readonly ReviewTab[];
+  readonly workspaceRoot: string | undefined;
   readonly onClose: () => void;
 }) {
-  const [splitView, setSplitView] = useState(true);
+  const [tabs, setTabs] = useState<readonly ReviewTab[]>([initialTab]);
+  const [activeKey, setActiveKey] = useState(initialTab.key);
+  const [view, setView] = useState<"list" | "split" | "code">("split");
   const [lineWrap, setLineWrap] = useState(false);
-  const { rows, header } = useMemo(() => diffHunk(summary.diffLines), [summary.diffLines]);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
+  const [addTabOpen, setAddTabOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<undefined | "more">(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  const active = tabs.find((t) => t.key === activeKey) ?? tabs[0]!;
+  const summary = active.summary;
   const fileName = summary.file_path.split("/").pop() ?? summary.file_path;
+  const { rows, header } = useMemo(() => diffHunk(summary.diffLines), [summary.diffLines]);
+  const codeRows = useMemo(() => renderFileAfterChange(summary.diffLines), [summary.diffLines]);
+  const absolutePath = workspaceRoot ? `${workspaceRoot.replace(/\/$/, "")}/${summary.file_path}` : undefined;
+
+  // Click-away + Escape close the two menus.
+  useEffect(() => {
+    if (addTabOpen === false && openMenu === undefined) return;
+    const onDown = (e: MouseEvent) => {
+      if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
+        setAddTabOpen(false);
+        setOpenMenu(undefined);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAddTabOpen(false);
+        setOpenMenu(undefined);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [addTabOpen, openMenu]);
+
+  const openPatchInNewTab = useCallback(() => {
+    const text = renderUnifiedPatch(summary, header);
+    const url = URL.createObjectURL(new Blob([text], { type: "text/x-diff;charset=utf-8" }));
+    const opened = window.open(url, "_blank", "noopener");
+    if (!opened) setNotice("The browser blocked the new tab — use Download patch instead.");
+    // Revoke once the tab has had a chance to load the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }, [summary, header]);
+
+  const downloadPatch = useCallback(() => {
+    const base = fileName.replace(/\.[^.]+$/, "") || "change";
+    downloadTextFile(`${base}.diff`, renderUnifiedPatch(summary, header));
+  }, [summary, header, fileName]);
+
+  const copyPath = useCallback(
+    async (value: string, label: string) => {
+      const ok = await copyToClipboard(value);
+      setNotice(ok ? `${label} copied.` : `Could not copy — the path is shown in the toolbar.`);
+    },
+    [],
+  );
+
+  const addToTab = useCallback((tab: ReviewTab) => {
+    setTabs((prev) => (prev.some((t) => t.key === tab.key) ? prev : [...prev, tab]));
+    setActiveKey(tab.key);
+    setAddTabOpen(false);
+  }, []);
+
+  const closeTab = useCallback(
+    (key: string) => {
+      setTabs((prev) => {
+        const next = prev.filter((t) => t.key !== key);
+        if (next.length === 0) {
+          onClose();
+          return prev;
+        }
+        setActiveKey((current) => (current === key ? next[next.length - 1]!.key : current));
+        return next;
+      });
+    },
+    [onClose],
+  );
+
+  const available = availableTabs.filter((t) => !tabs.some((open) => open.key === t.key));
+
+  const cls = ["right-panel", "review-right-panel"];
+  if (fullscreen) cls.push("review-fullscreen");
+  if (collapsed) cls.push("review-collapsed");
+
+  if (collapsed) {
+    return (
+      <aside className={cls.join(" ")} role="tabpanel" aria-label={`Review · turn ${active.turnNumber}`} aria-expanded="false">
+        <button type="button" className="review-expand-btn" aria-label="Expand right sidebar" title="Expand right sidebar" onClick={() => setCollapsed(false)}>
+          <PanelRightIcon />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="right-panel review-right-panel" role="tabpanel" aria-label={`Review · turn ${turnNumber}`}>
-      <div className="right-panel-tabs" role="tablist">
-        <span role="tab" aria-selected="true" className="right-panel-tab">
-          Review · turn {turnNumber}
-          <button type="button" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </span>
-        <button type="button" className="right-panel-add-tab" aria-label="Add tab" disabled title={NOT_IMPLEMENTED}>
+    <aside className={cls.join(" ")} role="tabpanel" aria-label={`Review · turn ${active.turnNumber}`}>
+      <div className="right-panel-tabs" role="tablist" ref={toolbarRef}>
+        {tabs.map((tab) => (
+          <span
+            key={tab.key}
+            role="tab"
+            aria-selected={tab.key === active.key}
+            tabIndex={tab.key === active.key ? 0 : -1}
+            className={tab.key === active.key ? "right-panel-tab" : "right-panel-tab inactive"}
+            onClick={() => setActiveKey(tab.key)}
+          >
+            Review · turn {tab.turnNumber}
+            <button type="button" aria-label={`Close review of ${tab.summary.file_path}`} onClick={() => closeTab(tab.key)}>
+              ×
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          className="right-panel-add-tab"
+          aria-label="Add tab"
+          aria-haspopup="menu"
+          aria-expanded={addTabOpen}
+          onClick={() => setAddTabOpen((v) => !v)}
+        >
           <PlusIcon />
         </button>
-        {/* Layout controls at the tab-strip level (critic round-3 P1 — reference ARIA lists these
-         *  beside the tab strip, distinct from the toolbar's view toggles below). This tranche has
-         *  no multi-pane layout engine or real fullscreen/sidebar-collapse implementation, so these
-         *  stay inert (present-but-disabled) — see DEVIATIONS.md. */}
-        <button type="button" className="review-toolbar-btn icon-btn" disabled title={NOT_IMPLEMENTED} aria-label="Split">
+        {addTabOpen && (
+          <div role="menu" className="right-panel-tab-menu">
+            {available.length === 0 ? (
+              <span className="right-panel-tab-menu-empty">No other file changes in this session.</span>
+            ) : (
+              available.map((tab) => (
+                <button key={tab.key} type="button" role="menuitem" onClick={() => addToTab(tab)}>
+                  Turn {tab.turnNumber} · {tab.summary.file_path}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {/* Layout controls at the tab-strip level (critic round-3 P1), now wired: Split mirrors the
+         *  toolbar's split view, Fullscreen expands the panel over the frame, and Collapse shrinks
+         *  it to a rail with a single expand control. */}
+        <button
+          type="button"
+          className="review-toolbar-btn icon-btn"
+          aria-label="Split"
+          aria-pressed={view === "split"}
+          title="Split"
+          onClick={() => setView((v) => (v === "split" ? "list" : "split"))}
+        >
           <SplitViewIcon />
         </button>
-        <button type="button" className="review-toolbar-btn icon-btn" disabled title={NOT_IMPLEMENTED} aria-label="Fullscreen">
+        <button
+          type="button"
+          className="review-toolbar-btn icon-btn"
+          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          aria-pressed={fullscreen}
+          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          onClick={() => setFullscreen((v) => !v)}
+        >
           <FullscreenIcon />
         </button>
-        <button type="button" className="review-toolbar-btn icon-btn" disabled title={NOT_IMPLEMENTED} aria-label="Collapse right sidebar">
+        <button
+          type="button"
+          className="review-toolbar-btn icon-btn"
+          aria-label="Collapse right sidebar"
+          title="Collapse right sidebar"
+          onClick={() => setCollapsed(true)}
+        >
           <PanelRightIcon />
         </button>
       </div>
       <div className="review-panel-toolbar" role="toolbar" aria-label="Review view">
-        <button type="button" className="review-toolbar-btn icon-btn" aria-pressed={!splitView} onClick={() => setSplitView(false)} aria-label="List view" title="List view">
+        <button type="button" className="review-toolbar-btn icon-btn" aria-pressed={view === "list"} onClick={() => setView("list")} aria-label="List view" title="List view">
           <ListViewIcon />
         </button>
-        <button type="button" className="review-toolbar-btn icon-btn" aria-pressed={splitView} onClick={() => setSplitView(true)} aria-label="Split view" title="Split view">
+        <button type="button" className="review-toolbar-btn icon-btn" aria-pressed={view === "split"} onClick={() => setView("split")} aria-label="Split view" title="Split view">
           <SplitViewIcon />
         </button>
-        <button type="button" className="review-toolbar-btn icon-btn" disabled title={NOT_IMPLEMENTED} aria-label="Code view">
+        <button
+          type="button"
+          className="review-toolbar-btn icon-btn"
+          aria-pressed={view === "code"}
+          onClick={() => setView((v) => (v === "code" ? "split" : "code"))}
+          aria-label="Code view"
+          title="Code view — the file as it will be after this change"
+        >
           <CodeViewIcon />
         </button>
         <span className="review-panel-file">{summary.file_path}</span>
@@ -2362,56 +2843,106 @@ function ReviewPanel({
         <button type="button" className="review-toolbar-btn" aria-pressed={lineWrap} onClick={() => setLineWrap((v) => !v)}>
           Line wrap
         </button>
-        {/* Enabled per reference ARIA (critic round-3 P1 — Cognate's disabled state didn't match);
-         *  this panel already *is* the file's sidebar view, so the action is a no-op rather than a
-         *  second navigation. */}
-        <button type="button" className="review-toolbar-btn" onClick={() => undefined}>
-          Open {fileName} in sidebar
-        </button>
-        {/* Both inert in the reference too (`[disabled]` in reference ARIA) — no file-location or
-         *  external-open surface exists in this tranche. */}
-        <button type="button" className="review-toolbar-btn" disabled title={NOT_IMPLEMENTED}>
+        <button
+          type="button"
+          className="review-toolbar-btn"
+          aria-pressed={showLocation}
+          onClick={() => setShowLocation((v) => !v)}
+        >
           Show file location
         </button>
-        <button type="button" className="review-toolbar-btn" disabled title={NOT_IMPLEMENTED}>
+        <button
+          type="button"
+          className="review-toolbar-btn"
+          aria-haspopup="menu"
+          aria-expanded={openMenu === "more"}
+          onClick={() => setOpenMenu((v) => (v === "more" ? undefined : "more"))}
+        >
           More ways to open
         </button>
-      </div>
-      <div className="review-panel-body">
-        <div className="review-hunk-header">{header}</div>
-        {splitView ? (
-          <div className={`review-diff-split${lineWrap ? " wrap-lines" : ""}`}>
-            <div className="review-diff-pane review-diff-old">
-              {rows
-                .filter((r) => r.kind !== "add")
-                .map((r, i) => (
-                  <div key={i} className={`review-diff-row${r.kind === "del" ? " diff-del" : " diff-ctx"}`}>
-                    <span className="review-diff-gutter">{r.oldNo}</span>
-                    <span className="review-diff-text">{r.text}</span>
-                  </div>
-                ))}
-            </div>
-            <div className="review-diff-pane review-diff-new">
-              {rows
-                .filter((r) => r.kind !== "del")
-                .map((r, i) => (
-                  <div key={i} className={`review-diff-row${r.kind === "add" ? " diff-add" : " diff-ctx"}`}>
-                    <span className="review-diff-gutter">{r.newNo}</span>
-                    <span className="review-diff-text">{r.text}</span>
-                  </div>
-                ))}
-            </div>
+        {openMenu === "more" && (
+          <div role="menu" className="review-more-menu">
+            <button type="button" role="menuitem" onClick={() => void copyPath(summary.file_path, "Path")}>
+              Copy path
+            </button>
+            <button type="button" role="menuitem" disabled={!absolutePath} onClick={() => absolutePath && void copyPath(absolutePath, "Full path")}>
+              Copy full path
+            </button>
+            <button type="button" role="menuitem" onClick={openPatchInNewTab}>
+              Open patch in a new tab
+            </button>
+            <button type="button" role="menuitem" onClick={downloadPatch}>
+              Download patch (.diff)
+            </button>
           </div>
-        ) : (
-          <div className={`review-diff-unified${lineWrap ? " wrap-lines" : ""}`}>
-            {rows.map((r, i) => (
-              <div key={i} className={`review-diff-row${r.kind === "add" ? " diff-add" : r.kind === "del" ? " diff-del" : " diff-ctx"}`}>
-                <span className="review-diff-gutter">{r.oldNo ?? ""}</span>
-                <span className="review-diff-gutter">{r.newNo ?? ""}</span>
+        )}
+      </div>
+      {showLocation && (
+        <p className="review-panel-location" role="status">
+          {absolutePath ? (
+            <>
+              <code>{absolutePath}</code>
+            </>
+          ) : (
+            <>
+              <code>{summary.file_path}</code> (workspace root unknown — select a workspace to resolve the full path)
+            </>
+          )}
+        </p>
+      )}
+      {notice && (
+        <p className="review-panel-location" role="status">
+          {notice}
+        </p>
+      )}
+      <div className="review-panel-body">
+        {view === "code" ? (
+          <div className={`review-diff-unified${lineWrap ? " wrap-lines" : ""}`} aria-label={`Code view of ${summary.file_path}`}>
+            {codeRows.map((r, i) => (
+              <div key={i} className="review-diff-row diff-ctx">
+                <span className="review-diff-gutter">{r.no}</span>
                 <span className="review-diff-text">{r.text}</span>
               </div>
             ))}
           </div>
+        ) : (
+          <>
+            <div className="review-hunk-header">{header}</div>
+            {view === "split" ? (
+              <div className={`review-diff-split${lineWrap ? " wrap-lines" : ""}`}>
+                <div className="review-diff-pane review-diff-old">
+                  {rows
+                    .filter((r) => r.kind !== "add")
+                    .map((r, i) => (
+                      <div key={i} className={`review-diff-row${r.kind === "del" ? " diff-del" : " diff-ctx"}`}>
+                        <span className="review-diff-gutter">{r.oldNo}</span>
+                        <span className="review-diff-text">{r.text}</span>
+                      </div>
+                    ))}
+                </div>
+                <div className="review-diff-pane review-diff-new">
+                  {rows
+                    .filter((r) => r.kind !== "del")
+                    .map((r, i) => (
+                      <div key={i} className={`review-diff-row${r.kind === "add" ? " diff-add" : " diff-ctx"}`}>
+                        <span className="review-diff-gutter">{r.newNo}</span>
+                        <span className="review-diff-text">{r.text}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : (
+              <div className={`review-diff-unified${lineWrap ? " wrap-lines" : ""}`}>
+                {rows.map((r, i) => (
+                  <div key={i} className={`review-diff-row${r.kind === "add" ? " diff-add" : r.kind === "del" ? " diff-del" : " diff-ctx"}`}>
+                    <span className="review-diff-gutter">{r.oldNo ?? ""}</span>
+                    <span className="review-diff-gutter">{r.newNo ?? ""}</span>
+                    <span className="review-diff-text">{r.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </aside>
@@ -2960,65 +3491,357 @@ function PresetMenu({
   );
 }
 
-/** The sidebar "Plugins" global panel (usage pass U4, §14, checkpoint 25b): heading, description,
- *  Refresh + "Add plugin" (both inert this pass — no plugin install backend), and the "Official"
- *  list of this deployment's plugin-like features with per-entry View buttons and Enable switches
- *  (inert — nothing here is genuinely toggleable yet; DEVIATIONS.md). Rendered in place of the
- *  session surface; the sidebar's Plugins button toggles it. */
-function PluginsPanel({ onClose }: { readonly onClose: () => void }) {
-  // Usage pass U7: the RealityTrace switch is the one REAL plugin toggle — it writes the durable
-  // `plugins` state (`settings.changePlugin`) that the observation drain gate reads per cycle.
-  const realitytrace = useRealityTracePlugin();
+/** Presentational body of the sidebar Plugins panel — data and callbacks as props, so the status
+ *  words, the refresh line, the "only render a control that acts" toggle rule and the install /
+ *  refusal outcomes are assertable without a client. Serves `j_plg_install` (T11). */
+export function PluginsPanelBody({
+  detail,
+  catalog,
+  loading,
+  error,
+  refreshedAt,
+  outcome,
+  pending,
+  addOpen,
+  enabledKeys,
+  onClose,
+  onOpenDetail,
+  onCloseDetail,
+  onRefresh,
+  onOpenAdd,
+  onCloseAdd,
+  onInstall,
+  onToggle,
+}: {
+  readonly detail: PluginView | undefined;
+  readonly catalog: PluginCatalogResult | undefined;
+  readonly loading: boolean;
+  readonly error: string | undefined;
+  readonly refreshedAt: string | undefined;
+  readonly outcome: string | undefined;
+  readonly pending: string | undefined;
+  readonly addOpen: boolean;
+  readonly enabledKeys: ReadonlySet<string>;
+  readonly onClose: () => void;
+  readonly onOpenDetail: (id: string) => void;
+  readonly onCloseDetail: () => void;
+  readonly onRefresh: () => void;
+  readonly onOpenAdd: () => void;
+  readonly onCloseAdd: () => void;
+  readonly onInstall: (pluginId: string, install: boolean) => void;
+  readonly onToggle: (pluginId: string, next: boolean) => void;
+}) {
   return (
     <div className="plugins-panel" role="region" aria-label="Plugins">
       <div className="plugins-panel-header">
         <div>
-          <h1>Plugins</h1>
-          <p className="settings-description">Add and manage plugins</p>
+          <h1>{detail ? detail.name : "Plugins"}</h1>
+          <p className="settings-description">
+            {detail ? "Plugin detail" : "Add and manage plugins"}
+            {catalog && !detail ? ` · ${catalog.views.length} in ${catalog.sources.length} source${catalog.sources.length === 1 ? "" : "s"}` : ""}
+          </p>
         </div>
         <div className="plugins-panel-actions">
-          <button type="button" className="icon-btn" aria-label="Refresh" disabled title={NOT_IMPLEMENTED}>
-            ⟳
-          </button>
-          <button type="button" className="btn-primary" disabled title={NOT_IMPLEMENTED}>
-            <PlusIcon /> Add plugin
-          </button>
+          {detail ? (
+            <button type="button" onClick={onCloseDetail}>
+              ← All plugins
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={`Refresh plugin list${refreshedAt ? `, last refreshed ${refreshedAt}` : ""}`}
+                disabled={loading}
+                onClick={onRefresh}
+              >
+                ⟳
+              </button>
+              <button type="button" className="btn-primary" onClick={onOpenAdd}>
+                <PlusIcon /> Add plugin
+              </button>
+            </>
+          )}
           <button type="button" className="icon-btn" aria-label="Close plugins panel" onClick={onClose}>
             ×
           </button>
         </div>
       </div>
-      <h3>Official</h3>
-      <ul className="plugins-list" aria-label="Official plugins">
-        {[...SESSION_PLUGIN_CATALOG.map((p) => ({ id: p.id, name: p.name, description: p.description, enabled: true })), ...GLOBAL_PLUGIN_CATALOG].map((p) => (
-          <li key={p.id}>
-            <div className="plugin-row">
-              <div className="plugin-row-text">
-                <strong>{p.name}</strong>
-                <span className="plugin-description">{p.description}</span>
-              </div>
-              <div className="plugin-row-actions">
-                <button type="button" aria-label={`View ${p.name}`} disabled title={NOT_IMPLEMENTED}>
-                  View
+
+      {refreshedAt && !detail && (
+        <p className="plugins-status" role="status">
+          Refreshed {refreshedAt}
+        </p>
+      )}
+      {loading && !catalog && <p className="empty-state small">Loading plugins…</p>}
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {outcome && (
+        <p role="status" className="plugins-status">
+          {outcome}
+        </p>
+      )}
+
+      {detail ? (
+        <div className="plugin-detail">
+          <p className="plugin-detail-description">{detail.description}</p>
+          <dl className="plugin-detail-facts">
+            <dt>Identifier</dt>
+            <dd>
+              <code>{detail.id}</code>
+            </dd>
+            <dt>Lifecycle</dt>
+            <dd>{detail.lifecycle}</dd>
+            <dt>Status</dt>
+            <dd>{STATUS_LABELS[detail.status]}</dd>
+            {detail.implementation.kind === "tool" && (
+              <>
+                <dt>Tool</dt>
+                <dd>
+                  <code>{detail.implementation.tool}</code>
+                </dd>
+              </>
+            )}
+            {detail.presets && detail.presets.length > 0 && (
+              <>
+                <dt>Composed by</dt>
+                <dd>{detail.presets.join(", ")} preset{detail.presets.length === 1 ? "" : "s"}</dd>
+              </>
+            )}
+          </dl>
+          {detail.reason && <p className="plugin-detail-reason">{detail.reason}</p>}
+          <div className="plugin-detail-actions">
+            {detail.lifecycle === "optional" &&
+              (detail.status === "installed" ? (
+                <button type="button" disabled={pending !== undefined} onClick={() => onInstall(detail.id, false)}>
+                  {pending === detail.id ? "Removing…" : "Uninstall"}
                 </button>
-                {p.id === "realitytrace" ? (
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={realitytrace.enabled}
-                    aria-label={`Enable ${p.name}`}
-                    onClick={() => void realitytrace.toggle(!realitytrace.enabled)}
-                    title={realitytrace.enabled ? "Delivering run events to the SXR evidence ledger" : "Deliver run events to the SXR evidence ledger"}
-                    className="settings-switch"
-                  />
-                ) : (
-                  <button type="button" role="switch" aria-checked={p.enabled} aria-label={`Enable ${p.name}`} disabled={!p.enabled} title={p.enabled ? NOT_IMPLEMENTED : "Not configured this build"} className="settings-switch" />
-                )}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
+              ) : (
+                <button type="button" className="btn-primary" disabled={pending !== undefined} onClick={() => onInstall(detail.id, true)}>
+                  {pending === detail.id ? "Installing…" : "Install"}
+                </button>
+              ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <h3>Official</h3>
+          <ul className="plugins-list" aria-label="Official plugins">
+            {catalog?.views.map((p) => (
+              <li key={p.id}>
+                <div className="plugin-row">
+                  <div className="plugin-row-text">
+                    <strong>{p.name}</strong>
+                    <span className="plugin-description">{p.description}</span>
+                    <span className="plugin-status-line">{STATUS_LABELS[p.status]}</span>
+                  </div>
+                  <div className="plugin-row-actions">
+                    <button type="button" aria-label={`View ${p.name}`} onClick={() => onOpenDetail(p.id)}>
+                      View
+                    </button>
+                    {p.toggleable && p.implementation.kind === "settings-toggle" ? (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={optionalPluginEnabled(enabledKeys, p)}
+                        aria-label={`Enable ${p.name}`}
+                        onClick={() => onToggle(p.implementation.kind === "settings-toggle" ? p.implementation.key : p.id, !optionalPluginEnabled(enabledKeys, p))}
+                        title={optionalPluginEnabled(enabledKeys, p) ? "On — switch off to stop it" : "Off — switch on to start it"}
+                        className="settings-switch"
+                      />
+                    ) : (
+                      <span className="plugin-not-toggleable" title={p.reason}>
+                        {p.reason}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+            {catalog && catalog.views.length === 0 && <p className="empty-state small">This deployment's catalog is empty.</p>}
+          </ul>
+        </>
+      )}
+
+      {addOpen && (
+        <AddPluginDialog
+          installable={catalog?.installable ?? []}
+          installed={new Set(catalog?.records.map((r) => r.pluginId) ?? [])}
+          busy={pending}
+          onInstall={(id) => onInstall(id, true)}
+          onClose={onCloseAdd}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The sidebar "Plugins" global panel (usage pass U4 §14, checkpoint 25b; made real in T11).
+ *
+ *  Every row is now backed by the server-authoritative `plugin.catalog`: lifecycle decides whether
+ *  a switch may exist at all (see `src/plugins.ts`), so nothing renders that would do nothing.
+ *  Refresh re-queries the registry; "Add plugin" installs through `plugin.install`; View opens the
+ *  `#plugins/<id>` route, which survives Back, Forward and reload. */
+function PluginsPanel({
+  detailId,
+  onClose,
+  onOpenDetail,
+  onCloseDetail,
+}: {
+  /** From the `#plugins/<id>` hash route. `undefined` is the list view. */
+  readonly detailId: string | undefined;
+  readonly onClose: () => void;
+  readonly onOpenDetail: (id: string) => void;
+  readonly onCloseDetail: () => void;
+}) {
+  const client = useCognate();
+  const settings = useGeneralSettings();
+  const [catalog, setCatalog] = useState<PluginCatalogResult | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [refreshedAt, setRefreshedAt] = useState<string | undefined>(undefined);
+  const [addOpen, setAddOpen] = useState(false);
+  const [pending, setPending] = useState<string | undefined>(undefined);
+  const [outcome, setOutcome] = useState<string | undefined>(undefined);
+
+  const enabledKeys = useMemo(() => {
+    const entries = Object.entries(settings.plugins ?? {}).filter(([, on]) => on);
+    return new Set(entries.map(([k]) => k));
+  }, [settings.plugins]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(undefined);
+    try {
+      const result = (await client.invoke("plugin.catalog", {})) as unknown as PluginCatalogResult;
+      setCatalog(result);
+      setRefreshedAt(new Date().toLocaleTimeString());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [client]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const runInstall = useCallback(
+    async (pluginId: string, install: boolean) => {
+      setPending(pluginId);
+      setOutcome(undefined);
+      try {
+        const result = (await client.invoke(install ? "plugin.install" : "plugin.uninstall", { pluginId } as never)) as unknown as {
+          readonly ok?: boolean;
+          readonly message?: string;
+        };
+        setOutcome(result.message ?? (result.ok ? "Done." : "The request was refused."));
+        await load();
+      } catch (err) {
+        setOutcome(err instanceof Error ? err.message : String(err));
+      } finally {
+        setPending(undefined);
+      }
+    },
+    [client, load],
+  );
+
+  const detail = detailId === undefined ? undefined : catalog?.views.find((v) => v.id === detailId);
+
+  return (
+    <PluginsPanelBody
+      detail={detail}
+      catalog={catalog}
+      loading={loading}
+      error={error}
+      refreshedAt={refreshedAt}
+      outcome={outcome}
+      pending={pending}
+      addOpen={addOpen}
+      enabledKeys={enabledKeys}
+      onClose={onClose}
+      onOpenDetail={onOpenDetail}
+      onCloseDetail={onCloseDetail}
+      onRefresh={() => void load()}
+      onOpenAdd={() => setAddOpen(true)}
+      onCloseAdd={() => setAddOpen(false)}
+      onInstall={(pluginId, install) => void runInstall(pluginId, install)}
+      onToggle={(pluginKey, next) => {
+        void client
+          .invoke("settings.changePlugin", { plugins: { [pluginKey]: next } } as never)
+          .catch((e) => console.error("settings.changePlugin failed", e));
+      }}
+    />
+  );
+}
+
+/** Plain-language status for each lifecycle outcome — never colour alone. */
+const STATUS_LABELS: Readonly<Record<PluginStatus, string>> = {
+  "always-on": "Always on",
+  "composes-tools": "Composed by presets",
+  installed: "Installed",
+  available: "Not installed",
+  inert: "Installed, inert",
+};
+
+/** "Add plugin" (T11): a picker over the ids the registry declares installable. Installs are
+ *  reported back verbatim, including an inert install or a refusal. */
+function AddPluginDialog({
+  installable,
+  installed,
+  busy,
+  onInstall,
+  onClose,
+}: {
+  readonly installable: readonly string[];
+  readonly installed: ReadonlySet<string>;
+  readonly busy: string | undefined;
+  readonly onInstall: (id: string) => void;
+  readonly onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const candidates = installable.filter((id) => !installed.has(id));
+  return (
+    <div className="modal-backdrop modal-backdrop-stacked">
+      <div className="modal add-plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="add-plugin-heading" tabIndex={-1} ref={dialogRef}>
+        <div className="dialog-banner">
+          <h2 id="add-plugin-heading">Add plugin</h2>
+          <button type="button" className="icon-btn" aria-label="Close add plugin" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="add-plugin-body">
+          {candidates.length === 0 ? (
+            <p className="empty-state small">Everything this deployment offers is already installed.</p>
+          ) : (
+            <ul className="plugins-list">
+              {candidates.map((id) => {
+                const entry = catalogEntry(id);
+                return (
+                  <li key={id}>
+                    <div className="plugin-row">
+                      <div className="plugin-row-text">
+                        <strong>{entry?.name ?? id}</strong>
+                        <span className="plugin-description">{entry?.description ?? ""}</span>
+                      </div>
+                      <div className="plugin-row-actions">
+                        <button type="button" disabled={busy !== undefined} onClick={() => onInstall(id)}>
+                          {busy === id ? "Installing…" : "Install"}
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3616,8 +4439,11 @@ export function App() {
   const [sessionSearch, setSessionSearch] = useState("");
   const [viewOptionsOpen, setViewOptionsOpen] = useState(false);
   const viewOptionsRef = useRef<HTMLDivElement>(null);
-  const [groupBy, setGroupBy] = useState<"workspace-tree" | "in-one-list">("workspace-tree");
-  const [orderBy, setOrderBy] = useState<"manual" | "last-updated">("manual");
+  const [groupBy, setGroupBy] = useState<GroupBy>("workspace-tree");
+  const [orderBy, setOrderBy] = useState<OrderBy>("manual");
+  // T11 (J-SESSION-archive): whether archived conversations are listed is a view preference, not
+  // stored state — archiving is durable, visibility is not.
+  const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>("hide-archived");
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<ReadonlySet<string>>(new Set());
   const [wsMenuFor, setWsMenuFor] = useState<string | undefined>(undefined);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
@@ -3628,6 +4454,48 @@ export function App() {
   // column for the plugin manager (the reference's panel replaces the session surface, per the
   // 25b checkpoint's aria tree).
   const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
+  // T11: `#plugins/<id>` is the panel's only route. The hash is the source of truth, so Back,
+  // Forward and a reload all restore the same view; opening pushes one history entry and closing
+  // unwinds it (or replaces it when the page was deep-linked).
+  const [detailPluginId, setDetailPluginId] = useState<string | undefined>(undefined);
+  const pushedDetailRef = useRef(false);
+  useEffect(() => {
+    const readHash = () => {
+      const match = /^#?\/?plugins\/(.+)$/.exec(window.location.hash);
+      const id = match ? decodeURIComponent(match[1]!) : undefined;
+      setDetailPluginId(id);
+      if (id) setPluginsPanelOpen(true);
+    };
+    readHash();
+    window.addEventListener("hashchange", readHash);
+    return () => window.removeEventListener("hashchange", readHash);
+  }, []);
+  const openPluginDetail = useCallback((id: string) => {
+    pushedDetailRef.current = true;
+    window.location.hash = `plugins/${encodeURIComponent(id)}`;
+  }, []);
+  const closePluginDetail = useCallback(() => {
+    if (pushedDetailRef.current) {
+      pushedDetailRef.current = false;
+      window.history.back();
+      return;
+    }
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    setDetailPluginId(undefined);
+  }, []);
+  /** Closing the panel must also unwind its route, so a stale hash never re-opens it on reload. */
+  const closePluginsPanel = useCallback(() => {
+    if (detailPluginId !== undefined) {
+      if (pushedDetailRef.current) {
+        pushedDetailRef.current = false;
+        window.history.back();
+      } else {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        setDetailPluginId(undefined);
+      }
+    }
+    setPluginsPanelOpen(false);
+  }, [detailPluginId]);
   // Workbench: the cockpit view (tasks, workflows, capabilities, automations) and the task the
   // conversation is bound to (scopes authority, attributes usage).
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
@@ -3694,6 +4562,15 @@ export function App() {
   // Review split-diff panel (critic round-2 batch B P0) — mutually exclusive with the subagent
   // child-transcript panel; both reuse the same right-hand-pane slot beside the chat.
   const [openReview, setOpenReview] = useState<{ readonly summary: EditSummary; readonly turnNumber: number } | undefined>(undefined);
+  // T11: every edit in this session, keyed the same way ReviewPanel keys its tabs — the "Add tab"
+  // picker and the panel's initial tab come from one source.
+  const availableReviewTabs = useMemo(
+    () =>
+      transcript
+        .map((message, index) => (message.editSummary ? reviewTabKey(message.editSummary, index + 1) : undefined))
+        .filter((tab): tab is ReviewTab => tab !== undefined),
+    [transcript],
+  );
   const openReviewPanel = useCallback((summary: EditSummary, turnNumber: number) => {
     setOpenChildToolCallId(undefined);
     setOpenReview({ summary, turnNumber });
@@ -4019,7 +4896,7 @@ export function App() {
               className={pluginsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
               aria-label="Plugins"
               aria-pressed={pluginsPanelOpen}
-              onClick={() => setPluginsPanelOpen((v) => !v)}
+              onClick={() => (pluginsPanelOpen ? closePluginsPanel() : setPluginsPanelOpen(true))}
             >
               <PluginIcon />
               Plugins
@@ -4070,35 +4947,43 @@ export function App() {
                 {viewOptionsOpen && (
                   <div role="menu" className="workspaces-view-options" ref={viewOptionsRef}>
                     <span className="view-options-group-label">Group by</span>
-                    <button type="button" role="menuitem" disabled title={NOT_IMPLEMENTED}>
-                      WorkSpace
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={groupBy === "workspace-sections"}
+                      onClick={() => {
+                        setGroupBy("workspace-sections");
+                        setViewOptionsOpen(false);
+                      }}
+                    >
+                      {GROUP_BY_LABELS["workspace-sections"]}
                     </button>
                     <button
                       type="button"
-                      role="menuitem"
+                      role="menuitemradio"
                       aria-checked={groupBy === "workspace-tree"}
                       onClick={() => {
                         setGroupBy("workspace-tree");
                         setViewOptionsOpen(false);
                       }}
                     >
-                      Workspace Tree
+                      {GROUP_BY_LABELS["workspace-tree"]}
                     </button>
                     <button
                       type="button"
-                      role="menuitem"
+                      role="menuitemradio"
                       aria-checked={groupBy === "in-one-list"}
                       onClick={() => {
                         setGroupBy("in-one-list");
                         setViewOptionsOpen(false);
                       }}
                     >
-                      In one list
+                      {GROUP_BY_LABELS["in-one-list"]}
                     </button>
                     <span className="view-options-group-label">Order by</span>
                     <button
                       type="button"
-                      role="menuitem"
+                      role="menuitemradio"
                       aria-checked={orderBy === "manual"}
                       onClick={() => {
                         setOrderBy("manual");
@@ -4109,7 +4994,7 @@ export function App() {
                     </button>
                     <button
                       type="button"
-                      role="menuitem"
+                      role="menuitemradio"
                       aria-checked={orderBy === "last-updated"}
                       onClick={() => {
                         setOrderBy("last-updated");
@@ -4119,11 +5004,27 @@ export function App() {
                       Last updated
                     </button>
                     <span className="view-options-group-label">Filter sessions</span>
-                    <button type="button" role="menuitem" disabled title={NOT_IMPLEMENTED}>
-                      Hide archived
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={archiveFilter === "hide-archived"}
+                      onClick={() => {
+                        setArchiveFilter("hide-archived");
+                        setViewOptionsOpen(false);
+                      }}
+                    >
+                      {ARCHIVE_FILTER_LABELS["hide-archived"]}
                     </button>
-                    <button type="button" role="menuitem" disabled title={NOT_IMPLEMENTED}>
-                      All conversations (show archived)
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={archiveFilter === "show-archived"}
+                      onClick={() => {
+                        setArchiveFilter("show-archived");
+                        setViewOptionsOpen(false);
+                      }}
+                    >
+                      {ARCHIVE_FILTER_LABELS["show-archived"]}
                     </button>
                   </div>
                 )}
@@ -4149,62 +5050,105 @@ export function App() {
             <div role="tree" aria-label="Sessions" className="session-tree">
               {workspaces.length === 0 ? (
                 <p className="empty-state small">No workspace selected</p>
-              ) : groupBy === "in-one-list" ? (
-                orderSessions(
-                  sessions.filter((s) => sessionMatchesSearch(s, sessionSearch)),
-                  orderBy,
-                ).map((session) => (
+              ) : (() => {
+                const grouped = groupSessions({ workspaces, sessions, groupBy, orderBy, archiveFilter, search: sessionSearch });
+                const hiddenCount = hiddenArchiveCount(sessions, archiveFilter);
+                const renderRow = (session: SessionRow) => (
                   <SessionRowButton
                     key={session.id}
                     session={session}
                     active={session.id === activeSessionId}
                     planPending={planReviewPendingSessions.has(session.id)}
                     onOpen={() => openSession(session.id)}
+                    onToggleArchive={() => {
+                      const archived = session.archived !== true;
+                      void client
+                        .invoke("session.setArchived", { sessionId: session.id, archived } as never)
+                        .catch((e) => console.error("session.setArchived failed", e));
+                    }}
                   />
-                ))
-              ) : (
-                workspaces.map((ws) => {
-                  const wsSessions = orderSessions(
-                    sessions.filter((s) => s.workspaceId === ws.id && sessionMatchesSearch(s, sessionSearch)),
-                    orderBy,
-                  );
-                  const collapsedWs = collapsedWorkspaces.has(ws.id);
+                );
+                const notice =
+                  hiddenCount > 0 ? (
+                    <p className="empty-state small archive-hidden-notice">
+                      {hiddenCount} archived conversation{hiddenCount === 1 ? "" : "s"} hidden.{" "}
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => setArchiveFilter("show-archived")}
+                      >
+                        Show archived
+                      </button>
+                    </p>
+                  ) : null;
+                if (grouped.flat) {
+                  const hasAnySession = sessions.length > 0;
                   return (
-                    <div key={ws.id} role="treeitem" aria-expanded={!collapsedWs} className="workspace-row">
-                      <span className="workspace-row-label" title={ws.executionWorldId && ws.executionWorldId !== "local" ? `${worlds.get(ws.executionWorldId)?.label ?? ws.executionWorldId}: ${ws.root}` : ws.root}>
+                    <>
+                      {grouped.flat.length === 0 ? (
+                        hasAnySession && hiddenCount > 0 ? (
+                          notice
+                        ) : (
+                          <p className="empty-state small">No sessions yet</p>
+                        )
+                      ) : (
+                        grouped.flat.map(renderRow)
+                      )}
+                      {grouped.flat.length > 0 && notice}
+                    </>
+                  );
+                }
+                const groups = grouped.groups ?? [];
+                if (groups.length === 0 && hiddenCount > 0) return notice;
+                return groups.map((group) => {
+                  const collapsedWs = collapsedWorkspaces.has(group.workspaceId);
+                  return (
+                    <div key={group.workspaceId} role="treeitem" aria-expanded={!collapsedWs} className="workspace-row">
+                      <span
+                        className="workspace-row-label"
+                        title={
+                          group.executionWorldId && group.executionWorldId !== "local"
+                            ? `${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}: ${group.root}`
+                            : group.root
+                        }
+                      >
                         <FolderIcon aria-hidden="true" />
-                        {ws.title || ws.id}
-                        {ws.executionWorldId && ws.executionWorldId !== "local" ? (
-                          <span className="workspace-world-badge">{(worlds.get(ws.executionWorldId)?.kind ?? "remote").toUpperCase()} · {worlds.get(ws.executionWorldId)?.label ?? ws.executionWorldId}</span>
+                        {group.title}
+                        {group.executionWorldId && group.executionWorldId !== "local" ? (
+                          <span className="workspace-world-badge">
+                            {(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · {worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}
+                          </span>
                         ) : null}
                         <button
                           type="button"
                           className="icon-btn workspace-new-session-btn"
-                          aria-label={`New session in ${ws.title || ws.id}`}
-                          title={`New session in ${ws.title || ws.id}`}
-                          onClick={() => void newSessionIn(ws)}
+                          aria-label={`New session in ${group.title}`}
+                          title={`New session in ${group.title}`}
+                          onClick={() =>
+                            void newSessionIn({ id: group.workspaceId, title: group.title, root: group.root, ...(group.executionWorldId ? { executionWorldId: group.executionWorldId } : {}) })
+                          }
                         >
                           <PlusIcon />
                         </button>
                         <button
                           type="button"
                           className="icon-btn workspace-actions-btn"
-                          aria-label={`Workspace actions for ${ws.title || ws.id}`}
+                          aria-label={`Workspace actions for ${group.title}`}
                           aria-haspopup="menu"
-                          aria-expanded={wsMenuFor === ws.id}
-                          title={`Workspace actions for ${ws.title || ws.id}`}
-                          onClick={() => setWsMenuFor(wsMenuFor === ws.id ? undefined : ws.id)}
+                          aria-expanded={wsMenuFor === group.workspaceId}
+                          title={`Workspace actions for ${group.title}`}
+                          onClick={() => setWsMenuFor(wsMenuFor === group.workspaceId ? undefined : group.workspaceId)}
                         >
                           <MoreIcon />
                         </button>
-                        {wsMenuFor === ws.id && (
+                        {wsMenuFor === group.workspaceId && (
                           <div role="menu" className="workspace-actions-menu">
                             <button
                               type="button"
                               role="menuitem"
                               onClick={() => {
                                 setWsMenuFor(undefined);
-                                setRenameFor({ id: ws.id, title: ws.title || ws.id });
+                                setRenameFor({ id: group.workspaceId, title: group.title });
                               }}
                             >
                               Rename
@@ -4214,7 +5158,7 @@ export function App() {
                               role="menuitem"
                               onClick={() => {
                                 setWsMenuFor(undefined);
-                                void client.invoke("workspace.delete", { workspaceId: ws.id } as never).catch((e) => console.error("workspace.delete failed", e));
+                                void client.invoke("workspace.delete", { workspaceId: group.workspaceId } as never).catch((e) => console.error("workspace.delete failed", e));
                               }}
                             >
                               Delete workspace
@@ -4224,25 +5168,17 @@ export function App() {
                       </span>
                       {!collapsedWs && (
                         <div className="session-rows">
-                          {wsSessions.length === 0 ? (
+                          {group.sessions.length === 0 ? (
                             <p className="empty-state small">No sessions yet</p>
                           ) : (
-                            wsSessions.map((session) => (
-                              <SessionRowButton
-                                key={session.id}
-                                session={session}
-                                active={session.id === activeSessionId}
-                                planPending={planReviewPendingSessions.has(session.id)}
-                                onOpen={() => openSession(session.id)}
-                              />
-                            ))
+                            group.sessions.map(renderRow)
                           )}
                         </div>
                       )}
                     </div>
                   );
-                })
-              )}
+                });
+              })()}
             </div>
           </div>
         )}
@@ -4257,7 +5193,12 @@ export function App() {
 
       <main className="center-column">
         {pluginsPanelOpen ? (
-          <PluginsPanel onClose={() => setPluginsPanelOpen(false)} />
+          <PluginsPanel
+            detailId={detailPluginId}
+            onClose={closePluginsPanel}
+            onOpenDetail={openPluginDetail}
+            onCloseDetail={closePluginDetail}
+          />
         ) : workbenchOpen && currentWorkspaceId ? (
           <WorkbenchView
             workspaceId={currentWorkspaceId}
@@ -4432,14 +5373,25 @@ export function App() {
         )}
       </main>
       {openReview ? (
-        <ReviewPanel summary={openReview.summary} turnNumber={openReview.turnNumber} onClose={() => setOpenReview(undefined)} />
+        <ReviewPanel
+          initialTab={reviewTabKey(openReview.summary, openReview.turnNumber)}
+          availableTabs={availableReviewTabs}
+          workspaceRoot={currentWorkspace?.root}
+          onClose={() => setOpenReview(undefined)}
+        />
       ) : traceDetail ? (
         <TraceDetailsPanel trace={trace} detail={traceDetail} onClose={() => setTraceDetail(undefined)} />
       ) : (
         openChildRow ? <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} /> : <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
       )}
       {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} />}
-      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+      {shortcutsOpen && (
+        <ShortcutsDialog
+          overrides={settings.shortcuts}
+          onChangeShortcuts={(shortcuts) => client.invoke("settings.changeShortcuts", { shortcuts } as never) as unknown as Promise<void>}
+          onClose={() => setShortcutsOpen(false)}
+        />
+      )}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
       <FirstRunDialogs />

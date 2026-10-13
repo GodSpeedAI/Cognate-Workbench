@@ -19,6 +19,17 @@ export type AgentConfigInput =
   /** Usage pass U3: the sidebar's Delete workspace action — removes the record (and a current
    *  pointer to it); the workspace's sessions' events stay in history. */
   | { readonly kind: "workspace.deleted"; readonly workspaceId: string }
+  /** T11 (J-CFG-provider-delete): removes a provider configuration. The handler removes the stored
+   *  secret *before* this run records the deletion, so a secret is never orphaned by a crash. */
+  | { readonly kind: "provider.deleted"; readonly providerId: string }
+  /** T11 (J-PLG-install): durable plugin registration. `implementation` names what the catalog entry
+   *  declares it can drive; a catalog entry with no implementation installs inert and the UI says so
+   *  rather than pretending it runs. */
+  | { readonly kind: "plugin.installed"; readonly pluginId: string; readonly implementation?: string }
+  | { readonly kind: "plugin.uninstalled"; readonly pluginId: string }
+  /** T11 (J-SESSION-archive): reversible, durable archiving of a conversation. The flag only changes
+   *  sidebar visibility; no turn, run or event is ever deleted. */
+  | { readonly kind: "session.archived"; readonly sessionId: string; readonly archived: boolean }
   /** A remote execution world (SSH host / WSL distribution) the operator connected. `connection` and
    *  `metadata` carry only safe facts (host, user, auth *kind*, key *path*, pinned host-key fingerprint) —
    *  never a password, passphrase or key material. */
@@ -80,6 +91,22 @@ export const agentConfigAgent: AgentDefinition = {
       case "onboarding.dismissed": {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("onboarding.dismissed", payload);
+        return { ok: true };
+      }
+      case "provider.deleted": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("provider.deleted", payload);
+        return { ok: true };
+      }
+      case "plugin.installed":
+      case "plugin.uninstalled": {
+        const { kind, ...payload } = command;
+        await ctx.emit(kind, payload as unknown as Json);
+        return { ok: true };
+      }
+      case "session.archived": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.archived", payload);
         return { ok: true };
       }
       case "settings.changed": {

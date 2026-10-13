@@ -16,7 +16,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
@@ -35,6 +35,12 @@ import { planStateComponent } from "./capabilities/planState.ts";
 import { subagentStartComponent } from "./capabilities/subagentStart.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
+import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
+import { providerManageComponent } from "./capabilities/providerManage.ts";
+import { configPathComponent } from "./capabilities/configPath.ts";
+import { pluginInstallComponent } from "./capabilities/pluginInstall.ts";
+import { pluginsProjection } from "./projections/plugins.ts";
+import { PluginRegistry } from "./components/pluginRegistry.ts";
 import { observationCapabilityComponent, observationOutboxFor, wireObservations, defaultSxrBin, type ObservationWiring } from "./observations.ts";
 import { workspaceManageComponent } from "./capabilities/workspaceManage.ts";
 import { workbenchComponent, WORKBENCH_CAPABILITY_IDS } from "./capabilities/workbench.ts";
@@ -96,6 +102,14 @@ const GRANTED_CAPABILITIES = [
   "settings.changeSendBehavior",
   "settings.changePreset",
   "settings.changePlugin",
+  "settings.changeShortcuts",
+  "session.setArchived",
+  "provider.delete",
+  "model.catalog",
+  "config.path",
+  "plugin.catalog",
+  "plugin.install",
+  "plugin.uninstall",
   "observation.status",
   "observation.record",
   ...WORKBENCH_CAPABILITY_IDS,
@@ -179,6 +193,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const usage3 = bindUsage3(domain);
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
+  const t11 = bindTranche11(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -189,6 +204,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // Execution worlds: where a workspace's files live and its commands run. Local today; other
   // providers (ssh, wsl, sandbox forks) register here without touching the tools or the agent.
   const executionWorlds = createExecutionWorldRegistry([localExecutionWorld()]);
+  // T11: the plugin catalog registry. Constructed here (not inside the component) so the same
+  // instance can be handed to any future surface that needs to resolve a catalog entry, and so an
+  // additional `PluginSource` can be registered at boot without touching the capability.
+  const pluginRegistry = new PluginRegistry();
 
   const runtime = await createRuntime({
     store,
@@ -210,9 +229,19 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       planStateComponent(getService, planBindings.planState.semanticRef),
       subagentStartComponent({ getService, systemActor: SYSTEM_CALLER.actor, semanticRef: subagentBindings.subagentStart.semanticRef }),
       onboardingDismissComponent({ getService, systemCaller: SYSTEM_CALLER }),
-      settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage2.settingsChange }),
+      settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage2.settingsChange, shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs }),
+      sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
+      configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
+      pluginInstallComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        plugins: pluginRegistry,
+        installSemanticRef: t11["plugin.install"],
+        uninstallSemanticRef: t11["plugin.uninstall"],
+        catalogSemanticRef: t11["plugin.install"],
+      }),
     ],
     projections: [
       { projection: modelConfigProjection, public: true },
@@ -226,6 +255,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       { projection: settingsProjection, public: true },
       { projection: sessionTraceProjection, public: true },
       { projection: workbenchProjection, public: true },
+      { projection: pluginsProjection, public: true },
     ],
     system: SYSTEM_CALLER.actor,
   });
@@ -251,6 +281,18 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   );
   await runtime.kernel.mount(
     modelConfigureComponent({ registry, secrets, getService, systemCaller: SYSTEM_CALLER, semanticRef: bindings.modelConfigure.semanticRef }),
+  );
+  // T11: `provider.delete` / `model.catalog` need the same live `ProviderRegistry` the configure
+  // component uses, so they mount here rather than in the `createRuntime` component list.
+  await runtime.kernel.mount(
+    providerManageComponent({
+      registry,
+      secrets,
+      getService,
+      systemCaller: SYSTEM_CALLER,
+      deleteSemanticRef: t11["provider.delete"],
+      catalogSemanticRef: t11["model.catalog"],
+    }),
   );
 
   // Re-mount the last-configured provider on boot (survives restart): `model.generate` is not

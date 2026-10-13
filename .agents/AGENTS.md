@@ -1,0 +1,6 @@
+The acting agent updates this workbench when repository reality changes. `CURRENT_STATUS.jsonl` is the agent-facing, append-only status history. Read only its last line (`tail -n 1 .agents/CURRENT_STATUS.jsonl`) for the latest complete snapshot; read earlier records only when history matters. Each update appends exactly one line: a single JSON object with a higher `revision`, `recorded_at`, `stage`, `summary`, `verified`, `limits`, `next`, `evidence`, `spec`, and `plan`. Carry forward facts that remain true; an entry is a complete snapshot, not a delta. Never edit previous entries.
+
+`CURRENT_STATUS.md` is the human-facing view of only the latest snapshot. Update it in place in the same change, with matching status revision and summary; do not append history there.
+
+Record evidence-backed out-of-scope debts in .agents/DEBT.md when found.
+When creating plans use .agents/plans/<yyyymmdd>_<aim>.plan.yaml to document the plan and update `CURRENT_STATUS.md` to point to the new plan. Aim to keep `CURRENT_STATUS.md` to less than 500 words. 
