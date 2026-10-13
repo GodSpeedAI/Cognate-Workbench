@@ -22,6 +22,18 @@ Entity instances: 20
 Policies: 1
 Patterns: 0
 
+=== Experts & Teams extension (2026-10-13, DomainForge CLI 0.19.0) ===
+$ domainforge validate --format human .sea/interaction/interaction-model.sea
+Validation succeeded: 0 violations total
+
+=== Cognate adapter binding check ===
+$ bun -e 'import { loadDomain, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS } from "./domain/index.ts"; const d = await loadDomain(); const b = bindExpertCapabilities(d); if (Object.keys(b).length !== Object.keys(EXPERT_CAPABILITY_ANCHORS).length) throw new Error("binding count mismatch"); console.log(`bound ${Object.keys(b).length} expert capabilities`);'
+[domain] loaded 187 semantic objects (digest sha256:2f9044080e47e26c53ee1d65d370bb557401ca9fe4865f6de9848abeb517e0b4) from .sea/interaction/interaction-model.sea
+bound 22 expert capabilities
+
+The 12 new journey records have `evidence_class: "proposed"`; adapter resolution verifies the
+semantic anchors, not capability registration or working runtime behavior.
+
 == domainforge parse interaction-model.sea --ast --format human ==
 AST parsed successfully: interaction-model.sea
 Namespace: deepseek-harness.interaction

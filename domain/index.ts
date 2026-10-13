@@ -279,3 +279,50 @@ export function bindTranche11(domain: Domain) {
   if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} tranche-11 contracts, got ${contracts.length}`);
   return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
 }
+
+/**
+ * Proposed Experts & Teams capability bindings. These explicit anchors keep the `.sea` model
+ * authoritative; this map declares contracts only and does not imply that runtime components are
+ * already published. Once implemented, components should validate authority and persist changes
+ * through Cognate shared thread state with CAS semantics.
+ */
+export const EXPERT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "expert.save": "Expert",
+  "expert.copy": "ExpertDefinition",
+  "expert.archive": "Expert",
+  "team.save": "Team",
+  "team.copy": "Team",
+  "team.member": "TeamMembership",
+  "team.activate": "Team",
+  "team.replaceOrchestrator": "TeamMembership",
+  "expert.converse": "Conversation",
+  "team.converse": "Conversation",
+  "team.delegate": "Assignment",
+  "team.handoff": "Handoff",
+  "team.message": "ExpertMessage",
+  "team.cancel": "Assignment",
+  "team.retry": "Assignment",
+  "team.review": "Team",
+  "team.settle": "Team",
+  "expert.memory.write": "ExpertMemory",
+  "expert.memory.read": "ExpertMemory",
+  "expert.context": "Conversation",
+  "expert.model.generate": "ExpertRun",
+  "experts.seed": "ExpertDefinition",
+};
+
+export function expertCapabilityBindings(domain: Domain): readonly CapabilityBinding[] {
+  return Object.entries(EXPERT_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+}
+
+export function bindExpertCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = expertCapabilityBindings(domain);
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) {
+    throw new Error(`domain: expected ${bindings.length} expert contracts, got ${contracts.length}`);
+  }
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}

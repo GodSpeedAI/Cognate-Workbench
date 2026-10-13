@@ -79,6 +79,28 @@ Entity "AttentionFocus"
 // pretending to work. Trust is an explicit boundary: this app never executes downloaded plugin code.
 Entity "Plugin"
 
+// Experts and Teams (proposed native Workbench subsystem). ExpertDefinition is reusable
+// configuration; Expert is the persistent identity that survives individual Cognate runs.
+Entity "ExpertDefinition"
+
+Entity "Expert"
+
+Entity "Team"
+
+Entity "TeamMembership"
+
+Entity "Conversation"
+
+Entity "Assignment"
+
+Entity "ExpertRun"
+
+Entity "Handoff"
+
+Entity "ExpertMessage"
+
+Entity "ExpertMemory"
+
 Resource "ModelConfig" units
 
 Resource "WorkspaceSelection" units
@@ -140,6 +162,28 @@ Resource "UsageProvenance" units
 
 Resource "FocusSnapshot" units
 
+// Experts and Teams resources. These represent durable event-backed state and artifacts, not a
+// second event store or a promise that the proposed capabilities have already been implemented.
+Resource "ExpertDefinitionRecord" units
+
+Resource "ExpertIdentityRecord" units
+
+Resource "TeamRecord" units
+
+Resource "MembershipRecord" units
+
+Resource "ConversationRecord" units
+
+Resource "AssignmentRecord" units
+
+Resource "ExpertRunReceipt" units
+
+Resource "HandoffRecord" units
+
+Resource "ExpertMessageRecord" units
+
+Resource "ExpertMemoryRecord" units
+
 Role "Approver"
 
 Role "Operator"
@@ -150,6 +194,14 @@ Role "HostAuthority"
 
 // The human who decides a ReviewGate. Distinct from the Operator (agent) and from approval of a single tool call.
 Role "Reviewer"
+
+Role "Orchestrator"
+
+Role "Specialist"
+
+Role "MemoryContributor"
+
+Role "HumanSettlementAuthority"
 
 Relation "ApprovalAuthorization"
     subject: "Approver"
@@ -167,6 +219,24 @@ Relation "ReviewAuthorization"
     subject: "Reviewer"
     predicate: "authorizes"
     object: "Operator"
+    via: flow "ReviewDecision"
+
+Relation "TeamCoordination"
+    subject: "Orchestrator"
+    predicate: "coordinates"
+    object: "Specialist"
+    via: flow "AssignmentRecord"
+
+Relation "ExpertMemoryAttribution"
+    subject: "MemoryContributor"
+    predicate: "attributes"
+    object: "Reviewer"
+    via: flow "ExpertMemoryRecord"
+
+Relation "HumanTeamSettlement"
+    subject: "HumanSettlementAuthority"
+    predicate: "settles"
+    object: "Orchestrator"
     via: flow "ReviewDecision"
 
 Flow "ModelConfig" from "User" to "ModelProvider" quantity 1
@@ -231,6 +301,28 @@ Flow "ParallelismVerdict" from "Workflow" to "ParallelPlan" quantity 1
 Flow "UsageProvenance" from "OperatorAgent" to "UsageLedger" quantity 1
 
 Flow "FocusSnapshot" from "User" to "AttentionFocus" quantity 1
+
+// Experts and Teams flows preserve authorship and routing at the semantic boundary. Active-Team
+// cardinality is enforced atomically by the mutation capability over Cognate shared thread state.
+Flow "ExpertDefinitionRecord" from "User" to "ExpertDefinition" quantity 1
+
+Flow "ExpertIdentityRecord" from "ExpertDefinition" to "Expert" quantity 1
+
+Flow "TeamRecord" from "User" to "Team" quantity 1
+
+Flow "MembershipRecord" from "Expert" to "TeamMembership" quantity 1
+
+Flow "ConversationRecord" from "User" to "Conversation" quantity 1
+
+Flow "AssignmentRecord" from "Team" to "Assignment" quantity 1
+
+Flow "ExpertRunReceipt" from "Expert" to "ExpertRun" quantity 1
+
+Flow "HandoffRecord" from "ExpertRun" to "Handoff" quantity 1
+
+Flow "ExpertMessageRecord" from "Expert" to "ExpertMessage" quantity 1
+
+Flow "ExpertMemoryRecord" from "Expert" to "ExpertMemory" quantity 1
 
 Instance j_a_first_use of "CanonicalJourney" {
     actor: "User",
@@ -718,6 +810,164 @@ Instance j_plg_install of "CanonicalJourney" {
     settlement: "An installed plugin is durable, its enable state is honoured by whatever it actually drives, and a catalog entry with no executable implementation installs as inert and says so",
     steps: "operator chooses a catalog entry -> installs -> the plugin is registered and its declared implementation activated -> its enable switch now drives real behavior -> uninstalling reverses registration",
     variants: "entry with an executable implementation becomes toggleable; entry without one installs inert with a stated reason; installing an already-installed plugin is refused; arbitrary downloaded code is never executed"
+}
+
+// Experts and Teams journeys are proposed semantics until their runtime capabilities and tests
+// exist. Their settlement fields deliberately describe evidence requirements, not implementation.
+Instance j_expert_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "expert.save, expert.copy, expert.archive",
+    evidence_class: "proposed",
+    initiating_condition: "The operator needs a reusable specialist identity or a variation of an existing Expert",
+    journey_id: "J-EXPERT-CREATE",
+    precondition: "The operator can inspect available Expert definitions and permitted capabilities",
+    purpose: "Create an editable Expert identity from a reusable definition without inheriting another instance's private memory or authority",
+    settlement: "The Expert identity and definition are durable, configuration is inspectable, and a copied Expert has distinct identity, memory scope, and least-privilege capability allowlist",
+    steps: "operator creates or copies a definition -> configures specialization, instructions, model route, tools, context policy and behavior -> saves an Expert identity -> verifies it appears in the roster",
+    variants: "invalid tool or model configuration is rejected with a reason; copy never duplicates identity or private memory; archive preserves history and blocks new work"
+}
+
+Instance j_expert_solo of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "expert.converse, expert.context, expert.model.generate",
+    evidence_class: "proposed",
+    initiating_condition: "The operator wants to work directly with one Expert without creating or joining a Team",
+    journey_id: "J-EXPERT-SOLO",
+    precondition: "The Expert is active and has a permitted model route and conversation capability",
+    purpose: "Run a durable solo conversation under persistent Expert identity and scoped authority",
+    settlement: "A Cognate run is attributable to the Expert and solo Conversation; history survives restart and cannot read Team or other Expert private context",
+    steps: "operator opens or creates a solo Conversation -> sends a message -> Expert execution uses its captured model route and allowlist -> result and run receipt are projected into that Conversation",
+    variants: "provider failure is visible and retryable; archived Expert refuses new conversation; cancellation preserves partial run evidence"
+}
+
+Instance j_team_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.save, team.copy, team.member",
+    evidence_class: "proposed",
+    initiating_condition: "The operator needs a governed collaboration space for a recurring class of work",
+    journey_id: "J-TEAM-CREATE",
+    precondition: "At least one active Expert can be added to a Team",
+    purpose: "Create a draft Team with explicit membership, role, permissions, context scope, workspace and coordination policy",
+    settlement: "The draft Team and memberships are durable and inspectable; it cannot execute until exactly one active membership is Orchestrator",
+    steps: "operator creates or copies Team -> selects Experts and Specialist roles -> chooses one Orchestrator -> scopes shared context and policy -> saves draft",
+    variants: "zero Orchestrators remains draft; copied Team receives new identity and no inherited private conversations; default Cognate Team seed is idempotent"
+}
+
+Instance j_team_activate of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.activate",
+    evidence_class: "proposed",
+    initiating_condition: "A draft Team is ready to accept work",
+    journey_id: "J-TEAM-ACTIVATE",
+    precondition: "The Team has exactly one active Orchestrator and every membership resolves to an active Expert",
+    purpose: "Make a Team runnable only after its governance structure is valid",
+    settlement: "An atomic state transition marks the Team active with exactly one Orchestrator; invalid concurrent membership changes cannot produce an active invalid Team",
+    steps: "operator requests activation -> mutation boundary validates membership, role count, Expert lifecycle and policy -> Team state is committed atomically -> projection reports active status and designated Orchestrator",
+    variants: "zero or multiple Orchestrators refuses with actionable reason; concurrent invalid updates serialize or fail without violating the invariant; provider absence blocks execution but not valid activation"
+}
+
+Instance j_team_replace_orchestrator of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.replaceOrchestrator",
+    evidence_class: "proposed",
+    initiating_condition: "The current Team Orchestrator must be replaced or removed",
+    journey_id: "J-TEAM-REPLACE-ORCHESTRATOR",
+    precondition: "The Team exists and the replacement Expert is an eligible member or is atomically added",
+    purpose: "Transfer coordination responsibility without a moment in which an active Team has zero or two Orchestrators",
+    settlement: "One atomic transition records the old and new role assignments and the active Team retains exactly one Orchestrator; otherwise the Team is atomically deactivated",
+    steps: "operator selects replacement or deactivation -> mutation validates authority and current version -> old role is demoted and replacement promoted in one compare-and-swap -> resulting membership is projected",
+    variants: "stale concurrent replacement retries against fresh state; removal without replacement is refused unless deactivating Team in same transition; failed write leaves prior valid state"
+}
+
+Instance j_team_delegate of "CanonicalJourney" {
+    actor: "Orchestrator",
+    capabilities: "team.delegate, expert.context, expert.model.generate",
+    evidence_class: "proposed",
+    initiating_condition: "An Orchestrator determines a bounded unit of work needs one Specialist",
+    journey_id: "J-TEAM-DELEGATE",
+    precondition: "Team is active, requester is its sole Orchestrator, recipient is an active Specialist, and human-authorized scope permits the work",
+    purpose: "Authorize one bounded Assignment without allowing an Orchestrator or Specialist to elevate authority or create a second parent hierarchy",
+    settlement: "Assignment has durable identity, purpose, selected input context, authority limits, acceptance criteria, return contract and queued/running state tied to a genuine Cognate run",
+    steps: "Orchestrator specifies assignment and recipient -> boundary validates Team membership and allowlist intersection -> assignment is persisted before execution -> serialized dispatcher starts the Specialist run with captured route and correlation",
+    variants: "typed abstention/decline leaves a reasoned terminal assignment; duplicate request reuses same logical assignment; concurrency waits in durable queue; provider failure is recoverable"
+}
+
+Instance j_team_handoff of "CanonicalJourney" {
+    actor: "Specialist",
+    capabilities: "team.handoff",
+    evidence_class: "proposed",
+    initiating_condition: "A Specialist run completes, fails, abstains or is cancelled",
+    journey_id: "J-TEAM-HANDOFF",
+    precondition: "An Assignment and correlated ExpertRun exist and the return contract identifies the Orchestrator",
+    purpose: "Deliver an attributable structured outcome to the Orchestrator exactly once logically, despite at-least-once physical delivery",
+    settlement: "Durable Handoff includes output, artifacts, evidence, uncertainty, failures and follow-up; idempotent processing records one logical return and makes it available to Orchestrator reconciliation without browser activity",
+    steps: "run terminal event resolves durable completion continuation -> handoff is committed with run and assignment correlation -> Orchestrator inbox/projection receives it -> reconciliation decision is recorded",
+    variants: "redelivery is deduplicated; worker crash recovers from run terminal state; missing output or evidence is reconciliation-required; late result after cancellation is retained but cannot authorize further work"
+}
+
+Instance j_team_converse of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.converse, team.message, team.delegate, team.handoff, team.review",
+    evidence_class: "proposed",
+    initiating_condition: "The operator addresses work to an active Team",
+    journey_id: "J-TEAM-CONVERSE",
+    precondition: "Team is active with exactly one Orchestrator and a durable Team Conversation",
+    purpose: "Coordinate bounded expert contributions through one parent while preserving private and shared context boundaries",
+    settlement: "Conversation shows attributable messages and assignments; routing, unread-work, handoff-depth and speaking-round limits are enforced; Orchestrator reconciles evidence and cannot self-accept protected results",
+    steps: "user sends to Team -> Orchestrator interprets objective and chooses necessary Specialists -> addressed messages or assignments are persisted -> returns are correlated and reconciled -> next decision is presented",
+    variants: "mention queues only authorized work; duplicate message is suppressed; limit reached yields explicit waiting/escalation; typed abstention is visible; no uncontrolled Expert-to-Expert loop"
+}
+
+Instance j_team_recover of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.handoff, team.retry, team.cancel, team.context",
+    evidence_class: "proposed",
+    initiating_condition: "Workbench restarts while Team messages or assignments are unfinished",
+    journey_id: "J-TEAM-RECOVER",
+    precondition: "Durable Team state and Cognate run/event history are available",
+    purpose: "Resume pending communication and work from persisted facts without duplicating committed logical effects",
+    settlement: "Every recovered assignment is in a consistent queued/running/waiting/completed/failed/cancelled/reconciliation-required state; terminal completions are delivered idempotently and unresolved commitments remain visible",
+    steps: "startup reads shared thread state and run completion events -> reconciler compares assignments, messages and handoff receipts -> resumes or marks recoverable work -> projection exposes recovery decision and evidence",
+    variants: "missing run is marked failed or reconciliation-required; duplicate completion does not duplicate handoff; cancelled assignment retains late result as non-authorizing evidence"
+}
+
+Instance j_team_review of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.review",
+    evidence_class: "proposed",
+    initiating_condition: "Implementation, critique and verification results are ready for reconciliation",
+    journey_id: "J-TEAM-REVIEW",
+    precondition: "Attributable Builder output, Critic findings and Verifier receipts are available or explicitly marked missing",
+    purpose: "Assess whether evidence supports each acceptance criterion and surface unresolved contradiction",
+    settlement: "Reviewer returns accept/revise/escalate recommendation with rationale and gaps; contradiction or absent independent verification remains open; only the human can settle protected acceptance",
+    steps: "Reviewer receives implementation artifacts, critique and verification receipts -> checks claims against observable evidence -> records findings and unresolved differences -> recommends next action",
+    variants: "Verifier failure prompts repair; Critic disagreement is preserved; missing evidence blocks recommendation; Orchestrator cannot approve its own protected effect"
+}
+
+Instance j_expert_memory of "CanonicalJourney" {
+    actor: "Expert",
+    capabilities: "expert.memory.write, expert.memory.read, expert.context",
+    evidence_class: "proposed",
+    initiating_condition: "An Expert needs to preserve or retrieve useful context across runs",
+    journey_id: "J-EXPERT-MEMORY",
+    precondition: "The caller has access to the explicitly scoped personal or Team memory namespace",
+    purpose: "Retain attributable knowledge without treating every model statement as trusted fact or merging private scopes",
+    settlement: "Memory records source/provenance, scope and epistemic kind (observation, assertion, inference, accepted knowledge); retrieval respects scope and marks retrieved text as untrusted context",
+    steps: "Expert proposes memory with provenance and classification -> policy validates promotion and scope -> durable event records memory -> retrieval selects relevant bounded entries and unresolved commitments for the matching context",
+    variants: "unverified assertion is not promoted as accepted knowledge; cross-Team/private read is denied; malicious retrieved instruction is treated as data; older history is retrieved without loading full transcript"
+}
+
+Instance j_team_settlement of "CanonicalJourney" {
+    actor: "HumanSettlementAuthority",
+    capabilities: "team.settle",
+    evidence_class: "proposed",
+    initiating_condition: "A Team proposes that its assignment or overall work meets acceptance criteria",
+    journey_id: "J-TEAM-SETTLEMENT",
+    precondition: "Required handoffs and independent evidence are inspectable and all unresolved blockers are stated",
+    purpose: "Present a reviewable evidence package to the authorized human without delegating final acceptance to the Orchestrator",
+    settlement: "Human decision is separately attributed and durable; missing/failed evidence or unresolved contradiction prevents a supported acceptance recommendation; the Team cannot impersonate human settlement",
+    steps: "Orchestrator assembles criteria, artifacts, run receipts, critique, verification and uncertainty -> boundary checks human-only authority -> operator accepts, requests revision or escalates -> decision and provenance are projected",
+    variants: "human requests rework; protected effect awaits approval; Orchestrator proposes completion without sufficient evidence and is refused; provider or verifier failure leaves settlement open"
 }
 
 Policy every_canonical_flow_recorded as:

@@ -72,6 +72,25 @@ the spec's Phase 6 journeys are consistent with each other everywhere they overl
 describe the approval waterfall, tool observation policy, and mock-server error injection the same
 way). No claim in one source was found to directly contradict a claim in another.
 
+## Experts and Teams extension (proposed, 2026-10-13)
+
+- The 12 `J-EXPERT-*` / `J-TEAM-*` journeys and their added entities/resources/roles are proposed
+  semantics from the Workbench mission, not observed working behavior. Keep their evidence class
+  `proposed` until runtime capabilities, UI paths and journey tests supply evidence.
+- An active Team has exactly one active Orchestrator; a draft may have none. Mutation must enforce
+  the invariant atomically. Replacement must be one compare-and-swap state transition.
+- Proposed persistence uses Cognate shared thread state with CAS updates and run-completion
+  continuations for Specialist returns. The event log remains durable truth; this model does not
+  authorize a second event store, scheduler or agent runtime.
+- Initial dispatch is proposed as serialized. Parallel execution remains unknown until concurrency
+  and isolation are tested against the installed runtime.
+- `expert.model.generate` expresses per-Expert route selection. Each run must capture immutable
+  route/config so later edits cannot hot-swap an active run.
+- `team.settle` presents a decision surface; it does not grant the Team or Orchestrator power to
+  accept protected work. `team.review` can recommend, not settle.
+- Memory provenance, epistemic classification, prompt-injection handling and cross-scope access
+  checks are requirements whose enforcement remains unverified.
+
 ## Grammar/tooling limitations encountered (not IDM semantics)
 
 - DomainForge 0.18.1's `fmt` command still rewrites `forall`-quantifier `Policy` bodies into an

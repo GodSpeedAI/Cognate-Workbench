@@ -186,6 +186,43 @@ One test file per canonical journey, named after the journey id: `J-A-first-use.
 per the spec's "second branch" instruction), `J-E-plan.test.ts`, `J-F-delegation.test.ts`,
 `J-G-persistence.test.ts`, `J-H-cancellation.test.ts` (cancel + injected-error branches).
 
+## Experts and Teams extension (proposed; implementation handoff)
+
+The authoritative model now declares `ExpertDefinition`, persistent `Expert`, `Team`,
+`TeamMembership`, scoped `Conversation`, `Assignment`, Cognate `ExpertRun`, `Handoff`,
+`ExpertMessage`, and attributable `ExpertMemory`. `domain/index.ts` explicitly maps the proposed
+capability IDs in `EXPERT_CAPABILITY_ANCHORS`; `bindExpertCapabilities()` verifies every anchor
+through the installed Cognate DomainForge adapter. These bindings are semantic contracts only and
+must not be described as runtime implementations until capabilities are registered and journey
+tests pass.
+
+### Proposed state and execution boundary
+
+- Use Cognate durable shared thread state and compare-and-swap updates for Experts, Teams,
+  memberships, assignments, messages, and logical handoff receipts. Do not add a second event store.
+- Enforce exactly one active Orchestrator on activation, membership edits, removal, and replacement
+  at the mutation boundary. Replacement is atomic; invalid concurrent writes fail/retry against
+  current state. A draft may have zero Orchestrators and cannot execute.
+- A Team request enters through its sole Orchestrator. Persist a bounded Assignment before starting
+  a real Cognate Expert run. Intersect human scope, Team policy, member allowlist, and assignment
+  authority. Capture provider/model/tools/context at run start.
+- Resolve durable Specialist returns from Cognate run-completion continuations. Persist a structured
+  Handoff keyed by Assignment/run identity and idempotency key before notifying the parent. Redelivery
+  is deduplicated logically; the UI must not be required for reconciliation.
+- Begin serialized. Existing `subagent.start` is fire-and-forget and is not a sufficient return
+  contract. Do not infer safe parallelism from the Workbench planner.
+- Conversations and memory retain Solo, Team-shared, and private Expert-in-Team scopes. Retrieved
+  memory is untrusted input with source provenance; indexes/summaries are derived from durable facts.
+- Human-only protected acceptance and approval remain outside Orchestrator authority.
+
+### Required implementation evidence
+
+Implement and test the 12 catalog journeys before changing them from `proposed`: `J-EXPERT-CREATE`,
+`J-EXPERT-SOLO`, `J-TEAM-CREATE`, `J-TEAM-ACTIVATE`, `J-TEAM-REPLACE-ORCHESTRATOR`,
+`J-TEAM-DELEGATE`, `J-TEAM-HANDOFF`, `J-TEAM-CONVERSE`, `J-TEAM-RECOVER`, `J-TEAM-REVIEW`,
+`J-EXPERT-MEMORY`, and `J-TEAM-SETTLEMENT`. Include restart, duplicate delivery, provider failure,
+cancellation/late return, concurrent invariant updates, and authority-denial evidence.
+
 ## Workbench layer (unified harness experience model v2)
 
 Source: `.agents/plans/unified_harness_experience_model_v2.md`. Tranche plan: `WORKBENCH-PLAN.md`; honest

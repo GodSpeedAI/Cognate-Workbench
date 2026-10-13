@@ -531,3 +531,118 @@ Declared by `.agents/plans/unified_harness_experience_model_v2.md`; implemented 
 - **Settlement criteria**: The agent receives the referent chosen by fixed precedence (explicit selection, keyboard focus, active run, pinned focus, workspace) as a frozen focus line, only when the message refers to something; the person can see what this means and clear an explicit selection.
 - **Failure/recovery and variants**: explicit selection; fallback to the bound task; nothing in focus; a message that refers to nothing carries no focus line; a selection in another workspace is ignored.
 - **Evidence class**: proposed. Tested by `test/E2E-workbench.test.ts` and `test/workbench-focus.test.ts`.
+
+## Experts and Teams journeys (proposed)
+
+These journeys extend the Workbench IDM and remain proposed until capabilities and journey tests
+exist. State is expected to use Cognate shared thread state with compare-and-swap mutation; durable
+run-completion continuations resolve specialist returns. Execution starts serialized. This section
+is a semantic contract, not an implementation claim.
+
+### J-EXPERT-CREATE (`j_expert_create`)
+- **Actor/intention**: User creates or copies a reusable Expert identity.
+- **Current → desired**: missing specialization → durable editable definition and persistent Expert identity.
+- **Preconditions/affordance**: catalog available; `expert.save`, `expert.copy`, `expert.archive`.
+- **Payment/authority**: operator configures tools/model/context; copied Expert receives no inherited private memory or elevated authority.
+- **Transition/output**: save/copy persists definition and identity; archive preserves history and blocks new runs.
+- **Evidence/settlement**: projection shows configuration and lifecycle; IDs and scope survive restart.
+- **Failure/recovery/next**: invalid config explains field; then J-EXPERT-SOLO or J-TEAM-CREATE. Proposed.
+
+### J-EXPERT-SOLO (`j_expert_solo`)
+- **Actor/intention**: User converses with one Expert outside any Team.
+- **Current → desired**: no solo context → durable scoped Conversation and attributable Cognate run.
+- **Preconditions/affordance**: active Expert and configured route; `expert.converse`, `expert.context`, `expert.model.generate`.
+- **Payment/authority**: user context and run budget; Expert uses only its allowlist and operator grant.
+- **Transition/output**: persist message, run with captured route, store result and run receipt.
+- **Evidence/settlement**: solo history survives restart and cannot read Team/other Expert private context.
+- **Failure/recovery/next**: provider failure is visible/retryable, cancellation preserves partial evidence; continue or create Team. Proposed.
+
+### J-TEAM-CREATE (`j_team_create`)
+- **Actor/intention**: User creates/copies a governed collaboration space.
+- **Current → desired**: none → draft Team with explicit members, roles, permission/context scopes and policy.
+- **Preconditions/affordance**: eligible Experts; `team.save`, `team.copy`, `team.member`.
+- **Payment/authority**: operator selects membership; joining defaults to Specialist; copy has fresh identity and isolated context.
+- **Transition/output**: persist Team and membership records; draft may have zero Orchestrators.
+- **Evidence/settlement**: projection shows membership and draft; it cannot execute until exactly one Orchestrator is active.
+- **Failure/recovery/next**: stale/inactive member refused with reason; designate Orchestrator in J-TEAM-ACTIVATE. Proposed.
+
+### J-TEAM-ACTIVATE (`j_team_activate`)
+- **Actor/intention**: User makes a draft Team runnable.
+- **Current → desired**: draft → active with exactly one Orchestrator.
+- **Preconditions/affordance**: all memberships resolve to active Experts and one Orchestrator; `team.activate`.
+- **Payment/authority**: operator confirms governance; activation cannot expand permissions.
+- **Transition/output**: mutation boundary validates and CAS-commits Team state.
+- **Evidence/settlement**: projected active state identifies its sole Orchestrator, including after concurrent writes.
+- **Failure/recovery/next**: invalid cardinality refuses; CAS conflict reloads state; then J-TEAM-CONVERSE. Proposed.
+
+### J-TEAM-REPLACE-ORCHESTRATOR (`j_team_replace_orchestrator`)
+- **Actor/intention**: User transfers coordination or removes the current Orchestrator.
+- **Current → desired**: one lead → different sole lead, or inactive Team.
+- **Preconditions/affordance**: eligible replacement; `team.replaceOrchestrator`.
+- **Payment/authority**: operator decision; invariant enforced atomically at mutation boundary.
+- **Transition/output**: one CAS update demotes/promotes, or demotes and deactivates atomically.
+- **Evidence/settlement**: durable old/new roles and exactly one lead if still active.
+- **Failure/recovery/next**: stale update fails without partial state; reload and retry. Proposed.
+
+### J-TEAM-DELEGATE (`j_team_delegate`)
+- **Actor/intention**: Orchestrator delegates a bounded unit to a Specialist.
+- **Current → desired**: team request → durable authorized Assignment and real Cognate run.
+- **Preconditions/affordance**: active Team, sole Orchestrator, active Specialist, human-authorized scope; `team.delegate`, `expert.context`, `expert.model.generate`.
+- **Payment/authority**: run cost; authority is intersection of human grant, Team policy, Expert allowlist and Assignment limits.
+- **Transition/output**: persist assignment before serialized dispatch; freeze route/config and correlate run.
+- **Evidence/settlement**: queued/running is not complete; run ID and acceptance/return contract are visible.
+- **Failure/recovery/next**: deduplicate retry, typed abstention, provider failure and recursion limits are explicit; await J-TEAM-HANDOFF. Proposed.
+
+### J-TEAM-HANDOFF (`j_team_handoff`)
+- **Actor/intention**: Specialist returns output and evidence to its Orchestrator.
+- **Current → desired**: terminal run → durable attributable return.
+- **Preconditions/affordance**: Assignment, terminal run event and return contract; `team.handoff`.
+- **Payment/authority**: delivery/reconciliation; return cannot expand authority or approve effects.
+- **Transition/output**: completion continuation resolves Handoff with output, artifacts, evidence, uncertainty, failures and follow-up.
+- **Evidence/settlement**: correlated return available to parent once logically, including after restart/redelivery without a browser.
+- **Failure/recovery/next**: missing result becomes reconciliation-required; late cancelled result is evidence only; reconcile/retry. Proposed.
+
+### J-TEAM-CONVERSE (`j_team_converse`)
+- **Actor/intention**: User asks an active Team to coordinate work.
+- **Current → desired**: addressed task → bounded conversation with reconciled contributions.
+- **Preconditions/affordance**: active Team and durable Team Conversation; `team.converse`, `team.message`, `team.delegate`, `team.handoff`, `team.review`.
+- **Payment/authority**: coordination and run budget; mentions route but do not authorize; Orchestrator cannot elevate or self-accept.
+- **Transition/output**: request routes to sole Orchestrator, who selects necessary Specialists and records addressed assignments/messages.
+- **Evidence/settlement**: sender, recipient, scope, assignment, run and handoff are attributable; limits/duplicates visible.
+- **Failure/recovery/next**: cycles refused, limits queue/escalate, abstention and contradictions remain visible; review or settle. Proposed.
+
+### J-TEAM-RECOVER (`j_team_recover`)
+- **Actor/intention**: User resumes unfinished collaboration after restart.
+- **Current → desired**: uncertain work → reconciled durable state and safe continuation.
+- **Preconditions/affordance**: shared state and run-event history; `team.handoff`, `team.retry`, `team.cancel`, `expert.context`.
+- **Payment/authority**: reconciliation cost; retries retain original authority and cancellation checks.
+- **Transition/output**: reconcile queued messages, assignments, terminal runs and receipts before resuming.
+- **Evidence/settlement**: all work has queued/running/waiting/completed/failed/cancelled/reconciliation-required status; no duplicate logical handoff.
+- **Failure/recovery/next**: missing run becomes failed/reconciliation-required; late cancelled return is non-authorizing evidence. Proposed.
+
+### J-TEAM-REVIEW (`j_team_review`)
+- **Actor/intention**: Reviewer compares implementation, critique and independent verification.
+- **Current → desired**: contributions → accept/revise/escalate recommendation with gaps and contradictions.
+- **Preconditions/affordance**: Builder artifact, Critic result and Verifier receipts present or explicitly missing; `team.review`.
+- **Payment/authority**: independent review effort; only human can settle protected acceptance.
+- **Transition/output**: correlate claims to evidence and record rationale, gaps, and unresolved disagreement.
+- **Evidence/settlement**: failed/missing check or contradiction prevents supported acceptance; recommendation cites receipts.
+- **Failure/recovery/next**: failed verifier prompts repair/retest; request revision or present J-TEAM-SETTLEMENT. Proposed.
+
+### J-EXPERT-MEMORY (`j_expert_memory`)
+- **Actor/intention**: Expert retains or retrieves useful scoped continuity.
+- **Current → desired**: transient context → attributable, scoped, searchable memory.
+- **Preconditions/affordance**: explicit access to personal or Team scope; `expert.memory.write`, `expert.memory.read`, `expert.context`.
+- **Payment/authority**: context budget; promotion follows provenance and trust rules.
+- **Transition/output**: record provenance, scope and observation/assertion/inference/accepted-knowledge class; retrieve bounded relevant entries.
+- **Evidence/settlement**: source and scope accompany retrieval; event log is truth, summaries/indexes rebuildable.
+- **Failure/recovery/next**: private cross-scope read denied; assertions stay unverified; retrieved instructions are untrusted; restore commitments. Proposed.
+
+### J-TEAM-SETTLEMENT (`j_team_settlement`)
+- **Actor/intention**: Human decides whether Team evidence warrants acceptance.
+- **Current → desired**: completion proposal → separately attributed human accept/revise/escalate decision.
+- **Preconditions/affordance**: criteria, handoffs and independent evidence inspectable; `team.settle` presents decision.
+- **Payment/authority**: human accountability; only human accepts protected work or approves gated effects.
+- **Transition/output**: Orchestrator assembles artifacts, critique, verification, uncertainty and blockers; human decision is persisted.
+- **Evidence/settlement**: acceptance requires human identity and supported criteria; contradiction/missing evidence keeps it open.
+- **Failure/recovery/next**: unsupported proposal refused; revision creates follow-up assignment; then operationalize or continue. Proposed.
