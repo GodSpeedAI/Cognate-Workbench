@@ -95,6 +95,13 @@ Entity "Assignment"
 
 Entity "ExpertRun"
 
+// Consequential Expert tool calls use Cognate commitments. A lost outcome remains unknown;
+// a restart never repeats an ambiguous shell/edit effect without human reconciliation.
+Entity "ExpertEffectCommitment"
+
+// J-TEAM-RECOVER extension: an ambiguous commitment can only be reconciled by a human with
+// an attributable reason and observed outcome. Orchestrators and Specialists cannot resolve it.
+
 Entity "Handoff"
 
 Entity "ExpertMessage"
@@ -920,7 +927,7 @@ Instance j_team_converse of "CanonicalJourney" {
 
 Instance j_team_recover of "CanonicalJourney" {
     actor: "User",
-    capabilities: "team.handoff, team.retry, team.cancel, team.context",
+    capabilities: "team.handoff, team.retry, team.cancel, expert.context, expert.tool.invoke, expert.effect.resolve",
     evidence_class: "proposed",
     initiating_condition: "Workbench restarts while Team messages or assignments are unfinished",
     journey_id: "J-TEAM-RECOVER",

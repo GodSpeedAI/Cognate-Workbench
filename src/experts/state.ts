@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-import type { Json } from "@godspeedai/cognate-events";
+import { fingerprint as nativeFingerprint, type Json } from "@godspeedai/cognate-events";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { ServiceError } from "@godspeedai/cognate-runtime-api";
 import { EXPERTS_THREAD, EXPERT_TOOLS, emptyExpertState, type ExpertState, type Team, type ExpertTool } from "./types.ts";
 
 export const json = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
-export const fingerprint = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+export const fingerprint = (value: unknown) => nativeFingerprint(json(value));
 export function text(value: unknown, field: string, max = 20000): string {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new Error(`${field} must contain 1–${max} characters`);
   if (/id$/i.test(field) && ["__proto__","constructor","prototype"].includes(value.trim()))throw new Error("Reserved identity");
@@ -62,6 +61,7 @@ export function seedExperts(state: ExpertState): void {
 export async function readExperts(service: RuntimeService, caller: Caller): Promise<{state: ExpertState; version: number}> {
   const result = await service.readSharedState(caller,{threadId:EXPERTS_THREAD});
   const raw = result.state as Partial<ExpertState>;
+  if(result.version>0 && raw.schema!==1)throw new Error("Unsupported Experts state schema; an explicit migration is required");
   return {state:raw.schema === 1 ? raw as ExpertState : emptyExpertState(),version:result.version};
 }
 
@@ -80,7 +80,7 @@ export async function mutateExperts<T>(service: RuntimeService, caller: Caller, 
     for (const team of Object.values(state.teams)) assertTeamInvariant(state,team);
     state.receipts[commandId] = {fingerprint:digest,result:result ?? null};
     try {
-      await service.updateSharedState(caller,{threadId:EXPERTS_THREAD,update:{snapshot:json(state)},expectedVersion:version,idempotencyKey:`${commandId}:${version}:${digest}`});
+      await service.updateSharedState(caller,{threadId:EXPERTS_THREAD,update:{snapshot:json(state)},expectedVersion:version,idempotencyKey:`${commandId}:${version}:${digest}:${fingerprint(state)}`});
       return result;
     } catch (error) {
       if (!(error instanceof ServiceError) || !["failed_precondition","unavailable"].includes(error.code)) throw error;

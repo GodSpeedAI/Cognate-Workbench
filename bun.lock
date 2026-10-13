@@ -9,6 +9,7 @@
         "@godspeedai/cognate-capabilities": "0.2.0",
         "@godspeedai/cognate-cli": "0.2.0",
         "@godspeedai/cognate-client": "0.2.0",
+        "@godspeedai/cognate-continuations": "0.2.0",
         "@godspeedai/cognate-domainforge": "0.2.0",
         "@godspeedai/cognate-events": "0.2.0",
         "@godspeedai/cognate-execution": "0.2.0",

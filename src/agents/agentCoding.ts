@@ -9,6 +9,7 @@
 import type { ModelMessage, ModelResponse, ToolCall, ToolDefinition } from "@godspeedai/cognate-capabilities";
 import type { Json } from "@godspeedai/cognate-events";
 import { InvocationFailedError, type AgentDefinition, type RunContext } from "@godspeedai/cognate-runtime-api";
+import type { ModelConfig } from "../components/providerRegistry.ts";
 import { approvalDeniedToolResult, approvalGate } from "../domain/approvalGate.ts";
 import {
   EXIT_PLAN_MODE_NOT_IN_PLAN_MODE,
@@ -65,6 +66,18 @@ export interface AgentCodingInput {
   /** Workbench: the task this turn serves. Scopes the authority plane (`authority.check`) and
    *  attributes usage; absent keeps the app-wide protected-evidence rules only. */
   readonly taskId?: string;
+  /** Trusted wrapper-supplied snapshot for standalone Experts and Team assignments. */
+  readonly expertExecution?: {
+    readonly expertId: string;
+    readonly assignmentId: string;
+    readonly conversationId: string;
+    readonly teamId?: string;
+    readonly instructions: string;
+    readonly route: ModelConfig;
+    readonly tools: readonly string[];
+    readonly maxSteps: number;
+    readonly context: readonly ModelMessage[];
+  };
 }
 
 interface AuthorityVerdict {
@@ -122,10 +135,23 @@ function classifyModelFailure(error: InvocationFailedError): { readonly code: st
  * returns the recorded result/failure. `callIndex` (the tool-loop step number) keys the backoff step
  * id so concurrent... (sequential, actually) model calls within one turn don't collide.
  */
-async function invokeModelGenerate(ctx: RunContext, callIndex: number, messages: ModelMessage[], tools: readonly ToolDefinition[]): Promise<ModelResponse> {
+async function invokeModelGenerate(
+  ctx: RunContext,
+  callIndex: number,
+  messages: ModelMessage[],
+  tools: readonly ToolDefinition[],
+  expertExecution?: AgentCodingInput["expertExecution"],
+): Promise<ModelResponse> {
   for (let attempt = 1; attempt <= MAX_MODEL_RETRIES + 1; attempt++) {
     try {
-      return (await ctx.invoke("model.generate", { messages, tools } as unknown as Json)) as unknown as ModelResponse;
+      const request = {
+        messages,
+        tools,
+        ...(expertExecution ? { instructions: expertExecution.instructions } : {}),
+      };
+      const capability = expertExecution ? "expert.model.generate" : "model.generate";
+      const input = expertExecution ? { route: expertExecution.route, request } : request;
+      return (await ctx.invoke(capability, input as unknown as Json)) as unknown as ModelResponse;
     } catch (error) {
       // A cancelled run must stop retrying immediately, not spend its remaining backoff/attempts —
       // `ctx.emit`/`ctx.step` would throw the runtime's internal halt sentinel anyway (via `guard()`),
@@ -236,6 +262,47 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
 ];
 
+/** Tools surfaced only to Expert executions whose persisted capability allowlist includes them. */
+export const EXPERT_TOOL_DEFS: ToolDefinition[] = [
+  {
+    name: "team_delegate",
+    description: "Assign bounded work to an authorized Specialist and wait for its durable handoff.",
+    inputSchema: { type: "object", properties: { expertId: { type: "string" }, purpose: { type: "string" }, acceptance: { type: "array", items: { type: "string" } } }, required: ["expertId", "purpose", "acceptance"], additionalProperties: false },
+  },
+  {
+    name: "team_message",
+    description: "Send an addressed, authorized message within this Expert's Team scope.",
+    inputSchema: { type: "object", properties: { recipientId: { type: "string" }, text: { type: "string" }, purpose: { type: "string" } }, required: ["recipientId", "text"], additionalProperties: false },
+  },
+  {
+    name: "expert_memory_read",
+    description: "Retrieve relevant memory available to this Expert and conversation scope.",
+    inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer" } }, required: ["query"], additionalProperties: false },
+  },
+  {
+    name: "expert_memory_write",
+    description: "Propose attributable knowledge for the permitted Expert or Team memory scope.",
+    inputSchema: { type: "object", properties: { scope: { type: "string", enum: ["personal", "private-team", "team"] }, text: { type: "string" }, sources: { type: "array", items: { type: "string" } }, kind: { type: "string", enum: ["observation", "assertion", "inference", "accepted"] }, pinned: { type: "boolean" } }, required: ["scope", "text", "sources", "kind"], additionalProperties: false },
+  },
+  {
+    name: "expert_return",
+    description: "Return a typed result, abstention or decline for the current durable Assignment.",
+    inputSchema: { type: "object", properties: { disposition: { type: "string", enum: ["result", "abstained", "declined"] }, output: { type: "string" }, artifacts: { type: "array", items: { type: "string" } }, evidence: { type: "array", items: { type: "string" } }, uncertainties: { type: "array", items: { type: "string" } }, failures: { type: "array", items: { type: "string" } }, followUp: { type: "array", items: { type: "string" } } }, required: ["disposition", "output"], additionalProperties: false },
+  },
+];
+
+function toolsForExpert(execution: NonNullable<AgentCodingInput["expertExecution"]>): readonly ToolDefinition[] {
+  const allowed = new Set(execution.tools);
+  // Expert agents do not inherit the generic subagent escape hatch. Delegation is a governed
+  // Team capability and appears only as team_delegate when that exact authority is granted.
+  const eligible = [...TOOL_DEFS.filter((tool) => tool.name !== "subagent"), ...EXPERT_TOOL_DEFS]
+    .filter((tool) => allowed.has(tool.name));
+  // Returning this assignment is intrinsic to every Expert run and has no authority outside that
+  // run's registered assignment; expose the typed outcome even on older/custom profiles.
+  const returnTool = EXPERT_TOOL_DEFS.find((tool) => tool.name === "expert_return");
+  return returnTool && !eligible.some((tool) => tool.name === returnTool.name) ? [...eligible, returnTool] : eligible;
+}
+
 function summarizeArgs(args: Readonly<Record<string, unknown>>): Json {
   return args as Json;
 }
@@ -267,6 +334,8 @@ async function invokeTool(
   call: ToolCall,
   readFiles: Set<string>,
   taskId?: string,
+  expertExecution?: AgentCodingInput["expertExecution"],
+  effectToolCallId?: string,
 ): Promise<string> {
   const args = (call.arguments ?? {}) as Record<string, unknown>;
 
@@ -295,7 +364,15 @@ async function invokeTool(
   }
 
   try {
-    const result = (await ctx.invoke(`tool.${call.name}`, { workspaceRoot: workspace.root, executionWorldId: workspace.executionWorldId, ...args } as unknown as Json)) as unknown as Json;
+    const toolInput = { ...args, workspaceRoot: workspace.root, executionWorldId: workspace.executionWorldId } as unknown as Json;
+    const result = (await ctx.invoke(
+      expertExecution && effectToolCallId && ["edit", "bash", "run_code"].includes(call.name)
+        ? "expert.tool.invoke"
+        : `tool.${call.name}`,
+      expertExecution && effectToolCallId && ["edit", "bash", "run_code"].includes(call.name)
+        ? { assignmentId: expertExecution.assignmentId, toolCallId: effectToolCallId, tool: call.name, input: toolInput } as unknown as Json
+        : toolInput,
+    )) as unknown as Json;
     if (call.name === "read") readFiles.add(String(args.file_path ?? ""));
     if (taskId && (call.name === "edit" || call.name === "bash")) {
       await ctx.emit("workbench.task.activity", { taskId, ...(call.name === "edit" ? { changed: String(args.file_path ?? "") } : { command: String(args.command ?? "").slice(0, 300) }) } as unknown as Json);
@@ -314,10 +391,12 @@ export const agentCodingAgent: AgentDefinition = {
   id: AGENT_CODING,
   version: "1.0.0",
   async run(input, ctx) {
-    const { sessionId, workspaceId, message, mode, preset, caseId, taskId } = input as unknown as AgentCodingInput;
+    const { sessionId, workspaceId, message, mode, preset, caseId, taskId, expertExecution } = input as unknown as AgentCodingInput;
     // Usage pass U4 (§15): the preset scopes this turn's tool catalog; an absent preset (direct API
     // runs) keeps the full TOOL_DEFS list.
-    const turnTools = [...toolsForPreset(preset, TOOL_DEFS), ...(caseId ? UI_TOOL_DEFS : [])];
+    const turnTools = expertExecution
+      ? [...toolsForExpert(expertExecution)]
+      : [...toolsForPreset(preset, TOOL_DEFS), ...(caseId ? UI_TOOL_DEFS : [])];
     // `mode` rides the turn event so the `sessions` projection can fold the session's CURRENT
     // access mode from run inputs (usage pass U2 — the composer's per-session access-mode dropdown
     // becomes this input's source); absent (direct API runs) keeps whatever the projection already
@@ -347,8 +426,10 @@ export const agentCodingAgent: AgentDefinition = {
       planState = { ...planState, on: true };
     }
 
-    const history = (await ctx.invoke("session.history", { sessionId, excludeRunId: ctx.runId })) as unknown as ModelMessage[];
     const workspace = (await ctx.invoke("workspace.path", { workspaceId })) as unknown as { readonly root: string; readonly executionWorldId: string };
+    const history = expertExecution
+      ? expertExecution.context
+      : (await ctx.invoke("session.history", { sessionId, excludeRunId: ctx.runId })) as unknown as ModelMessage[];
     const messages: ModelMessage[] = [...history, { role: "user", content: message }];
     const readFiles = new Set<string>();
 
@@ -377,9 +458,13 @@ export const agentCodingAgent: AgentDefinition = {
       return true;
     };
 
-    for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+    const maxSteps = expertExecution
+      ? Math.max(1, Math.min(MAX_TOOL_STEPS, Math.floor(expertExecution.maxSteps) || 1))
+      : MAX_TOOL_STEPS;
+    let toolCallPosition = 0;
+    for (let step = 0; step < maxSteps; step++) {
       if (step > 0) await drainSteering();
-      const response = await invokeModelGenerate(ctx, step, messages, turnTools);
+      const response = await invokeModelGenerate(ctx, step, messages, turnTools, expertExecution);
       if (response.usage) {
         await ctx.emit("workbench.usage.recorded", {
           sessionId,
@@ -400,6 +485,7 @@ export const agentCodingAgent: AgentDefinition = {
 
       let changedThisStep = false;
       for (const call of response.toolCalls) {
+        const effectToolCallId = `expert:${step}:${toolCallPosition++}`;
         const args = (call.arguments ?? {}) as Record<string, unknown>;
         // Emitted once, up front, regardless of whether this call needs approval — so the UI (and
         // any other observer of durable events) always has a `tool.call.*` entry to hang an
@@ -493,6 +579,45 @@ export const agentCodingAgent: AgentDefinition = {
               await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
             }
           }
+        } else if (expertExecution && ["team_delegate", "team_message", "expert_memory_read", "expert_memory_write", "expert_return"].includes(call.name)) {
+          // Expert collaboration is available only through the separately authorized capabilities
+          // attached to this persisted assignment. The model cannot supply/forge the run identity.
+          const capability = {
+            team_delegate: "team.delegate",
+            team_message: "team.message",
+            expert_memory_read: "expert.memory.read",
+            expert_memory_write: "expert.memory.write",
+            expert_return: "team.handoff",
+          }[call.name] as string;
+          const capabilityInput = {
+            ...args,
+            // Capability handlers derive sender, Team and Conversation from ctx.runId; only the
+            // current immutable Assignment key and replay-stable command identity are added here.
+            // Preserve the target expertId on delegate.
+            assignmentId: expertExecution.assignmentId,
+            requestId: effectToolCallId,
+          };
+          try {
+            const out = await ctx.invoke(capability, capabilityInput as unknown as Json) as unknown as Record<string, unknown>;
+            if (call.name === "team_delegate") {
+              const assignmentId = out?.assignmentId;
+              if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+                throw new Error("team.delegate did not return a durable assignmentId");
+              }
+              const handoff = await ctx.waitFor(`expert-assignment:${assignmentId}`, {
+                type: "expert-assignment",
+                condition: { kind: "expert_assignment", assignmentId },
+                payload: { assignmentId },
+              }) as unknown as Json;
+              resultText = JSON.stringify(handoff);
+            } else {
+              resultText = JSON.stringify(out);
+            }
+            await ctx.emit("tool.call.completed", { sessionId, toolCallId: call.id, tool: call.name, result: out } as unknown as Json);
+          } catch (error) {
+            resultText = `Error: ${error instanceof Error ? error.message : String(error)}`;
+            await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
+          }
         } else if (call.name === "subagent") {
           // J-F-delegation: fire-and-forget delegation (reference-behavior-matrix.md §6.4) — starts
           // a durable child `agent.coding` run, correlated `subagent:<parentRunId>:<id>` (this app's
@@ -534,10 +659,10 @@ export const agentCodingAgent: AgentDefinition = {
             resultText = approvalDeniedToolResult(permission);
             await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
           } else {
-            resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, taskId);
+            resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, taskId, expertExecution, effectToolCallId);
           }
         } else {
-          resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, taskId);
+          resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, taskId, expertExecution, effectToolCallId);
         }
         messages.push({ role: "tool", content: resultText, toolCallId: call.id });
         if (caseId && ["edit", "bash", "run_code"].includes(call.name) && !resultText.startsWith("Error:")) changedThisStep = true;

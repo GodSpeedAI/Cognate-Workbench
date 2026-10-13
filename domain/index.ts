@@ -308,6 +308,8 @@ export const EXPERT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "expert.memory.read": "ExpertMemory",
   "expert.context": "Conversation",
   "expert.model.generate": "ExpertRun",
+  "expert.tool.invoke": "ExpertEffectCommitment",
+  "expert.effect.resolve": "ExpertEffectCommitment",
   "experts.seed": "ExpertDefinition",
 };
 

@@ -33,12 +33,14 @@ export interface ExpertMessage {
   sender: { kind: "human" | "expert"; id: string }; recipientId: string;
   text: string; correlationId: string; causationId: string | null;
   delivery: "queued" | "delivered" | "cancelled"; replyTo: string | null;
+  visibility?: "team" | "addressed";
 }
 export interface Handoff {
   assignmentId: string; expertId: string; runId: string;
   disposition: "result" | "abstained" | "declined" | "failed";
   output: string; artifacts: string[]; evidence: string[]; uncertainties: string[];
   failures: string[]; followUp: string[];
+  observedFailures?: string[];
 }
 export interface ExpertExecution {
   expertId: string; assignmentId: string; conversationId: string; teamId?: string;
@@ -46,10 +48,12 @@ export interface ExpertExecution {
 }
 export interface Assignment {
   id: string; expertId: string; conversationId: string; teamId: string | null; parentId: string | null;
+  parentAttempt?: number | null;
   purpose: string; acceptance: string[]; depth: number; attempt: number; status: AssignmentStatus;
   workspaceId: string; mode: string; authorityTools: ExpertTool[];
   execution: ExpertExecution; runId: string | null; handoff: Handoff | null;
   reconciled: boolean; review: { verdict: "revision" | "accept" | "escalate"; rationale: string; evidence: string[]; by: string } | null;
+  effects?: Record<string,{commitmentId:string;state:string;tool:string;resolvedBy?:string}>;
   settlement: { decision: "accepted" | "revision"; by: string; rationale: string } | null;
 }
 export interface ExpertMemory {
@@ -61,6 +65,7 @@ export interface ExpertState {
   schema: 1; experts: Record<string, Expert>; teams: Record<string, Team>;
   conversations: Record<string, Conversation>; assignments: Record<string, Assignment>;
   messages: Record<string, ExpertMessage>; memory: Record<string, ExpertMemory>;
+  audit?: {id:string;capability:string;by:string;actorKind:string;runId:string|null;causationId:string|null}[];
   receipts: Record<string, { fingerprint: string; result: unknown }>;
 }
 export const emptyExpertState = (): ExpertState => ({schema:1,experts:{},teams:{},conversations:{},assignments:{},messages:{},memory:{},receipts:{}});

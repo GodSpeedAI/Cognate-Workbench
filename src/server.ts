@@ -16,7 +16,16 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { agentExpert } from "./agents/agentExpert.ts";
+import { expertsComponent, ExpertsService } from "./experts/service.ts";
+import { ExpertCompletionBridge } from "./experts/bridge.ts";
+import { EXPERT_AGENT, EXPERTS_THREAD } from "./experts/types.ts";
+import { expertsProjection } from "./projections/experts.ts";
+import { providerRoutesProjection } from "./projections/providerRoutes.ts";
+import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
+import { expertEffectComponent } from "./capabilities/expertEffect.ts";
+import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
@@ -65,6 +74,8 @@ export interface ServerOptions {
   readonly home: string;
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
+  /** Deterministic provider seam; normal execution uses the published provider adapters. */
+  readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
 }
 
 export interface AppServer {
@@ -74,6 +85,7 @@ export interface AppServer {
 }
 
 const GRANTED_CAPABILITIES = [
+  ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
   "secret.put",
@@ -132,7 +144,11 @@ function buildPolicy(): Policy {
 
 function buildActionPolicy(): ActionPolicy {
   return {
-    authorize: () => ({ allow: true, reason: "local single-operator app: default deny is enforced at the capability layer" }),
+    authorize: (request) => {
+      if (request.action === "run.start" && request.resource === EXPERT_AGENT && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
+      if (request.action === "thread.state.update" && request.resource === EXPERTS_THREAD && request.caller.actor.kind !== "system") return {allow:false,reason:"Experts registry mutations require validated capabilities"};
+      return { allow: true, reason: "local single-operator app: default deny is enforced at the capability layer" };
+    },
   };
 }
 
@@ -194,12 +210,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
+  const expertRefs = bindExpertCapabilities(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
     if (!serviceRef.current) throw new Error("runtime not ready");
     return serviceRef.current;
   };
+  let experts: ExpertsService;
   const knownWorkspaceIds = new Set<string>();
   // Execution worlds: where a workspace's files live and its commands run. Local today; other
   // providers (ssh, wsl, sandbox forks) register here without touching the tools or the agent.
@@ -209,7 +227,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // additional `PluginSource` can be registered at boot without touching the capability.
   const pluginRegistry = new PluginRegistry();
 
-  const runtime = await createRuntime({
+  const runtime: Runtime = await createRuntime({
     store,
     // Usage pass U6 (RealityTrace, Option A): trace-worthy events get an observation intent
     // committed atomically with the event (the runtime's generic hook — no runtime dependency on
@@ -217,8 +235,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent],
+    agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent, agentExpert],
     components: [
+      expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
+      expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
+      expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings }),
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [] }),
@@ -244,6 +265,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }),
     ],
     projections: [
+      { projection: expertsProjection, public: true },
+      { projection: providerRoutesProjection, public: true },
       { projection: modelConfigProjection, public: true },
       { projection: workspacesProjection, public: true },
       { projection: cognitiveProjection, public: true },
@@ -259,7 +282,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ],
     system: SYSTEM_CALLER.actor,
   });
-  serviceRef.current = runtime.service;
+  const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
+  serviceRef.current = governedService;
+  experts = new ExpertsService(governedService,SYSTEM_CALLER);
+  await experts.seed(LOCAL_OPERATOR.tenant);
 
   // Seed `knownWorkspaceIds` from the persisted projection (survives restart).
   for (const row of ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" }))).rows) {
@@ -309,6 +335,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       secrets,
     );
   }
+
+  const expertBridge = new ExpertCompletionBridge(experts,LOCAL_OPERATOR.tenant);
+  await expertBridge.start();
 
   // Usage pass U6: the RealityTrace observation adapter — an at-least-once background drain from
   // the committed outbox to the pinned SXR CLI. SXR-down never blocks or breaks the app (the
@@ -375,7 +404,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // the same public `@connectrpc/connect` + `registerRuntimeService` calls `serveRuntime` uses
   // internally keeps this a genuinely single Bun process with no proxy layer to hang.
   const connectRouter = createConnectRouter({});
-  registerRuntimeService(connectRouter, runtime.service, { authenticate: devTokenAuthenticator, maxJsonDepth: 32 });
+  registerRuntimeService(connectRouter, governedService, { authenticate: devTokenAuthenticator, maxJsonDepth: 32 });
   const connectHandlersByPath = new Map<string, (req: Request) => Promise<Response>>();
   for (const uHandler of connectRouter.handlers) {
     connectHandlersByPath.set(uHandler.requestPath, createFetchHandler(uHandler, { httpVersion: "1.1" }));
@@ -395,7 +424,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // component's layout-only sheet (the server concatenates; components never import CSS).
   const WORKBENCH_CSS = ["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"];
   const cssParts: string[] = [];
-  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => fileURLToPath(new URL(`./ui/workbench/${n}.css`, import.meta.url)))]) {
+  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => fileURLToPath(new URL(`./ui/workbench/${n}.css`, import.meta.url))), fileURLToPath(new URL("./ui/experts/experts.css",import.meta.url))]) {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");
@@ -426,9 +455,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
 
   return {
     url: `http://127.0.0.1:${server.port}`,
-    runtime,
+    runtime: {...runtime,service:governedService},
     async stop() {
       eventsController.abort();
+      await expertBridge.stop();
       observations?.stop();
       server.stop(true);
       await runtime.close();
