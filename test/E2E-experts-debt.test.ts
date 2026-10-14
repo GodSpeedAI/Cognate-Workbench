@@ -97,3 +97,37 @@ test("a human live update is pending during inference and incorporated into the 
     }finally{release();await browser.close();}
   });
 },60000);
+
+test("loaded personal memory clears when selecting another Expert or Team scope",async()=>{
+  await withExpertApp(async model=>({message:{role:"assistant",content:"Provenance source"},toolCalls:[],finishReason:"stop",model:model.model}),async app=>{
+    await configureDefaultRoutes(app);
+    await invoke(app,"onboarding.dismiss",{step:"notice"});await invoke(app,"onboarding.dismiss",{step:"apikey"});
+    const source=await invoke(app,"expert.converse",{expertId:"builder",workspaceId:app.workspaceId,message:"Provide a bounded source record"}) as {assignmentId:string};
+    await waitForAssignment(app,source.assignmentId,a=>!!a.handoff);
+    await invoke(app,"expert.memory.write",{expertId:"builder",scope:"personal",kind:"assertion",text:"Builder personal scope sentinel",sources:[source.assignmentId]});
+    const browser=await chromium.launch();
+    let releaseFonts!:()=>void;
+    const fontsHeld=new Promise<void>(resolve=>{releaseFonts=resolve;});
+    try{
+      // A slow optional font stylesheet must not block the local app's module/bootstrap.
+      const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(10000);
+      await page.route(/https:\/\/fonts\.googleapis\.com\//,async route=>{await fontsHeld;await route.abort().catch(()=>{});});
+      await page.goto(app.app.url,{waitUntil:"domcontentloaded"});
+      await page.getByRole("button",{name:"Experts and Teams",exact:true}).click();
+      const roster=page.getByRole("list",{name:"Experts",exact:true});
+      await roster.getByRole("button",{name:/^Builder/}).click();
+      await page.getByRole("button",{name:"Load scoped memory",exact:true}).click();
+      await page.getByText("Builder personal scope sentinel",{exact:true}).waitFor();
+      await roster.getByRole("button",{name:/^Critic/}).click();
+      expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);
+      await roster.getByRole("button",{name:/^Builder/}).click();
+      expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);
+      await page.getByRole("button",{name:"Load scoped memory",exact:true}).click();
+      await page.getByText("Builder personal scope sentinel",{exact:true}).waitFor();
+      await page.getByRole("combobox",{name:"Memory scope",exact:true}).selectOption("cognate-team");
+      expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);
+      await page.getByRole("button",{name:"Load scoped memory",exact:true}).click();
+      expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);
+    }finally{releaseFonts();await browser.close();}
+  });
+},60000);
