@@ -101,7 +101,6 @@ Entity "ExpertEffectCommitment"
 
 // J-TEAM-RECOVER extension: an ambiguous commitment can only be reconciled by a human with
 // an attributable reason and observed outcome. Orchestrators and Specialists cannot resolve it.
-
 Entity "Handoff"
 
 Entity "ExpertMessage"
@@ -466,7 +465,6 @@ Instance j_h_cancellation of "CanonicalJourney" {
 // framework-level journeys (they apply to any Cognate app with workspaces), modeled here because
 // this reconstruction is where the workspace journeys live. They do NOT change J-A..J-H: those
 // keep their meaning, and now settle against whichever world the selected workspace references.
-
 Instance j_rw_select_world of "CanonicalJourney" {
     actor: "User",
     capabilities: "world.register, world.list, world.select",
@@ -977,9 +975,9 @@ Instance j_team_settlement of "CanonicalJourney" {
     variants: "human requests rework; protected effect awaits approval; Orchestrator proposes completion without sufficient evidence and is refused; provider or verifier failure leaves settlement open"
 }
 
-Policy every_canonical_flow_recorded as:
-    forall f in flows: (f.quantity > 0)
+Policy every_canonical_flow_recorded
+    as: forall f in flows: (f.quantity > 0.0)
 
 Metric "canonical_journey_count" as:
-    count(instances)
+    COUNT(instances)
     @unit "count"
