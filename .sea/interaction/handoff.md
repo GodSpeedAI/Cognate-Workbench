@@ -243,6 +243,27 @@ tests pass.
   memory is untrusted input with source provenance; indexes/summaries are derived from durable facts.
 - Human-only protected acceptance and approval remain outside Orchestrator authority.
 
+### Live Expert inbox slice (`J-EXPERT-STEER`, `J-EXPERT-INBOX-RECOVER`)
+
+Implemented in the native shared Experts thread, without a separate inbox engine. A human sends to
+an explicitly running/waiting Team Assignment; an Expert sender must already have `team_message`
+authority and address an active same-Team member. The CAS message record carries sequence,
+correlation, sender, target Assignment/run, queued/pending/incorporated/cancelled/superseded/late
+state and boundary acknowledgement. `team.inbox.consume` records one receipt per run and deterministic
+decision boundary in the same shared-state mutation that acknowledges its ordered batch. If a message
+arrives after the last allowed decision, it is marked `late` rather than falsely acknowledged as
+incorporated. The agent
+invokes it through Cognate before the next model request; messages are untrusted user context and do
+not alter tools, mode, or settlement authority. The active provider call is never interrupted.
+Private Expert-in-Team conversations do not opt into this inbox. `test/J-EXPERT-inbox.test.ts`
+exercises a live mid-call send, incorporation before the next model decision, restart persistence,
+stale target refusal, forged human Expert-message refusal, cancellation, sender permission, and late
+terminal delivery. `test/J-EXPERT-inbox-replay.test.ts` SIGKILLs the Workbench subprocess after the
+CAS receipt is committed but before the consume invocation returns; after restart the same run
+replays that ordered message batch into a provider request exactly once. No claim is made about an
+unpublished Cognate inbox API: this composes the installed 0.2 runtime's recorded invocations and
+native shared-state CAS.
+
 ### Required implementation evidence
 
 Implement and test the 12 catalog journeys before changing them from `proposed`: `J-EXPERT-CREATE`,
@@ -256,6 +277,60 @@ cancellation/late return, concurrent invariant updates, and authority-denial evi
 Source: `.agents/plans/unified_harness_experience_model_v2.md`. Tranche plan: `WORKBENCH-PLAN.md`; honest
 status per validation trace: `WORKBENCH-DEVIATIONS.md`. The IDM gained 14 Entities, 12 Resources/Flows, the
 `Reviewer` role, a `ReviewAuthorization` relation and 11 journeys (`J-WB-*`). Bindings are explicit and live
-in `domain/index.ts` (`WORKBENCH_ANCHORS`): 23 capabilities anchored on 13 entities. `AttentionFocus` has no
-capability on purpose (client state). Test files follow the journey ids: `test/J-WB-<journey>.test.ts` plus
+in `domain/index.ts` (`WORKBENCH_ANCHORS`): 23 capabilities anchored on 13 entities. `AttentionFocus`
+remains ephemeral client state, while its publish/context/request capabilities have explicit semantic
+contracts in the cognitive tranche. Test files follow the journey ids: `test/J-WB-<journey>.test.ts` plus
 `test/E2E-workbench.test.ts` for the browser.
+
+## Cognitive navigation binding
+
+The observed cognitive journeys are `J-COG-cleanup`, `J-COG-liveverify`, `J-COG-attention`,
+`J-COG-search`, and `J-COG-realitytrace`. The model separates `Case`, `SuccessCriterion`,
+`WorldSnapshot`, `Verification`, `RiskAssessment`, `Experiment`, `MethodRecommendation`, and the
+existing `AttentionFocus`. These names describe the current runtime contracts and event-backed
+facts; they make no claim that a Case contains a filesystem world or that any `.sea` policy is
+automatically enforced.
+
+`domain/index.ts` exports `COGNITIVE_CAPABILITY_ANCHORS` and binds all 20 executable
+`cognitiveComponent` contracts to those concepts. `src/server.ts` passes the resulting per-capability
+SemanticRefs to the component. `CognitiveOptions.semanticRef` remains a fallback for existing
+callers; the server uses `semanticRefs`. `test/cognitive-bindings.test.ts` checks the full binding
+table and observes a `run.invocation.semanticRef` during the existing attention journey. Human-only
+`world.settle` and `method.accept` remain runtime-enforced acts; binding a contract grants no
+authority.
+
+| IDM concept | Bound capabilities |
+|---|---|
+| `Case` | `case.open`, `case.derive`, `case.observe` |
+| `SuccessCriterion` | `criterion.freeze` |
+| `WorldSnapshot` | `world.freeze`, `world.fork`, `world.attach`, `world.discard`, `world.settle` |
+| `Verification` | `verification.run` |
+| `RiskAssessment` | `risk.assess` |
+| `AttentionFocus` | `ui.focus.publish`, `ui.context`, `ui.request`, `ui.pending` |
+| `Experiment` | `experiment.round`, `experiment.status` |
+| `MethodRecommendation` | `method.review`, `method.accept`, `method.active` |
+
+Validation evidence: DomainForge 0.19.0 reports zero violations and clean formatting; all 222
+projected semantic objects load through the Cognate adapter. `bun run typecheck` and
+`bun test test/cognitive-bindings.test.ts test/sea-format.test.ts` pass. The binding test confirms
+the 20 published contracts each carry the expected SemanticRef, including one actual recorded
+`ui.context` invocation. Existing entity, role, resource, relation, instance, policy and metric
+name-to-ID pairs remain unchanged.
+
+## Debt-closure native bindings and settlement evidence (2026-10-14)
+
+`bindExpertCapabilities` resolves 27 Expert contracts, including the three safe-boundary inbox
+contracts. `bindScheduleCapabilities` resolves `schedule.save`, `schedule.manage`, `schedule.list`
+and internal-only `schedule.dispatch` against the existing Automation semantic anchor. Model budget
+checks extend the existing `expert.save` / `expert.model.generate` contracts; paginated reads extend
+`expert.context` / `expert.memory.read` without changing legacy response shapes.
+
+The new canonical journeys are observed in real PostgreSQL/native runtime tests: schedule create,
+fire and SIGKILL recovery; live inbox steering and crash replay; immutable partition migration and
+source erasure; scoped cursor pagination; frozen context/economic budgets. UI tests inspect actual
+schedule, handoff, usage and live-delivery receipts. See the canonical catalog and
+`docs/experts-debt-closure.md` for exact boundaries and commands.
+
+These bindings do not establish distributed run ownership, parallel workers on the installed SDK,
+or production trust. Upstream PR https://github.com/GodSpeedAI/Cognate/pull/42 contains separately
+tested native dispatch/concurrency/containment contracts; Workbench remains on published 0.2.0.

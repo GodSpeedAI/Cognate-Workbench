@@ -6,7 +6,8 @@ import { createClient } from "@godspeedai/cognate-client";
 import type { ModelMessage, ModelProvider, ModelRequest, ModelResponse } from "@godspeedai/cognate-capabilities";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
-import { EXPERTS_THREAD, type ExpertState } from "../src/experts/types.ts";
+import type { ExpertState } from "../src/experts/types.ts";
+import { readExperts } from "../src/experts/state.ts";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
 import type { ModelConfig } from "../src/components/providerRegistry.ts";
 import type { Assignment } from "../src/experts/types.ts";
@@ -62,7 +63,7 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
   let closed = false;
   try {
     const launch = async () => {
-      app = await startServer({ port: 0, home, expertProviderFactory: providerFactory });
+      app = await startServer({ port: 0, home, expertProviderFactory: providerFactory,enableScheduleEvaluation:false });
       const caller = LOCAL_OPERATOR;
       const service = createRemoteRuntimeService(connectTransport(app.url), () => devToken(caller));
       client = createClient({ service, caller });
@@ -74,8 +75,7 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
     const testApp: ExpertTestApp = {
       get app() { return app!; }, get client() { return client!; }, home, workspaceId: selected.workspaceId, providerCalls: calls,
       async state() {
-        const result = await app!.runtime.service.readSharedState(LOCAL_OPERATOR, { threadId: EXPERTS_THREAD });
-        return result.state as unknown as ExpertState;
+        return (await readExperts(app!.runtime.service, { actor: { id: "system", kind: "system" }, tenant: LOCAL_OPERATOR.tenant })).state;
       },
       async restart() {
         await client?.close(); await app?.stop();

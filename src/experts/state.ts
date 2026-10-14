@@ -2,6 +2,7 @@ import { fingerprint as nativeFingerprint, type Json } from "@godspeedai/cognate
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { ServiceError } from "@godspeedai/cognate-runtime-api";
 import { EXPERTS_THREAD, EXPERT_TOOLS, emptyExpertState, type ExpertState, type Team, type ExpertTool } from "./types.ts";
+import { isExpertStateManifest, prepareExpertManifest, restoreExpertManifest } from "./persistence.ts";
 
 export const json = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
 export const fingerprint = (value: unknown) => nativeFingerprint(json(value));
@@ -59,10 +60,32 @@ export function seedExperts(state: ExpertState): void {
 }
 
 export async function readExperts(service: RuntimeService, caller: Caller): Promise<{state: ExpertState; version: number}> {
-  const result = await service.readSharedState(caller,{threadId:EXPERTS_THREAD});
-  const raw = result.state as Partial<ExpertState>;
-  if(result.version>0 && raw.schema!==1)throw new Error("Unsupported Experts state schema; an explicit migration is required");
-  return {state:raw.schema === 1 ? raw as ExpertState : emptyExpertState(),version:result.version};
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const result = await service.readSharedState(caller,{threadId:EXPERTS_THREAD});
+    if (result.version === 0) return {state:emptyExpertState(),version:0};
+    const raw = result.state as Partial<ExpertState> & {schema?: number};
+    if (raw.schema === 1) {
+      const legacy = raw as ExpertState;
+      const manifest = await prepareExpertManifest(service,caller,legacy);
+      try {
+        const migrated = await service.updateSharedState(caller,{
+          threadId:EXPERTS_THREAD,
+          update:{snapshot:json(manifest)},
+          expectedVersion:result.version,
+          idempotencyKey:`expert-state-migration:${result.version}:${fingerprint(manifest)}`,
+        });
+        return {state:legacy,version:migrated.version};
+      } catch (error) {
+        if (!(error instanceof ServiceError) || !["failed_precondition","unavailable"].includes(error.code)) throw error;
+        continue;
+      }
+    }
+    if (isExpertStateManifest(result.state)) {
+      return {state:await restoreExpertManifest(service,caller,result.state),version:result.version};
+    }
+    throw new Error("Unsupported Experts state schema; an explicit versioned migration is required");
+  }
+  throw new Error("Experts are busy; retry the state migration");
 }
 
 /** Re-read AND revalidate the intent after every conflict. Logical receipts live in the aggregate,
@@ -80,7 +103,8 @@ export async function mutateExperts<T>(service: RuntimeService, caller: Caller, 
     for (const team of Object.values(state.teams)) assertTeamInvariant(state,team);
     state.receipts[commandId] = {fingerprint:digest,result:result ?? null};
     try {
-      await service.updateSharedState(caller,{threadId:EXPERTS_THREAD,update:{snapshot:json(state)},expectedVersion:version,idempotencyKey:`${commandId}:${version}:${digest}:${fingerprint(state)}`});
+      const manifest = await prepareExpertManifest(service,caller,state);
+      await service.updateSharedState(caller,{threadId:EXPERTS_THREAD,update:{snapshot:json(manifest)},expectedVersion:version,idempotencyKey:`${commandId}:${version}:${digest}:${fingerprint(state)}`});
       return result;
     } catch (error) {
       if (!(error instanceof ServiceError) || !["failed_precondition","unavailable"].includes(error.code)) throw error;
@@ -93,7 +117,7 @@ export async function mutateExperts<T>(service: RuntimeService, caller: Caller, 
  * The human operator can read private scopes through explicitly authorized capabilities. */
 export function publicExperts(state: ExpertState): ExpertState {
   const view = structuredClone(state);
-  view.memory = {}; view.receipts = {};
+  view.memory = {}; view.receipts = {}; view.audit = [];
   for (const [id, conversation] of Object.entries(view.conversations)) {
     if (conversation.scope !== "private-team") continue;
     delete view.conversations[id];

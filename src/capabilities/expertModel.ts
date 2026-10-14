@@ -7,6 +7,8 @@ import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { buildProvider, type ModelConfig } from "../components/providerRegistry.ts";
 import type { SecretStore } from "../secrets.ts";
+import { enforceExpertBudget, modelAccounting, priorModelConsumption, type ExpertModelBudget, type ModelAccounting } from "../experts/economics.ts";
+import type { StoredEvent } from "@godspeedai/cognate-events";
 
 export interface ExpertModelGenerateInput {
   readonly route: ModelConfig;
@@ -17,7 +19,7 @@ export interface ExpertModelGenerateOptions {
   readonly secrets: SecretStore;
   readonly getService: () => RuntimeService;
   /** Must confirm run/assignment ownership, active membership, and route against authoritative state. */
-  readonly authorize: (ctx: HandlerContext, route: ModelConfig) => Promise<void>;
+  readonly authorize: (ctx: HandlerContext, route: ModelConfig) => Promise<ExpertModelBudget|undefined|void>;
   readonly semanticRef?: SemanticRef;
   /** Deterministic provider seam for tests; production defaults to Workbench's published provider adapters. */
   readonly providerFactory?: (route: ModelConfig, secrets: SecretStore) => ModelProvider;
@@ -43,7 +45,7 @@ export function expertModelGenerateComponent(options: ExpertModelGenerateOptions
     id: "expert:model-generate",
     provides: [contract],
     activate(fiber) {
-      fiber.provide(contract, async (rawInput, ctx): Promise<ModelResponse> => {
+      fiber.provide(contract, async (rawInput, ctx): Promise<ModelResponse & {accounting:ModelAccounting}> => {
         const input = rawInput as ExpertModelGenerateInput;
         if (!ctx.runId) throw new Error("expert.model.generate: requires an Expert run");
         if (!input || !isRoute(input.route) || !input.request || !Array.isArray(input.request.messages)) {
@@ -56,15 +58,24 @@ export function expertModelGenerateComponent(options: ExpertModelGenerateOptions
         }
         // Assignment ownership and the frozen route live in ExpertsService's durable registry,
         // not in the public run input. This callback is the authoritative assignment check.
-        await options.authorize(ctx, input.route);
+        const budget = await options.authorize(ctx, input.route) || undefined;
 
         // A provider belongs only to this call. Reconfiguration for another Expert cannot alter
         // this run's endpoint, model, credentials, or in-flight provider instance.
         const provider = createProvider(input.route, options.secrets);
-        if (!provider.features.stream || !ctx.progress) return provider.generate(input.request, ctx.signal);
+        let request=input.request;
+        if(budget){
+          const events:StoredEvent[]=[];
+          for await(const event of options.getService().events({tenant:ctx.tenant,actor:ctx.actor},{runId:ctx.runId}))events.push(event);
+          request=enforceExpertBudget(request,budget,provider.features.context_limit,priorModelConsumption(events,budget));
+        }
+        if (!provider.features.stream || !ctx.progress) {
+          const response=await provider.generate(request,ctx.signal);
+          return {...response,accounting:modelAccounting(request,response,budget)};
+        }
         let text = "";
         let final: ModelResponse | undefined;
-        for await (const delta of provider.stream(input.request, ctx.signal)) {
+        for await (const delta of provider.stream(request, ctx.signal)) {
           if (delta.type === "text") {
             text += delta.text;
             await ctx.progress({ kind: "text", text: delta.text });
@@ -72,12 +83,13 @@ export function expertModelGenerateComponent(options: ExpertModelGenerateOptions
             final = delta.response;
           }
         }
-        return final ?? {
+        const response = final ?? {
           message: { role: "assistant", content: text },
           toolCalls: [],
-          finishReason: "stop",
+          finishReason: "stop" as const,
           model: provider.model,
         };
+        return {...response,accounting:modelAccounting(request,response,budget)};
       });
     },
   };

@@ -9,7 +9,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { bindCapabilities, loadSemanticProjection, type CapabilityBinding, type SemanticProjection } from "@godspeedai/cognate-domainforge";
-import type { CapabilityContract } from "@godspeedai/cognate-kernel-api";
+import type { CapabilityContract, SemanticRef } from "@godspeedai/cognate-kernel-api";
 
 const INTERACTION_MODEL_URL = new URL("../.sea/interaction/interaction-model.sea", import.meta.url);
 
@@ -32,6 +32,46 @@ export async function loadDomain(): Promise<Domain> {
   // eslint-disable-next-line no-console
   console.log(`[domain] loaded ${projection.objects.length} semantic objects (digest ${projection.source.digest}) from ${path}`);
   return { projection, semanticId: (name) => `${namespace}::${name}` };
+}
+
+/** The executable cognitive capabilities are anchored explicitly to the IDM concepts they realize. */
+export const COGNITIVE_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "case.open": "Case",
+  "criterion.freeze": "SuccessCriterion",
+  "world.freeze": "WorldSnapshot",
+  "world.fork": "WorldSnapshot",
+  "world.attach": "WorldSnapshot",
+  "world.discard": "WorldSnapshot",
+  "verification.run": "Verification",
+  "case.derive": "Case",
+  "world.settle": "WorldSnapshot",
+  "risk.assess": "RiskAssessment",
+  "case.observe": "Case",
+  "ui.focus.publish": "AttentionFocus",
+  "ui.context": "AttentionFocus",
+  "ui.request": "AttentionFocus",
+  "ui.pending": "AttentionFocus",
+  "experiment.round": "Experiment",
+  "experiment.status": "Experiment",
+  "method.review": "MethodRecommendation",
+  "method.accept": "MethodRecommendation",
+  "method.active": "MethodRecommendation",
+};
+
+export function cognitiveCapabilityBindings(domain: Domain): readonly CapabilityBinding[] {
+  return Object.entries(COGNITIVE_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+}
+
+export function bindCognitiveCapabilities(domain: Domain): Readonly<Record<string, SemanticRef>> {
+  const bindings = cognitiveCapabilityBindings(domain);
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== 20) throw new Error(`domain: expected 20 cognitive contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: cognitive capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<Record<string, SemanticRef>>;
 }
 
 /**
@@ -300,6 +340,9 @@ export const EXPERT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "team.delegate": "Assignment",
   "team.handoff": "Handoff",
   "team.message": "ExpertMessage",
+  "team.inbox.send": "ExpertMessage",
+  "team.inbox.consume": "ExpertMessage",
+  "team.inbox.cancel": "ExpertMessage",
   "team.cancel": "Assignment",
   "team.retry": "Assignment",
   "team.review": "Team",
@@ -327,4 +370,16 @@ export function bindExpertCapabilities(domain: Domain): Readonly<Record<string, 
     throw new Error(`domain: expected ${bindings.length} expert contracts, got ${contracts.length}`);
   }
   return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
+/** Schedule definitions and occurrence delivery specialize the existing Automation concept. */
+export const SCHEDULE_CAPABILITY_ANCHORS: Readonly<Record<string,string>> = {
+  "schedule.save":"Automation", "schedule.manage":"Automation",
+  "schedule.list":"Automation", "schedule.dispatch":"Automation",
+};
+export function bindScheduleCapabilities(domain:Domain):Readonly<Record<string,CapabilityContract["semanticRef"]>> {
+  const bindings=Object.entries(SCHEDULE_CAPABILITY_ANCHORS).map(([id,concept])=>({semanticId:domain.semanticId(concept),capability:{id,version:"1.0.0"}}));
+  const contracts=bindCapabilities(domain.projection,bindings);
+  if(contracts.length!==4)throw new Error("domain: expected four native schedule bindings");
+  return Object.fromEntries(contracts.map(contract=>[contract.id,contract.semanticRef]));
 }

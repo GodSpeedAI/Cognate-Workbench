@@ -1,5 +1,6 @@
 // Single Bun process: runtime + Connect RuntimeService + bundled React UI + CSS.
-// See APP/README.md for why this is a hand-composed `createRuntime` rather than `createHarness`.
+// See docs/explanation/why-single-bun-process.md for why this is a hand-composed
+// `createRuntime` rather than `createHarness`.
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -16,7 +17,10 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
+import { ScheduleEvaluator } from "./schedules/evaluator.ts";
+import { SCHEDULES_THREAD } from "./schedules/types.ts";
 import { agentExpert } from "./agents/agentExpert.ts";
 import { expertsComponent, ExpertsService } from "./experts/service.ts";
 import { ExpertCompletionBridge } from "./experts/bridge.ts";
@@ -76,6 +80,8 @@ export interface ServerOptions {
   readonly extraMediators?: readonly MediatorSpec[];
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
+  /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
+  readonly enableScheduleEvaluation?: boolean;
 }
 
 export interface AppServer {
@@ -85,6 +91,7 @@ export interface AppServer {
 }
 
 const GRANTED_CAPABILITIES = [
+  ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
@@ -146,7 +153,7 @@ function buildActionPolicy(): ActionPolicy {
   return {
     authorize: (request) => {
       if (request.action === "run.start" && request.resource === EXPERT_AGENT && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
-      if (request.action === "thread.state.update" && request.resource === EXPERTS_THREAD && request.caller.actor.kind !== "system") return {allow:false,reason:"Experts registry mutations require validated capabilities"};
+      if (request.action === "thread.state.update" && (request.resource === EXPERTS_THREAD || request.resource.startsWith("experts:partition:") || request.resource === SCHEDULES_THREAD) && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Experts and schedule state mutations require validated capabilities"};
       return { allow: true, reason: "local single-operator app: default deny is enforced at the capability layer" };
     },
   };
@@ -201,6 +208,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const secrets = secretStore(secretsPath);
 
   const domain = await loadDomain();
+  const cognitiveRefs = bindCognitiveCapabilities(domain);
   const bindings = bindTranche5(domain);
   const toolBindings = bindTranche7(domain);
   const planBindings = bindTranche9(domain);
@@ -211,6 +219,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
   const expertRefs = bindExpertCapabilities(domain);
+  const scheduleRefs = bindScheduleCapabilities(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -218,6 +227,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     return serviceRef.current;
   };
   let experts: ExpertsService;
+  let schedules: SchedulesService;
+  let scheduleEvaluator: ScheduleEvaluator;
   const knownWorkspaceIds = new Set<string>();
   // Execution worlds: where a workspace's files live and its commands run. Local today; other
   // providers (ssh, wsl, sandbox forks) register here without touching the tools or the agent.
@@ -237,12 +248,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     actions: buildActionPolicy(),
     agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent, agentExpert],
     components: [
+      schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings }),
-      cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [] }),
+      cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
@@ -338,6 +350,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // Restore the legacy model route before feature initialization: recovered ordinary coding
   // runs must not spend their provider-retry budget waiting for unrelated seed work.
   await experts.seed(LOCAL_OPERATOR.tenant);
+  schedules=new SchedulesService(experts);
+  scheduleEvaluator=new ScheduleEvaluator(schedules,experts);
+  await scheduleEvaluator.reconcile(LOCAL_OPERATOR.tenant);
   const expertBridge = new ExpertCompletionBridge(experts,LOCAL_OPERATOR.tenant);
   await expertBridge.start();
 
@@ -431,6 +446,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   }
   const appCss = cssParts.join("\n");
 
+  if(options.enableScheduleEvaluation!==false)await scheduleEvaluator.start(LOCAL_OPERATOR.tenant);
   const server = Bun.serve({
     port: options.port,
     hostname: "127.0.0.1",
@@ -460,6 +476,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     runtime: {...runtime,service:governedService},
     async stop() {
       eventsController.abort();
+      await scheduleEvaluator.stop();
       await expertBridge.stop();
       observations?.stop();
       server.stop(true);

@@ -6,6 +6,12 @@ import { EXPERT_AGENT } from "./types.ts";
 export function expertGovernedService(service:RuntimeService,system:Caller):RuntimeService{
   return {
     ...service,
+    async readProjection(caller,request){
+      const view=await service.readProjection(caller,request);
+      // Immutable preparation cache rows are implementation state. Only the accepted root view
+      // is public, including when a prepared partition lost its manifest CAS race.
+      return request.name==="experts" ? {...view,rows:view.rows.filter(row=>row.key==="current" || row.key===`${caller.tenant}/current`)}:view;
+    },
     async resolveContinuation(caller,request){
       const waits=await service.listContinuations({...system,tenant:caller.tenant},{});
       const wait=waits.find(w=>w.id===request.continuationId);

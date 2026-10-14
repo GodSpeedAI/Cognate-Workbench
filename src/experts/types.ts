@@ -2,6 +2,7 @@
 // written through typed commands and reconstructed from state.changed events.
 import type { ModelConfig } from "../components/providerRegistry.ts";
 import type { ModelMessage } from "@godspeedai/cognate-capabilities";
+import type { ExpertModelBudget } from "./economics.ts";
 
 export const EXPERTS_THREAD = "experts:registry";
 export const EXPERT_AGENT = "agent.expert";
@@ -16,6 +17,7 @@ export interface ExpertDefinition {
   tools: ExpertTool[];
   contextBudget: number;
   maxSteps: number;
+  budget?: ExpertModelBudget;
 }
 export interface Expert { id: string; name: string; definition: ExpertDefinition; lifecycle: "active" | "archived" }
 export interface TeamMembership { expertId: string; role: "orchestrator" | "specialist"; tools: ExpertTool[] }
@@ -34,6 +36,10 @@ export interface ExpertMessage {
   sender: { kind: "human" | "expert"; id: string }; recipientId: string;
   text: string; correlationId: string; causationId: string | null;
   delivery: "queued" | "delivered" | "cancelled"; replyTo: string | null;
+  /** Monotonic within the conversation; older snapshots may omit inbox metadata. */
+  sequence?: number; targetAssignmentId?: string | null; targetRunId?: string | null;
+  inboxStatus?: "queued" | "pending" | "incorporated" | "late" | "cancelled" | "superseded";
+  incorporatedAtBoundary?: string | null; terminalAtBoundary?: string | null; supersedesId?: string | null;
   visibility?: "team" | "addressed";
 }
 export interface Handoff {
@@ -45,7 +51,10 @@ export interface Handoff {
 }
 export interface ExpertExecution {
   expertId: string; assignmentId: string; conversationId: string; teamId?: string;
+  /** Only shared Team conversations opt into live messages; private Expert-in-Team remains isolated. */
+  liveInbox?: boolean; liveInboxClosed?: boolean;
   instructions: string; route: ModelConfig; tools: string[]; maxSteps: number; context: ModelMessage[];
+  budget?: ExpertModelBudget;
 }
 export interface Assignment {
   id: string; expertId: string; conversationId: string; teamId: string | null; parentId: string | null;
@@ -66,6 +75,7 @@ export interface ExpertState {
   schema: 1; experts: Record<string, Expert>; teams: Record<string, Team>;
   conversations: Record<string, Conversation>; assignments: Record<string, Assignment>;
   messages: Record<string, ExpertMessage>; memory: Record<string, ExpertMemory>;
+  inboxReceipts?: Record<string, { assignmentId: string; runId: string; boundary: string; messageIds: string[]; lateMessageIds?: string[] }>;
   audit?: {id:string;capability:string;by:string;actorKind:string;runId:string|null;causationId:string|null}[];
   receipts: Record<string, { fingerprint: string; result: unknown }>;
 }

@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { createClient } from "@godspeedai/cognate-client";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
-import { EXPERTS_THREAD, type ExpertState } from "../src/experts/types.ts";
+import type { ExpertState } from "../src/experts/types.ts";
+import { readExperts } from "../src/experts/state.ts";
 import type { ModelResponse } from "@godspeedai/cognate-capabilities";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import {
@@ -148,7 +149,7 @@ test("J-TEAM-RECOVER: process restart resumes a waiting Specialist and returns o
     service = createRemoteRuntimeService(connectTransport(`http://127.0.0.1:${port}`), () => devToken(LOCAL_OPERATOR));
     client = createClient({ service, caller: LOCAL_OPERATOR });
   };
-  const readState = async () => (await service!.readSharedState(LOCAL_OPERATOR, { threadId: EXPERTS_THREAD })).state as unknown as ExpertState;
+  const readState = async () => (await readExperts(service!, LOCAL_OPERATOR)).state;
   const call = async (capability: string, input: unknown) => client!.invoke(capability, input as never);
   const waitState = async (predicate: (state: ExpertState) => boolean, label: string, timeoutMs = 25_000) => {
     const deadline = Date.now() + timeoutMs;
