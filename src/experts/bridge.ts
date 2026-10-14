@@ -46,8 +46,12 @@ export class ExpertCompletionBridge {
       if(!["completed","failed","cancelled"].includes(run.status))continue;
       const result=run.output as {output?:{text?:string};receipt?:string}|null;
       const observedFailures:string[]=[];
-      for await(const event of service.events(caller,{runId:run.runId}))if(event.eventType==="tool.call.failed"){
-        const failed=event.payload as {tool?:string;error?:string};observedFailures.push(`${failed.tool ?? "tool"}: ${failed.error ?? "failed"}`);
+      let terminalEventId:string|null=null;
+      for await(const event of service.events(caller,{runId:run.runId})){
+        if(["run.completed","run.failed","run.cancelled"].includes(event.eventType))terminalEventId=event.eventId;
+        if(event.eventType==="tool.call.failed"){
+          const failed=event.payload as {tool?:string;error?:string};observedFailures.push(`${failed.tool ?? "tool"}: ${failed.error ?? "failed"}`);
+        }
       }
       const handoff:Handoff=a.handoff ?? {
         assignmentId:a.id,expertId:a.expertId,runId:run.runId,disposition:run.status==="completed" ? "result":"failed",
@@ -63,7 +67,7 @@ export class ExpertCompletionBridge {
         if(run.status!=="completed"){finalHandoff.disposition="failed";finalHandoff.failures.push(run.error ?? run.status);}
         current.handoff=finalHandoff;current.status=run.status==="completed" ? "reconciliation-required":run.status==="cancelled" ? "cancelled":"failed";
         const c=s.conversations[current.conversationId]!;const id=`return:${a.id}:${a.attempt}`;
-        s.messages[id]={id,conversationId:c.id,assignmentId:a.id,sender:{kind:"expert",id:a.expertId},recipientId:a.parentId ? s.assignments[a.parentId]!.expertId:"human",text:finalHandoff.output,correlationId:run.correlationId,causationId:run.runId,delivery:"delivered",replyTo:a.parentId};
+        s.messages[id]={id,conversationId:c.id,assignmentId:a.id,sender:{kind:"expert",id:a.expertId},recipientId:a.parentId ? s.assignments[a.parentId]!.expertId:"human",text:finalHandoff.output,correlationId:run.correlationId,causationId:terminalEventId,delivery:"delivered",replyTo:a.parentId};
         if(!c.messageIds.includes(id))c.messageIds.push(id);return {ok:true};
       });
     }

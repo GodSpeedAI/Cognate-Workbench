@@ -78,8 +78,8 @@ describe("J-E-plan", () => {
           const continuations = await app.runtime.service.listContinuations(LOCAL_OPERATOR, { runId: run.runId });
           return continuations.some((c) => c.status === "OPEN" && c.type === "plan-review");
         });
-        const pending = await app.runtime.service.getRun(LOCAL_OPERATOR, { runId: run.runId });
         await waitForCondition(async () => (await app.runtime.service.getRun(LOCAL_OPERATOR, { runId: run.runId })).status === "waiting");
+        const pending = await app.runtime.service.getRun(LOCAL_OPERATOR, { runId: run.runId });
         expect(pending.status).toBe("waiting");
         const continuations = await app.runtime.service.listContinuations(LOCAL_OPERATOR, { runId: run.runId });
         const review = continuations.find((c) => c.status === "OPEN" && c.type === "plan-review")!;

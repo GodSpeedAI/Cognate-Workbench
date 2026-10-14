@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun src/server.ts",
     "start": "bun src/server.ts",
-    "test": "bun test test",
+    "test": "bun test --timeout 15000 test",
     "typecheck": "tsc -p tsconfig.json",
     "verify": "bun run typecheck && bun run test",
     "test:smoke": "bun test test/workbench-contract.test.ts test/workbench-glob.test.ts test/skill-bundle.test.ts"

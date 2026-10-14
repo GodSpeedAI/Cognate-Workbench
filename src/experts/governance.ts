@@ -10,7 +10,9 @@ export function expertGovernedService(service:RuntimeService,system:Caller):Runt
       const waits=await service.listContinuations({...system,tenant:caller.tenant},{});
       const wait=waits.find(w=>w.id===request.continuationId);
       if(wait?.type==="expert-assignment" && (caller.actor.kind!=="system" || caller.actor.id!==system.actor.id))throw new ServiceError("permission_denied","Specialist returns are resolved only by the durable completion bridge");
-      if(wait && ["tool-approval","governance-approval"].includes(wait.type) && caller.actor.kind!=="user")throw new ServiceError("permission_denied","Only a human may resolve protected approvals");
+      const condition=wait?.condition as {kind?:string}|null|undefined;
+      const humanGate=wait && (["tool-approval","governance-approval","plan-review"].includes(wait.type) || condition?.kind==="human_approval" || condition?.kind==="governance_approval");
+      if(humanGate && caller.actor.kind!=="user")throw new ServiceError("permission_denied","Only a human may resolve protected approvals");
       return service.resolveContinuation(caller,request);
     },
     async cancelRun(caller,request){

@@ -285,7 +285,6 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
   serviceRef.current = governedService;
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
-  await experts.seed(LOCAL_OPERATOR.tenant);
 
   // Seed `knownWorkspaceIds` from the persisted projection (survives restart).
   for (const row of ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" }))).rows) {
@@ -336,6 +335,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     );
   }
 
+  // Restore the legacy model route before feature initialization: recovered ordinary coding
+  // runs must not spend their provider-retry budget waiting for unrelated seed work.
+  await experts.seed(LOCAL_OPERATOR.tenant);
   const expertBridge = new ExpertCompletionBridge(experts,LOCAL_OPERATOR.tenant);
   await expertBridge.start();
 

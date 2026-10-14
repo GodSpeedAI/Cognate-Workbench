@@ -1,4 +1,5 @@
-// Loads the validated Interaction Domain Model (IDM) for the DeepSeek Harness reconstruction.
+// Loads Cognate Workbench's authoritative Interaction Domain Model (IDM).
+// The inherited semantic namespace is preserved for compatibility with persisted evidence.
 //
 // Per idm-to-cognate.md "Gaps": there is no canonical `.sea/interaction/` -> `domain/*.sea` wiring
 // step in the CLI or the domainforge package. This app's decision: `domain/` does NOT copy or
@@ -281,10 +282,9 @@ export function bindTranche11(domain: Domain) {
 }
 
 /**
- * Proposed Experts & Teams capability bindings. These explicit anchors keep the `.sea` model
- * authoritative; this map declares contracts only and does not imply that runtime components are
- * already published. Once implemented, components should validate authority and persist changes
- * through Cognate shared thread state with CAS semantics.
+ * Native Experts & Teams capability bindings. Each contract is explicitly published by the
+ * Experts, model-routing or commitment component. Semantic policies do not grant authority;
+ * the mutation boundary validates permissions and commits native shared thread state with CAS.
  */
 export const EXPERT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "expert.save": "Expert",

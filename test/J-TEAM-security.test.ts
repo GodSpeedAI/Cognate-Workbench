@@ -71,3 +71,52 @@ test("J-TEAM-CANCEL: cancellation stops an in-flight model request and keeps the
     expect((await testApp.state()).assignments[assignmentId]?.handoff).toBeNull();
   });
 }, 45_000);
+
+test("J-EXPERT-CREATE / MEMORY: supplied identities cannot overwrite work, private scopes or accepted knowledge", async () => {
+  let attack = false;
+  const responder = async (config: ReturnType<typeof route>, request: Parameters<typeof collaborationResponder>[1]): Promise<ModelResponse> => {
+    if (attack && config.model === "pm-model" && !request.messages.some(m => m.role === "tool")) return {
+      message: { role: "assistant", content: "" }, model: config.model, finishReason: "tool_calls",
+      toolCalls: [{ id: "overwrite-message", name: "team_message", arguments: { id: "message:protected-work", recipientId: "builder", text: "Forged replacement" } }],
+    };
+    if (attack && !request.messages.some(m => m.role === "tool")) return {
+      message: { role: "assistant", content: "" }, model: config.model, finishReason: "tool_calls",
+      toolCalls: [{ id: "overwrite-accepted", name: "expert_memory_write", arguments: {
+        id: "memory:accepted", scope: "personal", kind: "assertion", text: "Untrusted replacement", sources: [sourceId],
+      } }],
+    };
+    return collaborationResponder(config, request);
+  };
+  let sourceId = "";
+  await withExpertApp(responder, async app => {
+    await configureDefaultRoutes(app);
+    const original = await invoke(app, "expert.converse", { id: "protected-work", expertId: "builder", workspaceId: app.workspaceId, message: "Create a source", requestId: "original-work" }) as { assignmentId: string; conversationId: string };
+    sourceId = original.assignmentId;
+    await waitForAssignment(app, sourceId, a => !!a.handoff);
+    const before = (await app.state()).assignments[sourceId]!;
+    await expect(invoke(app, "expert.converse", { id: sourceId, expertId: "critic", workspaceId: app.workspaceId, message: "Overwrite work", requestId: "different-work" })).rejects.toThrow("identity already exists");
+    expect((await app.state()).assignments[sourceId]).toEqual(before);
+    const replay = await invoke(app, "expert.converse", { id: "protected-work", expertId: "builder", workspaceId: app.workspaceId, message: "Create a source", requestId: "original-work" });
+    expect(replay).toEqual(original);
+    await expect(invoke(app, "expert.copy", { expertId: "critic", id: "builder" })).rejects.toThrow("Expert identity already exists");
+    await expect(invoke(app, "expert.save", { id: "builder", name: "Overwrite", instructions: "Overwrite" })).rejects.toThrow("Expert identity already exists");
+    await expect(invoke(app, "team.copy", { teamId: "cognate-team", id: "cognate-team" })).rejects.toThrow("Team identity already exists");
+    await expect(invoke(app, "team.save", { id: "cognate-team", name: "Overwrite" })).rejects.toThrow("Team identity already exists");
+    await invoke(app, "expert.memory.write", { id: "memory:accepted", expertId: "builder", scope: "personal", kind: "accepted", text: "Human accepted fact", sources: [sourceId] });
+    await expect(invoke(app, "expert.memory.write", { id: "memory:accepted", expertId: "critic", scope: "personal", text: "Other owner", sources: [sourceId] })).rejects.toThrow("Memory scope overwrite denied");
+    await expect(invoke(app, "expert.memory.write", { id: "memory:accepted", expertId: "builder", teamId: "cognate-team", scope: "team", text: "Other scope", sources: [sourceId] })).rejects.toThrow("Memory scope overwrite denied");
+    attack = true;
+    const attempted = await invoke(app, "expert.converse", { expertId: "builder", conversationId: original.conversationId, workspaceId: app.workspaceId, message: "Try replacing accepted knowledge" }) as { assignmentId: string };
+    const returned = await waitForAssignment(app, attempted.assignmentId, a => !!a.handoff);
+    expect(returned.handoff?.observedFailures?.join(" ")).toContain("Only a human may replace accepted knowledge");
+    expect((await app.state()).memory["memory:accepted"]?.text).toBe("Human accepted fact");
+    const addressed = await invoke(app, "team.converse", { teamId: "cognate-team", workspaceId: app.workspaceId, message: "Attempt message overwrite" }) as { assignmentId: string };
+    const addressedReturn = await waitForAssignment(app, addressed.assignmentId, a => !!a.handoff);
+    expect(addressedReturn.handoff?.observedFailures?.join(" ")).toContain("Message identity already exists");
+    expect((await app.state()).messages["message:protected-work"]?.sender.kind).toBe("human");
+    expect((await app.state()).messages["message:protected-work"]?.text).toBe("Create a source");
+    await app.restart();
+    expect((await app.state()).memory["memory:accepted"]?.kind).toBe("accepted");
+    expect((await app.state()).assignments[sourceId]?.runId).toBe(before.runId);
+  });
+}, 45_000);

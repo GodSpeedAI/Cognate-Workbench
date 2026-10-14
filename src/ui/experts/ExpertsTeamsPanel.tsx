@@ -139,30 +139,6 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
   }, [state, teams, experts, selectedTeamId, selectedExpertId, pendingTeamSelection, pendingExpertSelection]);
 
   useEffect(() => {
-    let stopped = false;
-    if (!conversationScope) {
-      setConversationHistory([]);
-      return;
-    }
-    const input = {
-      list: true,
-      scope: conversationScope,
-      ...(conversationScope === "team" ? { teamId: team?.id } : { expertId: expert?.id }),
-      ...(conversationScope === "private-team" ? { teamId: team?.id } : {}),
-    };
-    if ((conversationScope === "team" && !team?.id) || (conversationScope !== "team" && !expert?.id)) {
-      setConversationHistory([]);
-      return;
-    }
-    setHistoryBusy(true);
-    void invoke<{ conversations: Conversation[] }>("expert.context", input)
-      .then((result) => { if (!stopped) setConversationHistory(result.conversations); })
-      .catch((error: unknown) => { if (!stopped) setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) }); })
-      .finally(() => { if (!stopped) setHistoryBusy(false); });
-    return () => { stopped = true; };
-  }, [conversationScope, expert?.id, invoke, team?.id]);
-
-  useEffect(() => {
     if (conversationScope !== "private-team" || !conversationId) return;
     let stopped = false;
     const refresh = () => void invoke<{ conversation: Conversation; messages: NonNullable<ExpertState["messages"][string]>[]; assignments: Assignment[] }>("expert.context", { conversationId })

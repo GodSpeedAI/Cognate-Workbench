@@ -123,6 +123,7 @@ export class ExpertsService {
     return [...selected,...recent];
   }
   makeAssignment(state: ExpertState, input: {id:string; e:Expert; conversation:Conversation; purpose:string; acceptance:string[]; model:ModelConfig; parent?:Assignment; mode:string; authorityTools:ExpertTool[]}): Assignment {
+    if (state.assignments[input.id]) throw new Error("Assignment identity already exists");
     const {e,conversation,parent} = input;
     const t = conversation.teamId ? team(state,conversation.teamId,true) : undefined;
     const membership = t?.members.find(m => m.expertId === e.id);
@@ -227,12 +228,14 @@ export class ExpertsService {
         case "expert.save": {
           const eId = input.expertId ? text(input.expertId,"expertId",200) : id;
           const previous = state.experts[eId];
+          if (!input.expertId && previous) throw new Error("Expert identity already exists; edit by expertId");
           const e: Expert = {id:eId,name:text(input.name,"name",100),lifecycle:"active",definition:{id:previous?.definition.id ?? `definition:${eId}`,
             specialization:text(input.specialization ?? input.name,"specialization",500),instructions:text(input.instructions,"instructions"),route:route(input.route),tools:tools(input.tools ?? []),
             contextBudget:integer(input.contextBudget,16000,2000,64000),maxSteps:integer(input.maxSteps,12,1,20)}};
           state.experts[eId]=e; return {expertId:eId};
         }
         case "expert.copy": {
+          if (state.experts[id]) throw new Error("Expert identity already exists");
           const e = structuredClone(expert(state,input.expertId));e.id=id;e.definition.id=`definition:${id}`;e.name=text(input.name ?? `${e.name} copy`,"name",100);state.experts[id]=e;return {expertId:id};
         }
         case "expert.archive": {
@@ -244,11 +247,13 @@ export class ExpertsService {
         case "team.save": {
           const tId = input.teamId ? text(input.teamId,"teamId",200) : id;
           const previous = state.teams[tId];const l = input.limits ? record(input.limits) : {};
+          if (!input.teamId && previous) throw new Error("Team identity already exists; edit by teamId");
           const t: Team = {id:tId,name:text(input.name,"name",100),lifecycle:previous?.lifecycle ?? "draft",members:previous?.members ?? [],tools:tools(input.tools ?? previous?.tools ?? EXPERT_TOOLS),
             limits:{maxDepth:integer(l.maxDepth,previous?.limits.maxDepth ?? 2,1,5),maxAssignments:integer(l.maxAssignments,previous?.limits.maxAssignments ?? 12,1,30),maxUnread:integer(l.maxUnread,previous?.limits.maxUnread ?? 20,1,100),maxRounds:integer(l.maxRounds,previous?.limits.maxRounds ?? 8,1,30)}};
           state.teams[tId]=t;return {teamId:tId};
         }
         case "team.copy": {
+          if (state.teams[id]) throw new Error("Team identity already exists");
           const t = structuredClone(team(state,input.teamId));t.id=id;t.name=text(input.name ?? `${t.name} copy`,"name",100);t.lifecycle="draft";state.teams[id]=t;return {teamId:id};
         }
         case "team.member": {
@@ -275,6 +280,7 @@ export class ExpertsService {
         }
         case "expert.converse":
         case "team.converse": {
+          if (state.messages[`message:${id}`] || !input.conversationId && state.conversations[`conversation:${id}`]) throw new Error("Conversation message identity already exists");
           const t=input.teamId ? team(state,input.teamId,true) : undefined;
           const e=capability === "team.converse" ? expert(state,t!.members.find(m=>m.role==="orchestrator")!.expertId) : expert(state,input.expertId);
           if (t && !t.members.some(m=>m.expertId===e.id)) throw new Error("Expert is not a Team member");
@@ -309,6 +315,7 @@ export class ExpertsService {
           a.handoff=h;return {ok:true};
         }
         case "team.message": {
+          if (state.messages[id]) throw new Error("Message identity already exists");
           if (!invoking || !invoking.teamId || !invoking.execution.tools.includes("team_message")) throw new Error("Addressed messaging is not authorized");
           const a=state.assignments[invoking.id]!;const t=team(state,a.teamId,true);const recipient=expert(state,input.recipientId);
           if (!t.members.some(m=>m.expertId===recipient.id)) throw new Error("Recipient is not in this Team");
@@ -355,6 +362,9 @@ export class ExpertsService {
           const kind=input.kind ?? "assertion";
           if(!["observation","assertion","inference","accepted"].includes(String(kind)))throw new Error("Unknown knowledge kind");
           if(kind==="accepted" && ctx.actor.kind!=="user")throw new Error("Only a human may promote accepted knowledge");
+          const previous=state.memory[id];
+          if(previous && (previous.expertId!==eId || previous.teamId!==teamId || previous.scope!==scope))throw new Error("Memory scope overwrite denied");
+          if(previous?.kind==="accepted" && invoking)throw new Error("Only a human may replace accepted knowledge");
           const sources=strings(input.sources,"sources");
           if(sources.some(ref=>!state.assignments[ref] && !state.messages[ref] && !Object.values(state.assignments).some(a=>a.runId===ref)))throw new Error("Memory provenance must cite existing Assignments, runs or messages");
           if(invoking && sources.some(ref=>{const a=state.assignments[ref] ?? Object.values(state.assignments).find(a=>a.runId===ref);const m=state.messages[ref];return (a && a.conversationId!==invoking.conversationId) || (m && m.conversationId!==invoking.conversationId);} ))throw new Error("Memory provenance crosses a private context");
