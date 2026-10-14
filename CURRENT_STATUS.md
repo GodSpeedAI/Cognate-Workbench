@@ -1,6 +1,6 @@
-# Current status — revision 6
+# Current status — revision 7
 
-Native Experts & Teams and responsive management/conversation UX are implemented, verified, committed and published to `origin/feature/expert-teams`. The [implementation plan](.agents/plans/20261013_native-experts-teams.plan.yaml) is closed with explicit advanced deferrals.
+Native Experts & Teams remains published at `a892120` on `feature/expert-teams`. A new [debt closure plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) is executing; the previous release remains the verified baseline, not proof of this tranche.
 
 Final `just verify` at `a697e36` passed: **1,064 tests, zero failures, 6,536 assertions across 85 files (439.73 seconds)**, including typecheck. DomainForge 0.19.0 validates with zero violations; 188 semantic objects and all 24 Expert bindings resolve.
 
@@ -14,6 +14,10 @@ The task-acquired donor is deleted, with no donor files tracked. Provenance rema
 
 Implementation and documentation through `e3433e5` pushed successfully without force. This final status/plan closure follows on the same branch.
 
-Schedules, live inter-Expert steering, parallel workers, vector retrieval and multi-process effect dispatch remain deferred. Character budgets, aggregate scaling, graceful provider shutdown, development authentication, command guards and the DomainForge formatter discrepancy remain documented limits. Semantics validate. The debt ledger is `.agents/DEBT.md`.
+Schedules, live inter-Expert steering, parallel workers, aggregate scaling, token budgets, multi-process effects and production trust are the new mission's open work. The formatter debt is closed with executable evidence; optional vector retrieval still requires benchmark justification. The disposition map preserves every historical finding.
 
-Full report: [docs/experts-verification.md](docs/experts-verification.md).
+The new dependency and exhaustive disposition map is [docs/experts-debt-closure.md](docs/experts-debt-closure.md). Fresh full verification is running. Local upstream Cognate has user changes in its status files; they remain untouched. SDK changes are isolated on `feature/durable-dispatch-debt`. Published 0.3.0 availability was checked; Workbench stays on 0.2.0 until supported replacement integration passes.
+
+Formatter reconnaissance found the installed 0.19.0 already contains the upstream fidelity fix. A regression failed on the existing noncanonical formatting; canonical formatting now passes AST/comment/idempotence checks, zero-violation validation, and upstream's four fidelity tests. No semantic IDs changed. A narrow UI slice replaces fabricated child-run usage with an explicit unavailable state; implementation review remains pending.
+
+Prior release report: [docs/experts-verification.md](docs/experts-verification.md).
