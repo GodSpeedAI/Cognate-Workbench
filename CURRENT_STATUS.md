@@ -1,6 +1,6 @@
-# Current status — revision 12
+# Current status — revision 13
 
-Independent GitHub reviewer gate removed. SDK PR42 exact head 033029d passes CI and clean-room packaging plus all 81 local gates; final operator merge/release authorization remains required. Full debt mission incomplete.
+Operator authorized merge and linked release. Cognate PR42 merged at c6e3207; PR43 proposes aligned SDK 0.4.0. Release CI and package completeness precede Workbench integration. Mission incomplete.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
 The [verification report](docs/experts-debt-verification.md) records debt dispositions, journeys,
@@ -23,8 +23,10 @@ This published release does not contain the new contracts; Workbench still uses 
 Upstream corrections are pushed through 033029d; exact-head CI/packaging passes. All 81 local SDK
 verification gates pass. AG-UI settled-stream tests pass twenty repetitions (100 tests / 160 assertions).
 The operator
-removed the independent GitHub reviewer requirement. All remaining technical gates and final
-operator authorization still precede merge/publication. Neither has occurred.
+removed the independent GitHub reviewer requirement and gave final merge/release authorization.
+PR42 merged at c6e3207 on 2026-10-14 21:08:54 UTC. Release Please generated PR43 at f1a4914;
+local release configuration checks confirm all 45 packages and the manifest at 0.4.0. Exact-head
+checks precede publication. No new package publication or Workbench upgrade is claimed yet.
 
 Distributed run-write ownership, production authentication/tenant integration, supported containment,
 indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux child

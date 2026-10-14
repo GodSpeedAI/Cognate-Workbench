@@ -216,8 +216,16 @@ unimplemented ownership, authentication or retrieval work is already done.
 
 ## Remaining prerequisites and smallest next actions
 
-1. Obtain final operator merge/release authorization now that exact-head SDK checks pass.
-   Requested Luna workers resumed and completed the
+The operator gave final authorization to proceed. PR #42 merged at
+`c6e32079844dd36dd6c20d3516f8c6ac2f2c67f0` on 2026-10-14 21:08:54 UTC. Release workflow
+`38637959538` generated [linked release PR #43](https://github.com/GodSpeedAI/Cognate/pull/43),
+head `f1a49147cdbd558ab328184fdc8884088a6a49ca`. Its 91 changed files are exactly 45 package
+manifests, 45 changelogs and the release manifest; configuration checks confirm aligned 0.4.0.
+Release-head verification/packaging is being run before publication. No new SDK release or
+Workbench dependency integration is claimed yet.
+
+1. Complete the authorized linked release after exact-head checks, then verify all 45 published
+   package versions and clean-room installation. Requested Luna workers resumed and completed the
    CodeRabbit and release audit after an earlier service usage limit; unperformed security work
    remains unclaimed.
 2. Review the concrete upstream PR and follow Cognate's linked-version Release Please/npm workflow.
