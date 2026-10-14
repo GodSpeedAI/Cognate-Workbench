@@ -28,7 +28,7 @@ distributed integration remain separately gated; the plan records that narrower 
 | A1 Autonomous schedules | **Partially closed — specific remaining limitation** | Native Expert/Team one-time/daily/weekly schedules execute after restart, with IANA/DST rules, stable occurrence/Assignment IDs, bounded skip/coalesce, cancellation, failure and approval receipts, and real UI. Legacy accepted-workflow automation records are not automatically migrated. One process only; schedule history remains an aggregate. |
 | A2 Parallel Experts | **Partially closed — specific remaining limitation** | Upstream native capacities 1/2/4/8, resource eligibility, cancellation, continuation and PostgreSQL tests pass. Workbench still uses serial 0.2.0; reviewed supported SDK publication and application eligibility/UI integration remain required. |
 | A3 Live steering | **Partially closed — specific remaining limitation** | Shared Team messages are durably accepted and incorporated at safe model-decision boundaries, with sequence, ownership, supersession/cancellation, bounds and SIGKILL replay. Idle delivery retains the existing queue. Generalized SDK inbox and standalone live steering remain open. No arbitrary inference interruption. |
-| A4 Memory and economics | **Partially closed — specific remaining limitation** | Bounded immutable partitions, interrupted migration, erasure invalidation, scoped cursor pages, measured write reduction and frozen Expert attempt budgets work. Global root CAS, complete materialization, indexed SQL retrieval, model tokenization and ordinary-session/global budget ceilings remain open. |
+| A4 Memory and economics | **Partially closed — specific remaining limitation** | Bounded immutable partitions, interrupted migration, erasure invalidation, scoped cursor pages, measured write reduction and frozen Expert attempt budgets work. Global root CAS, complete materialization, indexed SQL retrieval, model tokenization, pre-dispatch crash/billing reservations and ordinary-session/global budget ceilings remain open. |
 | A5 Multiple processes | **Still open — not implemented** | Fenced native outbox claims are an upstream prerequisite only. Run-write fencing, authoritative store-time ownership, worker compatibility, two-process fault injection and ambiguous-effect recovery are not implemented. No multiprocess mode is exposed. |
 | A6 Production trust | **Still open — not implemented** | Upstream opt-in Linux child-process namespace ports pass real adversarial tests. They are not consumed by Workbench. Production identity/session/tenant integration, aggregate resource containment, supported deployment and independent security review remain open. Development bearer authentication is unchanged. |
 | A7 Formatter fidelity | **Closed — verified** | Installed DomainForge 0.19.0 already contains the upstream fix. Canonical formatting preserves normalized AST and comments, validates, is idempotent, and passes `fmt --check`. No duplicate upstream patch or CLI version change was needed. |
@@ -116,7 +116,7 @@ deployment has been established.
 | Command | Observed result |
 | --- | --- |
 | Initial `just verify` | 1,064 pass, zero fail, 6,536 assertions/85 files; 407.91 s |
-| Final integrated `just verify` | **1,100 pass, zero fail, 6,856 assertions/96 files; 629.97 s**, including typecheck |
+| Final integrated `just verify` | **1,101 pass, zero fail, 6,860 assertions/96 files; 381.67 s**, including typecheck |
 | `just typecheck` | Pass |
 | Focused native debt suite (eleven files) | 41 pass, zero fail, 303 assertions |
 | Inbox ownership/schedule race suites | 18 pass, zero fail, 96 assertions |
@@ -127,11 +127,13 @@ deployment has been established.
 | `domainforge fmt --check .sea/interaction/interaction-model.sea` | Already formatted |
 | `domainforge validate --format human .sea/interaction/interaction-model.sea` | Zero violations |
 | DomainForge upstream formatter fidelity tests | Four pass |
-| Upstream Cognate `just verify` | 81/81 gates pass; pool regression added to CG-EVT-008 |
+| Upstream Cognate `just verify` | Earlier baseline 81/81; review rerun 80/81, then its sole documentation-map omission fixed and narrow gate passes |
 | Upstream events/memory/SQLite; PostgreSQL conformance | 73 pass; 29 pass |
-| Upstream complete PostgreSQL adapter suite | 42 pass, zero fail, 192 assertions |
+| Upstream complete PostgreSQL adapter suite | 42 pass, zero fail, 193 assertions |
 | Upstream saturated-pool regression, three repetitions | Three pass, zero fail, twelve assertions |
-| Upstream runtime/service/continuations | 96 pass, zero fail, 371 assertions |
+| Upstream runtime/service/continuations | 96 pass, zero fail, 373 assertions after final startup compatibility guard |
+| Upstream events/continuations/runtime after CodeRabbit fixes | 225 pass, zero fail, 772 assertions; seventeen optional external CEP tests skipped |
+| Mixed run/resume claims at capacities one/two | Before: two/four outstanding claims; after: bounded at one/two with all deliveries settled once |
 | `COGNATE_BWRAP_TESTS=1 bun test --timeout 15000 packages/execution/test/bubblewrap.test.ts` | Ten pass, zero fail, 29 assertions; actual OS namespaces |
 | Upstream documentation gate | Five pass, zero fail, 26 assertions |
 | `git diff --check` | Pass |
@@ -141,6 +143,13 @@ Initial browser locator failures and a font-load wait were corrected; reruns and
 suite pass. Unprivileged fixture failures were sandbox access denials; authorized real-store/OS
 tests supplied the observed evidence. Optional skipped OS tests are not counted as containment proof.
 
+Final scope review also bound cached transcript/history/memory pages to their selected conversation,
+Expert and Team/query, so late reads cannot display previous-scope content under a new selection.
+The new native browser sentinel test verifies Expert and Team memory switching. A deliberately held
+Google Fonts response reproduces the former bootstrap timeout; nonblocking optional stylesheet
+preloading makes that same test pass in about four seconds without extending timeouts. All 1,101
+tests pass after these fixes. The shorter full-suite time is one local run, not a general latency claim.
+
 ## Commits, branches and release boundary
 
 Workbench implementation commits:
@@ -149,6 +158,8 @@ Workbench implementation commits:
 - `07df49e` — dependency/debt disposition plan.
 - `a4d6201` — native schedules, live inbox, partition migration/pagination, budgets and journey tests.
 - `8169975` — native UX, observed usage, responsive evidence and browser journeys.
+- `e88bdf4` — debt evidence, benchmarks and documentation reconciliation.
+- `7ecc4a0` — scoped cached-view guards and nonblocking optional font bootstrap.
 
 The authorized Workbench branch is `feature/expert-teams`; final documentation/status publication
 is recorded in its Git history. Upstream branch `feature/durable-dispatch-debt` is pushed with:
@@ -157,9 +168,15 @@ is recorded in its Git history. Upstream branch `feature/durable-dispatch-debt` 
 - `920c4c9` — opt-in Linux execution world and regression gates.
 - `06a520b` — fail-fast secret and actually reachable network-denial evidence.
 - `48ad057` — precise old-writer and workspace-content compatibility limits.
+- `a0b462a` — complete upstream verification/publication checkpoint.
+- `a59a7da` — reject unfenced injected stores before opening a parallel runtime; 96 tests/373 assertions.
+- `7221260` — release only uncommitted duplicate position reservations; following fact retains position two.
+- `7d9b80f` — PostgreSQL replay and release checkpoint.
+- `52a8eaf` — shared run/resume admission, worker settlement/error regression and actual file-existence check.
+- `ff505ae` — remove independent GitHub reviewer gate per operator instruction; repair evidence documentation map.
 
 [Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42) is reviewable. CI verification and
-clean-room packaging passed on `06a520b`; later documentation-only commits have their narrow gate.
+clean-room packaging passed on `7d9b80f`; subsequent review corrections need exact-head checks.
 No new SDK release is claimed. Workbench still pins published 0.2.0; the observed upstream 0.3.0
 release does not contain these new contracts. No DomainForge source change or release was required.
 
@@ -167,10 +184,24 @@ The original sibling Cognate status modifications remain untouched. Temporary so
 production dependency; provenance survives in upstream commits/PR and this report. Cleanup and
 push receipts are recorded in the latest development status.
 
+Workbench through documentation commit `e88bdf4` was pushed successfully without force. The clean
+SDK task worktree was removed at checkpoint `a0b462a`, then reopened for the admission guard,
+PostgreSQL ordering regression and CodeRabbit corrections. It currently remains at the pushed
+upstream branch for review and CI follow-up. The prior DeepSeek donor is absent and no donor files
+are indexed. Other donor directories and sibling working changes were preserved. Unsupported
+legacy/custom stores now fail at parallel startup rather than leaving accepted work queued.
+
+The operator explicitly removed the independent GitHub reviewer requirement. Remaining release
+gates are verified actionable CodeRabbit fixes, green latest-head CI and clean-room packaging,
+linked-package release readiness, documented limits and final operator authorization before merge
+or publication. No reviewer-access change is needed. These gates do not imply the still
+unimplemented ownership, authentication or retrieval work is already done.
+
 ## Remaining prerequisites and smallest next actions
 
-1. Restore availability of the requested Luna workers: the service reported its usage limit during
-   this tranche. Their completed work was preserved; unfinished recon/security work was not claimed.
+1. Confirm latest-head SDK CI and packaging. Requested Luna workers resumed and completed the
+   CodeRabbit and release audit after an earlier service usage limit; unperformed security work
+   remains unclaimed.
 2. Review the concrete upstream PR and follow Cognate's linked-version Release Please/npm workflow.
    Then install the genuinely published version and rerun Workbench eligibility, concurrency,
    compatibility and containment journeys. Do not substitute a local SDK checkout.

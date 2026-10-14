@@ -1,38 +1,30 @@
-# Current status — revision 10
+# Current status — revision 11
 
-Verified native debt slices committed; final Workbench gate passes1100tests. Upstream SDK PR42 is pushed and tested but unpublished. Full debt-closure mission remains incomplete.
+Workbench verified at 1101 passing tests; upstream PR42 review corrections are pushed. Independent GitHub reviewer gate removed by operator; latest-head CI and final merge/release authorization remain required. Mission incomplete.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
-The complete [verification report](docs/experts-debt-verification.md) records every primary debt,
-canonical journeys, measurements, failure evidence, source commits and remaining conditions.
+The [verification report](docs/experts-debt-verification.md) records debt dispositions, journeys,
+measurements, failure evidence, commits and remaining conditions.
 
-Final `just verify`: **1,100 pass, zero fail, 6,856 assertions across 96 files, 629.97 seconds**,
-including typecheck. DomainForge 0.19.0 validates with zero violations and clean formatting;
-222 semantic objects and all 27 Expert/four schedule/twenty cognitive bindings resolve.
+Final Workbench `just verify`: **1,101 pass, zero fail, 6,860 assertions across 96 files,
+381.67 seconds**, including typecheck. DomainForge 0.19.0 validates with zero violations and clean
+formatting; 222 semantic objects and all 27 Expert/four schedule/twenty cognitive bindings resolve.
+Native schedules, shared Team live inbox, partition migration, scoped pagination and frozen Expert
+budgets retain their real PostgreSQL and browser evidence. Default Team governance remains intact.
 
-Workbench remains on published Cognate **0.2.0** and PostgreSQL/pg0. Backend `a4d6201` and UI
-`8169975` implement single-process native Expert/Team schedules, shared Team live inbox,
-bounded immutable state partitions, scoped cursor history/memory, frozen Expert attempt budgets,
-accurate observed usage and inspectable receipts. Schedule and inbox SIGKILL recovery, failure,
-cancellation, human approval, migration/erasure, private context and browser journeys pass.
-The default Cognate Team and one-Orchestrator invariant remain intact.
+[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42) contains shared pre-claim admission
+for run and continuation delivery, worker failure settlement and corrected actual filesystem evidence.
+The mixed-topic regression failed at two/four outstanding leases for capacities one/two before the
+fix and passes afterward. Events/continuations/runtime: 225 pass, 772 assertions, with seventeen
+optional external CEP tests skipped. Linux OS evidence: ten tests / 29 assertions.
 
-A real PostgreSQL pool deadlock was reproduced and fixed upstream. Workbench coalesces identical
-immutable preparation requests without caching private state; the original concurrent membership
-journey passes five repetitions with unchanged assertions/timeouts. Comparative 917 KB writes fall
-from about 3.68 MB to 173 KB; the 8.49 MB fixture retains scope/identity and recovers.
+All 45 linked npm names currently report 0.3.0 and the historical nine-package gap is resolved.
+This published release does not contain the new contracts; Workbench still uses published 0.2.0.
+Upstream corrections are pushed through ff505ae; latest-head CI/packaging is pending. The operator
+removed the independent GitHub reviewer requirement. All remaining technical gates and final
+operator authorization still precede merge/publication. Neither has occurred.
 
-Upstream `ab4dd2a`, `920c4c9`, `06a520b` and `48ad057` are pushed in
-[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42). Native fencing/concurrency and Linux
-child-process ports pass scoped gates and 81 verification gates. CI/clean-room packaging passed
-`06a520b`. Source success is not a published dependency release or production trust.
-
-Distributed run-write ownership, production identity/session/tenant integration, supported contained
-deployment, aggregate resource quotas and independent security review remain open. So do indexed
-retrieval, exact tokenization/global budgets and enumerated historical workflow gaps. One Bun process
-is supported; no new parallel/distributed UI promise is made.
-
-Luna workers reported their service usage limit; unperformed recon is not claimed. Sibling user
-changes are preserved. Final documentation push and removal of the task-owned temporary SDK
-worktree are next; source is preserved by pushed commits and PR. No force-push or unsupported
-development dependency is authorized or used.
+Distributed run-write ownership, production authentication/tenant integration, supported containment,
+indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux child
+containment do not establish those guarantees. The SDK task worktree remains ignored for review
+follow-up; no donor source is a production dependency. Original sibling changes are preserved.

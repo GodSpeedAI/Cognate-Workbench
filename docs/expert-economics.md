@@ -16,7 +16,10 @@ retained; an excessive request fails before provider dispatch with `BUDGET_EXCEE
 Successful provider-reported input/output tokens replace the conservative reservation in accounting.
 Failed or unreported generations retain input and maximum-output reservations. Erased prior model
 evidence fails closed because the remaining allowance cannot be established safely. Provider calls
-are recorded native invocations, so replay does not charge another logical call. These are preflight
+are recorded native invocations, so replay of a committed outcome does not create another logical
+call. A process death after provider dispatch but before outcome persistence can leave unknown billed
+usage and repeat that inference on recovery. Durable pre-dispatch billing reservations and provider
+reconciliation are not implemented; these limits are not a physical billing guarantee. These are preflight
 guardrails: a provider's inaccurate token report or disregard of an output limit cannot be undone.
 
 Open an assignment's **Model usage and budget** disclosure to inspect provider-reported usage,

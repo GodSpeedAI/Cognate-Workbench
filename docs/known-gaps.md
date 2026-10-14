@@ -64,6 +64,9 @@ From the workbench design source:
   optional model budgets additionally check the complete visible request plus reserved output using
   a labeled conservative byte estimate. Model-specific tokenizer counts and hidden provider framing
   remain unmeasured. Provider-reported input/output usage is recorded separately.
+  A crash after inference dispatch but before its native outcome persists can leave unknown billed
+  usage and repeat the call on recovery. Durable pre-dispatch billing reservations and provider
+  reconciliation remain open; configured prices/ceilings are not a billing guarantee.
 - Expert state now uses bounded immutable native partitions and an atomic manifest. Scoped history
   and memory responses are paginated; stale cursors explicitly reject. Reads still materialize all
   partitions and filter lexically, and the root CAS remains a global contention point. No indexed
@@ -99,7 +102,7 @@ Explicitly labelled as such in the code.
 
 ### Inert controls against the product's own rule
 
-`PRODUCT.md` principle 3 says *"No control renders that does something"*, and
+`PRODUCT.md` principle 3 says *"Every control has a real purpose"*, and
 `src/ui/workbench/UX.md` rule 7 says a disabled control must explain itself **in visible text next to
 the control**, never in a tooltip alone.
 
@@ -175,6 +178,10 @@ was **not** removed, no merge to Workbench `main` had occurred at that point, an
 execution validation was pending CI — with an explicit instruction not to call it a successful
 cutover until the workflow was green.
 
+That pending-validation statement is historical. Current standalone verification passes against
+published SDK packages (see the debt verification report). The original reconstruction is retained,
+and this task does not merge its Workbench feature branch into `main` or perform migration cleanup.
+
 `AGENTS.md` still records that the original must not be removed until standalone verification passes,
 and that the development authenticator is a known security limitation that must not be described as
 production hardening.
@@ -189,6 +196,8 @@ product-characterisation document · reference screenshots and comparison images
 guard tests (`no-reference-imports`, `no-copied-source`) and the screenshot capture script.
 
 Where a debt or critic finding appears in recovered prose, it is cited as second-hand.
+The current native `.agents/DEBT.md`, Experts verification/translation reports, tests and screenshots
+do exist. They are new evidence and do not reconstruct the missing legacy artifacts listed above.
 
 ## Source trail
 
