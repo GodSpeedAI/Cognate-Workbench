@@ -2,9 +2,16 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ExpertEditor } from "../src/ui/experts/ExpertEditor.tsx";
-import { AssignmentEffectResolution, AssignmentSettlement, ExpertMemoryPanel } from "../src/ui/experts/ExpertsTeamsPanel.tsx";
+import { AssignmentEffectResolution, AssignmentSettlement, ExpertMemoryPanel, LiveInboxForm } from "../src/ui/experts/ExpertsTeamsPanel.tsx";
 import type { Assignment, Expert } from "../src/experts/types.ts";
 import { TeamEditor } from "../src/ui/experts/TeamEditor.tsx";
+
+test("LiveInboxForm explains that an update reaches a running Expert at its next decision", () => {
+  const html=renderToStaticMarkup(<LiveInboxForm assignment={{id:"assignment-running",expertId:"builder"} as Assignment} busy={false} onSend={async()=>true} />);
+  expect(html).toContain("Live update for this running Expert");
+  expect(html).toContain("The next model decision will receive this");
+  expect(html).toContain("Send live update");
+});
 
 describe("ExpertEditor", () => {
   test("names identity, model route, tools and context without collecting credentials", () => {

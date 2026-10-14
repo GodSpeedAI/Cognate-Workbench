@@ -145,7 +145,7 @@ interface ChatMessage {
    *  the "Verbose" Work details mode (reference-behavior-matrix.md §10a: `foldCompletedTurns: false`
    *  — every step stays visible individually instead of folding behind the "Took Ns" disclosure).
    *  Not persisted across a reload/session-switch (this app's `session.history` only returns
-   *  `stepCount`, not per-step detail — see APP/DEVIATIONS.md); a reloaded historical turn falls
+   *  `stepCount`, not per-step detail — see docs/known-gaps.md); a reloaded historical turn falls
    *  back to the folded view even under Verbose. */
   readonly steps?: readonly ToolEntry[];
 }
@@ -219,7 +219,7 @@ function usePlanState(sessionId: string | undefined): PlanStateRow | undefined {
   }, [rows, sessionId]);
 }
 
-interface SubagentRowView {
+export interface SubagentRowView {
   readonly sessionId: string;
   readonly toolCallId: string;
   readonly title: string;
@@ -506,7 +506,7 @@ function FirstRunNotice({ onContinue }: { readonly onContinue: () => void }) {
  *  key is entered; reference-behavior-matrix.md §1). This tranche has no default/preset provider to
  *  key-only configure (no DeepSeek-branded "official" provider) — "Save and continue" dismisses this
  *  step the same as "Configure later"; the entered key is not persisted here (an assumption, not an
- *  observed reference behavior — see APP/DEVIATIONS.md). Full provider setup happens in Settings →
+ *  observed reference behavior — see docs/known-gaps.md). Full provider setup happens in Settings →
  *  Models afterward. */
 function FirstRunApiKey({ onDismiss }: { readonly onDismiss: () => void }) {
   const [key, setKey] = useState("");
@@ -1166,10 +1166,10 @@ const PRESET_DETAILS: Readonly<Record<AgentPreset, string>> = {
 /** Settings → Built-in plugins (§14, checkpoints 25*): an inspect-only view of this deployment's
  *  plugins — Session plugins composed per agent preset (with the preset-inspect dropdown), Global
  *  plugins shared by everything. Search filters both. Read-only by design this pass (no
- *  enable/disable toggles of real capabilities — DEVIATIONS.md). */
+ *  enable/disable toggles of real capabilities — docs/known-gaps.md). */
 function BuiltInPluginsPane({ settings }: { readonly settings: GeneralSettings }) {
   // Usage pass U7: the RealityTrace row reads its durable state and toggles for real; the other
-  // rows stay informational (DEVIATIONS.md).
+  // rows stay informational (docs/known-gaps.md).
   const realitytrace = useRealityTracePlugin();
   const [inspect, setInspect] = useState<AgentPreset>(settings.preset);
   const [sessionOpen, setSessionOpen] = useState(true);
@@ -1267,7 +1267,7 @@ function BuiltInPluginsPane({ settings }: { readonly settings: GeneralSettings }
 /** Settings → Agent presets (§15, checkpoints 26*): preset cards for this app's three presets —
  *  "Set as new task default" (durable via settings.changePreset), "Mode details" and "View
  *  configuration" dialogs (this app's own copy/composition, not the reference's YAML). The
- *  reference's Creator mode is out of scope (DEVIATIONS.md). */
+ *  reference's Creator mode is out of scope (docs/known-gaps.md). */
 function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) {
   const client = useCognate();
   const [detailsFor, setDetailsFor] = useState<AgentPreset | undefined>(undefined);
@@ -1503,11 +1503,9 @@ function GeneralPane({
 /** Settings → Models: a provider list (row + Cancel/Apply for the configured provider's API key,
  *  Edit/Delete) plus a two-tab "Add model provider" wizard (Third-party combobox / Custom model API
  *  form with a Models sub-list and Cancel/Create provider) — critic round-1 P0-4/P1-4. This tranche's
- *  backend (`model.configure`) still only ever holds one live provider config (`model-config`
- *  projection's single `"current"` row — see APP/DEVIATIONS.md), so "Edit" reopens the wizard
- *  prefilled with the current config and "Delete" is present but disabled (no backend
- *  "unconfigure" capability exists this tranche) — same "control present, feature stubbed" pattern
- *  used throughout this app (see the Settings nav's inert items below). */
+ *  backend (`model.configure`) holds one live provider config (`model-config` projection's single
+ *  `"current"` row), so "Edit" reopens the wizard prefilled with the current config. Delete is a
+ *  real two-step action that removes the configured provider and its stored secret. */
 /** "Open configuration file" (T11, J-CFG-config-path): the browser cannot open a local file, so the
  *  button resolves where configuration lives and hands over the real, non-secret bytes — the path to
  *  copy, the recognised environment variables with sensitive values already redacted, and a
@@ -1738,7 +1736,7 @@ function SettingsModels({
       if (!providerId || !displayName || !baseURL) throw new Error("Provider ID, display name, and base URL are required.");
       // This tranche's `model.configure` capability holds exactly one live provider config; a
       // Models sub-list with several rows is structurally supported (Fetch/Add), but only the first
-      // configured model is actually wired through to the backend — see APP/DEVIATIONS.md.
+      // configured model is actually wired through to the backend — see docs/known-gaps.md.
       await client.invoke("model.configure", {
         providerId,
         baseURL,
@@ -2427,7 +2425,7 @@ function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; readonly 
  *  pending"`, reference-behavior-matrix.md §6.3) — renders as soon as `todo_write` has run, under
  *  Standard mode too, and persists after plan mode exits (`13c-plan-completed`). Expandable to the
  *  raw todo list; the reference's own expanded-state content was not captured, so this is this
- *  app's own minimal rendering, not a copy — see DEVIATIONS.md. */
+ *  app's own minimal rendering, not a copy — see docs/known-gaps.md. */
 function TodoWidget({ todos }: { readonly todos: readonly PlanTodo[] }) {
   const [expanded, setExpanded] = useState(false);
   if (todos.length === 0) return null;
@@ -2456,7 +2454,7 @@ function TodoWidget({ todos }: { readonly todos: readonly PlanTodo[] }) {
  *  ... in sidebar" opens the child's transcript in the right-hand panel (`RightPanel` below) — the
  *  only source for it is this row itself (prompt + output), since children are not sessions
  *  (`src/projections/sessions.ts`) and so have no `session.history` of their own to fetch. */
-function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowView[]; readonly onOpen: (row: SubagentRowView) => void }) {
+export function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowView[]; readonly onOpen: (row: SubagentRowView) => void }) {
   return (
     <div role="tree" aria-label="Subagent sessions" className="subagent-tree" data-subagent-card>
       {rows.map((row) => (
@@ -2471,7 +2469,7 @@ function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowVie
           <span className="subagent-row-text">
             {row.title} · {row.desc} · continuable · {row.status}
           </span>
-          <span className="subagent-row-stat">0 tok / 0s</span>
+          <span className="subagent-row-stat">Usage unavailable</span>
           <ChevronRightIcon aria-hidden="true" />
         </button>
       ))}
@@ -2480,7 +2478,7 @@ function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowVie
 }
 
 /** Right-hand panel (reused for J-F-delegation's "Open <title> in sidebar"): the reference's own
- *  right sidebar is otherwise entirely inert this tranche (`DEVIATIONS.md` — "Open right sidebar"),
+ *  right sidebar is otherwise entirely inert this tranche (`docs/known-gaps.md` — "Open right sidebar"),
  *  so this is the first thing to actually populate it; a plan's "View full plan" (J-E-plan) still
  *  renders inline rather than here, unchanged. Shows the child's two-message transcript (its
  *  delegated prompt, its final answer) sourced entirely from its `subagents` projection row. */
@@ -2516,7 +2514,7 @@ function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly 
 /** Plan review card (J-E-plan): docked where the composer normally sits, same pattern as
  *  `ApprovalBar` — `region "Approve this plan and leave plan mode?"` (reference-behavior-matrix.md
  *  §6.3, `13b-plan-review-prompt`). The reference also auto-opens the plan in a right-sidebar tab;
- *  this tranche has no right sidebar (`DEVIATIONS.md` — "Open right sidebar" is already inert), so
+ *  this tranche has no right sidebar (`docs/known-gaps.md` — "Open right sidebar" is already inert), so
  *  the full plan is shown inline via "View full plan" instead. */
 function PlanReviewCard({
   heading,
@@ -3280,7 +3278,7 @@ function MessageBubble({
 /** Usage pass U3 (§12): the "Add workspace" dialog — the same path-input + `workspace.select`
  *  flow the no-workspace chooser uses, opened from the sidebar header's "Add workspace" button or
  *  the hero menu's "Add workspace…". (The reference's full directory-browser dialog is out of scope
- *  this pass — DEVIATIONS.md.) */
+ *  this pass — docs/known-gaps.md.) */
 function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
   const client = useCognate();
   const [place, setPlace] = useState<"local" | "ssh" | "wsl">("local");
@@ -3849,7 +3847,7 @@ function AddPluginDialog({
 
 /** Usage pass U5 (reference-behavior-matrix.md SS13): the session's trace row from the public
  *  `session-trace` projection — live during a run, durable after a reload (the projection re-folds
- *  from SQLite events). */
+ *  from durable Cognate events). */
 function useSessionTrace(sessionId: string | undefined): TraceRow | undefined {
   const rows = useProjection("session-trace");
   return useMemo(() => {
@@ -3935,7 +3933,7 @@ function buildTrajectoryTimeline(trace: TraceRow | undefined): { readonly lanes:
  *  role-badged trace table (USER rows, ASSISTANT "Request #N" rows, TOOL `tool{args} -> result`
  *  rows), and the right-hand "Event details" panel (TOOL: Summary/Payload/Result/Schema/Timing;
  *  Request: Summary/Options/Timing). Structurally per the pinned reference; the timeline strip and
- *  the Calls toggle are approximated (DEVIATIONS.md). The SYSTEM row kind exists in the data model
+ *  the Calls toggle are approximated (docs/known-gaps.md). The SYSTEM row kind exists in the data model
  *  but this app sends no system prompt, so no SYSTEM rows appear — honest, not invented. */
 function TrajectoryView({
   trace,

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import type { ModelConfig } from "../../components/providerRegistry.ts";
 import { EXPERT_TOOLS, type Expert, type ExpertTool } from "../../experts/types.ts";
+import type { ExpertModelBudget } from "../../experts/economics.ts";
 
 const TOOL_LABELS: Readonly<Record<ExpertTool, string>> = {
   read: "Read files",
@@ -25,6 +26,7 @@ export interface ExpertDraft {
   readonly tools: ExpertTool[];
   readonly contextBudget: number;
   readonly maxSteps: number;
+  readonly budget?: ExpertModelBudget|null;
 }
 
 export function ExpertEditor({ initial, copying = false, defaultRoute, routes, busy, onCancel, onSave, onOpenSettings }: {
@@ -45,6 +47,10 @@ export function ExpertEditor({ initial, copying = false, defaultRoute, routes, b
   const [tools, setTools] = useState<ExpertTool[]>(initial?.definition.tools ?? ["read"]);
   const [contextBudget, setContextBudget] = useState(initial?.definition.contextBudget ?? 16000);
   const [maxSteps, setMaxSteps] = useState(initial?.definition.maxSteps ?? 12);
+  const [budgetEnabled,setBudgetEnabled]=useState(Boolean(initial?.definition.budget));
+  const [budget,setBudget]=useState<ExpertModelBudget>(initial?.definition.budget ?? {contextTokens:16000,maxOutputTokens:2048});
+  const [inputPrice,setInputPrice]=useState(initial?.definition.budget?.prices ? String(initial.definition.budget.prices.inputUsdPerMillion):"");
+  const [outputPrice,setOutputPrice]=useState(initial?.definition.budget?.prices ? String(initial.definition.budget.prices.outputUsdPerMillion):"");
 
   const toggleTool = (tool: ExpertTool, checked: boolean) => setTools((current) => checked ? [...new Set([...current, tool])] : current.filter((value) => value !== tool));
   const selectRoute = (providerId: string) => {
@@ -57,7 +63,7 @@ export function ExpertEditor({ initial, copying = false, defaultRoute, routes, b
   const effectiveRoute = inheritDefault ? null : route;
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSave({ name: name.trim(), specialization: specialization.trim(), instructions: instructions.trim(), route: effectiveRoute, tools, contextBudget, maxSteps });
+    onSave({ name: name.trim(), specialization: specialization.trim(), instructions: instructions.trim(), route: effectiveRoute, tools, contextBudget, maxSteps,budget:budgetEnabled ? {...budget,prices:inputPrice.trim() && outputPrice.trim() ? {inputUsdPerMillion:Number(inputPrice),outputUsdPerMillion:Number(outputPrice)}:undefined}:null });
   };
 
   return <section className="experts-editor" aria-labelledby="expert-editor-heading"><header className="experts-section-head"><div><p className="experts-eyebrow">Expert definition</p><h2 id="expert-editor-heading">{copying ? "Copy Expert" : initial ? "Edit Expert" : "Create Expert"}</h2><p>Identity and configuration persist across runs. Memory remains scoped to this Expert.</p></div></header>
@@ -84,6 +90,17 @@ export function ExpertEditor({ initial, copying = false, defaultRoute, routes, b
       <fieldset><legend>Allowed capabilities</legend><div className="experts-tool-list">{EXPERT_TOOLS.map((tool) => <label key={tool}><input type="checkbox" checked={tools.includes(tool)} onChange={(event) => toggleTool(tool, event.currentTarget.checked)} />{TOOL_LABELS[tool]}</label>)}</div></fieldset>
       <div className="experts-route-fields"><label htmlFor="expert-context-budget">Context budget<input id="expert-context-budget" type="number" min={2000} max={64000} step={1000} value={contextBudget} onChange={(event) => setContextBudget(Number(event.currentTarget.value))} /></label><label htmlFor="expert-max-steps">Maximum steps per run<input id="expert-max-steps" type="number" min={1} max={20} value={maxSteps} onChange={(event) => setMaxSteps(Number(event.currentTarget.value))} /></label></div>
       <p className="experts-muted">A Team membership may further restrict these capabilities. It cannot add permissions.</p>
+      <fieldset><legend>Model budget per Assignment attempt</legend>
+        <label><input type="checkbox" checked={budgetEnabled} onChange={event=>setBudgetEnabled(event.currentTarget.checked)} />Enforce model token and cost limits</label>
+        {budgetEnabled && <><div className="experts-route-fields">
+          <label>Context token ceiling<input type="number" min={256} max={2000000} required value={budget.contextTokens} onChange={event=>setBudget({...budget,contextTokens:Number(event.currentTarget.value)})} /></label>
+          <label>Maximum output tokens<input type="number" min={1} max={64000} required value={budget.maxOutputTokens} onChange={event=>setBudget({...budget,maxOutputTokens:Number(event.currentTarget.value)})} /></label>
+          <label>Attempt token budget (optional)<input type="number" min={1} value={budget.totalTokens ?? ""} onChange={event=>setBudget({...budget,totalTokens:event.currentTarget.value ? Number(event.currentTarget.value):undefined})} /></label>
+          <label>Attempt cost ceiling USD (optional)<input type="number" min={0} step="any" value={budget.maxCostUsd ?? ""} onChange={event=>setBudget({...budget,maxCostUsd:event.currentTarget.value ? Number(event.currentTarget.value):undefined})} /></label>
+          <label>Input USD per million tokens<input type="number" min={0} step="any" value={inputPrice} onChange={event=>setInputPrice(event.currentTarget.value)} /></label>
+          <label>Output USD per million tokens<input type="number" min={0} step="any" value={outputPrice} onChange={event=>setOutputPrice(event.currentTarget.value)} /></label>
+        </div><p className="experts-muted">Visible request tokens are conservatively estimated, including instructions and tools; provider-added framing is unknown. Reported usage remains distinct. Cost ceilings require both explicit prices. Changes apply to future Assignments; failed or unreported calls keep their reservation.</p></>}
+      </fieldset>
       <div className="experts-actions"><button type="button" className="global-panel-btn" disabled={busy} onClick={onCancel}>Cancel</button><button type="submit" className="global-panel-btn primary" disabled={busy || !name.trim() || !specialization.trim() || !instructions.trim()}>{busy ? "Saving…" : copying ? "Copy Expert" : initial ? "Save Expert" : "Create Expert"}</button></div>
     </form>
   </section>;

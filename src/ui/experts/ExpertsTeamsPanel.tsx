@@ -8,6 +8,10 @@ import { SurfaceView } from "../CognitiveFrame.tsx";
 import { EXPERT_TOOLS, type Assignment, type Conversation, type Expert, type ExpertMemory, type ExpertState, type ExpertTool, type Team } from "../../experts/types.ts";
 import { ExpertEditor } from "./ExpertEditor.tsx";
 import { TeamEditor, type TeamDraft } from "./TeamEditor.tsx";
+import { SchedulesSurface } from "./SchedulesSurface.tsx";
+import { AssignmentUsage } from "./AssignmentUsage.tsx";
+
+type ConversationSummary = Pick<Conversation, "id" | "scope" | "expertId" | "teamId" | "workspaceId" | "title" | "createdAt" | "updatedAt"> & { readonly messageCount: number };
 
 function currentValue<T>(rows: readonly { readonly key: string; readonly value: unknown }[] | undefined): T | undefined {
   const row = rows?.find((candidate) => candidate.key === "current" || candidate.key.endsWith("/current"));
@@ -46,23 +50,25 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
   const [copying, setCopying] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [conversationScope, setConversationScope] = useState<"solo" | "team" | "private-team">();
-  const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ConversationSummary[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string>();
   const [historyBusy, setHistoryBusy] = useState(false);
   const [privateRead, setPrivateRead] = useState<{ conversation: Conversation; messages: NonNullable<ExpertState["messages"][string]>[]; assignments: Assignment[] }>();
+  const [messagePage, setMessagePage] = useState<{ messages: NonNullable<ExpertState["messages"][string]>[]; nextCursor?: string }>({ messages: [] });
+  const [messageBusy, setMessageBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [notice, setNotice] = useState<{ readonly kind: "status" | "error"; readonly text: string }>();
   const [busy, setBusy] = useState(false);
+  const [showSchedules,setShowSchedules]=useState(false);
 
   const experts = useMemo(() => Object.values(state?.experts ?? {}).sort((a, b) => a.name.localeCompare(b.name)), [state]);
   const teams = useMemo(() => Object.values(state?.teams ?? {}).sort((a, b) => a.name.localeCompare(b.name)), [state]);
   const team = state?.teams[selectedTeamId];
   const expert = state?.experts[selectedExpertId];
   const projectedConversation = conversationId ? state?.conversations[conversationId] : undefined;
-  const privateConversation = conversationScope === "private-team" && privateRead?.conversation.id === conversationId ? privateRead : undefined;
+  const privateConversation = privateRead?.conversation.id === conversationId ? privateRead : undefined;
   const conversation = privateConversation?.conversation ?? projectedConversation;
-  const messages = privateConversation
-    ? privateConversation.messages
-    : conversation ? conversation.messageIds.map((id) => state?.messages[id]).filter((row): row is NonNullable<typeof row> => Boolean(row)) : [];
+  const messages = messagePage.messages;
   const projectedAssignments = useMemo(() => Object.values(state?.assignments ?? {})
     .filter((item) => conversation ? item.conversationId === conversation.id : false)
     .sort((a, b) => a.id.localeCompare(b.id)), [state, conversation]);
@@ -72,19 +78,21 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
     return await client.invoke(capability, { requestId: crypto.randomUUID(), ...input } as never) as T;
   }, [client]);
 
-  const refreshHistory = useCallback(async (scope = conversationScope, expertId = expert?.id, teamId = team?.id) => {
+  const refreshHistory = useCallback(async (scope = conversationScope, expertId = expert?.id, teamId = team?.id, cursor?: string) => {
     if (!scope || (scope === "team" && !teamId) || (scope !== "team" && !expertId)) {
-      setConversationHistory([]);
+      setConversationHistory([]); setHistoryCursor(undefined);
       return;
     }
     setHistoryBusy(true);
     try {
-      const result = await invoke<{ conversations: Conversation[] }>("expert.context", {
+      const result = await invoke<{ conversations: ConversationSummary[]; nextCursor?: string }>("expert.context", {
         list: true, scope,
+        limit: 100, ...(cursor ? { cursor } : {}),
         ...(scope === "team" ? { teamId } : { expertId }),
         ...(scope === "private-team" ? { teamId } : {}),
       });
-      setConversationHistory(result.conversations);
+      setConversationHistory(current => cursor ? [...current, ...result.conversations] : result.conversations);
+      setHistoryCursor(result.nextCursor);
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -95,7 +103,7 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
   useEffect(() => {
     let stopped = false;
     if (!conversationScope) {
-      setConversationHistory([]);
+      setConversationHistory([]); setHistoryCursor(undefined);
       setHistoryBusy(false);
       return;
     }
@@ -106,17 +114,17 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
       ...(conversationScope === "private-team" ? { teamId: team?.id } : {}),
     };
     if ((conversationScope === "team" && !team?.id) || (conversationScope !== "team" && !expert?.id)) {
-      setConversationHistory([]);
+      setConversationHistory([]); setHistoryCursor(undefined);
       setHistoryBusy(false);
       return;
     }
     setHistoryBusy(true);
-    void invoke<{ conversations: Conversation[] }>("expert.context", input)
-      .then((result) => { if (!stopped) setConversationHistory(result.conversations); })
+    void invoke<{ conversations: ConversationSummary[]; nextCursor?: string }>("expert.context", { ...input, limit: 100 })
+      .then((result) => { if (!stopped) { setConversationHistory(result.conversations); setHistoryCursor(result.nextCursor); } })
       .catch((error: unknown) => { if (!stopped) setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) }); })
       .finally(() => { if (!stopped) setHistoryBusy(false); });
     return () => { stopped = true; };
-  }, [conversationScope, expert?.id, invoke, team?.id]);
+  }, [conversationScope, expert?.id, invoke, team?.id, state]);
 
   useEffect(() => {
     if (rows === undefined || seeded.current || state) return;
@@ -139,24 +147,37 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
   }, [state, teams, experts, selectedTeamId, selectedExpertId, pendingTeamSelection, pendingExpertSelection]);
 
   useEffect(() => {
-    if (conversationScope !== "private-team" || !conversationId) return;
+    if (!conversationId || !conversationScope) { setMessagePage({ messages: [] }); setPrivateRead(undefined); return; }
     let stopped = false;
-    const refresh = () => void invoke<{ conversation: Conversation; messages: NonNullable<ExpertState["messages"][string]>[]; assignments: Assignment[] }>("expert.context", { conversationId })
-      .then((result) => { if (!stopped) setPrivateRead(result); })
-      .catch((error: unknown) => { if (!stopped) setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) }); });
-    refresh();
-    const interval = setInterval(refresh, 1200);
-    return () => { stopped = true; clearInterval(interval); };
-  }, [conversationScope, conversationId, invoke]);
+    setMessageBusy(true);
+    void invoke<{ conversation: Conversation; messages: NonNullable<ExpertState["messages"][string]>[]; assignments: Assignment[]; nextCursor?: string }>("expert.context", { conversationId, limit: 100 })
+      .then((result) => { if (!stopped) { setPrivateRead(result); setMessagePage({ messages: result.messages, nextCursor: result.nextCursor }); } })
+      .catch((error: unknown) => { if (!stopped) setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) }); })
+      .finally(() => { if (!stopped) setMessageBusy(false); });
+    return () => { stopped = true; };
+  }, [conversationScope, conversationId, invoke, state]);
 
-  const run = useCallback(async (action: () => Promise<unknown>, success: string) => {
+  const loadOlderMessages = async () => {
+    if (!conversationId || !messagePage.nextCursor || messageBusy) return;
+    setMessageBusy(true);
+    try {
+      const result = await invoke<{ conversation: Conversation; messages: NonNullable<ExpertState["messages"][string]>[]; assignments: Assignment[]; nextCursor?: string }>("expert.context", { conversationId, limit: 100, cursor: messagePage.nextCursor });
+      setPrivateRead(result);
+      setMessagePage(current => ({ messages: [...result.messages, ...current.messages], nextCursor: result.nextCursor }));
+    } catch (error) { setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) }); }
+    finally { setMessageBusy(false); }
+  };
+
+  const run = useCallback(async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
     setBusy(true);
     setNotice(undefined);
     try {
       await action();
       setNotice({ kind: "status", text: success });
+      return true;
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -224,9 +245,20 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
           <p>Persistent Expert identities. Governed Team work. Each run remains inspectable.</p>
         </div>
         <button type="button" className="global-panel-btn" onClick={onClose}>Back to conversation</button>
+        <button type="button" className="global-panel-btn" aria-expanded={showSchedules} onClick={()=>setShowSchedules(value=>!value)}>Schedules</button>
       </header>
 
       {notice && <p className={notice.kind === "error" ? "experts-notice error" : "experts-notice"} role={notice.kind === "error" ? "alert" : "status"}>{notice.text}</p>}
+      {showSchedules && <SchedulesSurface experts={experts} teams={teams} workspaceId={workspaceId} onInspect={occurrence=>{
+        if(!occurrence.conversationId)return;
+        const scheduled=state?.conversations[occurrence.conversationId];
+        const assignment=occurrence.assignmentId ? state?.assignments[occurrence.assignmentId]:undefined;
+        const target=scheduled?.teamId ?? assignment?.teamId;
+        setConversationScope(target ? "team":"solo");
+        if(target){setSelectedTeamId(target);setDetailMode("team");}
+        else if(assignment){setSelectedExpertId(assignment.expertId);setDetailMode("expert");}
+        setConversationId(occurrence.conversationId);setShowSchedules(false);
+      }} />}
 
       {editor === "expert" ? (
         <ExpertEditor initial={editingExpertId ? state?.experts[editingExpertId] : undefined} copying={copying} defaultRoute={configuredRoute} routes={configuredRoutes} busy={busy} onCancel={() => { setEditor(undefined); setCopying(false); setEditingExpertId(undefined); }} onSave={(draft) => void createExpert(draft)} onOpenSettings={onOpenSettings} />
@@ -283,13 +315,13 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
                 <p className="experts-config-line"><strong>Tools</strong> {expert.definition.tools.length ? expert.definition.tools.join(", ") : "None"}</p>
                 <p className="experts-config-line"><strong>Model</strong> {expert.definition.route ? `${expert.definition.route.providerId} · ${expert.definition.route.model}` : configuredRoute ? `${configuredRoute.providerId} · ${configuredRoute.model} (default)` : "No model route configured"}</p>
                 <p className="experts-config-line"><strong>Context</strong> {expert.definition.contextBudget} tokens · up to {expert.definition.maxSteps} steps</p>
-                <ExpertMemoryPanel expert={expert} teams={teams} assignments={Object.values(state?.assignments ?? {})} onInvoke={invoke} />
+                <ExpertMemoryPanel expert={expert} teams={teams.filter((candidate) => candidate.members.some((member) => member.expertId === expert.id))} assignments={Object.values(state?.assignments ?? {})} onInvoke={invoke} />
                 {expert.lifecycle === "archived" && <p className="experts-muted">Archived Experts cannot start new runs.</p>}
               </section>
             ) : <p className="experts-empty">Choose a Team or Expert to inspect its membership and work.</p>}
 
             {conversationScope && (
-              <ConversationPane scope={conversationScope} conversation={selectedConversation} history={conversationHistory} historyBusy={historyBusy} onSelectConversation={setConversationId} messages={messages} assignments={assignments} experts={state?.experts ?? {}} specialists={team?.members.filter((member) => member.role === "specialist") ?? []} value={message} busy={busy} workspaceAvailable={Boolean(selectedConversation?.workspaceId ?? workspaceId)} activeWorkspaceId={workspaceId} onChange={setMessage} onMention={(id) => { const person = state?.experts[id]; if (person) setMessage((current) => `${current}${current && !/\s$/.test(current) ? " " : ""}@${person.name} `); }} onSubmit={startConversation} onCancel={(id) => void run(() => invoke("team.cancel", { assignmentId: id }), "Cancellation requested.")} onRetry={(id) => void run(() => invoke("team.retry", { assignmentId: id }), "Retry queued.")} onReview={(assignmentId, verdict, rationale, evidence) => void run(() => invoke("team.review", { assignmentId, verdict, rationale, evidence }), "Human review recorded.")} onSettle={(assignmentId, decision, rationale) => void run(() => invoke("team.settle", { assignmentId, decision, rationale }), decision === "accepted" ? "Human acceptance recorded." : "Revision requested.")} onResolveEffect={(assignmentId, toolCallId, outcome, reason) => void run(() => invoke("expert.effect.resolve", { assignmentId, toolCallId, outcome, reason }), "Effect reconciliation recorded by the operator.")} />
+              <ConversationPane scope={conversationScope} conversation={selectedConversation} history={conversationHistory} historyBusy={historyBusy} historyCursor={historyCursor} onLoadMoreHistory={() => void refreshHistory(conversationScope, expert?.id, team?.id, historyCursor)} onSelectConversation={(id) => { setConversationId(id); setPrivateRead(undefined); }} messages={messages} messageCursor={messagePage.nextCursor} messageBusy={messageBusy} onLoadOlderMessages={() => void loadOlderMessages()} assignments={assignments} experts={state?.experts ?? {}} specialists={team?.members.filter((member) => member.role === "specialist") ?? []} value={message} busy={busy} workspaceAvailable={Boolean(selectedConversation?.workspaceId ?? workspaceId)} activeWorkspaceId={workspaceId} onChange={setMessage} onMention={(id) => { const person = state?.experts[id]; if (person) setMessage((current) => `${current}${current && !/\s$/.test(current) ? " " : ""}@${person.name} `); }} onSubmit={startConversation} onLiveInbox={(assignmentId, text) => run(() => invoke("team.inbox.send", { assignmentId, text }), "Live update queued for the recipient's next model decision.")} onCancelInbox={(messageId) => void run(() => invoke("team.inbox.cancel", { messageId }), "Pending live update cancelled.")} onCancel={(id) => void run(() => invoke("team.cancel", { assignmentId: id }), "Cancellation requested.")} onRetry={(id) => void run(() => invoke("team.retry", { assignmentId: id }), "Retry queued.")} onReview={(assignmentId, verdict, rationale, evidence) => void run(() => invoke("team.review", { assignmentId, verdict, rationale, evidence }), "Human review recorded.")} onSettle={(assignmentId, decision, rationale) => void run(() => invoke("team.settle", { assignmentId, decision, rationale }), decision === "accepted" ? "Human acceptance recorded." : "Revision requested.")} onResolveEffect={(assignmentId, toolCallId, outcome, reason) => void run(() => invoke("expert.effect.resolve", { assignmentId, toolCallId, outcome, reason }), "Effect reconciliation recorded by the operator.")} />
             )}
           </div>
         </div>
@@ -298,13 +330,18 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
   );
 }
 
-function ConversationPane({ scope, conversation, history, historyBusy, onSelectConversation, messages, assignments, experts, specialists, value, busy, workspaceAvailable, activeWorkspaceId, onChange, onMention, onSubmit, onCancel, onRetry, onReview, onSettle, onResolveEffect }: {
+function ConversationPane({ scope, conversation, history, historyBusy, historyCursor, onLoadMoreHistory, onSelectConversation, messages, messageCursor, messageBusy, onLoadOlderMessages, assignments, experts, specialists, value, busy, workspaceAvailable, activeWorkspaceId, onChange, onMention, onSubmit, onLiveInbox, onCancelInbox, onCancel, onRetry, onReview, onSettle, onResolveEffect }: {
   readonly scope: "solo" | "team" | "private-team";
   readonly conversation: Conversation | undefined;
-  readonly history: readonly Conversation[];
+  readonly history: readonly ConversationSummary[];
   readonly historyBusy: boolean;
+  readonly historyCursor: string | undefined;
+  readonly onLoadMoreHistory: () => void;
   readonly onSelectConversation: (id: string | undefined) => void;
   readonly messages: readonly NonNullable<ExpertState["messages"][string]>[];
+  readonly messageCursor: string | undefined;
+  readonly messageBusy: boolean;
+  readonly onLoadOlderMessages: () => void;
   readonly assignments: readonly Assignment[];
   readonly experts: Readonly<Record<string, Expert>>;
   readonly specialists: readonly { readonly expertId: string }[];
@@ -315,6 +352,8 @@ function ConversationPane({ scope, conversation, history, historyBusy, onSelectC
   readonly onChange: (value: string) => void;
   readonly onMention: (expertId: string) => void;
   readonly onSubmit: (event: FormEvent) => void;
+  readonly onLiveInbox: (assignmentId: string, text: string) => Promise<boolean>;
+  readonly onCancelInbox: (messageId: string) => void;
   readonly onCancel: (id: string) => void;
   readonly onRetry: (id: string) => void;
   readonly onReview: (id: string, verdict: "revision" | "accept" | "escalate", rationale: string, evidence: string[]) => void;
@@ -331,15 +370,20 @@ function ConversationPane({ scope, conversation, history, historyBusy, onSelectC
   return <section className="experts-conversation" aria-labelledby="experts-conversation-heading">
     <div className="experts-section-head"><div><p className="experts-eyebrow">{scope === "solo" ? "Solo Expert" : scope === "private-team" ? "Private Expert-in-Team" : "Team conversation"}</p><h2 id="experts-conversation-heading">{conversation?.title ?? "New conversation"}</h2><p>{conversation ? `Conversation ${conversation.id}` : "Your first message starts a durable, scoped conversation."}</p></div></div>
     {conversation && activeWorkspaceId !== conversation.workspaceId && <p className="experts-muted">Continuing in the original workspace ({conversation.workspaceId}).</p>}
-    <label className="experts-history">Conversation history <select aria-label="Conversation history" value={conversation?.id ?? ""} disabled={historyBusy} onChange={(event) => onSelectConversation(event.currentTarget.value || undefined)}><option value="">New conversation</option>{history.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.messageIds.length} messages</option>)}</select></label>
+    <label className="experts-history">Conversation history <select aria-label="Conversation history" value={conversation?.id ?? ""} disabled={historyBusy} onChange={(event) => onSelectConversation(event.currentTarget.value || undefined)}><option value="">New conversation</option>{history.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.messageCount} messages</option>)}</select></label>
+    {historyCursor && <button type="button" className="global-panel-btn" disabled={historyBusy} onClick={onLoadMoreHistory}>Load more conversations</button>}
+    {messageCursor && <button type="button" className="global-panel-btn" disabled={messageBusy} onClick={onLoadOlderMessages}>Load older messages</button>}
+    {messageBusy && <p role="status" className="experts-muted">Loading conversation history…</p>}
     <ol className="experts-transcript" aria-label="Conversation messages">
-      {messages.map((item) => <li key={item.id}><strong>{item.sender.kind === "human" ? "You" : experts[item.sender.id]?.name ?? item.sender.id}</strong><p>{item.text}</p></li>)}
+      {messages.map((item) => <li key={item.id}><strong>{item.sender.kind === "human" ? "You" : experts[item.sender.id]?.name ?? item.sender.id}</strong><span className="experts-status">Message{item.sequence === undefined ? "" : ` #${item.sequence}`} · {item.inboxStatus ?? item.delivery}</span><p>{item.text}</p>{scope === "team" && item.sender.kind === "human" && ["queued","pending"].includes(item.inboxStatus ?? item.delivery) && <button type="button" className="global-panel-btn" disabled={busy} onClick={() => onCancelInbox(item.id)}>Cancel pending update</button>}</li>)}
       {messages.length === 0 && <li className="experts-empty">No messages yet. Send a task to start this conversation.</li>}
     </ol>
     {assignments.length > 0 && <section className="experts-assignments" aria-labelledby="experts-assignments-heading"><h3 id="experts-assignments-heading">Assignments</h3><ol>{assignments.map((assignment) => <li key={assignment.id} id={`assignment-${assignment.id}`}><div><strong>{experts[assignment.expertId]?.name ?? assignment.expertId}</strong><span className="experts-status">{assignmentLabel(assignment.status)}</span><p>{assignment.purpose}</p></div>
+      {scope === "team" && ["running", "waiting"].includes(assignment.status) && assignment.execution.liveInboxClosed !== true && <LiveInboxForm assignment={assignment} busy={busy} onSend={onLiveInbox} />}
       {assignment.handoff && <details><summary>Handoff and evidence</summary><p>{assignment.handoff.output || "No output returned."}</p>{assignment.handoff.evidence.length > 0 && <ul>{assignment.handoff.evidence.map((item) => <li key={item}>{item}</li>)}</ul>}{assignment.handoff.uncertainties.length > 0 && <p>Uncertainty: {assignment.handoff.uncertainties.join("; ")}</p>}</details>}
       {assignment.handoff && <details><summary>Returned artifacts, failures and follow-up</summary><p><strong>Disposition</strong> {assignment.handoff.disposition}</p>{assignment.handoff.artifacts.length > 0 && <ul>{assignment.handoff.artifacts.map((artifact) => <li key={artifact}><ArtifactDownload artifactId={artifact} /></li>)}</ul>}{assignment.handoff.observedFailures?.length ? <p><strong>Observed tool failures</strong> {assignment.handoff.observedFailures.join("; ")} <span>These are observations; a later check may show recovery.</span></p> : null}{assignment.handoff.failures.length > 0 && <p role="alert"><strong>Unresolved failures</strong> {assignment.handoff.failures.join("; ")}</p>}{assignment.handoff.followUp.length > 0 && <p><strong>Follow-up</strong> {assignment.handoff.followUp.join("; ")}</p>}</details>}
       <AssignmentTrace runId={assignment.runId ?? undefined} entries={assignment.runId ? traces[assignment.runId] ?? [] : []} />
+      <AssignmentUsage assignment={assignment} />
       <AssignmentEffectResolution assignment={assignment} busy={busy} onResolve={(toolCallId, outcome, reason) => onResolveEffect(assignment.id, toolCallId, outcome, reason)} />
       <AssignmentApproval assignment={assignment} busy={busy} />
       {assignment.handoff && <AssignmentSettlement assignment={assignment} assignments={assignments} experts={experts} traces={traces} busy={busy} onReview={(verdict, rationale, evidence) => onReview(assignment.id, verdict, rationale, evidence)} onSettle={(decision, rationale) => onSettle(assignment.id, decision, rationale)} />}
@@ -350,6 +394,14 @@ function ConversationPane({ scope, conversation, history, historyBusy, onSelectC
       {!workspaceAvailable && <p>Choose a workspace to start a conversation.</p>}
       <button type="submit" className="global-panel-btn primary" disabled={busy || !workspaceAvailable || value.trim().length === 0}>{busy ? "Sending…" : "Send message"}</button></form>
   </section>;
+}
+
+export function LiveInboxForm({ assignment, busy, onSend }: { readonly assignment: Assignment; readonly busy: boolean; readonly onSend: (assignmentId: string, text: string) => Promise<boolean> }) {
+  const [value, setValue] = useState("");
+  return <form className="experts-actions" aria-label={`Live update for ${assignment.expertId}`} onSubmit={async (event) => { event.preventDefault(); const text=value.trim(); if(text && !busy && await onSend(assignment.id,text))setValue(""); }}>
+    <label>Live update for this running Expert<input aria-label="Live update" value={value} onChange={event=>setValue(event.currentTarget.value)} placeholder="The next model decision will receive this" /></label>
+    <button type="submit" className="global-panel-btn" disabled={busy || !value.trim()}>Send live update</button>
+  </form>;
 }
 
 export function AssignmentSettlement({ assignment, assignments, experts, traces, busy, onReview, onSettle }: {
@@ -402,6 +454,7 @@ export function ExpertMemoryPanel({ expert, teams, assignments, onInvoke }: {
   const [scope, setScope] = useState<ExpertMemory["scope"]>("personal");
   const [sources, setSources] = useState<string[]>([]);
   const [records, setRecords] = useState<readonly ExpertMemory[]>([]);
+  const [memoryCursor, setMemoryCursor] = useState<string>();
   const [notice, setNotice] = useState<{ readonly text: string; readonly error: boolean }>();
   const [busy, setBusy] = useState(false);
   const sourceOptions = assignments.filter((item) => item.expertId === expert.id && item.handoff && (!teamId ? item.teamId === null : item.teamId === teamId));
@@ -411,21 +464,22 @@ export function ExpertMemoryPanel({ expert, teams, assignments, onInvoke }: {
     catch (failure) { setNotice({ text: failure instanceof Error ? failure.message : String(failure), error: true }); }
     finally { setBusy(false); }
   };
-  const read = () => run(async () => {
-    const result = await onInvoke("expert.memory.read", { expertId: expert.id, ...(teamId ? { teamId } : {}), ...(query.trim() ? { query: query.trim() } : {}) });
-    setRecords(result as ExpertMemory[]);
-  }, "Scoped memory loaded.");
+  const read = (cursor?: string) => run(async () => {
+    const result = await onInvoke("expert.memory.read", { expertId: expert.id, limit: 100, ...(cursor ? { cursor } : {}), ...(teamId ? { teamId } : {}), ...(query.trim() ? { query: query.trim() } : {}) }) as { records: ExpertMemory[]; nextCursor?: string };
+    setRecords(current => cursor ? [...current, ...result.records] : result.records);
+    setMemoryCursor(result.nextCursor);
+  }, cursor ? "More scoped memory loaded." : "Scoped memory loaded.");
   const save = (event: FormEvent) => {
     event.preventDefault();
     void run(async () => {
       await onInvoke("expert.memory.write", { expertId: expert.id, ...(teamId ? { teamId } : {}), scope: teamId ? scope : "personal", kind, text: text.trim(), sources });
       setText(""); setSources([]);
-      const result = await onInvoke("expert.memory.read", { expertId: expert.id, ...(teamId ? { teamId } : {}) });
-      setRecords(result as ExpertMemory[]);
+      const result = await onInvoke("expert.memory.read", { expertId: expert.id, limit: 100, ...(teamId ? { teamId } : {}) }) as { records: ExpertMemory[]; nextCursor?: string };
+      setRecords(result.records); setMemoryCursor(result.nextCursor);
     }, "Memory retained with provenance.");
   };
   return <section className="experts-memory" aria-labelledby="expert-memory-heading"><div className="experts-section-head"><div><p className="experts-eyebrow">Context stewardship</p><h3 id="expert-memory-heading">Scoped memory</h3><p>Memory is separate from the event log. Keep claims attributed and cite their source.</p></div></div>
-    <label>Memory scope<TeamContextSelect teams={teams} value={teamId} onChange={(id) => { setTeamId(id); setRecords([]); setSources([]); setScope(id ? "private-team" : "personal"); }} /></label>
+    <label>Memory scope<TeamContextSelect teams={teams} value={teamId} onChange={(id) => { setTeamId(id); setRecords([]); setMemoryCursor(undefined); setSources([]); setScope(id ? "private-team" : "personal"); }} /></label>
     <p className="experts-muted">Team notes can be private to this Expert in the Team, or Shared with this Team.</p>
     <form onSubmit={save}>
       <label>Knowledge kind<select value={kind} onChange={(event) => setKind(event.currentTarget.value as ExpertMemory["kind"])}><option value="observation">Observation</option><option value="assertion">Assertion</option><option value="inference">Inference</option><option value="accepted">Accepted knowledge (human promoted)</option></select></label>
@@ -435,9 +489,10 @@ export function ExpertMemoryPanel({ expert, teams, assignments, onInvoke }: {
       <p className="experts-muted">Retained knowledge keeps its provenance. An assertion is not a demonstrated capability; “accepted” is a human promotion.</p>
       <button type="submit" className="global-panel-btn" disabled={busy || !text.trim() || !sources.length}>Retain memory</button>
     </form>
-    <form onSubmit={(event) => { event.preventDefault(); void read(); }}><label htmlFor={`expert-memory-query-${expert.id}`}>Find memory<input id={`expert-memory-query-${expert.id}`} value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search this scope" /></label><button type="submit" className="global-panel-btn" disabled={busy}>Load scoped memory</button></form>
+    <form onSubmit={(event) => { event.preventDefault(); void read(); }}><label htmlFor={`expert-memory-query-${expert.id}`}>Find memory<input id={`expert-memory-query-${expert.id}`} value={query} onChange={(event) => { setQuery(event.currentTarget.value); setMemoryCursor(undefined); }} placeholder="Search this scope" /></label><button type="submit" className="global-panel-btn" disabled={busy}>Load scoped memory</button></form>
     {notice && <p role={notice.error ? "alert" : "status"}>{notice.text}</p>}
     {records.length > 0 ? <ul aria-label="Retained memory">{records.map((record) => <li key={record.id}><strong>{record.kind} · {record.scope}</strong><p>{record.text}</p><small>Sources: {record.sources.join(", ")} · retained by {record.by}</small></li>)}</ul> : <p className="experts-muted">No memory loaded for this scope. Load it to inspect retained notes.</p>}
+    {memoryCursor && <button type="button" className="global-panel-btn" disabled={busy} onClick={() => void read(memoryCursor)}>Load more memory</button>}
   </section>;
 }
 

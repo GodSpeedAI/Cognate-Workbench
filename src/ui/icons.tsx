@@ -1,7 +1,7 @@
 // Small inline-SVG icon set, drawn from scratch for this reconstruction (no copied assets).
 // Kept tiny and monochrome (`currentColor`) so they follow the surrounding text/button color in
 // both themes. Not meant to be pixel-identical to the reference's iconography — see
-// APP/DEVIATIONS.md.
+// docs/known-gaps.md.
 import type { JSX } from "react";
 
 type IconProps = JSX.IntrinsicElements["svg"];

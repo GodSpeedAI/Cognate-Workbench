@@ -415,6 +415,28 @@
   outline-offset: 2px;
 }
 
+.experts-schedules {
+  padding: 20px;
+  border: 1px solid var(--cg-border);
+  border-radius: 12px;
+}
+.experts-schedules form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 12px;
+}
+.experts-schedules label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.experts-schedules input, .experts-schedules select, .experts-schedules textarea {
+  width: 100%; min-width: 0; box-sizing: border-box; padding: 8px;
+  color: var(--cg-text); background: var(--cg-surface); border: 1px solid var(--cg-border); border-radius: 6px;
+}
+.experts-schedules button {
+  padding: 8px 12px; border: 1px solid var(--cg-border); border-radius: 6px;
+  background: var(--cg-surface); color: var(--cg-text); cursor: pointer; margin: 4px;
+}
+.experts-schedules button:disabled { cursor: default; opacity: .55; }
+.experts-schedules__list article { padding: 12px 0; border-top: 1px solid var(--cg-border); overflow-wrap: anywhere; }
+
 @media (max-width: 850px) {
   .experts-layout {
     grid-template-columns: minmax(0, 1fr);
