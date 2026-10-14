@@ -1,6 +1,6 @@
-# DeepSeek Harness — Interaction Domain Model (tranche T3)
+# Cognate Workbench — Interaction Domain Model
 
-Canonical location for the DeepSeek Harness Web UI Interaction Domain Model, produced per
+Canonical location for Cognate Workbench's interaction model, including its original Web UI reconstruction and native Experts & Teams, produced per
 `.agents/skills/deriving-interaction-domain-models/SKILL.md` and validated per
 `.agents/skills/domainforge-sea/SKILL.md`.
 

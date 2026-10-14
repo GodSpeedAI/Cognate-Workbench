@@ -49,3 +49,25 @@ The donor has focused tests in `ds-bot/test/roster.test.js`, `groups.test.js`, `
 ## Explicit non-transfer
 
 Do not add `@deepseek-ai/*`, DeepSeek Harness, Cordis/DSH plugins, donor state/storage, a donor scheduler, or donor client code to production Workbench. Use only the product behaviors in the matrix, expressed with published Cognate packages and Workbench's typed capabilities, durable events, projections, and UI.
+
+## Native reconstruction outcomes
+
+| Donor affordance | Implemented Workbench realization | Evidence |
+| --- | --- | --- |
+| Reusable roster and role membership | Editable Expert definitions/instances, copies, draft/active Teams, atomic sole-Orchestrator replacement, idempotent seeds | `test/J-EXPERT-management.test.ts`, `test/J-TEAM-security.test.ts` |
+| Group work and bounded speaking | Typed bounded Assignments and serialized genuine Cognate runs; Orchestrator chooses Specialists | `test/J-TEAM-execution.test.ts`, `test/J-TEAM-bounds.test.ts` |
+| Addressed messages and durable delivery | Scoped messages with deterministic request identities, queued delivery, recipient-filtered model context and one logical return | `src/experts/service.ts`, `bridge.ts`; interruption journey in `test/J-TEAM-execution.test.ts` |
+| Return routing and continuity | Native parent continuations, terminal-run completion bridge, restart scans and idempotent resolution | `test/experts-runtime-scheduling.test.ts`, subprocess SIGKILL recovery test |
+| Private/shared knowledge and context stewardship | Provenance/classification, personal/private-Team/Team boundaries, bounded lexical retrieval, pinned facts and unresolved commitments | `test/J-EXPERT-memory.test.ts`; `ExpertsService.context` |
+| Identity-specific tools and prompt composition | Frozen model/tool/context specification, existing coding gates, native commitments for effects, typed abstention | `test/expert-model-routing.test.ts`, `test/expert-effect.test.ts` |
+| Roster/group/client management | Native React sidebar, editors, conversations, history, evidence, approvals, memory and human decisions | `test/ui-experts.test.tsx`, `test/E2E-experts.test.ts`; `screenshots/experts/` |
+| Schedules and live steering | Deferred. Existing automation records do not execute; addressed communication is explicitly queued | `docs/known-gaps.md` |
+
+The task-acquired donor checkout was deleted after examination and native implementation. No donor source was copied or adapted; behavior descriptions and provenance are retained here. No donor file entered the index.
+
+Dependency audit found an existing SDK-internal dependency: Cognate 0.2.0's runtime depends on
+`@godspeedai/cognate-kernel-cordis`, which depends on `cordis`. This predates the task and remains
+unchanged in `bun.lock`. Workbench adds no direct Cordis use or donor plugin/runtime. A literal
+ban on all transitive Cordis conflicts with retaining the prescribed published Cognate SDK.
+The operator explicitly approved keeping that existing SDK-internal dependency, with no direct
+Cordis imports or donor runtime integration added by Workbench.

@@ -1,17 +1,19 @@
-# Current status — revision 2
+# Current status — revision 5
 
-Native Experts & Teams has a validated semantic model, persistent identities, governed Teams, per-Expert routing and real correlated delegation on `feature/expert-teams`. Native UX and effect-recovery hardening are in progress. The operator's mission and vital UX requirement govern the work.
+Native Experts & Teams and responsive management/conversation UX pass final exact-tree verification on `feature/expert-teams`. Documentation publication and the authorized branch push remain.
 
 Plan: [.agents/plans/20261013_native-experts-teams.plan.yaml](.agents/plans/20261013_native-experts-teams.plan.yaml).
 
-Baseline `just typecheck` passed. Baseline `just verify` failed: 915 passed, 106 failed; observed blockers include pg0 startup writing to a read-only filesystem and aimock startup. No feature changes existed during baseline. The previously required status files were absent and are initialized here.
+Final `just verify` at `a697e36` passed: **1,064 tests, zero failures, 6,536 assertions across 85 files (439.73 seconds)**, including typecheck. DomainForge 0.19.0 validates with zero violations; 188 semantic objects and all 24 Expert bindings resolve.
 
-Recon confirms published Cognate 0.2.0, PostgreSQL/pg0 persistence, fire-and-forget existing subagents and a single global provider. Native shared thread state offers atomic optimistic writes. Durable continuations exist; automatic run-completion resolution is missing and needs an explicit tested bridge. Default development authentication remains a known limitation.
+Published Cognate 0.2.0 remains the execution substrate and PostgreSQL/pg0 the only store. Native state, continuations, commitments and projections support stable identities, frozen per-Expert routes, bounded collaboration, isolated memory and correlated returns. The default Cognate Team has five editable Experts and exactly one Orchestrator.
 
-Donor: DeepSeek-Bot 0.1.5, commit `20ebc9213cbbde7249d71786765f86be00dc6663`, Apache-2.0. Temporary checkout is ignored. Translation matrix: `docs/experts-donor-translation.md`. No donor source copied.
+Evidence demonstrates concurrent membership consistency, real child execution, one logical handoff after process-kill recovery, actual Builder edits, independent verification and human settlement. Five-Expert disagreement is preserved. Cancellation, provider recovery, protected approvals and identity/message/memory overwrite attempts are tested.
 
-Observed proof: 6 execution/security/memory integration tests passed against PostgreSQL (60 assertions); 6 model-routing tests passed; membership/concurrency/persisted-projection tests passed (4 tests, 37 assertions). Native UI typechecking and 3 component tests passed. Core returns are durable and attributable, but unfinished-process interruption and complete browser flows remain to verify.
+Both desktop/mobile browser journeys pass, including custom Team activation, Expert creation/edit/copy, route selection and solo/private history after reload. UX evidence is retained in `screenshots/experts/`.
 
-Adversarial review exposed an SDK gap: replay can repeat an invocation after an effect whose result was not recorded. Expert side effects are being wrapped with native Cognate commitments, with ambiguous outcomes blocked for human reconciliation. Evidence-reference scoping and addressed-message context filtering are tightened. These are open verification gates, not claimed settlement.
+The task-acquired donor checkout is absent, with no donor files tracked. Provenance and translations remain in `docs/experts-donor-translation.md`. The operator approved retaining Cognate's pre-existing SDK-internal Cordis dependency; no direct integration was added. The added-line secret-pattern audit found no matches. Unrelated regenerated Workbench screenshots were restored.
 
-Next: finish native commitment integration, interruption and genuine-tool journeys, browser UX checks, independent review, regression suite, donor cleanup, documentation and push. Milestones committed: `3b0781e`, `5dbce99`.
+Autonomous schedules, live inter-Expert steering, parallel workers, vector memory and multi-process effect dispatch remain deferred. Development authentication and best-effort shell guards remain limitations. DomainForge's formatter issue remains; semantics validate. Deferred work is recorded in `.agents/DEBT.md`.
+
+Next: commit release documentation/status, push the branch and record publication. Full evidence: [docs/experts-verification.md](docs/experts-verification.md).

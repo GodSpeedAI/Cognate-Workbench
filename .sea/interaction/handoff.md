@@ -1,5 +1,33 @@
 # Handoff — Projecting This IDM into Cognate
 
+## Current native Experts & Teams handoff (2026-10-13)
+
+The installed DomainForge adapter/CLI is 0.19.0. The complete model validates with zero violations,
+projects 188 semantic objects, and resolves all 24 explicit Expert contracts in
+`EXPERT_CAPABILITY_ANCHORS` / `bindExpertCapabilities` (`domain/index.ts`). The inherited
+`deepseek-harness.interaction` namespace is preserved for existing evidence compatibility.
+
+`expertsComponent` publishes typed identity, Team, conversation, Assignment, memory and human
+decision capabilities. `expert.model.generate` routes the registered Assignment's frozen model
+through existing published adapters. `expert.tool.invoke` and human-only `expert.effect.resolve`
+use native Cognate commitments. The authoritative registry is a native shared thread state stream
+with optimistic version checks and logical command receipts; `expertsProjection` is its redacted
+read model. These are deliberate bindings, not automatic `.sea` policy execution.
+
+`agent.expert` reuses `agent.coding`; the completion bridge supplies the missing 0.2.0
+run-completion-condition evaluator through native continuations and persisted terminal runs.
+The genuine subprocess interruption test preserves the child identity and delivers one handoff
+without browser participation. Human review/settlement requires independent observable evidence;
+the five-Expert disagreement scenario rejects unresolved acceptance.
+
+Use [implementation evidence](../../docs/experts-verification.md) for current test results,
+[user/runtime contracts](../../docs/experts-and-teams.md) for supported scope, and
+[donor translation](../../docs/experts-donor-translation.md) for source provenance. Earlier
+sections below are historical tranche records; their older package versions/object counts do not
+describe the current adapter.
+
+The Interaction Domain Model is sufficiently stable to serve as the canonical semantic source for downstream projections.
+
 This model is consumed the way `.agents/skills/building-with-cognate/references/idm-to-cognate.md`
 describes: `loadSemanticProjection(source, { uri })` (from `packages/domainforge/src/index.ts`,
 pinned `@godspeedai/domainforge@0.18.1`) turns `interaction-model.sea` into a flat list of

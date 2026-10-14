@@ -33,6 +33,15 @@ If you only need a chat box that edits files, Workbench is more than you need. I
 - Model providers can be changed without restarting. Adapters: OpenAI-compatible, OpenAI Responses, Anthropic-compatible. Local and hosted endpoints both work.
 - Execution environments: local, SSH, and WSL where supported.
 
+### Experts and Teams
+
+- Persistent, editable Experts with individual model routes and scoped memory.
+- Cognate Team: Product Manager coordinates Builder, Critic, Verifier and Reviewer as needed.
+- Custom Teams with one atomic Orchestrator role, durable Assignments, correlated Specialist returns and human settlement.
+- Native roster, configuration, conversations, approvals, evidence inspection and recovery controls.
+
+Open **Experts & Teams** in the sidebar. See [using Experts and Teams](docs/experts-and-teams.md) for setup, authority and recovery details.
+
 ### Traces
 
 - Inspect tool invocations, output, refusals, and event-backed session traces.

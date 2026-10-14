@@ -1,5 +1,22 @@
 # Assumptions, Unknowns, and Contradictions
 
+## Native Experts & Teams observations (2026-10-13)
+
+- **Observed:** Cognate 0.2.0 stores durable waits but does not automatically evaluate child-run
+  completion conditions. The explicit native completion bridge is tested through process kill and restart.
+- **Observed:** SDK dispatch is serialized. Teams expose bounded serialized collaboration, not parallel workers.
+- **Observed:** Atomic native shared-thread writes plus command receipts preserve membership and return invariants.
+- **Observed:** Side-effect invocation alone is not crash-atomic. Native commitments now prevent
+  ambiguous Expert effects from being repeated, and reserve reconciliation for the human.
+- **Observed:** Per-Expert model routes work through the installed adapters without global provider swapping.
+- **Observed:** Public projections redact private contexts; authorized scoped reads and bounded
+  provenance-backed memory preserve the distinctions in the canonical model.
+- **Deferred:** Autonomous schedules, vector search and multi-process effect dispatch; the one-process
+  deployment remains the supported boundary. See `docs/known-gaps.md`.
+- **Resolved authority:** Existing Cognate SDK transitive Cordis dependency predates this work. The
+  operator explicitly approved retaining it while Workbench adds no direct Cordis or donor integration.
+- **Security limitation:** Development authentication and command guards remain unsuitable for hostile multi-user isolation.
+
 ## Representation decisions (proposed, evidence class: proposed)
 
 0. **Remote Workspaces are modeled as framework-level journeys (`J-RW-*`) in this IDM.** The

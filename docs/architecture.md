@@ -166,6 +166,19 @@ The one inversion worth naming: **writes start runs**. A capability handler vali
 rationale and the consequences are in
 [Why `agent.config` is the write path](explanation/why-agent-config-is-the-write-path.md).
 
+Experts and Teams use another native Cognate write contract: `updateSharedState` appends
+`state.changed` to the versioned `experts:registry` thread. Each capability revalidates the command
+against the latest snapshot and commits with `expectedVersion`; conflicts re-read and revalidate.
+This preserves atomic membership invariants and logical idempotency under concurrent mutations.
+The `experts` projection derives the public roster and work view; scoped memory and private context
+stay outside that projection. PostgreSQL remains the only persistence engine.
+
+`agent.expert` reuses the coding engine with a frozen Assignment, model route and tool ceiling.
+The completion bridge correlates genuine Cognate child runs and resolves native parent waits from
+persisted terminal events. Expert side effects use native commitments, with ambiguous outcomes
+reserved for human reconciliation. [Experts and Teams](experts-and-teams.md) explains these
+contracts and their limits.
+
 ## Trust and security boundaries
 
 ```mermaid
@@ -207,6 +220,9 @@ CI runs the same sequence against a `postgres:18` service. See
 - `domain/index.ts` — `tranche5Bindings` … `bindUsage3`, `bindWorkbench`, `bindExecutionWorlds`
 - `src/agents/agentCoding.ts`, `src/agents/agentConfig.ts`, `src/agents/agentCognitive.ts`
 - `src/capabilities/` — one file per capability family
-- `src/projections/` — eleven projection definitions
+- `src/projections/` — event-derived read models, including `experts` and `provider-routes`
+- `src/experts/` — typed identity/Assignment state, CAS mutation boundary, service governance and completion bridge
+- `src/capabilities/expertModel.ts`, `expertEffect.ts` — isolated model routing and native commitment guards
+- `src/agents/agentExpert.ts` — trusted wrapper around the existing coding engine
 - `src/workbench/types.ts`, `src/cognitive/world.ts` — the two type roots
 - `justfile`, `package.json`, `.github/workflows/verify.yml` — the command surface

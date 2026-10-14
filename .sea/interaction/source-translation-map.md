@@ -1,5 +1,11 @@
 # Source Translation Map
 
+Current native reconstruction evidence is indexed in `docs/experts-verification.md`. All 12
+Expert/Team journeys have explicit capability bindings and executable journey coverage. Expert
+state uses Cognate's typed `state.changed` contract; effect safety uses native commitments. The
+donor checkout is removed, with provenance and behavior classifications retained in
+`docs/experts-donor-translation.md`. Historical rows below remain part of the original reconstruction trail.
+
 | Source | Source Statement | Extracted Concepts | Canonical Journey | Status | Evidence Class | Notes |
 |---|---|---|---|---|---|---|
 | product-characterization.md §2 | "The session composer remains unavailable until a workspace is selected" | Composer, WorkspaceRecord, gating | J-A-first-use, J-WS-select | represented | declared | `Composer` entity + `ComposerAvailability` resource/flow |

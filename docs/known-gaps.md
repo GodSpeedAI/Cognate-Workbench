@@ -40,11 +40,32 @@ From the workbench design source:
 - The artifact model and preview fidelity.
 - Variant experimentation and worktree isolation.
 - The global Board, and Evidence/Reviews navigation.
-- Settings pages for executors, teams and economics.
-- Team supervision, and subagent return contracts wired to real subagents.
+- Settings pages for executors and economics. Experts and Teams now have native management surfaces.
+- The original generic `subagent.start` remains fire-and-forget. Native Teams use separate governed
+  Assignments, genuine Cognate runs and correlated continuation returns; see [Experts and Teams](experts-and-teams.md).
 - Role-aware routing applied to executor choice — `routeExecutor` exists and is tested; nothing calls
   it.
 - `BACKLOG` and `BLOCKED` board states are defined in the model, but no UI action sets them.
+
+## Experts and Teams limits
+
+- Expert dispatch is serialized, matching the installed Cognate runtime. Parallelism plans still do
+  not create parallel workers.
+- Autonomous schedules and live inter-Expert steering are deferred. Messages queue for the next
+  authorized Assignment. Mentions guide the Orchestrator rather than automatically starting work.
+- Memory retrieval uses bounded lexical search and recent scoped context, without embeddings or
+  automatic model-generated trusted summaries. Context budgets measure characters, not exact tokens.
+- Expert registry writes use one versioned aggregate. Partitioning and paginated historical reads
+  are future scaling work; no high-volume throughput claim is made.
+- Multi-process effect dispatch fails closed without the owning live run context. The supported
+  Workbench deployment remains one Bun process.
+- A provider call can delay graceful runtime shutdown. Abrupt-process recovery is tested separately.
+- Human reconciliation of an ambiguous effect does not prove an objective complete. A confirmed
+  successful effect requires a new follow-up objective rather than blind retry of that objective.
+- Native commitment guards cover Expert `edit`, `bash` and `run_code`; legacy coding-session tools
+  retain their existing recovery semantics.
+- Development bearer-token authentication and best-effort command guards remain unchanged security
+  limitations. Expert capability checks are not OS-level or multi-user isolation.
 
 ## The cognitive layer is a local proof
 

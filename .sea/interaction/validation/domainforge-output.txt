@@ -1,3 +1,15 @@
+== Current native Experts & Teams validation (2026-10-14 UTC) ==
+domainforge 0.19.0
+domainforge validate --format human .sea/interaction/interaction-model.sea
+Validation succeeded: 0 violations total
+domainforge parse .sea/interaction/interaction-model.sea --format human
+Entities: 43; Resources: 40; Flows: 40; Roles: 8; Relations: 6; Entity instances: 49; Policies: 1
+Cognate loadDomain: 188 semantic objects
+bindExpertCapabilities: 24 explicit contracts resolve
+domainforge fmt --check: reports difference (985 -> 983 lines); known quantified-policy/comment formatter defect, source preserved
+Final exact-tree just verify at a697e36: 1064 pass, 0 fail, 6536 assertions, 85 files (439.73 seconds)
+
+== Historical tranche validation follows ==
 == domainforge --version ==
 domainforge 0.18.1
 
