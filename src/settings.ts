@@ -28,7 +28,7 @@ export function isPermissionMode(value: unknown): value is PermissionMode {
 
 export const LANGUAGE_CODES = ["zh", "en"] as const;
 export type LanguageCode = (typeof LANGUAGE_CODES)[number];
-/** Reference default: English (§11). Display-only persistence — see DEVIATIONS.md (no i18n
+/** Reference default: English (§11). Display-only persistence — see docs/known-gaps.md (no i18n
  *  strings exist; the app's copy is English-only). */
 export const DEFAULT_LANGUAGE: LanguageCode = "en";
 export const LANGUAGE_LABELS: Readonly<Record<LanguageCode, string>> = { zh: "中文", en: "English" };
@@ -52,7 +52,7 @@ export function isAppearanceMode(value: unknown): value is AppearanceMode {
 
 /** Reference: 1px stepper, default 14, floor 12 ("Decrease font size" [disabled] at 12 —
  *  checkpoint 22h2). The reference's ceiling was not characterized; 32 is this app's own sane
- *  upper bound so the stepper cannot run unbounded (see DEVIATIONS.md). */
+ *  upper bound so the stepper cannot run unbounded (see docs/known-gaps.md). */
 export const DEFAULT_FONT_SIZE_PX = 14;
 export const MIN_FONT_SIZE_PX = 12;
 export const MAX_FONT_SIZE_PX = 32;
@@ -88,7 +88,7 @@ export const DEFAULT_CODING_TOOLS = true;
 /** Usage pass U4 (reference-behavior-matrix.md SS15): which agent preset NEW sessions start in —
  *  the composer sends it as `AgentCodingInput.preset`, scoping the turn's tool catalog
  *  (`agentCoding.ts`'s PRESET_TOOLS). The reference's fourth preset (Creator mode) is out of scope
- *  (DEVIATIONS.md). */
+ *  (docs/known-gaps.md). */
 export const AGENT_PRESETS = ["standard", "ptc", "minimal"] as const;
 export type AgentPreset = (typeof AGENT_PRESETS)[number];
 /** Reference default: Standard mode. */
@@ -153,7 +153,7 @@ export interface GeneralSettings extends Required<SettingsPatch> {}
 /** The global plugins a client can actually toggle (`settings.changePlugin`): only entries with
  *  real runtime behavior behind them. RealityTrace observations gate the SXR evidence delivery
  *  (`wireObservations`' drain gate); the other global plugins in the UI's inventory are always-on
- *  compositions, so their switches stay informational (DEVIATIONS.md). */
+ *  compositions, so their switches stay informational (docs/known-gaps.md). */
 export const TOGGLEABLE_PLUGINS: readonly string[] = ["realitytrace"];
 
 export function isToggleablePluginId(value: unknown): value is string {
@@ -177,7 +177,7 @@ export function pluginEnabled(plugins: unknown, id: string): boolean {
  * each absent/invalid field. `legacyAppearance` is the pre-U2 `localStorage["cognate.theme"]`
  * value ("light"/"dark"): theme persistence migrated into the durable settings row this tranche,
  * and a home last used by an older build keeps its stored theme until the first explicit choice
- * writes a durable `appearance` (see DEVIATIONS.md).
+ * writes a durable `appearance` (see docs/known-gaps.md).
  */
 export function resolveGeneralSettings(value: unknown, legacyAppearance?: string): GeneralSettings {
   const row = (value ?? {}) as Partial<Record<keyof SettingsPatch, unknown>>;

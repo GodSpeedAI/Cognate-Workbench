@@ -8,7 +8,7 @@
 // reference/observations/aria/04-workspace-selected.desktop.txt). The reference's `all-prompts`
 // LLM re-titling cadence (a separate model request; see reference-behavior-matrix.md §0/§4) was not
 // observed to visibly replace this literal-text title within the pinned pass's timeframe, so this
-// reconstruction does not implement a second titling call — see APP/README.md "Known gaps".
+// reconstruction does not implement a second titling call — see docs/known-gaps.md.
 import type { Json } from "@godspeedai/cognate-events";
 import type { Projection } from "@godspeedai/cognate-projections";
 

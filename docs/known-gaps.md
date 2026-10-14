@@ -24,14 +24,14 @@ These render or record faithfully and do nothing else.
 |---|---|
 | Capability substitution | Recorded. Does not rebind a running tool. |
 | Parallelism plans | Recorded. Do not start workers. |
-| Automation records | Stored. No background scheduler fires them. |
-| Budget information | Informational. Not enforced as a runtime limit. |
-| Composer stats footer | Always renders `0 turns 0 steps · 0 tok/s` / `0% of context used`. No turn, step, token or context accounting exists. |
+| Legacy automation records | Stored accepted-workflow intent still needs explicit migration. Native Expert/Team schedules now execute due work; see [schedules](schedules.md). |
+| Legacy budget information | Workbench planning economics remain informational. Expert Assignment attempts now enforce configured model limits before invocation. |
+| Composer / child usage | Main composer counts actual turns/steps; unknown child usage is explicitly unavailable. Expert assignments expose provider usage and labeled estimates. No measured token-per-second rate is claimed. |
 | Trajectory / developer tools | Present as a read view over the trace. |
 
 The honest convention from `src/ui/workbench/UX.md` rule 9 is that an unreported number renders as
-`unknown` or `n/a`. The stats footer violates it because no number exists to report. The fix is a
-backend change, not a UI change, so it is recorded here rather than done silently.
+`unknown` or `n/a`. The historical fabricated-zero finding is closed by the actual current renderer
+and `test/ui-observability.test.tsx`; unknown prices and usage remain unknown.
 
 ## Plan sections not built
 
@@ -51,12 +51,24 @@ From the workbench design source:
 
 - Expert dispatch is serialized, matching the installed Cognate runtime. Parallelism plans still do
   not create parallel workers.
-- Autonomous schedules and live inter-Expert steering are deferred. Messages queue for the next
-  authorized Assignment. Mentions guide the Orchestrator rather than automatically starting work.
+- Native one-time/daily/weekly Expert and Team schedules execute independently of the browser,
+  recover after process termination, and retain occurrence receipts. Legacy automation workflows
+  are not automatically converted. Schedule state remains one CAS aggregate; high-volume history
+  partitioning and distributed evaluator ownership remain open.
+- Shared Team live messages are durably accepted, then incorporated at a recorded safe decision
+  boundary. Pending, incorporated, cancelled, superseded and late states are distinct. No arbitrary
+  interruption of an active provider call is claimed. Idle recipients retain next-assignment queueing;
+  a generalized SDK inbox and standalone live steering remain open. Mentions guide coordination.
 - Memory retrieval uses bounded lexical search and recent scoped context, without embeddings or
-  automatic model-generated trusted summaries. Context budgets measure characters, not exact tokens.
-- Expert registry writes use one versioned aggregate. Partitioning and paginated historical reads
-  are future scaling work; no high-volume throughput claim is made.
+  automatic model-generated trusted summaries. Context selection retains its character budget;
+  optional model budgets additionally check the complete visible request plus reserved output using
+  a labeled conservative byte estimate. Model-specific tokenizer counts and hidden provider framing
+  remain unmeasured. Provider-reported input/output usage is recorded separately.
+- Expert state now uses bounded immutable native partitions and an atomic manifest. Scoped history
+  and memory responses are paginated; stale cursors explicitly reject. Reads still materialize all
+  partitions and filter lexically, and the root CAS remains a global contention point. No indexed
+  SQL retrieval or broad scaling guarantee is claimed; see [storage](experts-storage.md) and the
+  [measured benchmark](experts-scale-baseline.md).
 - Multi-process effect dispatch fails closed without the owning live run context. The supported
   Workbench deployment remains one Bun process.
 - A provider call can delay graceful runtime shutdown. Abrupt-process recovery is tested separately.
@@ -71,10 +83,10 @@ From the workbench design source:
 
 Explicitly labelled as such in the code.
 
-- **Capabilities unbound to the semantic model.** `case.*`, `criterion.*`, `world.*`,
-  `verification.run`, `risk.assess`, `experiment.*`, `method.*` and `ui.*` are executable but not
-  bound. The recorded reason is that the `.sea` model carries another tranche's uncommitted edits.
-  A gap, not a decision.
+- **Semantic binding gap closed.** The validated model now represents the implemented cognitive
+  journeys and explicitly binds all 20 `case.*`, `criterion.*`, `world.*`, `verification.run`,
+  `risk.assess`, `experiment.*`, `method.*` and `ui.*` contracts. Tests inspect the semantic reference
+  on an actual native invocation. A semantic binding does not automatically execute a SEA policy.
 - **The fork provider is a directory copy**, not a hardened sandbox. It is isolation from accident.
 - **No core promotion.** Three candidates were identified — world identity and lineage,
   around-mediation with a trusted subchain, and the closed Surface grammar — each recorded with the
@@ -91,9 +103,9 @@ Explicitly labelled as such in the code.
 `src/ui/workbench/UX.md` rule 7 says a disabled control must explain itself **in visible text next to
 the control**, never in a tooltip alone.
 
-`src/ui/App.tsx` defines `const NOT_IMPLEMENTED = "Not implemented in this tranche — see
-APP/DEVIATIONS.md"` and uses it as the `title` on **21 disabled controls**. That is the count today
-and it is a live, unresolved disagreement with both documents.
+The historical finding counted **21 disabled controls** guarded by `NOT_IMPLEMENTED`, including
+review layout, shortcuts, configuration, plugins, view options and the fallback preset chooser.
+That count is no longer current: the marker is absent and T11 implemented those surfaces.
 
 Where they are, in summary: the review panel's toolbar (Split, Fullscreen, Collapse right sidebar,
 Code view) and its Add-tab control; a shortcuts edit button and a shortcuts footer control; an
@@ -101,22 +113,22 @@ Code view) and its Add-tab control; a shortcuts edit button and a shortcuts foot
 label pair; a Refresh button and a second primary button; and the display-only "Standard mode" badge
 in the no-workspace fallback chooser.
 
-Two further problems compound it: the string points at `APP/DEVIATIONS.md`, which does not exist, and
-the cockpit components under `src/ui/workbench/` are held to a stricter contract than the shell is.
+The removed marker also pointed at absent `APP/DEVIATIONS.md`. Current source comments now point
+at this document. Existing functional evidence includes `test/ui-review.test.tsx`,
+`test/J-PREFS-shortcuts.test.ts`, `test/J-CFG-config-path.test.ts`, `test/workbench-plugins.test.ts`,
+`test/workbench-sidebar-view.test.ts` and `test/E2E-workbench.test.ts`.
 
-**This is a finding, not a fix.** Resolving it means wiring, removing, or giving each control a real
-visible reason — a product-surface decision, not a documentation one.
+**Superseded — replaced by documented working T11 controls.** This preserves the original finding;
+it does not imply every planned product feature exists. Remaining planned surfaces are listed above.
 
 ### Unbound capabilities against the binding model
 
-The cognitive family is executable but not bound, while every other family is. See above.
+Closed by validated model concepts, explicit adapter bindings and native invocation evidence. See above.
 
 ### A no-workspace fallback badge
 
-When the app cannot create a default workspace, its fallback chooser renders a disabled "Standard
-mode" badge carrying the same `NOT_IMPLEMENTED` tooltip. It is display-only there, and is covered by
-the count in the inert-control finding above. This is **not** the composer's access-mode dropdown,
-which is functional.
+The historical fallback badge is superseded by a working preset selector using
+`settings.changePreset`. The composer's separate access-mode dropdown remains functional.
 
 ## Security and trust boundaries, stated plainly
 
@@ -134,8 +146,8 @@ code or data expecting containment.
 
 ## Stale references in source comments
 
-Source comments cite paths that no longer exist. They are recorded here rather than edited, because
-changing implementation comments was outside the scope of the documentation work.
+The previously recorded missing-path comments have been repaired in this tranche. Their historical
+locations are retained below; current comments use existing documentation.
 
 | Location | Points at |
 |---|---|
@@ -147,7 +159,8 @@ changing implementation comments was outside the scope of the documentation work
 
 Comments in a few source files and in legacy documents describe "SQLite-backed continuations". The
 store is PostgreSQL: `src/store.ts` returns `{ postgres: … }` or `{ postgresPg0: … }`, and CI
-provisions a `postgres:18` service. Where a comment says SQLite, it is stale.
+provisions a `postgres:18` service. Active source comments were repaired; historical documents remain
+provenance, not current persistence instructions.
 
 ## A command that does not exist
 
@@ -179,7 +192,7 @@ Where a debt or critic finding appears in recovered prose, it is cited as second
 
 ## Source trail
 
-- `src/ui/App.tsx:172` — `NOT_IMPLEMENTED`; 21 disabled controls using it
+- `src/ui/App.tsx` — T11 controls, actual composer counts and explicit unavailable child usage
 - `src/ui/workbench/UX.md` — rule 7, the honest-rendering rule
 - `PRODUCT.md` — principle 3 and the accessibility section
 - `src/capabilities/cognitive.ts` — the human-only guards and the fork provider

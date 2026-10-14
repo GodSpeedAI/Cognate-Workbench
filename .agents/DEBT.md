@@ -5,14 +5,14 @@ working feature. See `docs/known-gaps.md` and `docs/experts-verification.md`.
 
 | Debt | Evidence and current behavior | Condition for closing |
 | --- | --- | --- |
-| Autonomous scheduled work | `src/workbench/automation.ts` records intent; no durable background executor fires it. No schedule UI was added. | Native durable due-work execution with restart, cancellation and idempotency journeys |
-| Parallel Expert dispatch | `test/experts-runtime-scheduling.test.ts` observes maximum one active run in the installed SDK. Teams serialize. | Supported isolated runtime concurrency, tested before exposing parallel workers |
-| Live inter-Expert steering | `ExpertsService` durably queues addressed messages for the next authorized Assignment. | A supported Cognate live-inbox contract with durable recovery and authority checks |
-| Memory scaling and token accounting | Scoped lexical retrieval and character budgets work; the registry remains one CAS aggregate. | Evidence-backed partitioning/pagination, token-aware selection or embeddings when needed |
+| Autonomous scheduled work — Partially closed — specific remaining limitation | Native Expert/Team schedule evaluator and UI now execute real runs; PostgreSQL SIGKILL/restart, recurrence, failure, cancellation and read-only approval tests pass. Legacy workflow intent remains separate; one process only. | Supported distributed ownership and deliberate legacy workflow migration |
+| Parallel Expert dispatch — Partially closed — specific remaining limitation | Workbench installed SDK still serializes. Isolated upstream tests demonstrate bounded capacities 1/2/4/8, resource contention, cancellation, continuations and PostgreSQL. | Publish supported SDK contracts and verify Workbench eligibility/UI integration |
+| Live inter-Expert steering — Partially closed — specific remaining limitation | Shared Team inbox now incorporates authorized messages at native recorded decision boundaries, with ordered receipts, ownership, limits and SIGKILL replay evidence. | Generalized SDK inbox and standalone live steering; no arbitrary inference interruption claim |
+| Memory scaling and token accounting — Partially closed — specific remaining limitation | Bounded immutable partitions, tested migration/erasure, scoped cursor pages, measured write reduction and frozen Expert invocation budgets work. | Global root CAS contention, indexed retrieval, model tokenization and ordinary-session budgets remain |
 | Multiple Workbench processes | Native effect dispatch fails closed without the owning live run context; one Bun process is supported. | A supported durable distributed effect lease/dispatch contract with crash tests |
 | Production trust boundary | Existing development authenticator and best-effort shell guards remain; Expert capability gates are not OS isolation. | Separate authenticated multi-user and sandbox hardening work |
 | DomainForge formatter — Closed — verified | The installed 0.19.0 already contains upstream fix `5feeb93`; the recorded difference was canonical formatting, not semantic corruption. `test/sea-format.test.ts` proves AST/comment retention, validation and idempotence; formatting check passes. | Regression gate and upstream four-test evidence: `.sea/interaction/validation/formatter-fidelity.md` |
 
-The next tranche's exhaustive dispositions and shared architectural dependencies are tracked in
-`docs/experts-debt-closure.md`. The six other primary rows remain open; upstream source changes
-are not Workbench integration until a supported release is consumed and its journeys pass.
+The exhaustive dispositions and shared dependencies are tracked in `docs/experts-debt-closure.md`.
+This mission remains incomplete. Upstream source changes are not Workbench integration until a
+supported release is consumed and its journeys pass. No production or multi-process closure is claimed.

@@ -40,7 +40,7 @@ Cognate 0.2.0 stores run-completion conditions but does not automatically resolv
 
 States are `queued`, `running`, `waiting`, `reconciliation-required`, `failed`, `cancelled` and human-settled `completed`. Creating a child run does not complete its Assignment. Typed returns can report a result, abstention or decline. A returned result remains an assertion until its evidence is checked.
 
-The installed runtime dispatches runs serially. Teams make no parallel-worker claim. Addressed messages queue durably for a recipient's next authorized Assignment. Live steering and autonomous conversational loops are unavailable. Handoff depth, assignments, unread work, rounds and per-run steps are bounded.
+The installed runtime dispatches runs serially. Teams make no parallel-worker claim. Addressed messages to idle recipients queue for the next authorized Assignment. Active shared Team conversations additionally support a durable live inbox: messages are accepted immediately, then incorporated at a recorded safe decision boundary. Pending, incorporated, superseded, cancelled and late delivery are visible. An ongoing inference call is not interrupted. Handoff depth, assignments, unread work, rounds and per-run steps are bounded.
 
 ## Effects, cancellation and recovery
 
@@ -70,6 +70,10 @@ Handoffs preserve artifacts, run/event evidence, uncertainty, failures and follo
 
 This remains a single-operator development application with best-effort path/command guards, not production authentication or OS isolation. The Expert gate does not harden the legacy coding engine into a sandbox. Do not expose the development bearer-token service to untrusted callers.
 
-Autonomous schedules, a token-cost budget enforcer, parallel Expert workers, vector memory search and multi-process effect dispatch are deferred. In ambiguous multi-process delivery, effects fail closed rather than executing without their owning live context. The registry is one versioned aggregate; high-volume partitioning and paginated history need separate scaling work.
+Native Expert/Team schedules now execute one-time or timezone-aware daily/weekly objectives independently of the browser. Open **Experts and Teams → Schedules**, then inspect an occurrence's native conversation, run and evidence. These schedules are read-only and preserve human approval for workspace effects; see [schedule behavior](schedules.md).
+
+Optional [model budgets](expert-economics.md) freeze per-attempt limits and enforce reservations before provider calls. The usage disclosure distinguishes provider-reported tokens, conservative visible-input estimates and unknown cost. State now uses [bounded native partitions and paginated reads](experts-storage.md); global root contention and materialized lexical retrieval remain limitations.
+
+Parallel Workbench workers, vector search, distributed run ownership and production authentication/containment remain open. Tested upstream SDK improvements are not consumed until a supported release is available. In ambiguous multi-process delivery, effects fail closed rather than executing without their owning live context. The complete [debt disposition](experts-debt-closure.md) distinguishes verified changes from remaining work.
 
 For provenance and reconstructed donor behavior, see [donor translation](experts-donor-translation.md). For exact commands and observed evidence, see [verification](experts-verification.md).

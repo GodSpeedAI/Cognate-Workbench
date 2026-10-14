@@ -45,7 +45,7 @@ export const PLAN_APPROVED_TOOL_RESULT =
  *  'Still unresolved'"). This wording is this app's own invention, shaped by
  *  `canonical-journey-catalog.md` `j_e_plan`'s step description ("feedback returned as a failed tool
  *  call; agent revises and re-presents") rather than copied from any observed reference string — see
- *  DEVIATIONS.md. */
+ *  docs/known-gaps.md. */
 export function planRequestChangesToolResult(feedback: string | undefined): string {
   const suffix = feedback && feedback.trim().length > 0 ? `: ${feedback.trim()}` : "";
   return `Error: the user requested changes to this plan${suffix}; revise the plan and call exit_plan_mode again`;

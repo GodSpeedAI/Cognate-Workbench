@@ -16,6 +16,7 @@ decisions:
   - Preserve sibling Cognate dirty status files; upstream work uses an isolated task worktree.
   - Baseline and each settlement require actual store/runtime evidence, not mock-only proofs.
   - Formatting must prove semantic equivalence, comment retention and idempotence before canonical application.
+  - Real 0.2.0 restart tests support single-process schedules/inbox before distributed run ownership; T2 remains required for multi-process exposure and supported parallel integration.
 global_gates:
   - just typecheck
   - just verify
@@ -23,11 +24,21 @@ global_gates:
   - domainforge fmt --check .sea/interaction/interaction-model.sea
   - git diff --check
 dependency_graph:
-  edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T2,T5],[T0,T6],[T3,T7],[T4,T7],[T5,T7],[T6,T7],[T7,T8]]
-  critical_path: [T0,T1,T2,T3,T7,T8]
+  edges: [[T0,T1],[T1,T2],[T0,T3],[T0,T4],[T2,T5],[T0,T6],[T3,T7],[T4,T7],[T5,T7],[T6,T7],[T7,T8]]
+  critical_path: [T0,T1,T2,T5,T7,T8]
 initial_state:
-  current_task: T0
-  last_settled_task: null
+  current_task: T3
+  last_settled_task: T0
+progress:
+  T0: Baseline settled at 1064 passing tests; dependency and disposition map committed.
+  T1: Upstream implementation pushed in PR42; 81 gates, native concurrency, saturated-pool and OS tests pass; unpublished.
+  T2: Outbox fencing verified; durable run ownership remains open.
+  T3: Single-process schedules and shared Team safe-boundary inbox verified in native PostgreSQL and browser journeys; generalized/distributed contracts remain open.
+  T4: Partition migration, erasure, pagination, Expert budgets and benchmarks verified; indexed retrieval, tokenization and global budgets remain open.
+  T5: Production identity and OS containment remain open.
+  T6: Formatter closure and twenty cognitive bindings verified; semantic IDs preserved.
+  T7: Native schedule/inbox/accounting UI committed and browser verified; remaining historical product gaps retained.
+  T8: Verified subset passes1100tests; mission incomplete pending upstream release, distributed ownership and production trust.
 tasks:
   T0:
     title: Inventory, baseline, architectural dependency and debt disposition map
@@ -51,8 +62,8 @@ tasks:
     evidence: docs/experts-debt-closure.md
   T3:
     title: Durable schedules and governed live inbox on supported dispatch
-    depends_on: [T2]
-    changes: Model/bind due occurrences, safe-boundary inbox, misfires, authority revalidation and native UI.
+    depends_on: [T0]
+    changes: Model/bind single-process due occurrences and safe-boundary inbox on supported0.2.0 dispatch; distributed integration remains gated by T2.
     gate: [Schedule restart/cancellation/DST tests, inbox restart/steering journeys, browser tests]
     evidence: docs/experts-debt-closure.md
   T4:

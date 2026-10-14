@@ -1,6 +1,6 @@
 // Publishes `model.generate`, forwarding streamed text deltas via `HandlerContext.progress` into
-// `run.invocation.progress` events (the G1 durable progress channel; see
-// docs/reference/capability-and-architecture-contracts.md and packages/runtime-bun/src/executor.ts).
+// `run.invocation.progress` events (the durable progress channel; see
+// docs/reference/capability-catalog.md).
 // Distinct from `@godspeedai/cognate-profile-harness`'s `providerComponent`, which only calls `generate` — this
 // reconstruction needs live token deltas in the invoking run, which requires calling `provider.stream`
 // from inside the handler.

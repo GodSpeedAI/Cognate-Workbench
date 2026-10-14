@@ -1,23 +1,38 @@
-# Current status — revision 7
+# Current status — revision 10
 
-Native Experts & Teams remains published at `a892120` on `feature/expert-teams`. A new [debt closure plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) is executing; the previous release remains the verified baseline, not proof of this tranche.
+Verified native debt slices committed; final Workbench gate passes1100tests. Upstream SDK PR42 is pushed and tested but unpublished. Full debt-closure mission remains incomplete.
 
-Final `just verify` at `a697e36` passed: **1,064 tests, zero failures, 6,536 assertions across 85 files (439.73 seconds)**, including typecheck. DomainForge 0.19.0 validates with zero violations; 188 semantic objects and all 24 Expert bindings resolve.
+The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
+The complete [verification report](docs/experts-debt-verification.md) records every primary debt,
+canonical journeys, measurements, failure evidence, source commits and remaining conditions.
 
-Published Cognate 0.2.0 remains the execution substrate and PostgreSQL/pg0 the only store. Native state, continuations, commitments and projections support persistent identities, frozen per-Expert routes, bounded collaboration, isolated memory and correlated returns. Cognate Team contains five editable Experts with Product Manager as its sole Orchestrator. Custom identities, Teams and atomic concurrent role changes work.
+Final `just verify`: **1,100 pass, zero fail, 6,856 assertions across 96 files, 629.97 seconds**,
+including typecheck. DomainForge 0.19.0 validates with zero violations and clean formatting;
+222 semantic objects and all 27 Expert/four schedule/twenty cognitive bindings resolve.
 
-Evidence demonstrates real Specialist execution, one logical return after process-kill recovery, actual Builder edits, independent verification and human settlement. Five-Expert disagreement is preserved. Cancellation, provider recovery, protected approvals and identity/message/memory overwrite attempts are tested.
+Workbench remains on published Cognate **0.2.0** and PostgreSQL/pg0. Backend `a4d6201` and UI
+`8169975` implement single-process native Expert/Team schedules, shared Team live inbox,
+bounded immutable state partitions, scoped cursor history/memory, frozen Expert attempt budgets,
+accurate observed usage and inspectable receipts. Schedule and inbox SIGKILL recovery, failure,
+cancellation, human approval, migration/erasure, private context and browser journeys pass.
+The default Cognate Team and one-Orchestrator invariant remain intact.
 
-Both desktop/mobile browser journeys pass, including custom Team activation, Expert creation/edit/copy, model selection and solo/private history after reload. UX evidence is retained in `screenshots/experts/`.
+A real PostgreSQL pool deadlock was reproduced and fixed upstream. Workbench coalesces identical
+immutable preparation requests without caching private state; the original concurrent membership
+journey passes five repetitions with unchanged assertions/timeouts. Comparative 917 KB writes fall
+from about 3.68 MB to 173 KB; the 8.49 MB fixture retains scope/identity and recovers.
 
-The task-acquired donor is deleted, with no donor files tracked. Provenance remains in `docs/experts-donor-translation.md`. The operator approved retaining Cognate's pre-existing SDK-internal Cordis dependency; no direct integration was added. Added-line secret-pattern and diff checks passed. Unrelated regenerated screenshots were restored.
+Upstream `ab4dd2a`, `920c4c9`, `06a520b` and `48ad057` are pushed in
+[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42). Native fencing/concurrency and Linux
+child-process ports pass scoped gates and 81 verification gates. CI/clean-room packaging passed
+`06a520b`. Source success is not a published dependency release or production trust.
 
-Implementation and documentation through `e3433e5` pushed successfully without force. This final status/plan closure follows on the same branch.
+Distributed run-write ownership, production identity/session/tenant integration, supported contained
+deployment, aggregate resource quotas and independent security review remain open. So do indexed
+retrieval, exact tokenization/global budgets and enumerated historical workflow gaps. One Bun process
+is supported; no new parallel/distributed UI promise is made.
 
-Schedules, live inter-Expert steering, parallel workers, aggregate scaling, token budgets, multi-process effects and production trust are the new mission's open work. The formatter debt is closed with executable evidence; optional vector retrieval still requires benchmark justification. The disposition map preserves every historical finding.
-
-The new dependency and exhaustive disposition map is [docs/experts-debt-closure.md](docs/experts-debt-closure.md). Fresh full verification is running. Local upstream Cognate has user changes in its status files; they remain untouched. SDK changes are isolated on `feature/durable-dispatch-debt`. Published 0.3.0 availability was checked; Workbench stays on 0.2.0 until supported replacement integration passes.
-
-Formatter reconnaissance found the installed 0.19.0 already contains the upstream fidelity fix. A regression failed on the existing noncanonical formatting; canonical formatting now passes AST/comment/idempotence checks, zero-violation validation, and upstream's four fidelity tests. No semantic IDs changed. A narrow UI slice replaces fabricated child-run usage with an explicit unavailable state; implementation review remains pending.
-
-Prior release report: [docs/experts-verification.md](docs/experts-verification.md).
+Luna workers reported their service usage limit; unperformed recon is not claimed. Sibling user
+changes are preserved. Final documentation push and removal of the task-owned temporary SDK
+worktree are next; source is preserved by pushed commits and PR. No force-push or unsupported
+development dependency is authorized or used.

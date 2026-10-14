@@ -1,6 +1,6 @@
 // Public projection `session-trace` (usage pass U5, reference-behavior-matrix.md §13): the
 // developer-tools execution trace, folded from a session's own durable run events — the trace is
-// Cognate's (SQLite event log is authoritative), never a second recording path. One row per
+// Cognate's durable event log is authoritative, never a second recording path. One row per
 // session (`trace/<sessionId>`): a list of turns, each with its user message, its ASSISTANT
 // request rows (one per recorded `model.generate` invocation — the kernel records the full
 // invocation input/result on `run.invocation`), and its TOOL rows (`tool.call.*`, with durations

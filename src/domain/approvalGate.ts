@@ -17,8 +17,7 @@ export interface ApprovalDecisionRequest {
    *  case/spacing — normalized below). Defaults to `"read-only"`, the conservative default that
    *  matches the reference's observed approval-scenario mode
    *  (`reference/observations/aria/12-approval-resolved-allow`: `button "Access mode, current: Read
-   *  Only"`) — the app's composer access-mode dropdown is inert/display-only this tranche
-   *  (`DEVIATIONS.md`), so this default is not wired to it yet. */
+   *  Only"`). The composer supplies its per-session selection when one is set. */
   readonly mode?: string;
 }
 

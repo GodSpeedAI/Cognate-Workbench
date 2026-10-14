@@ -64,7 +64,7 @@ Some features record intent but do not act on it yet.
 | --- | --- |
 | Capability substitution | Recorded. Does not rebind a running tool. |
 | Parallelism plans | Recorded. Do not start workers. |
-| Automation records | Stored. No background scheduler. |
+| Legacy automation records | Stored workflow intent; native Expert/Team schedules now execute due work through Cognate. See [schedules](docs/schedules.md). |
 | Budget information | Informational. Not enforced as a runtime limit. |
 
 
