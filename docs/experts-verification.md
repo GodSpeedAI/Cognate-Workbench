@@ -119,10 +119,20 @@ The donor `Fei2411/DeepSeek-Bot` at `20ebc9213cbbde7249d71786765f86be00dc6663`, 
 | `663c339` | Scoped recovery, bounded collaboration and independent settlement evidence |
 | `5c07743` | Native responsive management, scoped history and evidence UX |
 | `a697e36` | Identity overwrite protection, human gates, startup ordering and final test corrections |
+| `e3433e5` | User/runtime documentation, semantic validation, donor parity, debt ledger and release evidence |
 
-Release target: `origin/feature/expert-teams` on `GodSpeedAI/Cognate-Workbench`. Final
-documentation/status commits and publication are recorded after the final exact-tree gate.
+Published successfully to `origin/feature/expert-teams` on `GodSpeedAI/Cognate-Workbench`,
+initially through `e3433e5`. The final status/plan closure is a documentation-only follow-up on the
+same branch. No force-push, unrelated history replacement or donor source publication occurred.
 
 The operator explicitly approved retaining the pre-existing SDK-internal Cordis dependency after
 the audit demonstrated its relationship to Cognate 0.2.0. This task adds no direct Cordis
-dependency or integration. Other supported limits are documented in [Experts and Teams](experts-and-teams.md) and [known gaps](known-gaps.md).
+dependency or integration.
+
+Remaining limits: autonomous schedules, live inter-Expert steering, parallel workers, vector
+retrieval and multi-process effect dispatch are deferred. Memory budgets count characters;
+history pagination and aggregate partitioning remain scaling work. A provider can delay graceful
+shutdown; abrupt recovery is tested. Development authentication and best-effort command guards
+are not production isolation. DomainForge's formatter discrepancy remains, while semantic
+validation passes. See [Experts and Teams](experts-and-teams.md), [known gaps](known-gaps.md)
+and [the debt ledger](../.agents/DEBT.md) for precise boundaries.

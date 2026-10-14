@@ -3,7 +3,7 @@ schema_version: '1.0'
 metadata:
   id: native-experts-teams
   title: Native governed Experts and Teams
-  status: in_progress
+  status: complete
   version: '1.0'
   created: '2026-10-13'
 source:
@@ -32,8 +32,8 @@ dependency_graph:
   edges: [[T0, T1], [T1, T2], [T2, T3], [T3, T4], [T4, T5], [T5, T6]]
   critical_path: [T0, T1, T2, T3, T4, T5, T6]
 initial_state:
-  current_task: T6
-  last_settled_task: T5
+  current_task: null
+  last_settled_task: T6
 tasks:
   T0:
     title: Reconnaissance, baseline, semantic model and explicit bindings
