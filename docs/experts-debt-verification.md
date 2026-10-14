@@ -127,13 +127,14 @@ deployment has been established.
 | `domainforge fmt --check .sea/interaction/interaction-model.sea` | Already formatted |
 | `domainforge validate --format human .sea/interaction/interaction-model.sea` | Zero violations |
 | DomainForge upstream formatter fidelity tests | Four pass |
-| Upstream Cognate `just verify` | Earlier baseline 81/81; review rerun 80/81, then its sole documentation-map omission fixed and narrow gate passes |
+| Upstream Cognate `just verify` | Final isolated run 81/81 gates pass, exit zero, about 49 seconds |
 | Upstream events/memory/SQLite; PostgreSQL conformance | 73 pass; 29 pass |
 | Upstream complete PostgreSQL adapter suite | 42 pass, zero fail, 193 assertions |
 | Upstream saturated-pool regression, three repetitions | Three pass, zero fail, twelve assertions |
 | Upstream runtime/service/continuations | 96 pass, zero fail, 373 assertions after final startup compatibility guard |
 | Upstream events/continuations/runtime after CodeRabbit fixes | 225 pass, zero fail, 772 assertions; seventeen optional external CEP tests skipped |
 | Mixed run/resume claims at capacities one/two | Before: two/four outstanding claims; after: bounded at one/two with all deliveries settled once |
+| AG-UI shared-state stress regression | Before: two failures in 100 repetitions; after awaiting settled SSE streams: 100 tests / 160 assertions pass |
 | `COGNATE_BWRAP_TESTS=1 bun test --timeout 15000 packages/execution/test/bubblewrap.test.ts` | Ten pass, zero fail, 29 assertions; actual OS namespaces |
 | Upstream documentation gate | Five pass, zero fail, 26 assertions |
 | `git diff --check` | Pass |
@@ -174,9 +175,25 @@ is recorded in its Git history. Upstream branch `feature/durable-dispatch-debt` 
 - `7d9b80f` — PostgreSQL replay and release checkpoint.
 - `52a8eaf` — shared run/resume admission, worker settlement/error regression and actual file-existence check.
 - `ff505ae` — remove independent GitHub reviewer gate per operator instruction; repair evidence documentation map.
+- `033029d` — await settled AG-UI streams, retain failed gate diagnostics; all 81 local gates and exact-head CI/packaging pass.
 
-[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42) is reviewable. CI verification and
-clean-room packaging passed on `7d9b80f`; subsequent review corrections need exact-head checks.
+[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42) is ready for final operator
+authorization at exact head `033029d2be29fc3982dc4ac9de963a93ab266f90`:
+
+- [CI verification](https://github.com/GodSpeedAI/Cognate/actions/runs/38636836131/job/116102034362)
+  succeeded at 2026-10-14 21:02:27 UTC.
+- [Pack and clean-room installation](https://github.com/GodSpeedAI/Cognate/actions/runs/38636835958/job/116102033155)
+  succeeded at 21:01:21 UTC.
+- CodeRabbit status succeeded; the known actionable findings are corrected and regression-tested.
+  No new review was submitted on this exact head; a successful bot status is not a fresh review.
+- Read-only registry checks find all 45 linked names at latest 0.3.0. Release run `38300385888`
+  reports successful publication for every name and readiness variable is true. The historical
+  nine-package gap is resolved; no current missing publication was found.
+
+Future linked npm publication remains non-atomic. Revalidate the approved release version and all
+package publications, and use documented exact-version recovery for any failure. No atomic external
+publication or exactly-once physical effect guarantee is claimed. Outbox fencing remains distinct
+from distributed run-write fencing; Linux child containment remains distinct from production trust.
 No new SDK release is claimed. Workbench still pins published 0.2.0; the observed upstream 0.3.0
 release does not contain these new contracts. No DomainForge source change or release was required.
 
@@ -199,7 +216,8 @@ unimplemented ownership, authentication or retrieval work is already done.
 
 ## Remaining prerequisites and smallest next actions
 
-1. Confirm latest-head SDK CI and packaging. Requested Luna workers resumed and completed the
+1. Obtain final operator merge/release authorization now that exact-head SDK checks pass.
+   Requested Luna workers resumed and completed the
    CodeRabbit and release audit after an earlier service usage limit; unperformed security work
    remains unclaimed.
 2. Review the concrete upstream PR and follow Cognate's linked-version Release Please/npm workflow.

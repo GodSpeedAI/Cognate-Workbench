@@ -1,6 +1,6 @@
-# Current status — revision 11
+# Current status — revision 12
 
-Workbench verified at 1101 passing tests; upstream PR42 review corrections are pushed. Independent GitHub reviewer gate removed by operator; latest-head CI and final merge/release authorization remain required. Mission incomplete.
+Independent GitHub reviewer gate removed. SDK PR42 exact head 033029d passes CI and clean-room packaging plus all 81 local gates; final operator merge/release authorization remains required. Full debt mission incomplete.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
 The [verification report](docs/experts-debt-verification.md) records debt dispositions, journeys,
@@ -20,7 +20,9 @@ optional external CEP tests skipped. Linux OS evidence: ten tests / 29 assertion
 
 All 45 linked npm names currently report 0.3.0 and the historical nine-package gap is resolved.
 This published release does not contain the new contracts; Workbench still uses published 0.2.0.
-Upstream corrections are pushed through ff505ae; latest-head CI/packaging is pending. The operator
+Upstream corrections are pushed through 033029d; exact-head CI/packaging passes. All 81 local SDK
+verification gates pass. AG-UI settled-stream tests pass twenty repetitions (100 tests / 160 assertions).
+The operator
 removed the independent GitHub reviewer requirement. All remaining technical gates and final
 operator authorization still precede merge/publication. Neither has occurred.
 
