@@ -3,14 +3,15 @@ domainforge 0.19.0
 domainforge validate --format human .sea/interaction/interaction-model.sea
 Validation succeeded: 0 violations total
 domainforge parse .sea/interaction/interaction-model.sea --format human
-Entities: 51; Resources: 47; Flows: 47; Roles: 8; Relations: 6; Entity instances: 63; Policies: 1
-Cognate loadDomain: 224 semantic objects
+Entities: 51; Resources: 47; Flows: 47; Roles: 8; Relations: 6; Entity instances: 64; Policies: 1
+Cognate loadDomain: 225 semantic objects
 bindExpertCapabilities: 27 explicit contracts resolve
-bindScheduleCapabilities: 4; bindCognitiveCapabilities: 20
+bindScheduleCapabilities: 4; bindCognitiveCapabilities: 20; execution-world bindings: 7
 bindRuntimeExecution: execution.runtime.inspect -> NativeExecutionSlots resolves
 domainforge fmt --check: already formatted
 J-EXPERT-PARALLEL is declared pending supported native integration and overlap proof; the binding does not claim runtime implementation.
-Full implementation just verify including this declared model and published SDK 0.4.0: 1101 pass, 0 fail, 6860 assertions, 96 files (403.64 seconds)
+J-RW-contained-workspace is under final integration: real PostgreSQL/Linux/Chromium focused suite31pass/177assertions after receipt correction.
+Full just verify with declared model and published SDK0.4.0 before final receipt correction:1127pass/0fail/7027assertions/100files586.06s. Final supported-release regression remains pending.
 The historical formatter finding below is corrected by validation/formatter-fidelity.md; upstream 0.19.0 already contains the fix.
 
 == Historical tranche validation follows ==

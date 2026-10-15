@@ -181,6 +181,15 @@ contracts and their limits.
 
 ## Trust and security boundaries
 
+Published Cognate0.5.0 owns bounded run scheduling. Workbench defaults to capacity1; host startup
+`COGNATE_RUN_CAPACITY=2`,4 or8 enables only model-only solo Experts and Specialists to overlap.
+Admission resolves the registered run and frozen Assignment; no cache or prompt grants authority.
+Tool-bearing runs, Team Orchestrators and configuration use one conservative resource-exclusion
+key. Configuration never waits on Expert boot readiness, avoiding seed dependency loops. Native
+continuations and recovery re-enter this admission path. `execution.runtime.inspect` reports
+effective capacity/policy, with no synthetic live-worker telemetry. General workspace effect
+parallelism remains open; see [measurements](experts-concurrency-benchmark.md).
+
 ```mermaid
 flowchart LR
     OP["Operator<br/>(browser, kind: user)"] -->|"dev bearer token"| RT
@@ -188,7 +197,8 @@ flowchart LR
     RT --> AG
     AG -->|"user actor required"| HUM["human-only capabilities<br/>settle, review, elevate, accept"]
     AG --> WORLD["execution worlds"]
-    WORLD -->|"best-effort path checks<br/>shell classification, NOT a sandbox"| FS["filesystem and shell"]
+    WORLD -->|"local default: best-effort guards"| FS["filesystem and shell"]
+    WORLD -->|"opt-in Linux child namespaces<br/>host-configured, no local fallback"| CHILD["dedicated workspace<br/>network denied"]
     RT --> SXR["RealityTrace<br/>one-way out"]
 ```
 
@@ -201,9 +211,15 @@ Boundaries that hold:
   loop before `tool.edit` or `tool.bash`.
 - **Lower trust cannot lower approval.** Sentinel compares against a re-run of the chain at or
   above its own tier.
-- **What is *not* here.** No OS-level sandbox. Path containment and shell classification are
-  best-effort. Single-operator development authentication. All recorded in
-  [Known gaps](known-gaps.md).
+- **Contained children are explicit.** A host-configured Linux execution world can isolate child
+  filesystem/process/network access. A direct human selects it through `workspace.contained.select`;
+  typed configuration events persist the root and world identity. Missing or changed host policy
+  leaves the world unavailable after restart, with no local fallback. See
+  [contained workspaces](linux-contained-workspaces.md).
+- **Production trust remains open.** Local default path and shell guards are best-effort. Linux
+  child namespaces do not isolate the host application or enforce aggregate resource quotas.
+  Authentication remains single-operator development mode; tenant/session boundaries and independent
+  security review remain unfulfilled. See [Known gaps](known-gaps.md).
 
 ## Testing and verification
 

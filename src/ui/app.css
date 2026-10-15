@@ -963,6 +963,35 @@ input:focus-visible {
   background: var(--cg-surface, #fff);
   color: inherit;
 }
+.workspace-execution-choice {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-execution-choice > legend {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.workspace-dialog .workspace-execution-choice label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workspace-dialog .workspace-execution-choice input[type="radio"] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+.workspace-execution-choice .settings-description {
+  line-height: 1.45;
+}
 .workspace-dialog .btn-primary {
   background: var(--cg-accent, #1b1d22);
   color: var(--cg-surface, #fff);

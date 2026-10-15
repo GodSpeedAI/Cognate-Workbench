@@ -365,7 +365,16 @@ settlement is still unsettled until the human acts.
 
 # Remote Workspaces (T1) — `J-RW-*`
 
-These ten journeys model the execution-world abstraction (user-facing: **Remote Workspaces**).
+These journeys model the execution-world abstraction (user-facing: **Remote Workspaces** and explicit contained workspaces).
+
+### J-RW-contained-workspace — explicitly add a Linux-contained workspace
+
+- **Actor/intention/current state**: human operator adds a new workspace through contained filesystem/process ports; existing local and remote workspaces retain their identity.
+- **Preconditions/visible affordance**: `execution.containment.inspect` reports host configuration and limits; `workspace.contained.select` requires host-owned patched-binary provenance, exact hash, approved runtime roots, supported Linux namespaces and real preflight. Browser and agent input cannot attest binary trust.
+- **Payment/authority**: a human selects a dedicated canonical root and accepts the child-process-only boundary; agents cannot establish or change it. Wall time/output limits are enforced; aggregate CPU/memory/network-enabled execution and production authentication are not promised.
+- **Transition/artifacts/evidence**: typed configuration events record a distinct world and workspace; native tool invocations retain world identity and ordinary results. Real tests inspect read/write/process success, host sibling/network denial, cancellation cleanup and restart.
+- **Settlement/failure/recovery**: restart reconstructs the same provider from safe root identity and host configuration. Missing configuration, wrong hash or failed preflight refuses new placement; a recorded but unavailable world never falls back locally. An uncontained same-path workspace remains separate.
+- **Next affordance/status**: open an ordinary coding or Expert conversation in the chosen workspace; inspect execution evidence. **Declared** until native integration, OS adversarial tests and browser journeys pass. No production trust claim.
 They are framework-level journeys — they apply to any Cognate app whose workspaces have an
 execution location — recorded here because this reconstruction is where the workspace journeys
 live. Their evidence class is **proposed**: derived from Cognate's own architecture and the donor
@@ -746,9 +755,21 @@ Executable evidence: `test/J-SCHEDULE-execution.test.ts`, `test/J-MEMORY-migrati
 
 ### J-EXPERT-PARALLEL (`j_expert_parallel`)
 
+The narrower J-EXPERT-MODEL-PARALLEL below establishes only intrinsic-return model work; this broader
+workspace-isolation journey remains declared.
+
 - **Actor/intention**: User or OperatorAgent wants independent coding and Expert work to overlap without concurrent mutation of a shared workspace.
 - **Preconditions/affordance**: Planned native Cognate 0.4 runtime exposes process-level `maxConcurrentRuns` (default 1; opt-in 2, 4, or 8); `execution.runtime.inspect` reports configured capacity and policy. Mutating run entries must resolve execution-world and canonical-root identity before admission.
 - **Transition/output**: Every direct coding, Expert/Team, delegation, resume, and recovery entry uses `nativeExecutionSlots`. Distinct known roots may use separate native slots; equal, aliased, or nested roots serialize. Unknown root identity blocks admission without effects until safely resolved. The existing `ParallelPlan` remains an advisory plan, not admission authority.
 - **Policy/authority**: Slot admission does not change captured model routing, mutation ownership, Team invariants, authorization, or human approval for protected effects. Inspection reports no active-worker count unless native telemetry later supplies one. Team-level maximum concurrency and batch delegation policy remain unsettled.
 - **Evidence/settlement**: Pending native binding and journey tests must show two Experts actually overlap on distinct workspaces at capacity 2, while same/alias/nested roots serialize; restart preserves ownership, routing, and Team invariants. This is declared semantics, not observed implementation.
 - **Failure/recovery/next**: Unresolvable roots block admission without effects; after resolving identity, the operator may retry. Operator inspects effective configured capacity/policy and may wait or retry after a run settles; no active-count or queue-position claim is implied. Read-only work does not bypass protected-effect approval.
+
+### J-EXPERT-MODEL-PARALLEL (`j_expert_model_parallel`)
+
+- **Actor/intention**: The operator enables bounded overlap of independent model decisions, retaining conservative workspace-effect serialization.
+- **Preconditions/affordance**: Supported asynchronous native admission; startup capacity one, two, four or eight. `execution.runtime.inspect` reports effective capacity and policy. Only a registered unfinished system-started Expert Assignment with the matching attempt and frozen intrinsic-return-only tool list is independently eligible.
+- **Transition/output**: Native slots execute eligible models concurrently and persist attributable handoffs. Tool-bearing Experts, ordinary coding and unknown agents share one exclusion key. Event-only `agent.config` is admitted without waiting for application readiness, avoiding seed deadlock.
+- **Payment/authority**: Provider token/cost and captured attempt budgets still apply. Slot eligibility grants no tools, approval or coordination authority. Forged tool calls are rejected by the frozen tool dispatcher and invocation gates.
+- **Evidence/settlement**: Declared pending actual PostgreSQL overlap, distinct-route returns, forged-tool denial, configuration boot, serial tool-bearing work and recovery tests. Inspection exposes no invented active count.
+- **Failure/recovery/next**: Missing/stale/impersonated Assignments fail closed before model effects; native durable dispatch supplies retry/cancellation/recovery. Frozen authority survives profile edits. The operator can inspect results or restart with a deliberate capacity change. Team-specific limits and concurrent workspace effects remain open in J-EXPERT-PARALLEL.

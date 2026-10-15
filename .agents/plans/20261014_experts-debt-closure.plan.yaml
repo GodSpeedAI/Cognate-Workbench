@@ -31,14 +31,14 @@ initial_state:
   last_settled_task: T0
 progress:
   T0: Baseline settled at 1064 passing tests; dependency and disposition map committed.
-  T1: SDK 0.4.0 completely published and consumed; Workbench 1104 tests pass. Async eligibility PR44 at d0e4911 repairs cancellation capacity and native shutdown/recovery, with PostgreSQL 19/121 and full81/81 plus exact-head CI/packaging pass. Final merge/release authorization and supported publication remain required before app integration.
+  T1: SDK 0.4.0 baseline consumed and committed at 1104 tests. PR44 merged as e90f511 after exact-head CI/packaging and RED/GREEN review repairs; linked release merged as dd13c842 published all 45 packages as 0.5.0 with complete registry audit and fresh-consumer proof. Workbench consumes published 0.5.0 only.
   T2: Outbox fencing verified; durable run ownership remains open.
   T3: Single-process schedules and shared Team safe-boundary inbox verified in native PostgreSQL and browser journeys; generalized/distributed contracts remain open.
   T4: Partition migration, erasure, pagination, Expert budgets and benchmarks verified; indexed retrieval, tokenization and global budgets remain open.
-  T5: Production identity and OS containment remain open.
+  T5: Human-selected host-configured Linux child containment is modelled/bound and passes actual OS/PostgreSQL/browser journeys, including lost-acknowledgment receipt recovery and launcher guards; the full gate passes 1153 tests. Production identity, tenant boundaries, aggregate resource quotas and independent security review remain open. This local child-world slice does not require or claim distributed ownership.
   T6: Formatter closure and twenty cognitive bindings verified; semantic IDs preserved.
   T7: Native schedule/inbox/accounting UI committed and browser verified; remaining historical product gaps retained.
-  T8: Published SDK 0.4.0 integration passes 1104 tests; mission incomplete pending native eligibility/UI, distributed ownership and production trust.
+  T8: Published SDK 0.5.0 integration passes the full gate (typecheck, 1153 tests / 0 fail including attested containment, DomainForge validation/format, diff check); evidence recorded and committed. Mission incomplete pending general workspace concurrency, Team admission/batching, distributed run ownership, production trust and remaining product debts.
 tasks:
   T0:
     title: Inventory, baseline, architectural dependency and debt disposition map

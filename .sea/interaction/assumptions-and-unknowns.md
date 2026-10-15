@@ -1,6 +1,20 @@
 # Assumptions, Unknowns, and Contradictions
 
-## Native Experts & Teams observations (2026-10-13)
+## Current observations (2026-10-15)
+
+- **Observed:** Published SDK 0.4.0 supports bounded native concurrent runs; Workbench still defaults
+  to serialized dispatch until authoritative resource eligibility and Team policy are integrated.
+- **Observed:** Single-process Expert/Team schedules and shared-Team safe-boundary inbox delivery
+  have real restart evidence. Generalized inbox and distributed run ownership remain open.
+- **Under final regression:** Host-configured, human-selected Linux contained workspaces have actual
+  PostgreSQL, namespace and browser evidence. This does not establish production authentication,
+  host application isolation or aggregate resource quotas.
+- **Corrected provenance:** Ubuntu Bubblewrap 0.11.1-1ubuntu0.3 reverted the cited CVE fix. The new OS
+  fixture is upstream 0.12.0, with separate source/build/hash evidence and no system replacement.
+- **Still open:** Indexed memory retrieval, model tokenization, durable global budgets, production
+  identities and run-write fencing. The complete disposition is in the debt verification report.
+
+## Historical native Experts & Teams observations (2026-10-13)
 
 - **Observed:** Cognate 0.2.0 stores durable waits but does not automatically evaluate child-run
   completion conditions. The explicit native completion bridge is tested through process kill and restart.

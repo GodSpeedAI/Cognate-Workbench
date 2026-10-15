@@ -1,38 +1,37 @@
-# Current status — revision 17
+# Current status — revision 21
 
-Workbench's published SDK 0.4.0 integration passes 1,104 tests. Separate PR44 repairs native admission capacity and shutdown recovery, with PostgreSQL regressions and exact-head CI/packaging passing; merge/release authorization remains reserved and the wider mission is incomplete.
+Published Cognate 0.5.0 is fully consumed: native model-only Expert admission, runtime inspection
+UI and Linux contained workspaces are integrated, and the final full gate passes 1,153 tests with
+zero failures. The verified slice is committed and pushed. The overall debt-closure mission remains
+incomplete by design; open tranches are tracked below.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
-[Release evidence](docs/sdk-0.4.0-release.md) and the [debt report](docs/experts-debt-verification.md)
-record exact source commits, workflow receipts, package audits and remaining conditions.
+All debts remain reconciled in [verification](docs/experts-debt-verification.md).
 
-PR #42 merged at `c6e3207` and linked release PR #43 at `467a5f` under operator authorization.
-All 45 npm packages published at 0.4.0 with the expected source commit. A new consumer installed
-all 45 with no graph drift and demonstrated native peak concurrency 2 with distinct outputs.
+PR44 merged at e90f511 and linked release PR45 merged at dd13c842; all 45 packages published as
+0.5.0 with a complete registry audit (all versions and gitHeads matched, machine-readable
+[receipt](docs/sdk-0.5.0-publication-receipt.json)) plus a fresh isolated consumer proof. Workbench
+upgraded all 23 direct / 35 resolved SDK pins to 0.5.0 with no local links or vendored tarballs.
 
-Workbench pins published Cognate **0.4.0**: 23 direct/35 resolved SDK packages, no source links
-and no non-SDK lockfile changes. The expanded `just verify` passes **1,104 tests, zero failures,
-6,884 assertions across 96 files in 408.21 seconds**, including actual browser and PostgreSQL
-recovery journeys. Four focused tests prove native capacity 1/2/4 and correlated handoff/redelivery;
-these substrate fixtures do not establish Workbench Team parallelism. Generated screenshots are
-restored after verification.
+Native admission is wired through `src/experts/admission.ts` and `src/server.ts`: opt-in capacity
+(1/2/4/8) uses only published SDK resource admission, with frozen intrinsic-return model work
+allowed to overlap and tool-bearing work conservatively serialized. Actual PostgreSQL journeys
+verify peaks, ordering, cancellation and same-run restart; a real Chromium journey shows distinct
+visible Expert results with native handoffs at capacity 2.
 
-Native schedules, shared Team live inbox, partition migration/pagination and frozen Expert budgets
-retain their verified behavior. The default Cognate Team and one-Orchestrator invariant remain intact.
-DomainForge 0.19.0 validates and formats 224 semantic objects; 27 Expert/four schedule/twenty cognitive
-bindings resolve. J-EXPERT-PARALLEL and its inspection binding are declared; app execution still
-defaults to one. Authority-safe metadata lookup and UI are not yet settled.
+The contained-workspace slice (J-RW) passes 5 tests / 111 assertions against the published
+launcher guard, including lost-acknowledgment receipt recovery across retry and restart.
 
-A separate [async admission PR #44](https://github.com/GodSpeedAI/Cognate/pull/44) at `d0e4911` passed
-exact-head CI and clean-room packaging. The cancelled-callback capacity finding is repaired; native
-shutdown now aborts cooperative execution and recovers acknowledged RESUMED waits. Each regression
-failed before its repair. PostgreSQL targeted tests pass 19/19 with 121 assertions; full SDK gates
-pass 81/81. Luna source review found no remaining scoped blocker. CodeRabbit is rate-limited and
-did not freshly review this head; its prior actionable finding is verified fixed.
+The final full gate passed on the exact integrated tree: `just verify` with the attested
+containment suite ran 1,153 tests across 105 files, 0 failures, 7,543 assertions; `just typecheck`,
+DomainForge validate (226 objects, 0 violations) / fmt --check and `git diff --check` all pass.
 
-The linked-release audit passes for all 45 packages with trusted publishing enabled and no pending
-release. PR44 is unmerged/unpublished and awaits reserved operator authorization; Workbench has no
-unsupported dependency. Signal-ignoring handlers can still delay shutdown, and interrupted remote
-effects may need reconciliation. Distributed run-write ownership, production authentication/containment,
-indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux
-child containment do not establish those guarantees. Original sibling changes remain untouched.
+Remaining open (next tranches): general workspace-effect concurrency and Team-specific
+admission/batching; distributed run-write ownership (one process only today); production
+identity/session/tenant isolation, aggregate resource quotas and independent security review;
+global root CAS, indexed retrieval, exact tokenization, durable billing reservations and
+session/global budget ceilings; generalized SDK inbox/standalone live steering; and the explicit
+product debts in the disposition matrix.
+
+Next: use published 0.5.0 capabilities to close the parallelism and remaining debt tranches; see
+[experts-debt-closure.md](docs/experts-debt-closure.md) for ownership and gates.

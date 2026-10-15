@@ -6,7 +6,7 @@ it does not close all seven mandatory debts or advertise production/multiprocess
 ## Architecture and dependency outcome
 
 Cognate-Workbench remains the same application on `feature/expert-teams`, using published Cognate
-**0.4.0**, PostgreSQL/pg0, native events, shared-state CAS, continuations, commitments and projections.
+**0.5.0**, PostgreSQL/pg0, native events, shared-state CAS, continuations, commitments and projections.
 No local SDK link, vendored runtime, broker, second event store or new Workbench dependency was added.
 The default five Experts and sole Product Manager Orchestrator remain ordinary editable seed records.
 
@@ -26,11 +26,11 @@ distributed integration remain separately gated; the plan records that narrower 
 | Debt | Disposition | Observed change and exact remaining limitation |
 | --- | --- | --- |
 | A1 Autonomous schedules | **Partially closed — specific remaining limitation** | Native Expert/Team one-time/daily/weekly schedules execute after restart, with IANA/DST rules, stable occurrence/Assignment IDs, bounded skip/coalesce, cancellation, failure and approval receipts, and real UI. Legacy accepted-workflow automation records are not automatically migrated. One process only; schedule history remains an aggregate. |
-| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Native capacities 1/2/4/8, resource exclusion, cancellation, continuation and PostgreSQL tests pass; SDK 0.4.0 is published and consumed with 1,104 app tests passing. Workbench defaults to serial execution; authoritative eligibility, per-Team admission/batch policy and UI remain required. Awaitable metadata eligibility is a separate unpublished SDK extension. |
+| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Published SDK0.5.0 is consumed after all45 registry receipts and fresh-consumer proof. Actual Workbench model-only peaks1/2/4/8, browser overlap, frozen-route/authority, configuration ordering and same-run restart pass. Native inspection reports effective startup policy. Tool-bearing work remains conservatively serialized; general workspace concurrency and Team-specific admission/batching remain open. |
 | A3 Live steering | **Partially closed — specific remaining limitation** | Shared Team messages are durably accepted and incorporated at safe model-decision boundaries, with sequence, ownership, supersession/cancellation, bounds and SIGKILL replay. Idle delivery retains the existing queue. Generalized SDK inbox and standalone live steering remain open. No arbitrary inference interruption. |
 | A4 Memory and economics | **Partially closed — specific remaining limitation** | Bounded immutable partitions, interrupted migration, erasure invalidation, scoped cursor pages, measured write reduction and frozen Expert attempt budgets work. Global root CAS, complete materialization, indexed SQL retrieval, model tokenization, pre-dispatch crash/billing reservations and ordinary-session/global budget ceilings remain open. |
 | A5 Multiple processes | **Still open — not implemented** | Fenced native outbox claims are an upstream prerequisite only. Run-write fencing, authoritative store-time ownership, worker compatibility, two-process fault injection and ambiguous-effect recovery are not implemented. No multiprocess mode is exposed. |
-| A6 Production trust | **Still open — not implemented** | Upstream opt-in Linux child-process namespace ports pass real adversarial tests. They are not consumed by Workbench. Production identity/session/tenant integration, aggregate resource containment, supported deployment and independent security review remain open. Development bearer authentication is unchanged. |
+| A6 Production trust | **Partially closed — specific remaining limitation** | Native opt-in Linux child worlds are integrated through host-only configuration, human-only selection, real preflight, typed events and fail-closed restart. PostgreSQL/OS/browser journeys pass. Production identity/session/tenant integration, aggregate resource containment, supported deployment and independent security review remain open. Development bearer authentication is unchanged. |
 | A7 Formatter fidelity | **Closed — verified** | Installed DomainForge 0.19.0 already contains the upstream fix. Canonical formatting preserves normalized AST and comments, validates, is idempotent, and passes `fmt --check`. No duplicate upstream patch or CLI version change was needed. |
 
 All adjacent findings remain in the exhaustive disposition matrix. Closed items include explicit
@@ -41,6 +41,14 @@ artifact fidelity and other unimplemented product journeys remain explicit; hidi
 not close them.
 
 ## Canonical journeys and key files
+
+- J-EXPERT-MODEL-PARALLEL: `src/experts/admission.ts`, `src/server.ts`, native runtime slots and
+  `runtimeExecution.ts`/`RuntimeExecutionStatus.tsx`; actual capacities1/2/4/8, inspection, browser,
+  conservative tool serialization, forged-tool denial and same-run restart. Broader
+  J-EXPERT-PARALLEL workspace isolation remains declared.
+- J-RW-contained-workspace: `containedWorkspace.ts`, existing world/config events and workspace
+  picker; real published-SDK tool execution, boundary denial, launcher refusal, receipt recovery
+  and configured restart. See [operator guide](linux-contained-workspaces.md).
 
 - J-SCHEDULE-CREATE/FIRE/RECOVER: `src/schedules/{types,service,evaluator}.ts`, native server lifecycle
   and four explicit bindings; schedule create/manage/history/inspection UI.
@@ -102,8 +110,10 @@ latency distribution. Root contention and full materialization remain measured l
   still required. Fencing does not revoke an external request already delivered.
 - Real Linux tests prove workspace filesystem access, symlink/host-secret refusal, denial of an
   otherwise reachable host TCP listener, nested user-namespace refusal, nested Bun containment,
-  timeout/abort descendant cleanup, output limits and changed-binary refusal. The patched distro
-  build and its SHA are verified. No aggregate CPU/memory/process/disk quota is claimed. Binding
+  timeout/abort descendant cleanup, output limits and changed-binary refusal. The earlier claim
+  that Ubuntu 0.11.1-1ubuntu0.3 includes the cited fix is withdrawn: USN-8779-2 reverted it. The
+  current tests use a separately built upstream 0.12.0 fixture with recorded source and SHA;
+  see [fixture provenance](bubblewrap-fixture-provenance.md). No aggregate CPU/memory/process/disk quota is claimed. Binding
   sensitive data as a workspace grants that data; host application code remains trusted.
 - Existing frozen authority, private/cross-Team memory, independent verification, human-only
   acceptance, durable handoff and ambiguous Expert effect regressions pass in the full suite.
@@ -251,7 +261,7 @@ waiting on Expert/provider readiness, avoiding a seed-to-config deadlock.
 These are unfulfilled acceptance conditions, not a successful mission declaration. The plan remains
 in progress and the debt entries remain present.
 
-## PR #44 release decision — 2026-10-15
+## Historical PR #44 pre-approval checkpoint — 2026-10-15
 
 [Cognate PR #44](https://github.com/GodSpeedAI/Cognate/pull/44), branch
 `feature/async-run-admission`, is pushed at **`d0e491105d7f76ecebed04302701c3f911b69926`**.
@@ -270,8 +280,9 @@ Workbench still consumes published 0.4.0. No source checkout is a production dep
 | Review | Requested Luna source reviews checked cancellation, late-controller registration, listener cleanup, permit ownership, replay and recovery. No remaining scoped blocker. CodeRabbit's latest pass context reflects its review quota: **no fresh automated review of `d0e4911` occurred**. Its previous finding is addressed by source and regression evidence. |
 | Release prerequisites | Head matches local/remote, mergeable, three commits ahead and zero behind release base `467a5f`. Unified release check passes for 45 packages at 0.4.0; trusted publishing flag is enabled. Prior 0.4.0 workflow published all 45 successfully. No release PR/workflow is pending. Expected 0.5.0 is a forecast until Release Please generates the linked version. |
 
-The operator's final merge/publication authorization is reserved. Neither PR #44 nor a new SDK
-release has merged or published. After authorization, inspect the generated linked release diff,
+The operator subsequently approved PR #44 and its linked release. Neither PR #44 nor a new SDK
+release has merged or published as of this record. Address fresh actionable review findings before
+merge, then inspect the generated linked release diff,
 run exact-head verification/packaging, require all package publications to complete, then audit
 registry gitHeads and a fresh consumer before changing Workbench dependencies.
 
@@ -285,3 +296,67 @@ trust are not settled by this PR.
 Workbench's latest committed test slice is **`069a9d8`**, pushed to `feature/expert-teams`:
 `just verify` passes **1,104 tests, zero failures, 6,884 assertions/96 files in 408.21 seconds**.
 All seven debt entries remain reconciled above; the overall mission remains incomplete.
+
+## PR44 final review repairs — 2026-10-15
+
+The operator approved PR44 and its linked SDK release. Final review repairs are committed as
+`6963620`: native cancellation spans eligibility, slot wait and the executor's first store read;
+every acquired permit is released even if close wins. Recovered runs use durable outbox retries.
+A monotonic250ms/100-candidate reconciliation policy bounds scan frequency; full query
+materialization remains an explicit A4 limitation. The250-run regression checks both the scan
+bound and eventual completion. The tests for lost cancellation, stale initial snapshot and
+late-grant cleanup fail before repair and pass afterward.
+
+Final real PostgreSQL/Linux targeted command (the four SDK test files previously listed, with an
+explicit reviewed attestation): **38 pass, zero fail,189 assertions/8.94s**. Full upstream
+`just verify` with the same OS fixture: **81/81 gates pass**. Typecheck/diff check and fresh requested
+Luna review pass. Exact pushed-head CI/packaging/review still gate the already-authorized merge;
+no new SDK is consumed before the complete linked publication and fresh-consumer audit.
+
+The approved PR44 merged at `e90f511731cbe01cf204f7ec7675e1b03532c5c7` on2026-10-15
+13:14:33UTC. Exact-head gates for`696362090fb5bae0627dad0a37d7b508eaa63f8a` passed:
+[verify](https://github.com/GodSpeedAI/Cognate/actions/runs/38740565172) and
+[clean-room package](https://github.com/GodSpeedAI/Cognate/actions/runs/38740565394).
+CodeRabbit reported success but its review quota prevented a fresh full automated review; the
+actionable comments were resolved with RED/GREEN regressions and requested Luna source reviews.
+The [linked release workflow](https://github.com/GodSpeedAI/Cognate/actions/runs/38741037685)
+has started. A merge is not a publication receipt; Workbench remains on0.4.0 until every linked
+package and a fresh consumer are verified.
+
+## Contained-workspace slice — 2026-10-15, integration gates in progress
+
+J-RW-contained-workspace extends the existing ExecutionWorld and WorkspaceRecord model. The current
+model has 225 semantic objects; formatting and validation pass. Seven execution-world bindings
+resolve through the published-package adapter. The legacy validation helper's absolute monorepo
+import was removed in `daa1fae`; it now checks the actual application model and contracts.
+
+The host supplies the Bubblewrap policy; a direct human supplies only the workspace path. Native
+preflight precedes typed `agent.config` events. The root/configuration determine the world identity.
+Changed or missing host policy leaves saved worlds unavailable after restart, with no local fallback.
+The workspace picker exposes the local default and explicit Linux child choice, availability,
+preflight failure and current-world status. Desktop/mobile browser evidence is in
+`screenshots/containment/`; setup and limits are in [the operator guide](linux-contained-workspaces.md).
+
+Configuration writes are sequential typed events, not an atomic multi-event transaction. A timeout
+cancels the queued native run and rereads its terminal state. Partial or unknown commits retain the
+provider for reconciliation. Stable world-specific receipts recover lost acceptance acknowledgments
+across repeated selection attempts. A bounded deterministic retry chain advances only after a
+previously observed terminal attempt has a verified empty effect history. A newly failed attempt
+stops rather than silently retrying; known workspaces record selection without duplicate creation.
+
+| Command/fixture | Observed result |
+| --- | --- |
+| `COGNATE_BWRAP_TESTS=1 COGNATE_BWRAP_TEST_ATTESTATION=<reviewed-file> just verify` | 1,127 pass, zero fail, 7,027 assertions/100 files; 586.06 seconds. This run precedes the final receipt-chain correction. |
+| Same host environment; `bun test --timeout 20000 test/containedWorkspace.test.ts test/executionWorlds.test.ts test/ui-contained-workspace.test.tsx test/J-RW-contained-workspace.test.ts test/E2E-contained-workspace.test.ts` | After receipt correction: 31 pass, zero fail, 177 assertions; 23.13 seconds. Actual PostgreSQL, namespaces and Chromium. |
+| OS denial/recovery | Workspace edits/commands work; sibling host files and reachable host loopback are denied. Configured restart works; missing configuration and wrong binary hash fail closed. Queued configuration is cancelled without late workspace/world events while an unrelated Expert remains active. |
+| Browser | Explicit containment choice, unavailable-host reason, native coding flow and workspace badge; no page errors. Four screenshots include desktop and 360px mobile layouts. |
+
+Test host: Bun 1.4.0, DomainForge 0.19.0, Linux 6.18.54.1-microsoft-standard-WSL2, six visible logical
+processors, controlled PostgreSQL 18.1/pg0. This is fixture-specific evidence, not a portable
+performance or security guarantee. The upstream 0.12.0 Bubblewrap source/build/hash is recorded in
+[provenance](bubblewrap-fixture-provenance.md). The old distro patch assertion is withdrawn.
+
+Published SDK 0.4.0 remains the dependency at this checkpoint. The writable-launcher guard in PR44
+must be legitimately published and consumed before its protection is claimed for Workbench. Final
+full integration, commit and publication remain pending. Production authentication, tenant/session
+authorization, host isolation, aggregate resource quotas and formal security review remain open.

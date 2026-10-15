@@ -10,6 +10,7 @@ import { ExpertEditor } from "./ExpertEditor.tsx";
 import { TeamEditor, type TeamDraft } from "./TeamEditor.tsx";
 import { SchedulesSurface } from "./SchedulesSurface.tsx";
 import { AssignmentUsage } from "./AssignmentUsage.tsx";
+import { RuntimeExecutionStatus } from "./RuntimeExecutionStatus.tsx";
 
 type ConversationSummary = Pick<Conversation, "id" | "scope" | "expertId" | "teamId" | "workspaceId" | "title" | "createdAt" | "updatedAt"> & { readonly messageCount: number };
 const historyScopeKey=(scope:Conversation["scope"]|undefined,expertId:string|undefined,teamId:string|undefined)=>JSON.stringify([scope,scope==="team" ? teamId:expertId,scope==="private-team" ? teamId:null]);
@@ -83,6 +84,9 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
 
   const invoke = useCallback(async <T,>(capability: string, input: Record<string, unknown>): Promise<T> => {
     return await client.invoke(capability, { requestId: crypto.randomUUID(), ...input } as never) as T;
+  }, [client]);
+  const inspectRuntimeExecution = useCallback(async () => {
+    return await client.invoke("execution.runtime.inspect", {} as never);
   }, [client]);
 
   const refreshHistory = useCallback(async (scope = conversationScope, expertId = expert?.id, teamId = team?.id, cursor?: string) => {
@@ -258,6 +262,7 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
         <button type="button" className="global-panel-btn" aria-expanded={showSchedules} onClick={()=>setShowSchedules(value=>!value)}>Schedules</button>
       </header>
 
+      <RuntimeExecutionStatus inspect={inspectRuntimeExecution} />
       {notice && <p className={notice.kind === "error" ? "experts-notice error" : "experts-notice"} role={notice.kind === "error" ? "alert" : "status"}>{notice.text}</p>}
       {showSchedules && <SchedulesSurface experts={experts} teams={teams} workspaceId={workspaceId} onInspect={occurrence=>{
         if(!occurrence.conversationId)return;

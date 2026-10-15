@@ -2,7 +2,7 @@
 // See docs/explanation/why-single-bun-process.md for why this is a hand-composed
 // `createRuntime` rather than `createHarness`.
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
@@ -17,7 +17,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -28,6 +28,9 @@ import { EXPERT_AGENT, EXPERTS_THREAD } from "./experts/types.ts";
 import { expertsProjection } from "./projections/experts.ts";
 import { providerRoutesProjection } from "./projections/providerRoutes.ts";
 import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
+import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
+import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
+import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
 import { expertEffectComponent } from "./capabilities/expertEffect.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
@@ -76,12 +79,16 @@ const SYSTEM_CALLER = { actor: { id: "system", kind: "system" as const }, tenant
 export interface ServerOptions {
   readonly port: number;
   readonly home: string;
+  /** Host startup capacity; default one. Eligibility never widens captured Expert authority. */
+  readonly runCapacity?: 1 | 2 | 4 | 8;
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
   readonly enableScheduleEvaluation?: boolean;
+  /** Trusted host configuration only; browser and agent inputs cannot supply binary provenance. */
+  readonly containmentConfig?: ContainmentConfig;
 }
 
 export interface AppServer {
@@ -91,6 +98,7 @@ export interface AppServer {
 }
 
 const GRANTED_CAPABILITIES = [
+  RUNTIME_EXECUTION_INSPECT,
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
   "model.generate",
@@ -103,6 +111,7 @@ const GRANTED_CAPABILITIES = [
   "session.history",
   ...EXECUTION_CAPABILITY_IDS,
   "execution.world.probe", "execution.wsl.list", "execution.world.connect", "execution.world.check", "execution.world.disconnect",
+  "workspace.contained.select", "execution.containment.inspect",
   "case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard", "verification.run", "case.derive", "world.settle", "risk.assess", "case.observe", "ui.focus.publish", "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review", "method.accept", "method.active",
   "tool.read",
   "tool.edit",
@@ -202,6 +211,16 @@ function indexHtml(): string {
 
 export async function startServer(options: ServerOptions): Promise<AppServer> {
   const home = options.home;
+  const runCapacity = parseExpertAdmissionCapacity(options.runCapacity === undefined ? process.env.COGNATE_RUN_CAPACITY : String(options.runCapacity));
+  let containmentConfig = options.containmentConfig;
+  const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
+  if (!containmentConfig && containmentConfigPath) {
+    const contents = await readFile(containmentConfigPath, "utf8");
+    try { containmentConfig = JSON.parse(contents) as ContainmentConfig; }
+    catch { throw new Error("Invalid host Linux containment configuration JSON"); }
+  }
+  // Freeze this server's policy by value; caller-owned options cannot reroute an active world.
+  if (containmentConfig) containmentConfig = validateContainmentConfig(structuredClone(containmentConfig));
   await mkdir(home, { recursive: true });
   const store = storeConfigFor(home, "harness");
   const secretsPath = join(home, "secrets.json");
@@ -220,6 +239,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const t11 = bindTranche11(domain);
   const expertRefs = bindExpertCapabilities(domain);
   const scheduleRefs = bindScheduleCapabilities(domain);
+  const runtimeExecutionRef = bindRuntimeExecution(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -227,6 +247,23 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     return serviceRef.current;
   };
   let experts: ExpertsService;
+  let finishExpertsBoot!: (value: ExpertsService) => void;
+  const expertsBoot = new Promise<ExpertsService>(resolve => { finishExpertsBoot = resolve; });
+  const admissionKeys = createExpertAdmissionResourceKeys(signal => {
+    signal?.throwIfAborted();
+    if (experts) return Promise.resolve(experts);
+    return new Promise<ExpertsService>((resolve, reject) => {
+      const aborted = () => {
+        signal?.removeEventListener("abort", aborted);
+        reject(signal?.reason ?? new Error("Expert admission cancelled during boot"));
+      };
+      signal?.addEventListener("abort", aborted, { once: true });
+      void expertsBoot.then(value => {
+        signal?.removeEventListener("abort", aborted);
+        resolve(value);
+      });
+    });
+  });
   let schedules: SchedulesService;
   let scheduleEvaluator: ScheduleEvaluator;
   const knownWorkspaceIds = new Set<string>();
@@ -240,6 +277,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
 
   const runtime: Runtime = await createRuntime({
     store,
+    // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
+    // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
+    ...(runCapacity > 1 ? { execution: { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } } : {}),
     // Usage pass U6 (RealityTrace, Option A): trace-worthy events get an observation intent
     // committed atomically with the event (the runtime's generic hook — no runtime dependency on
     // RealityTrace; the adapter only drains the outbox).
@@ -248,12 +288,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     actions: buildActionPolicy(),
     agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent, agentExpert],
     components: [
+      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
-      executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings }),
+      executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
+      containedWorkspaceComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
@@ -297,6 +339,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
   serviceRef.current = governedService;
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
+  finishExpertsBoot(experts);
 
   // Seed `knownWorkspaceIds` from the persisted projection (survives restart).
   for (const row of ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" }))).rows) {
@@ -304,7 +347,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   }
 
   // Re-register durable SSH/WSL worlds (lazy: nothing connects until a workspace uses one).
-  await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets });
+  await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, containmentConfig });
 
   const registry = new ProviderRegistry(runtime.kernel, bindings.modelGenerate.semanticRef);
   await runtime.kernel.mount(

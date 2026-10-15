@@ -45,7 +45,7 @@ export function collaborationResponder(route: ModelConfig, request: ModelRequest
   return Promise.resolve(completed(route.model, `${route.model} completed the objective.`));
 }
 
-export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: ExpertTestApp) => Promise<T>): Promise<T> {
+export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: ExpertTestApp) => Promise<T>, options: { readonly runCapacity?: 1 | 2 | 4 | 8 } = {}): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "cognate-experts-test-"));
   const calls: { model: string; toolNames: readonly string[]; messages: readonly ModelMessage[] }[] = [];
   const providerFactory = (route: ModelConfig): ModelProvider => ({
@@ -63,7 +63,7 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
   let closed = false;
   try {
     const launch = async () => {
-      app = await startServer({ port: 0, home, expertProviderFactory: providerFactory,enableScheduleEvaluation:false });
+      app = await startServer({ port: 0, home, expertProviderFactory: providerFactory, enableScheduleEvaluation: false, ...options, runCapacity: options.runCapacity ?? 1 });
       const caller = LOCAL_OPERATOR;
       const service = createRemoteRuntimeService(connectTransport(app.url), () => devToken(caller));
       client = createClient({ service, caller });

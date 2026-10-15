@@ -1,0 +1,234 @@
+{
+  "registry": "https://registry.npmjs.org",
+  "version": "0.5.0",
+  "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e",
+  "verifiedAt": "2026-10-15T14:20:49.244Z",
+  "verifiedCount": 45,
+  "packages": [
+    {
+      "name": "@godspeedai/cognate-execution",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-mcp",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-projections",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-profile",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-proto",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-protocol-connect",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-protocol-connect-bun",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-auth",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-local",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-openai-compatible",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-openai-responses",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-typesafe",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-anthropic-compatible",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-openai-oauth",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-react",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-provider-wire",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-runtime-api",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-runtime-bun",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-realitytrace",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-store-postgres",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-store-sqlite",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-ui-astryx",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-store-memory",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-profile-copilot",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-profile-harness",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-ag-ui",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-a2a",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-cli",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-client",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-cognitive-api",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-cognitive-ruvector",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-cognitive-memory",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-cognitive-rvf",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-continuations",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-events",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-domainforge",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-execution-wsl",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-execution-ssh",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-hook-interoperability",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-kernel-api",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-kernel-cordis",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-artifacts",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-capabilities",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    },
+    {
+      "name": "@godspeedai/cognate-agent-discovery",
+      "version": "0.5.0",
+      "gitHead": "dd13c8422220ecbac61a92bdd90829218844bc2e"
+    }
+  ]
+}

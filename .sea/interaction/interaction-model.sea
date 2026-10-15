@@ -526,6 +526,19 @@ Instance j_rw_select_world of "CanonicalJourney" {
     variants: "local world (always available, no configuration); ssh world (host, user, auth reference, host-key policy, optional jump chain); a world whose provider is missing fails closed and is listed as unavailable rather than silently falling back to local"
 }
 
+Instance j_rw_contained_workspace of "CanonicalJourney" {
+    actor: "Human operator",
+    capabilities: "execution.containment.inspect, workspace.contained.select, workspace.path, filesystem.readText, filesystem.writeText, process.exec",
+    evidence_class: "observed",
+    initiating_condition: "The human wants a new workspace whose tool processes and filesystem operations use Linux namespace containment",
+    journey_id: "J-RW-contained-workspace",
+    precondition: "Host-owned configuration attests a patched Bubblewrap binary, exact SHA-256 and approved runtime directories; Linux namespaces and a dedicated canonical workspace root pass real provider preflight",
+    purpose: "Create an explicitly contained workspace through Cognate execution-world ports without changing existing sessions or accepting binary trust assertions from an agent or browser",
+    settlement: "A durable workspace references its own contained execution world; ordinary read/edit/Bash/run_code route through that provider; host sibling paths and network access are denied; restart restores the same boundary or marks it unavailable without local fallback",
+    steps: "human inspects host containment configuration and limits -> explicitly selects a dedicated root for a new contained workspace -> mutation rejects agent invocation and canonicalizes the root -> native provider verifies binary and launches real namespace preflight -> typed configuration events record world and workspace -> existing tools use provider-owned root -> visible status and actual receipts establish the selected boundary",
+    variants: "missing configuration, unsupported platform, changed binary or failed namespaces leave no new selectable workspace; restart without approved configuration preserves unavailable identity and denies work; a local uncontained twin remains distinct; Linux child containment does not authenticate users, isolate the host application or impose aggregate CPU/memory quotas; failed or ambiguous external effects still require native reconciliation"
+}
+
 Instance j_rw_add_workspace of "CanonicalJourney" {
     actor: "User",
     capabilities: "workspace.select, workspace.path",
@@ -1214,4 +1227,17 @@ Instance j_expert_parallel of "CanonicalJourney" {
     settlement: "execution.runtime.inspect reports the effective configured capacity and admission policy without claiming active-worker counts; two Experts on distinct workspaces demonstrably overlap when capacity permits, while same, aliased, or nested roots serialize; unresolved root identity blocks admission without effects; restart, mutation ownership, Team invariants, authorization, and each run's captured model route remain intact",
     steps: "operator inspects native execution capacity -> direct coding, Expert, Team, delegated, resumed, and recovered run entries pass through the same nativeExecutionSlots admission boundary -> runtime resolves execution-world and canonical root identities -> unresolved identity blocks admission before effects -> only runs with non-overlapping known roots may occupy distinct slots -> operator inspects run evidence and the configured capacity",
     variants: "default capacity one is serial; configured capacity accepts only 1, 2, 4, or 8; same-root, alias-root, and ancestor/descendant-root cases serialize; unresolved root identity blocks admission without effects until safely resolved; read-only work does not bypass human approval for protected effects; existing ParallelPlan recommendations remain advisory; Team-level maximum concurrency and batch delegation policy are not established by this journey"
+}
+
+Instance j_expert_model_parallel of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "execution.runtime.inspect, expert.converse, team.converse, team.handoff, team.retry",
+    evidence_class: "observed",
+    initiating_condition: "The operator enables bounded native capacity for independent Expert model decisions while retaining conservative exclusion of workspace effects",
+    journey_id: "J-EXPERT-MODEL-PARALLEL",
+    precondition: "A supported native runtime accepts authoritative asynchronous admission; capacity defaults to one with opt-in two, four or eight; a genuine system-started Expert run resolves its registered unfinished Assignment and matching attempt before eligibility is granted",
+    purpose: "Overlap only Expert decisions whose frozen tools contain the intrinsic expert_return and no workspace, delegation, messaging or memory tools",
+    settlement: "Two independently routed model-only Expert runs overlap at capacity two and return attributable durable results; forged tool calls cannot widen the frozen allowlist; all tool-bearing and ordinary coding runs share one exclusion key; no active-worker count or general workspace parallelism is claimed",
+    steps: "operator configures host capacity and inspects effective policy -> native admission resolves the registered Assignment after application readiness -> only intrinsic-return assignments receive independent slots -> all other work retains conservative shared exclusion -> native runs return correlated handoffs -> operator inspects evidence",
+    variants: "unknown or stale Assignment, attempt, sender or Team membership blocks admission before model effects; event-only agent.config bypasses application-readiness lookup to preserve seed boot; cancellation and recovery use the same native admission path; current frozen tools and model route survive profile edits; capacity remains a startup setting; Team-specific capacities and disjoint workspace effect parallelism remain deferred under J-EXPERT-PARALLEL"
 }

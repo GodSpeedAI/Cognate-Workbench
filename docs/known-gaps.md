@@ -49,9 +49,12 @@ From the workbench design source:
 
 ## Experts and Teams limits
 
-- Published Cognate 0.4.0 provides bounded native concurrency and fenced outbox delivery; Workbench
-  currently retains its default serialized execution. Authoritative workspace eligibility and native
-  UI integration remain open. Parallelism plans still do not create parallel workers.
+- Published Cognate0.5.0 provides bounded native concurrency and awaitable admission. Workbench
+  defaults to capacity1; host opt-in1/2/4/8 enables actual overlapping model-only solo Experts and
+  Specialists, with frozen authority and native capacity inspection. Tool-bearing work, Team
+  Orchestrators and configuration share conservative exclusion. General workspace-effect parallelism
+  and Team-specific limits/batching remain open. Parallelism plans remain advisory. See
+  [measured capacity evidence](experts-concurrency-benchmark.md).
 - Native one-time/daily/weekly Expert and Team schedules execute independently of the browser,
   recover after process termination, and retain occurrence receipts. Legacy automation workflows
   are not automatically converted. Schedule state remains one CAS aggregate; high-volume history
@@ -143,13 +146,14 @@ The historical fallback badge is superseded by a working preset selector using
 |---|---|
 | Authentication | `devTokenAuthenticator`, single operator, single tenant. **Not production authentication.** |
 | Network exposure | The server binds `127.0.0.1` and has no other listener. Do not proxy it to untrusted clients. |
-| Tool guards | Workspace-relative path containment and best-effort shell command classification. **Not a sandbox.** |
-| `run_code` | Its `sandbox_permissions` field is a model tool-schema name. The mechanism is an approval gate plus path containment. |
+| Tool guards | Local default uses best-effort path/shell guards. Explicit host-configured Linux child worlds add native filesystem/process/network containment; host application isolation and aggregate quotas remain open. |
+| `run_code` | Its `sandbox_permissions` field names an approval gate. Actual execution uses the selected world: local default is uncontained; opt-in Linux children use namespaces. Permission approval alone provides no OS isolation. |
 | Secrets | In `<home>/secrets.json` with restrictive permissions. Not in the event log. |
 | Remote worlds | SSH host keys are probed and must be explicitly trusted by a human, compared against a known source. |
 
-The application binds to loopback and refuses nothing about its callers. Do not point it at untrusted
-code or data expecting containment.
+Development authentication does not establish a production listener or hostile-user boundary.
+See [Linux contained workspaces](linux-contained-workspaces.md) for the explicit child-world
+configuration, refusal behavior and remaining limits.
 
 ## Stale references in source comments
 

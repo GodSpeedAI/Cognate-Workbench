@@ -1,6 +1,19 @@
 # Handoff — Projecting This IDM into Cognate
 
-## Current native Experts & Teams handoff (2026-10-13)
+## Current native Experts & Teams handoff (2026-10-15)
+
+Published Cognate 0.4.0 is the runtime dependency; DomainForge 0.19.0 validates/formats the current
+model with zero violations. The current published-package adapter check resolves **225 objects**,
+27 Expert, four schedule, twenty cognitive and seven execution-world bindings, plus native runtime
+inspection. J-RW-contained-workspace adds a human-only, host-configured Linux child containment
+selection; its PostgreSQL/OS/browser slice is under final regression. J-EXPERT-PARALLEL remains
+declared pending supported authoritative admission and application integration.
+
+See [current debt evidence](../../docs/experts-debt-verification.md). Child containment is not
+production identity, host isolation or aggregate resource containment. One process remains supported;
+outbox fencing is not distributed run-write ownership.
+
+## Historical native Experts & Teams handoff (2026-10-13)
 
 The installed DomainForge adapter/CLI is 0.19.0. The complete model validates with zero violations,
 projects 188 semantic objects, and resolves all 24 explicit Expert contracts in

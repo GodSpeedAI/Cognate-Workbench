@@ -13,6 +13,8 @@ export type AgentConfigInput =
   /** `root` is provider-owned and opaque above the execution-world boundary; `executionWorldId`
    *  names where that root lives (see `@godspeedai/cognate-execution`). */
   | { readonly kind: "workspace.added"; readonly workspaceId: string; readonly root: string; readonly title: string; readonly executionWorldId: string }
+  /** One replay-safe typed configuration run records the preflighted world and workspace. */
+  | { readonly kind: "workspace.contained.added"; readonly requestId: string; readonly workspaceId: string; readonly root: string; readonly title: string; readonly executionWorldId: string; readonly worldLabel: string; readonly worldMetadata: Readonly<Record<string, string>>; readonly connection: Json }
   | { readonly kind: "workspace.selected"; readonly workspaceId: string }
   /** Usage pass U3: the sidebar's per-workspace Rename action (reference-behavior-matrix.md §12). */
   | { readonly kind: "workspace.renamed"; readonly workspaceId: string; readonly title: string }
@@ -57,6 +59,19 @@ export const agentConfigAgent: AgentDefinition = {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("workspace.added", payload);
         await ctx.emit("workspace.selected", { workspaceId: payload.workspaceId });
+        return { ok: true };
+      }
+      case "workspace.contained.added": {
+        const { kind: _kind, requestId: _requestId, workspaceId, root, title, executionWorldId, worldLabel, worldMetadata, connection } = command;
+        await ctx.emit("execution.world.connected", {
+          worldId: executionWorldId,
+          worldKind: "linux-bubblewrap",
+          label: worldLabel,
+          metadata: worldMetadata,
+          connection,
+        });
+        await ctx.emit("workspace.added", { workspaceId, root, title, executionWorldId });
+        await ctx.emit("workspace.selected", { workspaceId });
         return { ok: true };
       }
       case "workspace.selected": {

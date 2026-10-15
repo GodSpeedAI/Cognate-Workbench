@@ -230,17 +230,19 @@ export function executionWorldBindings(domain: Domain): readonly CapabilityBindi
   return [
     { semanticId: domain.semanticId("ExecutionWorld"), capability: { id: "process.exec", version: "1.0.0" } },
     { semanticId: domain.semanticId("ExecutionWorld"), capability: { id: "execution.world.connect", version: "1.0.0" } },
+    { semanticId: domain.semanticId("ExecutionWorld"), capability: { id: "workspace.contained.select", version: "1.0.0" } },
     { semanticId: domain.semanticId("ExecutionWorld"), capability: { id: "execution.world.disconnect", version: "1.0.0" } },
     { semanticId: domain.semanticId("WorldConnection"), capability: { id: "execution.world.probe", version: "1.0.0" } },
     { semanticId: domain.semanticId("WorldConnection"), capability: { id: "execution.world.check", version: "1.0.0" } },
+    { semanticId: domain.semanticId("WorldConnection"), capability: { id: "execution.containment.inspect", version: "1.0.0" } },
   ];
 }
 
 export function bindExecutionWorlds(domain: Domain) {
   const contracts = bindCapabilities(domain.projection, executionWorldBindings(domain));
-  if (contracts.length !== 5) throw new Error(`domain: expected 5 bound contracts, got ${contracts.length}`);
-  const [family, connect, disconnect, probe, check] = contracts as [(typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number]];
-  return { family: family.semanticRef, connect: connect.semanticRef, disconnect: disconnect.semanticRef, probe: probe.semanticRef, check: check.semanticRef };
+  if (contracts.length !== 7) throw new Error(`domain: expected 7 bound contracts, got ${contracts.length}`);
+  const [family, connect, contained, disconnect, probe, check, containmentInspect] = contracts as [(typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number], (typeof contracts)[number]];
+  return { family: family.semanticRef, connect: connect.semanticRef, contained: contained.semanticRef, disconnect: disconnect.semanticRef, probe: probe.semanticRef, check: check.semanticRef, containmentInspect: containmentInspect.semanticRef };
 }
 
 /**

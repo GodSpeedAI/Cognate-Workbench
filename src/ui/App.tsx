@@ -3279,25 +3279,140 @@ function MessageBubble({
  *  flow the no-workspace chooser uses, opened from the sidebar header's "Add workspace" button or
  *  the hero menu's "Add workspace…". (The reference's full directory-browser dialog is out of scope
  *  this pass — docs/known-gaps.md.) */
-function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
-  const client = useCognate();
-  const [place, setPlace] = useState<"local" | "ssh" | "wsl">("local");
+type ContainmentInspection = {
+  readonly configured: boolean;
+  readonly platformSupported: boolean;
+  readonly reason?: string;
+  readonly limits?: { readonly timeoutMs: number; readonly maxOutputBytes: number };
+};
+
+type WorkspaceInvoke = (capability: string, input: unknown) => Promise<unknown>;
+
+export async function selectWorkspaceForExecution(
+  invoke: WorkspaceInvoke,
+  path: string,
+  mode: "local" | "contained",
+  inspection: ContainmentInspection | undefined,
+): Promise<void> {
+  if (mode === "contained") {
+    if (inspection?.configured !== true || inspection.platformSupported !== true) {
+      throw new Error(inspection?.reason ?? "Linux child containment is not available.");
+    }
+    await invoke("workspace.contained.select", { path });
+    return;
+  }
+  await invoke("workspace.select", { path });
+}
+
+/** The local workspace picker keeps containment an explicit, per-workspace choice. */
+export function LocalWorkspaceForm({
+  invoke,
+  onClose,
+}: {
+  readonly invoke: WorkspaceInvoke;
+  readonly onClose: () => void;
+}) {
   const [path, setPath] = useState("");
+  const [mode, setMode] = useState<"local" | "contained">("local");
+  const [inspection, setInspection] = useState<ContainmentInspection | undefined>();
+  const [inspectionError, setInspectionError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef, onClose);
+
+  useEffect(() => {
+    let active = true;
+    void invoke("execution.containment.inspect", {}).then((result) => {
+      if (active) setInspection(result as ContainmentInspection);
+    }).catch((err: unknown) => {
+      if (active) setInspectionError(err instanceof Error ? err.message : String(err));
+    });
+    return () => { active = false; };
+  }, [invoke]);
+
+  const containmentAvailable = inspection?.configured === true && inspection.platformSupported === true;
+  const containmentReason = inspectionError ?? inspection?.reason ??
+    (inspection?.platformSupported === false ? "Linux child containment is unavailable on this platform." :
+      inspection?.configured === false ? "Linux child containment is not configured by the host." :
+        "Checking host support…");
+  const containmentLimits = inspection?.limits
+    ? ` Wall-time limit: ${Math.ceil(inspection.limits.timeoutMs / 1000)} seconds; output limit: ${(inspection.limits.maxOutputBytes / (1024 * 1024)).toFixed(1)} MiB.`
+    : "";
+
   const submit = useCallback(async () => {
     setBusy(true);
     setError(undefined);
     try {
-      await client.invoke("workspace.select", { path });
+      await selectWorkspaceForExecution(invoke, path, mode, inspection);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
     }
-  }, [client, path, onClose]);
+  }, [inspection, invoke, mode, onClose, path]);
+
+  return (
+    <>
+      <p className="settings-description">Choose a folder for the agent to read and edit files in.</p>
+      <input
+        aria-label="Workspace directory path"
+        placeholder="/path/to/project"
+        value={path}
+        onChange={(e) => setPath(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && path.trim() && !busy) void submit();
+        }}
+        autoFocus
+      />
+      <fieldset className="workspace-execution-choice">
+        <legend>Execution mode</legend>
+        <label>
+          <input type="radio" name="workspace-execution-mode" value="local" checked={mode === "local"} onChange={() => setMode("local")} />
+          Local · uncontained (default)
+        </label>
+        <label title={containmentAvailable ? undefined : containmentReason}>
+          <input
+            type="radio"
+            name="workspace-execution-mode"
+            value="contained"
+            checked={mode === "contained"}
+            disabled={!containmentAvailable}
+            aria-describedby="workspace-containment-status"
+            onChange={() => setMode("contained")}
+          />
+          Linux child containment
+        </label>
+        <p id="workspace-containment-status" className="settings-description" role="status" aria-live="polite">
+          {containmentAvailable ?
+            `Host configured. The workspace is preflighted when opened; child process network access is denied.${containmentLimits} The Workbench host application is not isolated.` :
+              containmentReason}
+        </p>
+      </fieldset>
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <div className="modal-actions">
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="btn-primary" disabled={busy || path.trim().length === 0} onClick={() => void submit()}>
+          Open
+        </button>
+      </div>
+    </>
+  );
+}
+
+function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
+  const client = useCognate();
+  const [place, setPlace] = useState<"local" | "ssh" | "wsl">("local");
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const invoke = useCallback<WorkspaceInvoke>(
+    (capability, input) => client.invoke(capability, input as never) as unknown as Promise<unknown>,
+    [client],
+  );
   const places = [["local", "This computer"], ["ssh", "SSH"], ["wsl", "WSL"]] as const;
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
@@ -3334,32 +3449,7 @@ function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
         </div>
         <div role="tabpanel" id="ws-place-panel" aria-labelledby={`ws-place-${place}`}>
           {place === "local" ? (
-            <>
-              <p className="settings-description">Choose a folder for the agent to read and edit files in.</p>
-              <input
-                aria-label="Workspace directory path"
-                placeholder="/path/to/project"
-                value={path}
-                onChange={(e) => setPath(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && path.trim() && !busy) void submit();
-                }}
-                autoFocus
-              />
-              {error && (
-                <p role="alert" className="form-error">
-                  {error}
-                </p>
-              )}
-              <div className="modal-actions">
-                <button type="button" onClick={onClose}>
-                  Cancel
-                </button>
-                <button type="button" className="btn-primary" disabled={busy || path.trim().length === 0} onClick={() => void submit()}>
-                  Open
-                </button>
-              </div>
-            </>
+            <LocalWorkspaceForm invoke={invoke} onClose={onClose} />
           ) : place === "ssh" ? (
             <>
               <p className="settings-description">Work in a folder on another machine over SSH. Files and commands stay on that machine.</p>
@@ -5131,9 +5221,13 @@ export function App() {
                       >
                         <FolderIcon aria-hidden="true" />
                         {group.title}
-                        {group.executionWorldId && group.executionWorldId !== "local" ? (
+                        {group.executionWorldId ? (
                           <span className="workspace-world-badge">
-                            {(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · {worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}
+                            {group.executionWorldId === "local"
+                              ? "LOCAL · UNCONTAINED"
+                              : worlds.get(group.executionWorldId)?.kind === "linux-bubblewrap"
+                                ? `LINUX CHILD CONTAINMENT · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`
+                                : `${(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`}
                           </span>
                         ) : null}
                         <button
