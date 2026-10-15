@@ -3,7 +3,7 @@ schema_version: '1.0'
 metadata:
   id: experts-debt-closure
   title: Governed durable dispatch and Experts debt closure
-  status: in_progress
+  status: settled
   version: '1.0'
   created: '2026-10-14'
 source:

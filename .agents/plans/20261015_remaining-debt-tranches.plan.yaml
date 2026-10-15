@@ -1,0 +1,166 @@
+schema: agent.development_plan
+schema_version: '1.0'
+metadata:
+  id: remaining-debt-tranches
+  title: Workspace concurrency, economics, distributed ownership and production trust
+  status: ready
+  version: '1.0'
+  created: '2026-10-15'
+  purpose: >-
+    Project the operator-accepted remaining-debt order (A2 residual, then A4 residual, then A5
+    upstream ownership, then A6 production trust) into a settlement graph on top of the settled
+    20261014_experts-debt-closure mission and published Cognate 0.5.0.
+source:
+  authority: Operator acceptance of the recommended tranche order in this session (2026-10-15)
+  inventory: docs/experts-debt-closure.md
+  predecessor: .agents/plans/20261014_experts-debt-closure.plan.yaml (settled at fdc709b)
+decisions:
+  - Tranche order is operator-accepted as A2 residual, A4 residual, A5 upstream ownership, A6 production trust; dependency edges encode this order even where no technical prerequisite exists.
+  - Consume only complete published Cognate releases; no local SDK sources, vendored tarballs or workspace aliases. Upstream work happens in the Cognate repo through an isolated task worktree with PR44-style gates (RED/GREEN regressions, exact-head CI/packaging, operator-authorized merge, linked release, registry audit, fresh-consumer proof).
+  - Parallelism stays opt-in and conflict-aware. Unknown or unclassifiable work fails closed to the workspace-effects exclusion; eligibility is never widened silently.
+  - Resource identities derive from authoritative application state (assignment/workspace/world records), not from run-supplied input; aliases must canonicalize or be denied.
+  - Team admission/batching policy resolves from authoritative Team metadata inside the async eligibility lookup; the UI must state the effective policy truthfully, including serialized reasons.
+  - Economics never treat unknown prices as zero; interrupted billing reservations reconcile rather than blindly repeat.
+  - A3 generalization (generalized SDK inbox, standalone live steering) and the enumerated product debts remain tracked in the disposition matrix; they are out of this plan's scope.
+  - Baseline and every settlement require actual store/runtime/browser evidence, not mock-only proofs.
+  - Single-process admission remains the default until the T6/T7 verified multi-process release exists.
+global_gates:
+  - just typecheck
+  - just verify
+  - domainforge validate --format human .sea/interaction/interaction-model.sea
+  - domainforge fmt --check .sea/interaction/interaction-model.sea
+  - git diff --check
+dependency_graph:
+  edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
+  critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
+initial_state:
+  current_task: T0
+  last_settled_task: null
+progress: {}
+tasks:
+  T0:
+    title: Baseline, workspace-effect conflict inventory and benchmark refresh
+    depends_on: []
+    changes: >-
+      Record the fresh baseline on fdc709b (1153 tests); inventory every workspace-effect surface
+      (tool-bearing Expert work, coding sessions, schedule dispatch, configuration) with the
+      canonical resource identity each requires; refresh the capacity 1/2/4/8 benchmark and
+      isolate the capacity-8 regression hypothesis (registry CAS, full context materialization).
+    proves: The conflict inventory names each mutating surface and its authoritative resource identity source.
+    does_not_prove: Any new overlap behavior; the inventory only grounds T1.
+    gate: [just verify]
+    evidence: docs/experts-concurrency-benchmark.md
+  T1:
+    title: Conflict-aware workspace-effect admission
+    depends_on: [T0]
+    changes: >-
+      Replace the single global workspace-effects exclusion key with canonical per-resource keys
+      (workspace, execution world, configuration) derived from authoritative state so provably
+      disjoint work overlaps; same-resource work serializes; unknown classification fails closed.
+      Keep model-only Expert overlap semantics unchanged.
+    proves: Two tool-bearing runs on different workspaces overlap at capacity; runs sharing a canonical resource serialize; forged or aliased identities are denied.
+    does_not_prove: Distributed safety; admission remains process-local by SDK contract.
+    gate: [actual PostgreSQL overlap/exclusion/denial/restart journeys, browser journeys]
+    teeth:
+      - {attack: Two runs present aliased paths or distinct spellings of one workspace, expected: Canonical keys collide and the runs serialize}
+      - {attack: A run claims a workspace identity absent from authoritative state, expected: Admission fails closed to exclusion}
+    evidence: docs/experts-debt-closure.md
+  T2:
+    title: Team admission and batching policy
+    depends_on: [T1]
+    changes: >-
+      Resolve per-Team maximum concurrent runs and batch policy from authoritative Team metadata
+      inside the async eligibility lookup; surface the effective policy and serialized reasons in
+      the Team editor and runtime inspection UI.
+    proves: A Team exceeding its policy waits even when process capacity is free; policy reads come only from authoritative metadata.
+    does_not_prove: Cross-process Team fairness.
+    gate: [actual PostgreSQL Team policy journeys, browser journeys]
+    teeth:
+      - {attack: Stale or unauthorized client-supplied Team policy influences admission, expected: Refused; only authoritative metadata decides}
+    evidence: docs/experts-and-teams.md
+  T3:
+    title: Capacity-8 throughput settlement
+    depends_on: [T2]
+    changes: >-
+      Profile and repair the measured capacity-8 throughput regression, or record its cause as an
+      accepted limit with evidence; re-run the benchmark across 1/2/4/8 with the T1/T2 policies.
+    proves: Benchmark table refreshed with isolated cause attribution for capacity 8.
+    does_not_prove: Portable throughput guarantees; single-trial measurements remain labeled as such.
+    gate: [bun test --timeout 120000 test/experts-app-capacity.test.ts, just verify]
+    evidence: docs/experts-concurrency-benchmark.md
+  T4:
+    title: Indexed retrieval and global root CAS
+    depends_on: [T0]
+    changes: >-
+      Replace unbounded materialization on Workbench read paths with scoped indexed/paginated
+      queries; complete the global root CAS over memory partitions and history.
+    proves: Large-history reads stay bounded; source-erased or aliased partitions fail verification and invalidate projections.
+    does_not_prove: Model tokenization or budget enforcement (T5).
+    gate: [migration/recovery/scoped-load tests, storage benchmarks]
+    teeth:
+      - {attack: A partition row is erased or aliased at the source, expected: CAS verification fails and the public projection invalidates}
+    evidence: docs/experts-storage.md
+  T5:
+    title: Exact tokenization, durable reservations and budget ceilings
+    depends_on: [T3, T4]
+    changes: >-
+      Add model-specific tokenization for context accounting; durable pre-dispatch billing
+      reservations with crash reconciliation; ordinary-session and global spending ceilings that
+      fail closed on exhaustion.
+    proves: Over-ceiling dispatch is refused; an interrupted reservation reconciles without double-counting or blind repeat; unknown prices surface as unknown.
+    does_not_prove: Provider-side billing accuracy beyond observed usage receipts.
+    gate: [economics journeys including real native runs and restart, browser usage inspection]
+    teeth:
+      - {attack: Owner is interrupted between reservation and provider dispatch, expected: Reconciliation required without blind repeat}
+      - {attack: A price is unavailable at dispatch, expected: Never booked as zero}
+    evidence: docs/expert-economics.md
+  T6:
+    title: Upstream run-write ownership design and supported publication
+    depends_on: [T5]
+    changes: >-
+      In the Cognate repo through an isolated worktree: run-write fencing, authoritative
+      store-time ownership, worker compatibility, two-process fault injection and
+      ambiguous-effect recovery. PR44-style gates: RED/GREEN regressions, exact-head
+      CI/packaging, operator-authorized merge, linked release, registry audit, fresh-consumer
+      proof. Workbench does not consume until the release is complete and legitimate.
+    proves: Stale owner writes are fenced; a killed owner's ambiguous external effects require reconciliation without blind repeat.
+    does_not_prove: Exactly-once physical effects; commitments and reconciliation remain the contract.
+    gate: [upstream conformance suites, two-process PostgreSQL crash and stale-writer journeys]
+    teeth:
+      - {attack: Owner killed after an external effect before receipt, expected: Reconciliation required without blind repeat}
+      - {attack: An expired owner attempts to settle reclaimed work, expected: Stale settlement refused}
+    evidence: upstream evidence documents plus a new docs/sdk release receipt
+  T7:
+    title: Workbench multi-process integration
+    depends_on: [T6]
+    changes: >-
+      Consume only the complete published ownership release; expose multi-process operation
+      behind verified configuration; add Workbench two-process crash and stale-writer journeys.
+    proves: Two Workbench processes against one PostgreSQL store pass crash and stale-writer gates.
+    does_not_prove: Production trust (T8); multi-user tenancy.
+    gate: [just verify, two-process crash/stale-writer journeys]
+    evidence: docs/experts-debt-closure.md
+  T8:
+    title: Production identity, authorization and aggregate containment
+    depends_on: [T7]
+    changes: >-
+      Durable identities and sessions with revocation, tenant isolation, aggregate resource
+      containment across processes, deployment hardening, and an independent security review.
+      Replace the single-operator development authenticator only after isolation gates pass.
+    proves: Cross-tenant access is refused; revoked sessions produce no further effects; aggregate quota exhaustion fails closed.
+    does_not_prove: A production certification claim; findings from the independent review govern any residual label.
+    gate: [tenant isolation, revocation, OS escape/egress/cancellation tests, independent security review]
+    teeth:
+      - {attack: A revoked session replays a captured request, expected: Refused with no durable effect}
+      - {attack: Aggregate CPU/memory/process usage exceeds the configured quota, expected: New work fails closed}
+    evidence: docs/experts-debt-verification.md plus the review artifact
+  T9:
+    title: Adversarial review, full verification, evidence and publication
+    depends_on: [T8]
+    changes: >-
+      Reconcile all debt statuses against observed proof, run the final full gates, update
+      DEBT/verification/status records, and commit and push without force.
+    proves: Every disposition claim in the debt matrix matches recorded evidence; no claim exceeds its proof.
+    does_not_prove: Closure of debts explicitly retained as open.
+    gate: [just verify, upstream conformance/release verification, git diff --check]
+    evidence: docs/experts-debt-verification.md
