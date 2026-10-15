@@ -75,7 +75,10 @@ From the workbench design source:
   [measured benchmark](experts-scale-baseline.md).
 - Multi-process effect dispatch fails closed without the owning live run context. The supported
   Workbench deployment remains one Bun process.
-- A provider call can delay graceful runtime shutdown. Abrupt-process recovery is tested separately.
+- A provider call can delay graceful runtime shutdown in consumed SDK 0.4.0. Upstream PR #44 fixes
+  cooperative abort and acknowledged-continuation recovery with PostgreSQL regressions; it is
+  unpublished and unconsumed. Signal-ignoring handlers can still delay shutdown. Abrupt-process
+  recovery is tested separately.
 - Human reconciliation of an ambiguous effect does not prove an objective complete. A confirmed
   successful effect requires a new follow-up objective rather than blind retry of that objective.
 - Native commitment guards cover Expert `edit`, `bash` and `run_code`; legacy coding-session tools

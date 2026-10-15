@@ -1,6 +1,6 @@
-# Current status — revision 16
+# Current status — revision 17
 
-Published Cognate 0.4.0 remains integrated; the expanded Workbench suite passes 1,104 tests. Native runtime capacities 1/2/4 are verified, while application parallel admission and the wider debt mission remain incomplete.
+Workbench's published SDK 0.4.0 integration passes 1,104 tests. Separate PR44 repairs native admission capacity and shutdown recovery, with PostgreSQL regressions and exact-head CI/packaging passing; merge/release authorization remains reserved and the wider mission is incomplete.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
 [Release evidence](docs/sdk-0.4.0-release.md) and the [debt report](docs/experts-debt-verification.md)
@@ -23,9 +23,16 @@ DomainForge 0.19.0 validates and formats 224 semantic objects; 27 Expert/four sc
 bindings resolve. J-EXPERT-PARALLEL and its inspection binding are declared; app execution still
 defaults to one. Authority-safe metadata lookup and UI are not yet settled.
 
-A separate [async admission PR #44](https://github.com/GodSpeedAI/Cognate/pull/44) passed exact-head
-CI and clean-room packaging at `bf5031c`. Its actionable review finding concerns a cancelled callback
-releasing capacity before it physically settles. A regression and source repair are in progress;
-the extension is unpublished and unconsumed. Distributed run-write ownership, production authentication/containment,
+A separate [async admission PR #44](https://github.com/GodSpeedAI/Cognate/pull/44) at `d0e4911` passed
+exact-head CI and clean-room packaging. The cancelled-callback capacity finding is repaired; native
+shutdown now aborts cooperative execution and recovers acknowledged RESUMED waits. Each regression
+failed before its repair. PostgreSQL targeted tests pass 19/19 with 121 assertions; full SDK gates
+pass 81/81. Luna source review found no remaining scoped blocker. CodeRabbit is rate-limited and
+did not freshly review this head; its prior actionable finding is verified fixed.
+
+The linked-release audit passes for all 45 packages with trusted publishing enabled and no pending
+release. PR44 is unmerged/unpublished and awaits reserved operator authorization; Workbench has no
+unsupported dependency. Signal-ignoring handlers can still delay shutdown, and interrupted remote
+effects may need reconciliation. Distributed run-write ownership, production authentication/containment,
 indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux
 child containment do not establish those guarantees. Original sibling changes remain untouched.

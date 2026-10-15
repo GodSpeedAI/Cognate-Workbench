@@ -31,7 +31,7 @@ initial_state:
   last_settled_task: T0
 progress:
   T0: Baseline settled at 1064 passing tests; dependency and disposition map committed.
-  T1: SDK 0.4.0 completely published and consumed; all 45 package gitHeads align and Workbench 1104 tests pass with native capacity 1/2/4 coverage. J-EXPERT-PARALLEL model/binding validates; async eligibility PR44 is unpublished and its cancellation-capacity review finding is being repaired before release readiness.
+  T1: SDK 0.4.0 completely published and consumed; Workbench 1104 tests pass. Async eligibility PR44 at d0e4911 repairs cancellation capacity and native shutdown/recovery, with PostgreSQL 19/121 and full81/81 plus exact-head CI/packaging pass. Final merge/release authorization and supported publication remain required before app integration.
   T2: Outbox fencing verified; durable run ownership remains open.
   T3: Single-process schedules and shared Team safe-boundary inbox verified in native PostgreSQL and browser journeys; generalized/distributed contracts remain open.
   T4: Partition migration, erasure, pagination, Expert budgets and benchmarks verified; indexed retrieval, tokenization and global budgets remain open.

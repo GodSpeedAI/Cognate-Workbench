@@ -26,7 +26,7 @@ distributed integration remain separately gated; the plan records that narrower 
 | Debt | Disposition | Observed change and exact remaining limitation |
 | --- | --- | --- |
 | A1 Autonomous schedules | **Partially closed — specific remaining limitation** | Native Expert/Team one-time/daily/weekly schedules execute after restart, with IANA/DST rules, stable occurrence/Assignment IDs, bounded skip/coalesce, cancellation, failure and approval receipts, and real UI. Legacy accepted-workflow automation records are not automatically migrated. One process only; schedule history remains an aggregate. |
-| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Native capacities 1/2/4/8, resource exclusion, cancellation, continuation and PostgreSQL tests pass; SDK 0.4.0 is published and consumed with 1,101 app tests passing. Workbench defaults to serial execution; authoritative eligibility, per-Team admission/batch policy and UI remain required. Awaitable metadata eligibility is a separate unpublished SDK extension. |
+| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Native capacities 1/2/4/8, resource exclusion, cancellation, continuation and PostgreSQL tests pass; SDK 0.4.0 is published and consumed with 1,104 app tests passing. Workbench defaults to serial execution; authoritative eligibility, per-Team admission/batch policy and UI remain required. Awaitable metadata eligibility is a separate unpublished SDK extension. |
 | A3 Live steering | **Partially closed — specific remaining limitation** | Shared Team messages are durably accepted and incorporated at safe model-decision boundaries, with sequence, ownership, supersession/cancellation, bounds and SIGKILL replay. Idle delivery retains the existing queue. Generalized SDK inbox and standalone live steering remain open. No arbitrary inference interruption. |
 | A4 Memory and economics | **Partially closed — specific remaining limitation** | Bounded immutable partitions, interrupted migration, erasure invalidation, scoped cursor pages, measured write reduction and frozen Expert attempt budgets work. Global root CAS, complete materialization, indexed SQL retrieval, model tokenization, pre-dispatch crash/billing reservations and ordinary-session/global budget ceilings remain open. |
 | A5 Multiple processes | **Still open — not implemented** | Fenced native outbox claims are an upstream prerequisite only. Run-write fencing, authoritative store-time ownership, worker compatibility, two-process fault injection and ambiguous-effect recovery are not implemented. No multiprocess mode is exposed. |
@@ -250,3 +250,38 @@ waiting on Expert/provider readiness, avoiding a seed-to-config deadlock.
 
 These are unfulfilled acceptance conditions, not a successful mission declaration. The plan remains
 in progress and the debt entries remain present.
+
+## PR #44 release decision — 2026-10-15
+
+[Cognate PR #44](https://github.com/GodSpeedAI/Cognate/pull/44), branch
+`feature/async-run-admission`, is pushed at **`d0e491105d7f76ecebed04302701c3f911b69926`**.
+It contains the additive awaitable resource-eligibility contract and native lifecycle repairs.
+Workbench still consumes published 0.4.0. No source checkout is a production dependency.
+
+| Gate | Exact observed evidence |
+| --- | --- |
+| Native admission bound | CodeRabbit's sole actionable finding is repaired: an ignored cancelled callback retains its permit until it settles. PostgreSQL regression fails before the fix (two callbacks at capacity one), then passes. |
+| Cooperative shutdown | Provider abort regression fails before signal forwarding, then passes. Same-run recovery retains a committed checkpoint and an open native continuation. |
+| Acknowledged resume recovery | Independent review found a stranded RESUMED wait. Fault injection confirms its outbox was delivered before the run resume event; the regression fails before recovery scans RESUMED waits, then passes. |
+| Targeted tests | `bun test packages/runtime-bun/test/concurrency.test.ts packages/runtime-bun/test/async-admission.test.ts packages/runtime-bun/test/shutdown-recovery.test.ts`: **19 pass, zero fail, 121 assertions**, actual PostgreSQL. |
+| Full upstream gate | `just verify`: **81/81 gates pass** after all repairs. Typecheck and `git diff --check` pass. |
+| Latest-head package gate | [Run 38665283847](https://github.com/GodSpeedAI/Cognate/actions/runs/38665283847/job/116195713751), exact `d0e4911`, passed 01:23:17 UTC. |
+| Latest-head verify | [Run 38665283850](https://github.com/GodSpeedAI/Cognate/actions/runs/38665283850/job/116195714099), exact `d0e4911`, passed 01:24:05 UTC, including interoperability and PostgreSQL suites. Cached DomainForge/RealityTrace installation step was skipped; no new installation proof is claimed. |
+| Review | Requested Luna source reviews checked cancellation, late-controller registration, listener cleanup, permit ownership, replay and recovery. No remaining scoped blocker. CodeRabbit's latest pass context reflects its review quota: **no fresh automated review of `d0e4911` occurred**. Its previous finding is addressed by source and regression evidence. |
+| Release prerequisites | Head matches local/remote, mergeable, three commits ahead and zero behind release base `467a5f`. Unified release check passes for 45 packages at 0.4.0; trusted publishing flag is enabled. Prior 0.4.0 workflow published all 45 successfully. No release PR/workflow is pending. Expected 0.5.0 is a forecast until Release Please generates the linked version. |
+
+The operator's final merge/publication authorization is reserved. Neither PR #44 nor a new SDK
+release has merged or published. After authorization, inspect the generated linked release diff,
+run exact-head verification/packaging, require all package publications to complete, then audit
+registry gitHeads and a fresh consumer before changing Workbench dependencies.
+
+Limits remain explicit: signal-ignoring callbacks can exhaust lookup capacity; signal-ignoring
+execution handlers can delay shutdown. External requests may have occurred before a durable result
+and can repeat on recovery; native commitments and reconciliation remain necessary. Outbox fencing
+does not establish distributed run-write fencing, and Linux child containment is not a complete
+production security boundary. Workbench Team parallelism, distributed deployment and production
+trust are not settled by this PR.
+
+Workbench's latest committed test slice is **`069a9d8`**, pushed to `feature/expert-teams`:
+`just verify` passes **1,104 tests, zero failures, 6,884 assertions/96 files in 408.21 seconds**.
+All seven debt entries remain reconciled above; the overall mission remains incomplete.
