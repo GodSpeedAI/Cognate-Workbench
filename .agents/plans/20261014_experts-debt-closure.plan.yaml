@@ -16,7 +16,7 @@ decisions:
   - Preserve sibling Cognate dirty status files; upstream work uses an isolated task worktree.
   - Baseline and each settlement require actual store/runtime evidence, not mock-only proofs.
   - Formatting must prove semantic equivalence, comment retention and idempotence before canonical application.
-  - Real 0.2.0 restart tests support single-process schedules/inbox before distributed run ownership; T2 remains required for multi-process exposure and supported parallel integration.
+  - Real 0.2.0 restart tests support single-process schedules/inbox before distributed run ownership; T2 remains required for multi-process exposure. Single-process parallel integration requires T1 and authoritative resource eligibility.
 global_gates:
   - just typecheck
   - just verify
@@ -27,18 +27,18 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T0,T3],[T0,T4],[T2,T5],[T0,T6],[T3,T7],[T4,T7],[T5,T7],[T6,T7],[T7,T8]]
   critical_path: [T0,T1,T2,T5,T7,T8]
 initial_state:
-  current_task: T3
+  current_task: T1
   last_settled_task: T0
 progress:
   T0: Baseline settled at 1064 passing tests; dependency and disposition map committed.
-  T1: Upstream implementation pushed in PR42; 81 gates, native concurrency, saturated-pool and OS tests pass; unpublished.
+  T1: PR42 merged with final operator authorization; verified linked0.4.0 PR43 merged and publication is in progress. J-EXPERT-PARALLEL model/binding validates; authoritative async eligibility extension is in upstream implementation, not consumed by Workbench.
   T2: Outbox fencing verified; durable run ownership remains open.
   T3: Single-process schedules and shared Team safe-boundary inbox verified in native PostgreSQL and browser journeys; generalized/distributed contracts remain open.
   T4: Partition migration, erasure, pagination, Expert budgets and benchmarks verified; indexed retrieval, tokenization and global budgets remain open.
   T5: Production identity and OS containment remain open.
   T6: Formatter closure and twenty cognitive bindings verified; semantic IDs preserved.
   T7: Native schedule/inbox/accounting UI committed and browser verified; remaining historical product gaps retained.
-  T8: Verified subset passes1100tests; mission incomplete pending upstream release, distributed ownership and production trust.
+  T8: Verified implementation subset passes1101tests; mission incomplete pending supported release integration, distributed ownership and production trust.
 tasks:
   T0:
     title: Inventory, baseline, architectural dependency and debt disposition map

@@ -1,6 +1,6 @@
-# Current status — revision 13
+# Current status — revision 14
 
-Operator authorized merge and linked release. Cognate PR42 merged at c6e3207; PR43 proposes aligned SDK 0.4.0. Release CI and package completeness precede Workbench integration. Mission incomplete.
+SDK0.4.0 release PR43 merged and npm publication is in progress; Workbench still pins0.2.0. Native parallel-admission model/binding validates; authoritative eligibility extension is being hardened upstream. Mission incomplete.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
 The [verification report](docs/experts-debt-verification.md) records debt dispositions, journeys,
@@ -25,10 +25,17 @@ verification gates pass. AG-UI settled-stream tests pass twenty repetitions (100
 The operator
 removed the independent GitHub reviewer requirement and gave final merge/release authorization.
 PR42 merged at c6e3207 on 2026-10-14 21:08:54 UTC. Release Please generated PR43 at f1a4914;
-local release configuration checks confirm all 45 packages and the manifest at 0.4.0. Exact-head
-checks precede publication. No new package publication or Workbench upgrade is claimed yet.
+local checks confirm all 45 packages and the manifest at 0.4.0. Exact-head verification and packaging
+pass. PR43 merged at467a5f and workflow38657275627 is publishing the SDK; the complete package set
+has not yet been verified, so Workbench remains on0.2.0.
 
 Distributed run-write ownership, production authentication/tenant integration, supported containment,
 indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux child
 containment do not establish those guarantees. The SDK task worktree remains ignored for review
 follow-up; no donor source is a production dependency. Original sibling changes are preserved.
+
+The declared J-EXPERT-PARALLEL model and native execution inspection binding validate with224
+semantic objects; no app parallelism settlement is claimed. Independent review found that projection
+apply-side caches could expose uncommitted metadata and the public Experts view omits private
+assignments. A narrow native asynchronous eligibility extension is being hardened upstream instead;
+no unsupported SDK checkout is consumed by Workbench.

@@ -741,3 +741,14 @@ These journeys extend the existing source and use published Cognate 0.2.0. They 
 | J-CONTEXT-BUDGET — human constrains per-attempt inference | `expert.save` freezes limits; `expert.model.generate` includes visible messages/instructions/tool schemas and output reserve; explicit prices needed for cost cap | Over-budget native invocation never dispatches provider; active limits survive edits/restart; provider usage is observed, byte estimate labeled, unknown price stays unknown | Failed/unreported calls retain conservative reservations; required context is not silently discarded; inspect receipt and revise task/budget |
 
 Executable evidence: `test/J-SCHEDULE-execution.test.ts`, `test/J-MEMORY-migration.test.ts`, `test/J-MEMORY-pagination.test.ts`, `test/expert-economics.test.ts`, and `test/E2E-experts-debt.test.ts`. Live inbox evidence and cognitive bindings are documented in the handoff. These tests use actual PostgreSQL/native execution with deterministic providers; they do not establish general Expert competence.
+
+## Declared native run admission (implementation and proof pending)
+
+### J-EXPERT-PARALLEL (`j_expert_parallel`)
+
+- **Actor/intention**: User or OperatorAgent wants independent coding and Expert work to overlap without concurrent mutation of a shared workspace.
+- **Preconditions/affordance**: Planned native Cognate 0.4 runtime exposes process-level `maxConcurrentRuns` (default 1; opt-in 2, 4, or 8); `execution.runtime.inspect` reports configured capacity and policy. Mutating run entries must resolve execution-world and canonical-root identity before admission.
+- **Transition/output**: Every direct coding, Expert/Team, delegation, resume, and recovery entry uses `nativeExecutionSlots`. Distinct known roots may use separate native slots; equal, aliased, or nested roots serialize. Unknown root identity blocks admission without effects until safely resolved. The existing `ParallelPlan` remains an advisory plan, not admission authority.
+- **Policy/authority**: Slot admission does not change captured model routing, mutation ownership, Team invariants, authorization, or human approval for protected effects. Inspection reports no active-worker count unless native telemetry later supplies one. Team-level maximum concurrency and batch delegation policy remain unsettled.
+- **Evidence/settlement**: Pending native binding and journey tests must show two Experts actually overlap on distinct workspaces at capacity 2, while same/alias/nested roots serialize; restart preserves ownership, routing, and Team invariants. This is declared semantics, not observed implementation.
+- **Failure/recovery/next**: Unresolvable roots block admission without effects; after resolving identity, the operator may retry. Operator inspects effective configured capacity/policy and may wait or retry after a run settles; no active-count or queue-position claim is implied. Read-only work does not bypass protected-effect approval.

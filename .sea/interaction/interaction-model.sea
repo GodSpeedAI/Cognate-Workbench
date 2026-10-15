@@ -67,6 +67,10 @@ Entity "GroundedFeedback"
 
 Entity "ParallelPlan"
 
+// Native process-level bound for admitting concurrent runs. This is distinct from
+// ParallelPlan, which only advises whether planned work units are independent.
+Entity "NativeExecutionSlots"
+
 Entity "UsageLedger"
 
 // Focus (adapted from the operator's gs-term): what "this" means is resolved by a fixed precedence and
@@ -1197,4 +1201,17 @@ Instance j_expert_inbox_recover of "CanonicalJourney" {
     settlement: "A stable run-and-boundary command receipt returns the identical batch after a crash between registry CAS and invocation recording; acknowledged messages do not reappear at later boundaries",
     steps: "restart restores native shared thread state -> Cognate replays recorded run steps -> consume command revalidates current recipient Team and Assignment -> matching receipt returns same ordered batch or new boundary commits next eligible batch -> agent continues at a safe model decision",
     variants: "stale Team membership, cancelled Assignment and private scope mismatch deny incorporation; retry cannot widen captured tools or mode; provider call is never interrupted"
+}
+
+Instance j_expert_parallel of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "execution.runtime.inspect, expert.converse, team.converse, subagent.start, team.retry, team.handoff",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants independent coding or Expert work to overlap without allowing shared or uncertain workspace mutations to race",
+    journey_id: "J-EXPERT-PARALLEL",
+    precondition: "The native runtime exposes a configured maxConcurrentRuns value (default 1; opt-in values 2, 4, or 8); each admitted mutating run resolves to a canonical execution-world and workspace-root identity; unresolved identity blocks admission without effects until safely resolved",
+    purpose: "Bound process-level run admission while permitting overlap only for work with disjoint canonical workspace roots",
+    settlement: "execution.runtime.inspect reports the effective configured capacity and admission policy without claiming active-worker counts; two Experts on distinct workspaces demonstrably overlap when capacity permits, while same, aliased, or nested roots serialize; unresolved root identity blocks admission without effects; restart, mutation ownership, Team invariants, authorization, and each run's captured model route remain intact",
+    steps: "operator inspects native execution capacity -> direct coding, Expert, Team, delegated, resumed, and recovered run entries pass through the same nativeExecutionSlots admission boundary -> runtime resolves execution-world and canonical root identities -> unresolved identity blocks admission before effects -> only runs with non-overlapping known roots may occupy distinct slots -> operator inspects run evidence and the configured capacity",
+    variants: "default capacity one is serial; configured capacity accepts only 1, 2, 4, or 8; same-root, alias-root, and ancestor/descendant-root cases serialize; unresolved root identity blocks admission without effects until safely resolved; read-only work does not bypass human approval for protected effects; existing ParallelPlan recommendations remain advisory; Team-level maximum concurrency and batch delegation policy are not established by this journey"
 }

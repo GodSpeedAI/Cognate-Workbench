@@ -383,3 +383,13 @@ export function bindScheduleCapabilities(domain:Domain):Readonly<Record<string,C
   if(contracts.length!==4)throw new Error("domain: expected four native schedule bindings");
   return Object.fromEntries(contracts.map(contract=>[contract.id,contract.semanticRef]));
 }
+
+/** Effective native capacity is inspection data, distinct from advisory parallelism plans. */
+export function bindRuntimeExecution(domain: Domain): CapabilityContract["semanticRef"] {
+  const contracts = bindCapabilities(domain.projection, [{
+    semanticId: domain.semanticId("NativeExecutionSlots"),
+    capability: { id: "execution.runtime.inspect", version: "1.0.0" },
+  }]);
+  if (contracts.length !== 1) throw new Error("domain: expected one native runtime execution binding");
+  return contracts[0]!.semanticRef;
+}
