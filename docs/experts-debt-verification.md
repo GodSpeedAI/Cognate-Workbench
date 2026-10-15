@@ -54,7 +54,7 @@ not close them.
   invocation SemanticRef evidence and existing human-only cognitive gates.
 
 The authoritative model, canonical catalog, source translation and handoff are updated in
-`.sea/interaction/`. The adapter loads **222 semantic objects**; all **27 Expert**, **four schedule**
+`.sea/interaction/`. The adapter loads **224 semantic objects**; all **27 Expert**, **four schedule**
 and **twenty cognitive** contracts resolve. Existing semantic IDs and the inherited namespace remain.
 
 ## Measurements
@@ -68,6 +68,7 @@ six reported CPUs and 8.33 GB reported RAM. These are small local measurements, 
 | Same registry, configured writer concurrency four | 0.81/s; 2,858/4,958 ms; six CAS conflicts | 2.72/s; 942/1,470 ms; six conflicts; 43,974 committed payload bytes |
 | 8.49 MB partitioned registry; four single-writer operations | Exceeds the former 1 MiB event envelope | 2.08/s; 490/593 ms; 200,392 payload bytes; peak RSS about 606 MB; restart/rebuild 906 ms |
 | Upstream eight independent 40 ms native steps, capacity 1/2/4/8 | Default serial | Observed maxima 1/2/4/8; about 331/166/86/45 ms |
+| Published Cognate 0.4.0 runtime, four independent timer-step runs, capacity 1/2/4 | 4 focused tests; 33 assertions | Observed overlap peaks match configured capacities 1/2/4; substrate contract only, not Workbench Team dispatch |
 
 Datasets, commands, writer-count caveats and scope/quality checks are in
 [experts-scale-baseline.md](experts-scale-baseline.md). Four mutations cannot establish a universal
@@ -116,7 +117,8 @@ deployment has been established.
 | Command | Observed result |
 | --- | --- |
 | Initial `just verify` | 1,064 pass, zero fail, 6,536 assertions/85 files; 407.91 s |
-| Final integrated `just verify` | **1,101 pass, zero fail, 6,860 assertions/96 files; 381.67 s**, including typecheck |
+| Prior integrated tranche `just verify` | 1,101 pass, zero fail, 6,860 assertions/96 files; 381.67 s, including typecheck (before published-SDK migration) |
+| Published SDK migration plus capacity coverage `just verify` | **1,104 pass, zero fail, 6,884 assertions/96 files; 408.21 s**, including typecheck, actual browser and PostgreSQL journeys |
 | `just typecheck` | Pass |
 | Focused native debt suite (eleven files) | 41 pass, zero fail, 303 assertions |
 | Inbox ownership/schedule race suites | 18 pass, zero fail, 96 assertions |
@@ -224,9 +226,13 @@ head `f1a49147cdbd558ab328184fdc8884088a6a49ca`. Its 91 changed files are exactl
 manifests, 45 changelogs and the release manifest; configuration checks confirm aligned 0.4.0.
 Release-head verification and packaging passed. PR43 merged at 467a5f and all 45 publication jobs
 completed successfully. Registry and clean-room audits verify every package at 0.4.0 from that
-commit. Workbench's 23 direct/35 resolved SDK pins are 0.4.0, with no non-SDK lockfile drift. Typecheck,
-42 targeted tests and full just verify pass: 1,101 tests, zero failures, 6,860 assertions, 96 files,
-403.64 seconds. Native app parallel admission is still declared pending supported eligibility/UI.
+commit. Workbench's 23 direct/35 resolved SDK pins are 0.4.0, with no non-SDK lockfile drift. The
+published-runtime capacity 1/2/4 characterization passes four focused tests and 33 assertions; it
+demonstrates only native SDK overlap, not Workbench eligibility or Team dispatch. The post-migration
+full `just verify` result is 1,101 tests, zero failures, 6,860 assertions, 96 files, 403.64 seconds.
+Native app parallel admission is still declared pending supported eligibility/UI. Any future
+admission readiness barrier must allow trusted boot-time `agent.config` seed work to complete before
+waiting on Expert/provider readiness, avoiding a seed-to-config deadlock.
 
 1. Integrate authoritative native eligibility and real concurrency UI after its supported SDK
    extension passes review/release. Requested Luna workers resumed and completed the

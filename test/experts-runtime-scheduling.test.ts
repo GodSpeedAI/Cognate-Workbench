@@ -21,18 +21,70 @@ async function waitForStatus(runtime: Awaited<ReturnType<typeof createRuntime>>,
   }
 }
 
-test("expert scheduling uses serialized durable runs and a resumable correlated handoff", async () => {
-  let activeRuns = 0;
-  let maxActiveRuns = 0;
+for (const capacity of [1, 2, 4] as const) {
+  test(`published runtime admits four independent Expert runs at capacity ${capacity}`, async () => {
+    let activeRuns = 0;
+    let maxActiveRuns = 0;
+    const experts: AgentDefinition[] = Array.from({ length: 4 }, (_, index) => ({
+      id: `test.expert.worker-${index + 1}`,
+      version: "1.0.0",
+      async run(_input, ctx) {
+        return ctx.step("observable-work", async () => {
+          activeRuns++;
+          maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            return { expertId: ctx.agent, runId: ctx.runId };
+          } finally {
+            activeRuns--;
+          }
+        });
+      },
+    }));
+
+    const runtime = await createRuntime({
+      store: storeConfigFor(`/tmp/experts-runtime-${randomUUID()}`, "scheduling_test"),
+      policy: allowTestRuns(),
+      actions: { authorize: () => ({ allow: true, reason: "test runtime action" }) },
+      agents: experts,
+      tickMs: 1,
+      ...(capacity === 1 ? {} : {
+        execution: {
+          maxConcurrentRuns: capacity,
+          resourceKeys: (run) => [`expert:${run.agent}`],
+        },
+      }),
+    });
+
+    try {
+      const started = await Promise.all(experts.map((expert) => runtime.service.startRun(caller, {
+        agent: expert.id,
+        input: { expertId: expert.id },
+        idempotencyKey: randomUUID(),
+        correlationId: `expert-run:${expert.id}`,
+      })));
+
+      await runtime.idle();
+      expect(maxActiveRuns).toBe(capacity);
+
+      for (let index = 0; index < started.length; index++) {
+        const result = await runtime.service.getRun(caller, { runId: started[index]!.runId });
+        expect(result.status).toBe("completed");
+        expect(result.output).toEqual({ expertId: experts[index]!.id, runId: started[index]!.runId });
+      }
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+}
+
+test("Expert scheduling retains a resumable correlated handoff with idempotent redelivery", async () => {
   const slowAgent: AgentDefinition = {
     id: "test.expert.slow",
     version: "1.0.0",
     async run(_input, ctx) {
       return ctx.step("observable-work", async () => {
-        activeRuns++;
-        maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
         await new Promise((resolve) => setTimeout(resolve, 30));
-        activeRuns--;
         return { completedBy: ctx.agent, runId: ctx.runId };
       });
     },
@@ -51,7 +103,7 @@ test("expert scheduling uses serialized durable runs and a resumable correlated 
   };
 
   const runtime = await createRuntime({
-    store: storeConfigFor(`/tmp/experts-runtime-${randomUUID()}`, "scheduling_test"),
+    store: storeConfigFor(`/tmp/experts-runtime-${randomUUID()}`, "scheduling_handoff_test"),
     policy: allowTestRuns(),
     actions: { authorize: () => ({ allow: true, reason: "test runtime action" }) },
     agents: [slowAgent, parentAgent],
@@ -59,22 +111,6 @@ test("expert scheduling uses serialized durable runs and a resumable correlated 
   });
 
   try {
-    const first = await runtime.service.startRun(caller, {
-      agent: slowAgent.id,
-      input: { expertId: "expert-1" },
-      idempotencyKey: randomUUID(),
-      correlationId: "expert-run:first",
-    });
-    const second = await runtime.service.startRun(caller, {
-      agent: slowAgent.id,
-      input: { expertId: "expert-2" },
-      idempotencyKey: randomUUID(),
-      correlationId: "expert-run:second",
-    });
-    expect((await waitForStatus(runtime, first.runId, ["completed", "failed"])).status).toBe("completed");
-    expect((await waitForStatus(runtime, second.runId, ["completed", "failed"])).status).toBe("completed");
-    expect(maxActiveRuns).toBe(1);
-
     const parent = await runtime.service.startRun(caller, {
       agent: parentAgent.id,
       input: { teamId: "team-1" },

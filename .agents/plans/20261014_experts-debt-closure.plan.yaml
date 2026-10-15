@@ -31,14 +31,14 @@ initial_state:
   last_settled_task: T0
 progress:
   T0: Baseline settled at 1064 passing tests; dependency and disposition map committed.
-  T1: SDK0.4.0 completely published and consumed; all45 package gitHeads align and Workbench1101 tests pass. J-EXPERT-PARALLEL model/binding validates; authoritative async eligibility extension is separately reviewed/tested upstream and remains unpublished.
+  T1: SDK 0.4.0 completely published and consumed; all 45 package gitHeads align and Workbench 1104 tests pass with native capacity 1/2/4 coverage. J-EXPERT-PARALLEL model/binding validates; async eligibility PR44 is unpublished and its cancellation-capacity review finding is being repaired before release readiness.
   T2: Outbox fencing verified; durable run ownership remains open.
   T3: Single-process schedules and shared Team safe-boundary inbox verified in native PostgreSQL and browser journeys; generalized/distributed contracts remain open.
   T4: Partition migration, erasure, pagination, Expert budgets and benchmarks verified; indexed retrieval, tokenization and global budgets remain open.
   T5: Production identity and OS containment remain open.
   T6: Formatter closure and twenty cognitive bindings verified; semantic IDs preserved.
   T7: Native schedule/inbox/accounting UI committed and browser verified; remaining historical product gaps retained.
-  T8: Published SDK0.4.0 integration passes1101tests; mission incomplete pending native eligibility/UI, distributed ownership and production trust.
+  T8: Published SDK 0.4.0 integration passes 1104 tests; mission incomplete pending native eligibility/UI, distributed ownership and production trust.
 tasks:
   T0:
     title: Inventory, baseline, architectural dependency and debt disposition map
