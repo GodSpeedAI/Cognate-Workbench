@@ -1,41 +1,28 @@
-# Current status — revision 14
+# Current status — revision 15
 
-SDK0.4.0 release PR43 merged and npm publication is in progress; Workbench still pins0.2.0. Native parallel-admission model/binding validates; authoritative eligibility extension is being hardened upstream. Mission incomplete.
+Cognate 0.4.0 is completely published and consumed: all 45 release packages verified, 23 direct/35 resolved Workbench pins upgraded, and all 1,101 app tests pass. Safe app parallel admission and the wider debt mission remain incomplete.
 
 The [mission plan](.agents/plans/20261014_experts-debt-closure.plan.yaml) remains **in progress**.
-The [verification report](docs/experts-debt-verification.md) records debt dispositions, journeys,
-measurements, failure evidence, commits and remaining conditions.
+[Release evidence](docs/sdk-0.4.0-release.md) and the [debt report](docs/experts-debt-verification.md)
+record exact source commits, workflow receipts, package audits and remaining conditions.
 
-Final Workbench `just verify`: **1,101 pass, zero fail, 6,860 assertions across 96 files,
-381.67 seconds**, including typecheck. DomainForge 0.19.0 validates with zero violations and clean
-formatting; 222 semantic objects and all 27 Expert/four schedule/twenty cognitive bindings resolve.
-Native schedules, shared Team live inbox, partition migration, scoped pagination and frozen Expert
-budgets retain their real PostgreSQL and browser evidence. Default Team governance remains intact.
+PR42 merged at c6e3207 and linked release PR43 at467a5f under final operator authorization.
+All45 package publication jobs succeeded; every npm0.4.0 package has gitHead467a5f. A new consumer
+installed all45 with no graph drift and demonstrated native peak concurrency2 with distinct outputs.
 
-[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42) contains shared pre-claim admission
-for run and continuation delivery, worker failure settlement and corrected actual filesystem evidence.
-The mixed-topic regression failed at two/four outstanding leases for capacities one/two before the
-fix and passes afterward. Events/continuations/runtime: 225 pass, 772 assertions, with seventeen
-optional external CEP tests skipped. Linux OS evidence: ten tests / 29 assertions.
+Workbench now pins published Cognate **0.4.0**:23 direct/35 resolved SDK packages, no source links
+and no non-SDK lockfile changes. Typecheck and42 targeted tests pass. Full `just verify` passes
+**1,101 tests, zero failures,6,860 assertions across96 files in403.64 seconds**, including actual
+browser and PostgreSQL recovery journeys. Generated screenshots were restored after verification.
 
-All 45 linked npm names currently report 0.3.0 and the historical nine-package gap is resolved.
-This published release does not contain the new contracts; Workbench still uses published 0.2.0.
-Upstream corrections are pushed through 033029d; exact-head CI/packaging passes. All 81 local SDK
-verification gates pass. AG-UI settled-stream tests pass twenty repetitions (100 tests / 160 assertions).
-The operator
-removed the independent GitHub reviewer requirement and gave final merge/release authorization.
-PR42 merged at c6e3207 on 2026-10-14 21:08:54 UTC. Release Please generated PR43 at f1a4914;
-local checks confirm all 45 packages and the manifest at 0.4.0. Exact-head verification and packaging
-pass. PR43 merged at467a5f and workflow38657275627 is publishing the SDK; the complete package set
-has not yet been verified, so Workbench remains on0.2.0.
+Native schedules, shared Team live inbox, partition migration/pagination and frozen Expert budgets
+retain their verified behavior. The default Cognate Team and one-Orchestrator invariant remain intact.
+DomainForge0.19.0 validates and formats224 semantic objects;27 Expert/four schedule/twenty cognitive
+bindings resolve. J-EXPERT-PARALLEL and its inspection binding are declared; app execution still
+defaults to one. Authority-safe metadata lookup and UI are not yet settled.
 
-Distributed run-write ownership, production authentication/tenant integration, supported containment,
-indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux child
-containment do not establish those guarantees. The SDK task worktree remains ignored for review
-follow-up; no donor source is a production dependency. Original sibling changes are preserved.
-
-The declared J-EXPERT-PARALLEL model and native execution inspection binding validate with224
-semantic objects; no app parallelism settlement is claimed. Independent review found that projection
-apply-side caches could expose uncommitted metadata and the public Experts view omits private
-assignments. A narrow native asynchronous eligibility extension is being hardened upstream instead;
-no unsupported SDK checkout is consumed by Workbench.
+A narrow native awaitable-eligibility extension is independently reviewed and tested in a separate
+upstream worktree; it is unpublished and not consumed. Its final runtime/admission tests pass16/16
+with actual PostgreSQL. Distributed run-write ownership, production authentication/containment,
+indexed retrieval, exact tokenization and global budgets remain open. Outbox fencing and Linux
+child containment do not establish those guarantees. Original sibling changes remain untouched.

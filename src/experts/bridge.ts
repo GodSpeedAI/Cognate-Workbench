@@ -1,4 +1,4 @@
-// Compatible completion bridge for Cognate 0.2.0: its run_completion condition is stored but
+// Compatible completion bridge for Cognate: its run_completion condition is stored but
 // not automatically resolved. Follow committed events, repair on boot, and resolve native waits.
 // Cognate's own durable run outbox remains the executor. This is not a second work scheduler.
 import type { RuntimeService } from "@godspeedai/cognate-runtime-api";

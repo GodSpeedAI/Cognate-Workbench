@@ -49,8 +49,9 @@ From the workbench design source:
 
 ## Experts and Teams limits
 
-- Expert dispatch is serialized, matching the installed Cognate runtime. Parallelism plans still do
-  not create parallel workers.
+- Published Cognate 0.4.0 provides bounded native concurrency and fenced outbox delivery; Workbench
+  currently retains its default serialized execution. Authoritative workspace eligibility and native
+  UI integration remain open. Parallelism plans still do not create parallel workers.
 - Native one-time/daily/weekly Expert and Team schedules execute independently of the browser,
   recover after process termination, and retain occurrence receipts. Legacy automation workflows
   are not automatically converted. Schedule state remains one CAS aggregate; high-volume history

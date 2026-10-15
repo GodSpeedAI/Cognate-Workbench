@@ -1,12 +1,12 @@
 # Experts debt tranche — verification and publication report
 
-Recorded 2026-10-14. **The full mission is incomplete.** This report settles the verified slices below;
+Recorded 2026-10-15. **The full mission is incomplete.** This report settles the verified slices below;
 it does not close all seven mandatory debts or advertise production/multiprocess operation.
 
 ## Architecture and dependency outcome
 
 Cognate-Workbench remains the same application on `feature/expert-teams`, using published Cognate
-**0.2.0**, PostgreSQL/pg0, native events, shared-state CAS, continuations, commitments and projections.
+**0.4.0**, PostgreSQL/pg0, native events, shared-state CAS, continuations, commitments and projections.
 No local SDK link, vendored runtime, broker, second event store or new Workbench dependency was added.
 The default five Experts and sole Product Manager Orchestrator remain ordinary editable seed records.
 
@@ -26,7 +26,7 @@ distributed integration remain separately gated; the plan records that narrower 
 | Debt | Disposition | Observed change and exact remaining limitation |
 | --- | --- | --- |
 | A1 Autonomous schedules | **Partially closed — specific remaining limitation** | Native Expert/Team one-time/daily/weekly schedules execute after restart, with IANA/DST rules, stable occurrence/Assignment IDs, bounded skip/coalesce, cancellation, failure and approval receipts, and real UI. Legacy accepted-workflow automation records are not automatically migrated. One process only; schedule history remains an aggregate. |
-| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Upstream native capacities 1/2/4/8, resource eligibility, cancellation, continuation and PostgreSQL tests pass. Workbench still uses serial 0.2.0; reviewed supported SDK publication and application eligibility/UI integration remain required. |
+| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Native capacities 1/2/4/8, resource exclusion, cancellation, continuation and PostgreSQL tests pass; SDK 0.4.0 is published and consumed with 1,101 app tests passing. Workbench defaults to serial execution; authoritative eligibility, per-Team admission/batch policy and UI remain required. Awaitable metadata eligibility is a separate unpublished SDK extension. |
 | A3 Live steering | **Partially closed — specific remaining limitation** | Shared Team messages are durably accepted and incorporated at safe model-decision boundaries, with sequence, ownership, supersession/cancellation, bounds and SIGKILL replay. Idle delivery retains the existing queue. Generalized SDK inbox and standalone live steering remain open. No arbitrary inference interruption. |
 | A4 Memory and economics | **Partially closed — specific remaining limitation** | Bounded immutable partitions, interrupted migration, erasure invalidation, scoped cursor pages, measured write reduction and frozen Expert attempt budgets work. Global root CAS, complete materialization, indexed SQL retrieval, model tokenization, pre-dispatch crash/billing reservations and ordinary-session/global budget ceilings remain open. |
 | A5 Multiple processes | **Still open — not implemented** | Fenced native outbox claims are an upstream prerequisite only. Run-write fencing, authoritative store-time ownership, worker compatibility, two-process fault injection and ambiguous-effect recovery are not implemented. No multiprocess mode is exposed. |
@@ -194,8 +194,9 @@ Future linked npm publication remains non-atomic. Revalidate the approved releas
 package publications, and use documented exact-version recovery for any failure. No atomic external
 publication or exactly-once physical effect guarantee is claimed. Outbox fencing remains distinct
 from distributed run-write fencing; Linux child containment remains distinct from production trust.
-No new SDK release is claimed. Workbench still pins published 0.2.0; the observed upstream 0.3.0
-release does not contain these new contracts. No DomainForge source change or release was required.
+SDK 0.4.0 is now published and consumed by Workbench; all 45 package versions and gitHeads match
+release commit 467a5f. The [release evidence](sdk-0.4.0-release.md) records all publication jobs and
+clean-room installation. No local SDK links are used. No DomainForge source release was required.
 
 The original sibling Cognate status modifications remain untouched. Temporary source is never a
 production dependency; provenance survives in upstream commits/PR and this report. Cleanup and
@@ -221,16 +222,18 @@ The operator gave final authorization to proceed. PR #42 merged at
 `38637959538` generated [linked release PR #43](https://github.com/GodSpeedAI/Cognate/pull/43),
 head `f1a49147cdbd558ab328184fdc8884088a6a49ca`. Its 91 changed files are exactly 45 package
 manifests, 45 changelogs and the release manifest; configuration checks confirm aligned 0.4.0.
-Release-head verification/packaging is being run before publication. No new SDK release or
-Workbench dependency integration is claimed yet.
+Release-head verification and packaging passed. PR43 merged at 467a5f and all 45 publication jobs
+completed successfully. Registry and clean-room audits verify every package at 0.4.0 from that
+commit. Workbench's 23 direct/35 resolved SDK pins are 0.4.0, with no non-SDK lockfile drift. Typecheck,
+42 targeted tests and full just verify pass: 1,101 tests, zero failures, 6,860 assertions, 96 files,
+403.64 seconds. Native app parallel admission is still declared pending supported eligibility/UI.
 
-1. Complete the authorized linked release after exact-head checks, then verify all 45 published
-   package versions and clean-room installation. Requested Luna workers resumed and completed the
+1. Integrate authoritative native eligibility and real concurrency UI after its supported SDK
+   extension passes review/release. Requested Luna workers resumed and completed the
    CodeRabbit and release audit after an earlier service usage limit; unperformed security work
    remains unclaimed.
-2. Review the concrete upstream PR and follow Cognate's linked-version Release Please/npm workflow.
-   Then install the genuinely published version and rerun Workbench eligibility, concurrency,
-   compatibility and containment journeys. Do not substitute a local SDK checkout.
+2. Preserve published 0.4.0 compatibility and complete Workbench eligibility, concurrency and
+   containment journeys. Do not substitute an unpublished SDK checkout.
 3. Implement native run ownership and transactional fencing using authoritative store time,
    worker-version admission and commitment ambiguity handling; pass actual two-process crash tests
    before exposing multiprocess operation.

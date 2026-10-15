@@ -10,7 +10,7 @@ bindScheduleCapabilities: 4; bindCognitiveCapabilities: 20
 bindRuntimeExecution: execution.runtime.inspect -> NativeExecutionSlots resolves
 domainforge fmt --check: already formatted
 J-EXPERT-PARALLEL is declared pending supported native integration and overlap proof; the binding does not claim runtime implementation.
-Last full implementation just verify before this declared model extension: 1101 pass, 0 fail, 6860 assertions, 96 files (381.67 seconds)
+Full implementation just verify including this declared model and published SDK 0.4.0: 1101 pass, 0 fail, 6860 assertions, 96 files (403.64 seconds)
 The historical formatter finding below is corrected by validation/formatter-fidelity.md; upstream 0.19.0 already contains the fix.
 
 == Historical tranche validation follows ==
