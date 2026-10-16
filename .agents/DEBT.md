@@ -16,3 +16,12 @@ working feature. See `docs/known-gaps.md` and `docs/experts-verification.md`.
 The exhaustive dispositions and shared dependencies are tracked in `docs/experts-debt-closure.md`.
 This mission remains incomplete. Upstream source changes are not Workbench integration until a
 supported release is consumed and its journeys pass. No production or multi-process closure is claimed.
+
+### E2E screenshots wait on remote web fonts and flake offline
+
+- Date: 2026-10-15
+- Location: test/E2E-experts-debt.test.ts (page.screenshot calls); src/server.ts indexHtml preloads fonts.googleapis.com
+- Debt: Playwright screenshots internally wait for `document.fonts.ready`; when the remote Google Fonts request hangs on a restricted network, the screenshot times out and an otherwise healthy suite run fails. The app already unblocks startup from remote fonts, but the test-side screenshot wait remains network-sensitive, so `just verify` is intermittently red for reasons unrelated to product behavior.
+- Evidence: full `just verify` on 2026-10-15 reported `(fail) a human live update is pending during inference and incorporated into the next Team decision [15490.08ms]` with `TimeoutError: screenshot: Timeout 10000ms exceeded - waiting for fonts to load...`; the same file passes standalone immediately afterward (3 pass / 0 fail).
+- Confidence: high
+- Closure: Route-block fonts.googleapis.com/gstatic.com in the E2E browser contexts (deterministic fast failure) or otherwise make screenshot capture font-independent; files likely touched: test/E2E-*.test.ts helpers; size S.
