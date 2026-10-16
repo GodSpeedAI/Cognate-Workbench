@@ -34,9 +34,22 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T0
-  last_settled_task: null
-progress: {}
+  current_task: T1
+  last_settled_task: T0
+progress:
+  T0: >-
+    Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
+    1,153 tests / 1,147 pass / 6 skip / 0 fail, 7,408 assertions across 105 files in 583.82 s. The
+    workspace-effect conflict inventory names all 11 mutating surfaces with their canonical resource
+    identity (workspace / execution world / configuration) and authoritative source, and pins
+    canonicalization, mutator-enumeration and fail-closed rules. The capacity 1/2/4/8 benchmark was
+    refreshed with four fresh sweeps (medians 5643.9 / 4985.1 / 5064.5 / 5151.9 ms); the earlier
+    single-trial capacity-8 regression did not reproduce (capacity 4 and 8 ranges overlap, 1.7 %
+    median gap). New instrumented attribution (`test/experts-capacity-attribution.test.ts`) rules
+    out full context materialization (0.03 % of elapsed) and attributes 62-64 % of elapsed to
+    Experts-registry shared-state reads and aggregate CAS commits, with 48/49 and 44/45 CAS
+    conflicts concentrated in concurrent assignment submission. Evidence:
+    docs/experts-concurrency-benchmark.md.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh

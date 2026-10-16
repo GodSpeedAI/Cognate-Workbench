@@ -1,42 +1,39 @@
-# Current status — revision 22
+# Current status — revision 23
 
-Published Cognate 0.5.0 is fully consumed: native model-only Expert admission, runtime inspection
-UI and Linux contained workspaces are integrated, and the final full gate passes 1,153 tests with
-zero failures. The verified slice is committed (fdc709b) and pushed. The remaining debt is now
-organized into the operator-accepted tranche plan below.
+The remaining-debt tranche plan is executing: **T0 (baseline, workspace-effect conflict inventory
+and benchmark refresh) is settled.** A fresh `just verify` on the clean fdc709b tree passed 1,153
+tests (1,147 pass, 6 skip, 0 fail, 7,408 assertions) across 105 files in 583.82 s.
 
 The active mission plan is [20261015_remaining-debt-tranches](.agents/plans/20261015_remaining-debt-tranches.plan.yaml)
 (A2 workspace concurrency → A4 retrieval/economics → A5 upstream run ownership → A6 production
 trust); its predecessor [20261014_experts-debt-closure](.agents/plans/20261014_experts-debt-closure.plan.yaml)
 is settled. All debts remain reconciled in [verification](docs/experts-debt-verification.md).
 
-PR44 merged at e90f511 and linked release PR45 merged at dd13c842; all 45 packages published as
-0.5.0 with a complete registry audit (all versions and gitHeads matched, machine-readable
-[receipt](docs/sdk-0.5.0-publication-receipt.json)) plus a fresh isolated consumer proof. Workbench
-upgraded all 23 direct / 35 resolved SDK pins to 0.5.0 with no local links or vendored tarballs.
+T0 evidence ([concurrency benchmark](docs/experts-concurrency-benchmark.md)): the conflict inventory
+names all 11 mutating workspace-effect surfaces with the canonical resource identity each requires
+(workspace, execution world, configuration) and the authoritative record that identity derives from;
+identities are looked up in authoritative state, so forged or aliased identities fail closed to the
+global exclusion key. The capacity 1/2/4/8 characterization was refreshed with four fresh sweeps
+(median elapsed 5643.9 / 4985.1 / 5064.5 / 5151.9 ms) — the previously recorded capacity-8
+regression did not reproduce (capacity 4 and 8 ranges overlap; 1.7 % median gap). A new instrumented
+attribution test rules out full context materialization (0.03 % of elapsed) and attributes 62–64 %
+of elapsed to Experts-registry shared-state reads and aggregate CAS commits, with nearly all CAS
+conflicts (48/49 at capacity 8, 44/45 at capacity 4) concentrated in concurrent assignment
+submission. That structural cost is capacity-independent and is what the A4 retrieval/CAS tranche
+targets.
 
-Native admission is wired through `src/experts/admission.ts` and `src/server.ts`: opt-in capacity
-(1/2/4/8) uses only published SDK resource admission, with frozen intrinsic-return model work
-allowed to overlap and tool-bearing work conservatively serialized. Actual PostgreSQL journeys
-verify peaks, ordering, cancellation and same-run restart; a real Chromium journey shows distinct
-visible Expert results with native handoffs at capacity 2.
+Unchanged from revision 22: published Cognate 0.5.0 is fully consumed (45 packages, complete registry
+audit, no local links), native model-only admission reaches actual peaks 1/2/4/8, and the
+contained-workspace slice passes its real OS/browser journeys. Dev bearer authentication remains a
+known single-operator limitation.
 
-The contained-workspace slice (J-RW) passes 5 tests / 111 assertions against the published
-launcher guard, including lost-acknowledgment receipt recovery across retry and restart.
+Remaining open (next tranches): conflict-aware per-resource workspace admission (T1, in progress)
+and Team admission/batching (T2); capacity settlement (T3); indexed retrieval and the global root
+CAS (T4); tokenization, durable billing reservations and budget ceilings (T5); distributed
+run-write ownership (T6/T7, one process only today); production identity/session/tenant isolation,
+aggregate resource quotas and independent security review (T8); generalized SDK inbox/standalone
+live steering; and the explicit product debts in the disposition matrix.
 
-The final full gate passed on the exact integrated tree: `just verify` with the attested
-containment suite ran 1,153 tests across 105 files, 0 failures, 7,543 assertions; `just typecheck`,
-DomainForge validate (226 objects, 0 violations) / fmt --check and `git diff --check` all pass.
-
-Remaining open (next tranches): general workspace-effect concurrency and Team-specific
-admission/batching; distributed run-write ownership (one process only today); production
-identity/session/tenant isolation, aggregate resource quotas and independent security review;
-global root CAS, indexed retrieval, exact tokenization, durable billing reservations and
-session/global budget ceilings; generalized SDK inbox/standalone live steering; and the explicit
-product debts in the disposition matrix.
-
-Next: execute [20261015_remaining-debt-tranches](.agents/plans/20261015_remaining-debt-tranches.plan.yaml)
-from T0 — baseline/conflict inventory first, then conflict-aware workspace admission, Team
-admission/batching, the A4 retrieval/economics residuals, the A5 upstream run-ownership tranche
-and A6 production trust. A3 generalization and the enumerated product debts stay in the
-disposition matrix.
+Next: execute T1 — replace the single global workspace-effects exclusion key with canonical
+per-resource keys derived from authoritative state, with actual PostgreSQL overlap/exclusion/denial
+and restart journeys plus browser evidence.
