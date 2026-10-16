@@ -34,8 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T4
-  last_settled_task: T3
+  current_task: T5
+  last_settled_task: T4
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -90,6 +90,32 @@ progress:
     which saturates throughput near 1.5 assignments/s and is the A4 tranche's target; (c) a
     key-waiting run occupies one bounded dispatch slot (published-SDK semantics), recorded as a
     limit. Default capacity remains 1; single-trial measurements stay labeled as such.
+  T4: >-
+    Indexed retrieval and the global root CAS are settled. The root manifest is now a fingerprinted
+    partition directory v2: it carries one content fingerprint per present logical section, every
+    restored section is verified against its fingerprint, unchanged sections are carried forward by
+    verified content address without re-reading, re-serializing or re-writing their leaves, and only
+    changed sections re-partition (writing only leaves whose path+hash changed). Workbench read paths
+    no longer materialize the aggregate: `expert.context` conversation pages locate records through the
+    manifest's SHA-256 nibble trie (root + one conversation leaf + at most N message-leaf reads + the
+    trailing assignment leaf, independent of aggregate size), `expert.memory.read` and the
+    listing/review/cancel/invocation pre-checks read only the sections they touch, and legacy/empty
+    roots fall back to the full read. `test/J-MEMORY-scoped-loads.test.ts` proves with counted
+    shared-state calls that a 50-message page of a 240-message conversation never touches memory,
+    expert, team, receipt or audit partitions, that a one-record memory mutation writes exactly the
+    changed memory leaf plus the command's receipt leaf, that the accepted root is a fingerprinted v2
+    directory, and that restart, section-directory aliasing and source-event erasure preserve the
+    fail-closed contract (the erased leaf fails content verification and the public projection
+    invalidates). `test/J-MEMORY-migration.test.ts` extends to fingerprint-inconsistent manifest
+    rejection; `test/J-MEMORY-pagination.test.ts` passes unchanged semantics with an explicit
+    PostgreSQL timeout. `just verify` passed 1,167 tests / 1,161 pass / 6 skip / 0 fail across 111
+    files in 1148.64 s. Back-to-back storage benchmarks on one machine: large profile p50 mutation
+    1,589 -> 782 ms and 632 -> 444 partition reads per four-op sweep (eliminated per-command
+    existence re-reads of unchanged leaves); small profile parity (six leaves; the eliminated reads
+    are milliseconds there). Known boundary: mutation commands still restore every accepted
+    partition to evaluate global invariants and fingerprint unchanged sections, so the root CAS
+    remains a global contention point and no SQL full-text index, garbage collection or vector index
+    is claimed. Evidence: docs/experts-storage.md, docs/experts-scale-baseline.md.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh

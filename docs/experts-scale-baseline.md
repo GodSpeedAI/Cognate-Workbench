@@ -118,3 +118,31 @@ establish a production capacity limit, real-user workload distribution, database
 vector-retrieval behavior. Four operations per setting give coarse p95 estimates. Repeat with more
 samples on a documented database and machine before making capacity claims. Preserve each profile
 and its raw JSON output so later runs remain comparable.
+
+## Indexed-retrieval tranche re-measurement (2026-10-16)
+
+The indexed-retrieval tranche added per-section content fingerprints to the root manifest
+(partition directory v2): unchanged sections are carried forward by verified content address
+without re-reading, re-serializing or re-writing their leaves, and every restored section is
+verified against its manifest fingerprint. To isolate the write-path change from machine drift,
+the pre- and post-tranche trees were measured back-to-back on the same machine (Bun 1.4.0,
+PostgreSQL 18.1 via local pg0, WSL2), each command creating its own fresh schema. These are
+single-run observations with the same run-to-run variance warned about above, not stable medians.
+
+Large profile (`--partitioned --memory-chars=5200 --message-chars=2500 --operations=4 --concurrency=1`,
+8,492,988-byte logical state, 36 partitions):
+
+| Tree | Sweep wall | p50 / p95 mutation | Partition reads per sweep | Partition writes |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-tranche | 6,024 / 7,283 ms (two runs) | 1,589 / 2,383 ms | 632 | 12 |
+| Post-tranche | 4,495 ms | 782 / 1,755 ms | 444 | 12 |
+
+The eliminated reads are the per-command existence re-reads of unchanged leaves during manifest
+preparation (~47 per mutation); partition writes are unchanged because only the changed
+experts/receipts/audit leaves commit. The comparable small profile (917,487-byte state, 6
+partitions, `--operations=4 --concurrency=1`) showed rough parity back-to-back (pre 3,453 ms
+cold / 1,209 ms warm; post 1,461 / 1,247 / 1,104 ms) — with only six leaves the eliminated
+existence reads are a few milliseconds each, so the write-path gain appears mainly at larger
+partition counts. Read-path boundedness is not a writer-sweep quantity; it is proven by counted
+shared-state calls in `test/J-MEMORY-scoped-loads.test.ts`, where a 50-message page of a
+240-message conversation never touches memory, expert, team, receipt or audit partitions.

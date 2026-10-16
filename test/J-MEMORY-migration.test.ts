@@ -197,7 +197,15 @@ test("J-MEMORY-MIGRATE: schema-1 history above 5 MiB prepares immutable partitio
     expect(JSON.stringify(publicRows.rows)).not.toContain("audit-private-marker");
     expect(publicRows.rows.filter((row) => row.key.startsWith("partition/")).length).toBeGreaterThan(0);
 
-    const missing = { ...manifest, partitions: [{
+    // A manifest that strips a present section's partitions is inconsistent with its own
+    // section fingerprints and fails closed before any row is served.
+    const stripped = { ...manifest, partitions: [{
+      section: "memory", path: "f", hash: "sha256:" + "0".repeat(64),
+      threadId: `${EXPERT_PARTITION_THREAD_PREFIX}memory:f:sha256:${"0".repeat(64)}`,
+    }] } as ExpertStateManifest;
+    await expect(restoreExpertManifest({ ...service }, SYSTEM, stripped)).rejects.toThrow("failed its manifest fingerprint verification");
+    // A manifest whose memory directory points at an erased or aliased source fails content verification.
+    const missing = { ...manifest, partitions: [...manifest.partitions.filter(reference => reference.section !== "memory"), {
       section: "memory", path: "f", hash: "sha256:" + "0".repeat(64),
       threadId: `${EXPERT_PARTITION_THREAD_PREFIX}memory:f:sha256:${"0".repeat(64)}`,
     }] } as ExpertStateManifest;

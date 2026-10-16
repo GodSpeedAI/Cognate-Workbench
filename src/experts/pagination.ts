@@ -26,6 +26,35 @@ function decode(raw: unknown, expected: Omit<Cursor, "boundary" | "v">): Cursor 
   return cursor;
 }
 
+/** Bound the opaque cursor envelope and return its decoded boundary for scoped page selection. */
+export function decodeExpertCursor(raw: unknown, expected: { kind: string; scope: string; version: number }): { readonly boundary: readonly [string, string] } {
+  const cursor = decode(raw, expected);
+  if (!cursor) throw new Error("Invalid pagination cursor boundary");
+  return { boundary: cursor.boundary as readonly [string, string] };
+}
+
+export function encodeExpertCursor(input: { kind: string; scope: string; version: number; boundary: readonly [string, string] }): string {
+  return encode({ v: 1, kind: input.kind, scope: input.scope, version: input.version, boundary: input.boundary });
+}
+
+/** Select a conversation history page from the conversation's append-ordered message ids.
+ * Conversation order is append order; sequenced messages append in sequence order, so pages
+ * agree with sequence-descending order wherever sequences exist and stay insertion-true elsewhere. */
+export function selectConversationPage(messageIds: readonly string[], limit: number, cursorBoundaryId?: string): { ids: string[]; hasMore: boolean } {
+  if (!Number.isInteger(limit) || limit < 1 || limit > EXPERT_PAGE_MAX) {
+    throw new Error(`Page limit must be between 1 and ${EXPERT_PAGE_MAX}`);
+  }
+  const descending = [...messageIds].reverse();
+  let start = 0;
+  if (cursorBoundaryId !== undefined) {
+    const index = descending.indexOf(cursorBoundaryId);
+    if (index === -1) throw new Error("Invalid pagination cursor boundary");
+    start = index + 1;
+  }
+  const ids = descending.slice(start, start + limit);
+  return { ids, hasMore: start + limit < descending.length };
+}
+
 export function pageExpertRows<T>(input: {
   readonly rows: readonly T[];
   readonly limit: number;

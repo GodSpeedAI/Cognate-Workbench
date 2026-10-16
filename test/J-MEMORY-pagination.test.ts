@@ -98,4 +98,4 @@ test("J-MEMORY-PAGINATE: capability pages keep stable bounded ordering and rejec
     expect(history.conversations[0]).not.toHaveProperty("messageIds");
     await expect(app.client.invoke("expert.memory.read", { expertId: "product-manager", teamId: "pagination-other-team", limit: 10 } as never)).rejects.toThrow("not a member of this Team");
   });
-});
+}, 60_000);

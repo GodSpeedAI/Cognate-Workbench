@@ -2,7 +2,23 @@ import { fingerprint as nativeFingerprint, type Json } from "@godspeedai/cognate
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { ServiceError } from "@godspeedai/cognate-runtime-api";
 import { EXPERTS_THREAD, EXPERT_TOOLS, emptyExpertState, type ExpertState, type Team, type ExpertTool } from "./types.ts";
-import { isExpertStateManifest, prepareExpertManifest, restoreExpertManifest } from "./persistence.ts";
+import { isExpertStateManifest, prepareExpertManifest, prepareExpertManifestUpdate, privateConversationIds, restoreExpertManifest, restoreExpertSectionEntries, stateSections, type ExpertStateManifest } from "./persistence.ts";
+
+export type ExpertRootRead =
+  | { kind: "empty"; version: 0 }
+  | { kind: "legacy"; state: ExpertState; version: number }
+  | { kind: "manifest"; manifest: ExpertStateManifest; version: number };
+
+/** Read only the global root. No partition is restored; scoped readers verify exactly the
+ * partitions they touch against this accepted root, so erased or aliased sources fail closed. */
+export async function readExpertRoot(service: RuntimeService, caller: Caller): Promise<ExpertRootRead> {
+  const result = await service.readSharedState(caller,{threadId:EXPERTS_THREAD});
+  if (result.version === 0) return {kind:"empty",version:0};
+  const raw = result.state as Partial<ExpertState> & {schema?: number};
+  if (raw.schema === 1) return {kind:"legacy",state:raw as ExpertState,version:result.version};
+  if (isExpertStateManifest(result.state)) return {kind:"manifest",manifest:result.state,version:result.version};
+  throw new Error("Unsupported Experts state schema; an explicit versioned migration is required");
+}
 
 export const json = (value: unknown): Json => JSON.parse(JSON.stringify(value)) as Json;
 export const fingerprint = (value: unknown) => nativeFingerprint(json(value));
@@ -61,39 +77,82 @@ export function seedExperts(state: ExpertState): void {
 
 export async function readExperts(service: RuntimeService, caller: Caller): Promise<{state: ExpertState; version: number}> {
   for (let attempt = 0; attempt < 30; attempt++) {
-    const result = await service.readSharedState(caller,{threadId:EXPERTS_THREAD});
-    if (result.version === 0) return {state:emptyExpertState(),version:0};
-    const raw = result.state as Partial<ExpertState> & {schema?: number};
-    if (raw.schema === 1) {
-      const legacy = raw as ExpertState;
-      const manifest = await prepareExpertManifest(service,caller,legacy);
+    const root = await readExpertRoot(service,caller);
+    if (root.kind === "empty") return {state:emptyExpertState(),version:0};
+    if (root.kind === "legacy") {
+      const manifest = await prepareExpertManifest(service,caller,root.state);
       try {
         const migrated = await service.updateSharedState(caller,{
           threadId:EXPERTS_THREAD,
           update:{snapshot:json(manifest)},
-          expectedVersion:result.version,
-          idempotencyKey:`expert-state-migration:${result.version}:${fingerprint(manifest)}`,
+          expectedVersion:root.version,
+          idempotencyKey:`expert-state-migration:${root.version}:${fingerprint(manifest)}`,
         });
-        return {state:legacy,version:migrated.version};
+        return {state:root.state,version:migrated.version};
       } catch (error) {
         if (!(error instanceof ServiceError) || !["failed_precondition","unavailable"].includes(error.code)) throw error;
         continue;
       }
     }
-    if (isExpertStateManifest(result.state)) {
-      return {state:await restoreExpertManifest(service,caller,result.state),version:result.version};
-    }
-    throw new Error("Unsupported Experts state schema; an explicit versioned migration is required");
+    return {state:await restoreExpertManifest(service,caller,root.manifest),version:root.version};
   }
   throw new Error("Experts are busy; retry the state migration");
 }
 
+/** Scoped read: restore only the named sections from the accepted root. Empty and legacy roots
+ * fall back to the full read; manifest roots never touch an unrequested section's partitions. */
+export async function readExpertsScope(service: RuntimeService, caller: Caller, sections: readonly string[]): Promise<{state: Partial<ExpertState>; version: number; manifest: ExpertStateManifest | undefined}> {
+  const root = await readExpertRoot(service,caller);
+  if (root.kind !== "manifest") {
+    const full = await readExperts(service,caller);
+    const state: Partial<ExpertState> = {};
+    for (const section of sections) (state as unknown as Record<string, unknown>)[section] = (full.state as unknown as Record<string, unknown>)[section];
+    return {state,version:full.version,manifest:undefined};
+  }
+  const state: Partial<ExpertState> = {};
+  for (const section of sections) {
+    const entries = await restoreExpertSectionEntries(service,caller,root.manifest,section);
+    if (section === "audit") state.audit = entries.map(([,value]) => value as NonNullable<ExpertState["audit"]>[number]);
+    else (state as unknown as Record<string, unknown>)[section] = Object.fromEntries(entries);
+  }
+  return {state,version:root.version,manifest:root.manifest};
+}
+
 /** Re-read AND revalidate the intent after every conflict. Logical receipts live in the aggregate,
- * so idempotency does not depend on reusing a CAS fingerprint with a different version. */
+ * so idempotency does not depend on reusing a CAS fingerprint with a different version. Unchanged
+ * sections are carried forward by verified content address instead of being re-serialized. */
 export async function mutateExperts<T>(service: RuntimeService, caller: Caller, commandId: string, command: unknown, mutate: (state: ExpertState) => T): Promise<T> {
   const digest = fingerprint(command);
   for (let attempt = 0; attempt < 30; attempt++) {
-    const {state,version} = await readExperts(service,caller);
+    const root = await readExpertRoot(service,caller);
+    let state: ExpertState;
+    let version: number;
+    let previous: ExpertStateManifest | undefined;
+    if (root.kind === "empty") {
+      state = emptyExpertState();
+      version = 0;
+    } else if (root.kind === "legacy") {
+      const manifest = await prepareExpertManifest(service,caller,root.state);
+      let migrated;
+      try {
+        migrated = await service.updateSharedState(caller,{
+          threadId:EXPERTS_THREAD,
+          update:{snapshot:json(manifest)},
+          expectedVersion:root.version,
+          idempotencyKey:`expert-state-migration:${root.version}:${fingerprint(manifest)}`,
+        });
+      } catch (error) {
+        if (!(error instanceof ServiceError) || !["failed_precondition","unavailable"].includes(error.code)) throw error;
+        continue;
+      }
+      state = root.state;
+      version = migrated.version;
+      previous = manifest;
+    } else {
+      state = await restoreExpertManifest(service,caller,root.manifest);
+      version = root.version;
+      previous = root.manifest;
+    }
     const receipt = state.receipts[commandId];
     if (receipt) {
       if (receipt.fingerprint !== digest) throw new Error("Idempotency identity was reused for different work");
@@ -103,8 +162,9 @@ export async function mutateExperts<T>(service: RuntimeService, caller: Caller, 
     for (const team of Object.values(state.teams)) assertTeamInvariant(state,team);
     state.receipts[commandId] = {fingerprint:digest,result:result ?? null};
     try {
-      const manifest = await prepareExpertManifest(service,caller,state);
-      await service.updateSharedState(caller,{threadId:EXPERTS_THREAD,update:{snapshot:json(manifest)},expectedVersion:version,idempotencyKey:`${commandId}:${version}:${digest}:${fingerprint(state)}`});
+      const sections = stateSections(state);
+      const manifest = await prepareExpertManifestUpdate(service,caller,{manifest:previous},sections,privateConversationIds(state));
+      await service.updateSharedState(caller,{threadId:EXPERTS_THREAD,update:{snapshot:json(manifest)},expectedVersion:version,idempotencyKey:`${commandId}:${version}:${digest}:${fingerprint(manifest)}`});
       return result;
     } catch (error) {
       if (!(error instanceof ServiceError) || !["failed_precondition","unavailable"].includes(error.code)) throw error;

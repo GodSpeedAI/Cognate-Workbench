@@ -8,9 +8,10 @@ import type { ModelConfig } from "../components/providerRegistry.ts";
 import type { ModelMessage } from "@godspeedai/cognate-capabilities";
 import { EXPERT_CAPABILITY_ANCHORS } from "../../domain/index.ts";
 import { parseExpertBudget, type ExpertModelBudget } from "./economics.ts";
-import { EXPERT_PAGE_DEFAULT, pageExpertRows } from "./pagination.ts";
-import { EXPERT_AGENT, EXPERT_TOOLS, isUnfinished, type Assignment, type Conversation, type Expert, type ExpertExecution, type ExpertMemory, type ExpertState, type ExpertTool, type Handoff, type Team } from "./types.ts";
-import { assertTeamInvariant, fingerprint, integer, json, mutateExperts, readExperts, seedExperts, text, tools } from "./state.ts";
+import { decodeExpertCursor, encodeExpertCursor, EXPERT_PAGE_DEFAULT, pageExpertRows, selectConversationPage } from "./pagination.ts";
+import { EXPERT_AGENT, EXPERT_TOOLS, isUnfinished, type Assignment, type Conversation, type Expert, type ExpertExecution, type ExpertMemory, type ExpertMessage, type ExpertState, type ExpertTool, type Handoff, type Team } from "./types.ts";
+import { assertTeamInvariant, fingerprint, integer, json, mutateExperts, readExperts, readExpertsScope, readExpertRoot, seedExperts, text, tools } from "./state.ts";
+import { readExpertRecords } from "./persistence.ts";
 
 type Command = Record<string, unknown>;
 function record(raw: unknown): Command {
@@ -59,6 +60,36 @@ export class ExpertsService {
   constructor(readonly service: RuntimeService, readonly systemCaller: Caller) {}
   caller(tenant: string): Caller { return {...this.systemCaller,tenant}; }
   async state(tenant: string) { return (await readExperts(this.service,this.caller(tenant))).state; }
+  /** Trie-directed point reads through the accepted manifest. Undefined means a legacy or empty
+   * root; callers fall back to the full read. */
+  async records(tenant: string, section: string, ids: readonly string[]): Promise<Map<string, unknown> | undefined> {
+    const root = await readExpertRoot(this.service,this.caller(tenant));
+    if (root.kind !== "manifest") return undefined;
+    return readExpertRecords(this.service,this.caller(tenant),root.manifest,section,ids);
+  }
+  /** Bounded conversation read: the conversation, its messages and its assignments are located
+   * through the partition trie; no unrelated section is ever materialized. */
+  async conversationSnapshot(tenant: string, conversationId: string): Promise<{ version: number; conversation?: Conversation; messages: ExpertMessage[]; assignments: Assignment[] }> {
+    const root = await readExpertRoot(this.service,this.caller(tenant));
+    if (root.kind === "manifest") {
+      const records = await readExpertRecords(this.service,this.caller(tenant),root.manifest,"conversations",[conversationId]);
+      const conversation = records.get(conversationId) as Conversation | undefined;
+      if (!conversation) return {version:root.version,messages:[],assignments:[]};
+      const messageRecords = await readExpertRecords(this.service,this.caller(tenant),root.manifest,"messages",conversation.messageIds);
+      const assignmentRecords = await readExpertRecords(this.service,this.caller(tenant),root.manifest,"assignments",conversation.assignmentIds);
+      const missing = conversation.messageIds.find(id => messageRecords.get(id) === undefined);
+      if (missing) throw new Error(`Expert message ${missing} is missing from the accepted state`);
+      const messages = conversation.messageIds.map(id => messageRecords.get(id) as ExpertMessage);
+      const assignments = conversation.assignmentIds.map(id => assignmentRecords.get(id)).filter((a): a is Assignment => !!a).map(a => ({...a,execution:{...a.execution,context:[]}}));
+      return {version:root.version,conversation,messages,assignments};
+    }
+    const full = await readExperts(this.service,this.caller(tenant));
+    const conversation = full.state.conversations[conversationId];
+    if (!conversation) return {version:full.version,messages:[],assignments:[]};
+    const messages = conversation.messageIds.map(id => full.state.messages[id]!).filter(Boolean);
+    const assignments = conversation.assignmentIds.map(id => full.state.assignments[id]!).filter(Boolean).map(a => ({...a,execution:{...a.execution,context:[]}}));
+    return {version:full.version,conversation,messages,assignments};
+  }
   async mutate<T>(tenant: string, id: string, command: unknown, fn: (state: ExpertState) => T): Promise<T> {
     return mutateExperts(this.service,this.caller(tenant),id,command,fn);
   }
@@ -71,7 +102,7 @@ export class ExpertsService {
     if (run.agent !== EXPERT_AGENT || run.startedBy !== this.systemCaller.actor.id || !["running","waiting"].includes(run.status)) throw new Error("Untrusted or inactive Expert run");
     const input = run.input as {assignmentId?: string};
     if (assignmentId !== undefined && input.assignmentId !== assignmentId) throw new Error("Assignment impersonation denied");
-    const state = await this.state(ctx.tenant);
+    const state = (await readExpertsScope(this.service,this.caller(ctx.tenant),["experts","teams","assignments"])).state as ExpertState;
     const a = state.assignments[input.assignmentId ?? ""];
     if (!a || !isUnfinished(a) || a.attempt !== (run.input as {attempt?:number}).attempt) throw new Error("Assignment is not authorized to execute");
     if(Object.values(a.effects ?? {}).some(effect=>effect.state==="UNKNOWN_RECONCILIATION_REQUIRED" || !allowEffectDispatch && effect.state==="DISPATCHING"))throw new Error("Effect outcome requires human reconciliation before further work");
@@ -89,7 +120,8 @@ export class ExpertsService {
       for(const mid of s.conversations[current.conversationId]!.messageIds){const m=s.messages[mid]!;if(m.recipientId===current.expertId && m.delivery==="queued" && !m.targetAssignmentId){m.targetAssignmentId=current.id;m.targetRunId=ctx.runId!;m.inboxStatus="incorporated";m.delivery="delivered";m.incorporatedAtBoundary="assignment-start";}}
       return {ok:true};
     });
-    return (await this.state(ctx.tenant)).assignments[a.id]!;
+    const reloaded = await this.records(ctx.tenant,"assignments",[a.id]);
+    return reloaded?.get(a.id) as Assignment ?? (await this.state(ctx.tenant)).assignments[a.id]!;
   }
   async authorizeModel(ctx: HandlerContext, requested: ModelConfig): Promise<ExpertModelBudget|undefined> {
     const a = await this.invocation(ctx);
@@ -173,42 +205,71 @@ export class ExpertsService {
     if(invoking && capability === "team.handoff" && !invoking.execution.tools.includes("expert_return"))throw new Error("Expert return capability is not authorized");
     if (capability === "expert.context") {
       if (!invoking) {
-        const {state,version}=await readExperts(this.service,this.caller(ctx.tenant));
         if(input.list===true){
+          const {state,version} = await readExpertsScope(this.service,this.caller(ctx.tenant),["experts","teams","conversations"]);
           if(!["solo","team","private-team"].includes(String(input.scope)))throw new Error("Choose a conversation scope");
-          const e=input.scope!=="team" ? expert(state,input.expertId):undefined;
-          const t=input.scope!=="solo" ? team(state,input.teamId):undefined;
+          const e=input.scope!=="team" ? expert(state as ExpertState,input.expertId):undefined;
+          const t=input.scope!=="solo" ? team(state as ExpertState,input.teamId):undefined;
           if(e && t && !t.members.some(m=>m.expertId===e.id))throw new Error("Expert is not a member of this Team");
-          const conversations=Object.values(state.conversations).filter(c=>c.scope===input.scope && c.expertId===(e?.id ?? null) && c.teamId===(t?.id ?? null));
+          const conversations=Object.values(state.conversations ?? {}).filter(c=>c.scope===input.scope && c.expertId===(e?.id ?? null) && c.teamId===(t?.id ?? null));
           if(input.limit===undefined && input.cursor===undefined) return {conversations:conversations.sort((a,b)=>(b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? ""))};
           const page=pageExpertRows({rows:conversations,limit:input.limit===undefined?EXPERT_PAGE_DEFAULT:integer(input.limit,EXPERT_PAGE_DEFAULT,1,100),cursor:input.cursor,kind:"conversation-list",version,scope:JSON.stringify([input.scope,e?.id ?? null,t?.id ?? null]),descending:true,key:c=>[c.updatedAt ?? c.createdAt ?? "",c.id]});
           return {conversations:page.items.map(c=>({id:c.id,scope:c.scope,expertId:c.expertId,teamId:c.teamId,workspaceId:c.workspaceId,title:c.title,createdAt:c.createdAt,updatedAt:c.updatedAt,messageCount:c.messageIds.length})),...(page.nextCursor?{nextCursor:page.nextCursor}:{})};
         }
-        const c=state.conversations[text(input.conversationId,"conversationId",200)];
-        if(!c)throw new Error("Conversation not found");
+        const conversationId=text(input.conversationId,"conversationId",200);
         if(input.limit!==undefined || input.cursor!==undefined){
+          const limit=input.limit===undefined?EXPERT_PAGE_DEFAULT:integer(input.limit,EXPERT_PAGE_DEFAULT,1,100);
+          const root=await readExpertRoot(this.service,this.caller(ctx.tenant));
+          if(root.kind==="manifest"){
+            const conversationRecords=await readExpertRecords(this.service,this.caller(ctx.tenant),root.manifest,"conversations",[conversationId]);
+            const c=conversationRecords.get(conversationId) as Conversation | undefined;
+            if(!c)throw new Error("Conversation not found");
+            let boundaryId: string | undefined;
+            if(input.cursor!==undefined){
+              const decoded=decodeExpertCursor(input.cursor,{kind:"conversation-messages",scope:c.id,version:root.version});
+              const boundaryRecords=await readExpertRecords(this.service,this.caller(ctx.tenant),root.manifest,"messages",[decoded.boundary[1]]);
+              if(boundaryRecords.get(decoded.boundary[1])===undefined)throw new Error("Invalid pagination cursor boundary");
+              boundaryId=decoded.boundary[1];
+            }
+            const page=selectConversationPage(c.messageIds,limit,boundaryId);
+            const pageRecords=await readExpertRecords(this.service,this.caller(ctx.tenant),root.manifest,"messages",page.ids);
+            const missing=page.ids.find(id=>pageRecords.get(id)===undefined);
+            if(missing)throw new Error(`Expert message ${missing} is missing from the accepted state`);
+            const items=page.ids.map(id=>pageRecords.get(id) as ExpertMessage);
+            const nextCursor=page.hasMore && items.length ? encodeExpertCursor({kind:"conversation-messages",scope:c.id,version:root.version,boundary:[String(items[items.length-1]!.sequence ?? 0).padStart(16,"0"),items[items.length-1]!.id]}) : undefined;
+            const assignmentIds=c.assignmentIds.slice(-100);
+            const assignmentRecords=await readExpertRecords(this.service,this.caller(ctx.tenant),root.manifest,"assignments",assignmentIds);
+            const assignments=assignmentIds.map(id=>assignmentRecords.get(id)).filter((a): a is Assignment => !!a).map(a => ({...a,execution:{...a.execution,context:[]}}));
+            return {conversation:{...c,messageIds:[],assignmentIds:[]},messageCount:c.messageIds.length,messages:items.reverse(),...(nextCursor?{nextCursor}:{}),assignments};
+          }
+          const {state,version}=await readExperts(this.service,this.caller(ctx.tenant));
+          const c=state.conversations[conversationId];
+          if(!c)throw new Error("Conversation not found");
           const messages=c.messageIds.map(id=>state.messages[id]!).filter(Boolean);
-          const page=pageExpertRows({rows:messages,limit:input.limit===undefined?EXPERT_PAGE_DEFAULT:integer(input.limit,EXPERT_PAGE_DEFAULT,1,100),cursor:input.cursor,kind:"conversation-messages",version,scope:c.id,descending:true,key:m=>[String(m.sequence ?? 0).padStart(16,"0"),m.id]});
+          const page=pageExpertRows({rows:messages,limit,cursor:input.cursor,kind:"conversation-messages",version,scope:c.id,descending:true,key:m=>[String(m.sequence ?? 0).padStart(16,"0"),m.id]});
           return {conversation:{...c,messageIds:[],assignmentIds:[]},messageCount:c.messageIds.length,messages:page.items.reverse(),...(page.nextCursor?{nextCursor:page.nextCursor}:{}),assignments:c.assignmentIds.slice(-100).map(id=>state.assignments[id]!).filter(Boolean).map(a=>({...a,execution:{...a.execution,context:[]}}))};
         }
-        return {conversation:c,messages:c.messageIds.map(id=>state.messages[id]!),assignments:c.assignmentIds.map(id=>state.assignments[id]!).map(a=>({...a,execution:{...a.execution,context:[]}}))};
+        const snapshot=await this.conversationSnapshot(ctx.tenant,conversationId);
+        const c=snapshot.conversation;
+        if(!c)throw new Error("Conversation not found");
+        return {conversation:c,messages:snapshot.messages,assignments:snapshot.assignments};
       }
       if(typeof input.query === "string"){
-        const state=await this.state(ctx.tenant);const c=state.conversations[invoking.conversationId]!;
+        const snapshot=await this.conversationSnapshot(ctx.tenant,invoking.conversationId);
         const q=input.query.toLowerCase().slice(0,500);
-        return {messages:c.messageIds.map(id=>state.messages[id]!).filter(m=>m && m.text.toLowerCase().includes(q) && (m.visibility!=="addressed" || m.recipientId===invoking!.expertId || m.sender.id===invoking!.expertId)).slice(-20)};
+        return {messages:snapshot.messages.filter(m => m.text.toLowerCase().includes(q) && (m.visibility!=="addressed" || m.recipientId===invoking!.expertId || m.sender.id===invoking!.expertId)).slice(-20)};
       }
       return {execution:invoking.execution,workspaceId:invoking.workspaceId,mode:invoking.mode,message:invoking.purpose};
     }
     if (capability === "expert.memory.read") {
-      const {state,version} = await readExperts(this.service,this.caller(ctx.tenant));
-      const eId = invoking?.expertId ?? text(input.expertId,"expertId",200);
-      if (invoking && input.expertId !== undefined && input.expertId !== eId) throw new Error("Private Expert memory access denied");
       const teamId = invoking?.teamId ?? (input.teamId ? text(input.teamId,"teamId",200) : null);
       if (invoking && input.teamId !== undefined && input.teamId !== invoking.teamId) throw new Error("Cross-Team memory access denied");
-      if(teamId && !team(state,teamId).members.some(member=>member.expertId===eId))throw new Error("Expert is not a member of this Team");
+      const {state,version} = await readExpertsScope(this.service,this.caller(ctx.tenant),teamId ? ["experts","teams","memory"] : ["memory"]);
+      const eId = invoking?.expertId ?? text(input.expertId,"expertId",200);
+      if (invoking && input.expertId !== undefined && input.expertId !== eId) throw new Error("Private Expert memory access denied");
+      if(teamId && !team(state as ExpertState,teamId).members.some(member=>member.expertId===eId))throw new Error("Expert is not a member of this Team");
       const q = typeof input.query === "string" ? input.query.toLowerCase().slice(0,500) : "";
-      const records=Object.values(state.memory).filter(m => (teamId ? m.teamId === teamId && (m.scope === "team" || m.expertId === eId) : m.teamId === null && m.expertId === eId) && (!q || m.text.toLowerCase().includes(q)));
+      const records=Object.values(state.memory ?? {}).filter(m => (teamId ? m.teamId === teamId && (m.scope === "team" || m.expertId === eId) : m.teamId === null && m.expertId === eId) && (!q || m.text.toLowerCase().includes(q)));
       if(input.limit===undefined && input.cursor===undefined)return records.slice(0,20);
       const page=pageExpertRows({rows:records,limit:input.limit===undefined?EXPERT_PAGE_DEFAULT:integer(input.limit,EXPERT_PAGE_DEFAULT,1,100),cursor:input.cursor,kind:"expert-memory",version,scope:JSON.stringify([eId,teamId,q]),descending:true,key:m=>[m.id,m.id]});
       return {records:page.items,...(page.nextCursor?{nextCursor:page.nextCursor}:{})};
@@ -217,7 +278,7 @@ export class ExpertsService {
     const id = input.id ? text(input.id,"id",200) : randomUUID();
     let selectedRoute: ModelConfig | undefined;
     if (["expert.converse","team.converse","team.delegate"].includes(capability)) {
-      const state = await this.state(ctx.tenant);
+      const state = (await readExpertsScope(this.service,this.caller(ctx.tenant),["experts","teams"])).state as ExpertState;
       const eId = capability === "team.converse" ? team(state,input.teamId,true).members.find(m => m.role === "orchestrator")!.expertId : input.expertId;
       selectedRoute = expert(state,eId).definition.route ?? await this.defaultRoute(ctx.tenant);
     }
@@ -232,7 +293,7 @@ export class ExpertsService {
     }
     let independentlyObserved=false;
     if(capability==="team.review" && input.verdict==="accept"){
-      const state=await this.state(ctx.tenant);const root=state.assignments[text(input.assignmentId,"assignmentId",200)];
+      const state=(await readExpertsScope(this.service,this.caller(ctx.tenant),["assignments"])).state as ExpertState;const root=state.assignments[text(input.assignmentId,"assignmentId",200)];
       if(root){
         const references=strings(input.evidence,"evidence");
         for(const a of descendants(state,root)){
@@ -459,7 +520,7 @@ export class ExpertsService {
     });
     if(capability==="team.cancel"){
       // Signal running work before acknowledging cancellation. The bridge remains the crash repair path.
-      const state=await this.state(ctx.tenant);const root=state.assignments[String(input.assignmentId)]!;
+      const state=(await readExpertsScope(this.service,this.caller(ctx.tenant),["assignments"])).state as ExpertState;const root=state.assignments[String(input.assignmentId)]!;
       for(const a of descendants(state,root,true))if(a.runId){
         const run=await this.service.getRun(this.caller(ctx.tenant),{runId:a.runId});
         if(["running","waiting"].includes(run.status))await this.service.cancelRun(this.caller(ctx.tenant),{runId:a.runId,reason:"Assignment cancelled by the human operator",idempotencyKey:`expert-cancel:${a.id}:${a.attempt}`});
