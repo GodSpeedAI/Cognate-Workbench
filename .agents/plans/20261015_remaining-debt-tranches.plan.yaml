@@ -34,8 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T3
-  last_settled_task: T2
+  current_task: T4
+  last_settled_task: T3
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -78,6 +78,18 @@ progress:
     second root; forged policy refused), `test/E2E-team-admission.test.ts` passes a real Chromium
     Team-editor/inspection journey, and `test/expert-admission.test.ts` covers lane derivation
     (11 tests). Cross-process Team fairness is not claimed.
+  T3: >-
+    Capacity-8 throughput settlement. The capacity 1/2/4/8 benchmark was re-run (four sweeps) on
+    the T1/T2 tree; the model-only solo workload holds no keys, so the policies neither widen nor
+    narrow it. Medians: 6548.2 / 5230.5 / 5230.3 / 5690.4 ms. The measured capacity-8 shortfall is
+    recorded as an accepted measured limit with isolated cause attribution (docs/experts-concurrency-benchmark.md):
+    (a) no discrete capacity-8 regression exists — both four-sweep batches show overlapping
+    capacity-4/8 ranges (T0 +1.7 %, T3 +8.8 % median gap against up to 20 % run-to-run spread);
+    (b) the dominant cost is the capacity-independent Experts-registry read-modify-write traffic
+    (62-64 % of elapsed at both capacities, 2.7-2.8 CAS retries per committed creation write),
+    which saturates throughput near 1.5 assignments/s and is the A4 tranche's target; (c) a
+    key-waiting run occupies one bounded dispatch slot (published-SDK semantics), recorded as a
+    limit. Default capacity remains 1; single-trial measurements stay labeled as such.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh

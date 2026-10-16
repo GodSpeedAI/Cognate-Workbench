@@ -123,6 +123,41 @@ Rules the inventory pins down for T1:
   plane (`authority.check`, protected evidence, path escape denial on `filesystem.*`), not on OS
   isolation; real containment is the contained-world tranche, and distributed safety is not claimed.
 
+## T3 settlement (2026-10-15, with the T1/T2 policies active)
+
+Four further sweeps on the tree that carries conflict-aware workspace admission and the Team
+admission/batching policy (the capacity workload itself is model-only solo work, which holds no
+resource keys, so T1/T2 cannot widen or narrow it — the re-run confirms that):
+
+| Startup capacity | Observed maximum active models | Median elapsed ms (min–max, n=4) | Median assignments/sec |
+| --- | --- | --- | --- |
+| 1 | 1 | 6548.2 (5501.5–9452.9) | 1.22 |
+| 2 | 2 | 5230.5 (4929.2–5612.7) | 1.53 |
+| 4 | 4 | 5230.3 (4935.9–5957.6) | 1.53 |
+| 8 | 8 | 5690.4 (5495.7–6021.1) | 1.41 |
+
+Settled conclusion — **the measured capacity-8 shortfall is recorded as an accepted measured limit,
+not repaired**, with this isolated cause attribution:
+
+1. There is no discrete capacity-8 regression to repair. Both four-sweep batches agree the
+   capacity-8 range overlaps capacity 4 (T0 batch medians 5064.5 vs 5151.9 ms, +1.7 %; T3 batch
+   medians 5230.3 vs 5690.4 ms, +8.8 % with ranges 4935.9–5957.6 vs 5495.7–6021.1 overlapping), and
+   run-to-run spread within a capacity (up to ±20 % in the noisier T3 batch) exceeds the gap.
+2. The dominant, capacity-independent cost is the Experts-registry shared-state traffic isolated
+   above: full-aggregate reads plus CAS commits are 62–64 % of elapsed at both capacities 4 and 8,
+   and ~2.7–2.8 CAS retries per committed assignment-creation write at both capacities. Higher
+   capacity multiplies concurrent `expert.converse` commands against one aggregate root, so the
+   submission phase contends equally at 4 and 8 and throughput saturates near ~1.5 assignments/s.
+3. A second, structural bound: a run waiting for a resource key still occupies one of the runtime's
+   bounded dispatch slots (`maxConcurrentRuns`), so with mixed key conflicts a free slot can sit
+   behind a key-waiting delivery. This is published-SDK dispatch semantics, recorded as a limit
+   (a key-waiting run occupies one bounded dispatch slot), not a Workbench defect.
+
+Repairing the cost class is the A4 tranche (scoped indexed/paginated retrieval and the global root
+CAS), which removes the per-command full-aggregate read-modify-write, not a capacity-8 special
+case. Default startup capacity remains 1. Single-trial measurements remain labeled as such; these
+are small local WSL2/pg0 observations, not throughput guarantees.
+
 ## Existing journeys
 
 Additional actual journeys in `test/J-EXPERT-model-parallel.test.ts` pass 8 tests / 48 assertions:
