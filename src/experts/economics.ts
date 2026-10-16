@@ -1,5 +1,6 @@
 import type { ModelRequest, ModelResponse } from "@godspeedai/cognate-capabilities";
 import type { StoredEvent } from "@godspeedai/cognate-events";
+import { ENVELOPE_MARGIN_TOKENS, legacyByteCount, type ModelTokenizer } from "./tokenizer.ts";
 
 /** Per-assignment-attempt limits, frozen with the route. Prices are explicit operator estimates. */
 export interface ExpertModelBudget {
@@ -12,10 +13,13 @@ export interface ExpertModelBudget {
 export interface ModelAccounting {
   inputEstimate: number;
   reservedOutputTokens: number | null;
-  estimateMethod: "utf8-visible-request-with-envelope-margin";
+  /** Names the accounting method actually used: a model-specific tokenizer encoding, or the
+   * legacy conservative UTF-8 byte estimate when no model tokenizer resolved. */
+  estimateMethod: string;
   usageSource: "provider" | "unreported";
   configuredCostUsd: number | null;
 }
+export const LEGACY_ESTIMATE_METHOD = "utf8-visible-request-with-envelope-margin";
 export class ModelBudgetError extends Error {
   override readonly name="ModelBudgetError";
   readonly kind="budget_exceeded";
@@ -47,11 +51,16 @@ export function parseExpertBudget(raw:unknown):ExpertModelBudget|undefined {
   return budget;
 }
 
-/** This is an estimate of the complete visible request, not a provider tokenizer count. The
- * conservative byte count includes messages, instructions, tool schemas and JSON structure.
- * Provider-added hidden framing remains unmeasured and is explicitly not claimed exact. */
-export function estimateRequestTokens(request:ModelRequest):number {
-  return new TextEncoder().encode(JSON.stringify(request)).byteLength+256;
+/** This is an estimate of the complete visible request, not a provider tokenizer receipt. With a
+ * resolved model tokenizer the visible payload is counted under that encoding plus an explicit
+ * envelope margin; without one the conservative legacy UTF-8 byte count applies. Either way the
+ * accounting method is labeled, and provider-added hidden framing remains unmeasured. */
+export function estimateRequestTokens(request:ModelRequest,tokenizer?:ModelTokenizer):number {
+  const serialized=JSON.stringify(request);
+  return (tokenizer ? tokenizer.count(serialized)+ENVELOPE_MARGIN_TOKENS : legacyByteCount(serialized)+ENVELOPE_MARGIN_TOKENS);
+}
+export function estimateMethodOf(tokenizer?:ModelTokenizer):string {
+  return tokenizer ? `${tokenizer.method}-with-envelope-margin` : LEGACY_ESTIMATE_METHOD;
 }
 function reportedUsage(response:ModelResponse):boolean {
   return !!response.usage && Number.isSafeInteger(response.usage.inputTokens) && response.usage.inputTokens>=0 && Number.isSafeInteger(response.usage.outputTokens) && response.usage.outputTokens>=0;
@@ -62,7 +71,7 @@ export function configuredCost(input:number,output:number,budget:ExpertModelBudg
 
 /** Failed/unknown generations retain their full conservative reservation. Successful reported
  * usage releases that reservation to the observed amount. Recorded invocations are unique steps. */
-export function priorModelConsumption(events:readonly StoredEvent[],budget:ExpertModelBudget):{tokens:number;costUsd:number|null} {
+export function priorModelConsumption(events:readonly StoredEvent[],budget:ExpertModelBudget,tokenizer?:ModelTokenizer):{tokens:number;costUsd:number|null} {
   let tokens=0;
   let costUsd:number|null=budget.prices ? 0:null;
   for(const event of events){
@@ -73,7 +82,7 @@ export function priorModelConsumption(events:readonly StoredEvent[],budget:Exper
     if(!request)throw new ModelBudgetError("Cannot establish prior model consumption; inspection is required");
     const usage=payload.result && reportedUsage(payload.result) ? payload.result.usage:undefined;
     const limited={...request,maxTokens:Math.min(request.maxTokens ?? budget.maxOutputTokens,budget.maxOutputTokens)};
-    const input=usage?.inputTokens ?? estimateRequestTokens(limited);
+    const input=usage?.inputTokens ?? estimateRequestTokens(limited,tokenizer);
     const output=usage?.outputTokens ?? budget.maxOutputTokens;
     tokens+=input+output;
     if(costUsd!==null)costUsd+=configuredCost(input,output,budget)!;
@@ -81,12 +90,12 @@ export function priorModelConsumption(events:readonly StoredEvent[],budget:Exper
   return {tokens,costUsd};
 }
 
-export function enforceExpertBudget(request:ModelRequest,budget:ExpertModelBudget,providerContextLimit:number,prior:{tokens:number;costUsd:number|null}):ModelRequest {
+export function enforceExpertBudget(request:ModelRequest,budget:ExpertModelBudget,providerContextLimit:number,prior:{tokens:number;costUsd:number|null},tokenizer?:ModelTokenizer):ModelRequest {
   const limited={...request,maxTokens:Math.min(request.maxTokens ?? budget.maxOutputTokens,budget.maxOutputTokens)};
   if(!Number.isSafeInteger(limited.maxTokens) || limited.maxTokens<1)throw new ModelBudgetError("Invalid model output limit");
-  const input=estimateRequestTokens(limited);
+  const input=estimateRequestTokens(limited,tokenizer);
   const contextLimit=Number.isFinite(providerContextLimit) && providerContextLimit>0 ? Math.min(providerContextLimit,budget.contextTokens):budget.contextTokens;
-  if(input+limited.maxTokens>contextLimit)throw new ModelBudgetError(`Context budget exceeded: conservative visible-input estimate ${input} plus ${limited.maxTokens} reserved output exceeds ${contextLimit} tokens. Required context was retained; shorten the task or increase the limit.`);
+  if(input+limited.maxTokens>contextLimit)throw new ModelBudgetError(`Context budget exceeded: model-specific estimate ${input} plus ${limited.maxTokens} reserved output exceeds ${contextLimit} tokens (${estimateMethodOf(tokenizer)}). Required context was retained; shorten the task or increase the limit.`);
   if(budget.totalTokens!==undefined && prior.tokens+input+limited.maxTokens>budget.totalTokens)throw new ModelBudgetError("Assignment attempt token budget exhausted before model invocation");
   if(budget.maxCostUsd!==undefined){
     const reservation=configuredCost(input,limited.maxTokens,budget);
@@ -96,7 +105,7 @@ export function enforceExpertBudget(request:ModelRequest,budget:ExpertModelBudge
   return limited;
 }
 
-export function modelAccounting(request:ModelRequest,response:ModelResponse,budget?:ExpertModelBudget):ModelAccounting {
+export function modelAccounting(request:ModelRequest,response:ModelResponse,budget?:ExpertModelBudget,tokenizer?:ModelTokenizer):ModelAccounting {
   const usage=reportedUsage(response) ? response.usage:undefined;
-  return {inputEstimate:estimateRequestTokens(request),reservedOutputTokens:request.maxTokens ?? null,estimateMethod:"utf8-visible-request-with-envelope-margin",usageSource:usage ? "provider":"unreported",configuredCostUsd:usage ? configuredCost(usage.inputTokens,usage.outputTokens,budget):null};
+  return {inputEstimate:estimateRequestTokens(request,tokenizer),reservedOutputTokens:request.maxTokens ?? null,estimateMethod:estimateMethodOf(tokenizer),usageSource:usage ? "provider":"unreported",configuredCostUsd:usage ? configuredCost(usage.inputTokens,usage.outputTokens,budget):null};
 }

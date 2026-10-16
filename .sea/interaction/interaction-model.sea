@@ -1172,15 +1172,15 @@ Instance j_memory_paginate of "CanonicalJourney" {
 
 Instance j_context_budget of "CanonicalJourney" {
     actor: "User",
-    capabilities: "expert.save, expert.model.generate",
+    capabilities: "expert.save, expert.model.generate, settings.changeSpending",
     evidence_class: "observed",
     initiating_condition: "The operator needs to constrain an Expert's context, token consumption and model spend",
     journey_id: "J-CONTEXT-BUDGET",
     precondition: "The model route and optional declared token prices are inspectable; the complete visible request is available before provider invocation",
     purpose: "Freeze per-Assignment attempt limits and enforce conservative reservations before each model call while preserving observed usage separately",
-    settlement: "Instructions, messages, tool schemas and reserved output are accounted for; an over-budget call never reaches the provider; provider-reported usage is retained as observed, unsupported tokenization as an estimate, and unknown prices remain unknown",
-    steps: "human configures optional context and attempt budgets -> Assignment freezes limits -> estimate complete request and reserve bounded output -> account prior successes and ambiguous failures -> enforce limits -> invoke provider -> record reported usage and labeled estimates -> inspect budget status",
-    variants: "unknown prices block a configured cost ceiling; absent provider usage keeps a conservative reservation; provider failure still consumes a pessimistic reservation; replay does not charge a second logical invocation; pinned unresolved context cannot silently disappear"
+    settlement: "Instructions, messages, tool schemas and reserved output are accounted for with the route's model-specific tokenizer named by its method label; an over-budget or over-ceiling call never reaches the provider; every dispatch holds a durable billing reservation that crash reconciliation settles, releases or books as unknown without blind repetition; provider-reported usage is retained as observed, unsupported tokenization as a labeled estimate, and unknown prices remain unknown everywhere including the global and ordinary-session spending ceilings",
+    steps: "human configures optional context and attempt budgets and spending ceilings -> Assignment freezes limits -> tokenize the complete request with the route's tokenizer and reserve bounded output -> account prior successes and ambiguous failures -> enforce limits and ceilings -> reserve durably on the billing ledger before dispatch -> invoke provider -> record reported usage and settle the reservation -> reconcile interrupted reservations on restart -> inspect budget, reservation and ceiling status",
+    variants: "unknown prices block a configured cost or spending ceiling; absent provider usage keeps a conservative reservation; provider failure still consumes a pessimistic reservation; an owner interrupted between reservation and dispatch requires reconciliation and never blindly repeats; replay does not charge a second logical invocation; pinned unresolved context cannot silently disappear"
 }
 
 Policy every_canonical_flow_recorded

@@ -131,3 +131,30 @@ test("loaded personal memory clears when selecting another Expert or Team scope"
     }finally{releaseFonts();await browser.close();}
   });
 },60000);
+
+test("spending and billing inspection shows durable reservations, booked cost and effective ceilings",async()=>{
+  await withExpertApp(async model=>({message:{role:"assistant",content:"Reserved inspection evidence."},toolCalls:[],finishReason:"stop",model:model.model,usage:{inputTokens:80,outputTokens:20}}),async app=>{
+    await configureDefaultRoutes(app);
+    await invoke(app,"onboarding.dismiss",{step:"notice"});await invoke(app,"onboarding.dismiss",{step:"apikey"});
+    await invoke(app,"settings.changeSpending",{spending:{globalUsd:25}} as never);
+    const expert=(await app.state()).experts.builder!;
+    await invoke(app,"expert.save",{expertId:expert.id,name:expert.name,specialization:expert.definition.specialization,instructions:expert.definition.instructions,tools:["read"],route:expert.definition.route,budget:{contextTokens:32000,maxOutputTokens:400,prices:{inputUsdPerMillion:2,outputUsdPerMillion:4}}});
+    const result=await invoke(app,"expert.converse",{expertId:"builder",workspaceId:app.workspaceId,message:"Produce inspectable spending evidence."} as never) as {assignmentId:string};
+    await waitForAssignment(app,result.assignmentId,a=>a.status==="reconciliation-required");
+    const browser=await chromium.launch();
+    try{
+      const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(10000);
+      const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
+      await page.goto(app.app.url,{waitUntil:"domcontentloaded"});
+      await page.getByRole("button",{name:"Experts and Teams",exact:true}).click();
+      const spending=page.getByTestId("spending-status");
+      await spending.getByText("Booked cost at operator-configured prices: USD 0.000240.").waitFor();
+      await spending.getByText("Ceilings: global USD 25, per session USD not set.").waitFor();
+      await spending.getByText(/usage 80 in \/ 20 out, provider/).waitFor();
+      await spending.getByText("Booked cost: USD 0.000240.").waitFor();
+      const shots=join(import.meta.dir,"..","screenshots","experts-debt");await mkdir(shots,{recursive:true});
+      await page.screenshot({path:join(shots,"spending-status-desktop.png")});
+      expect(errors).toEqual([]);
+    }finally{await browser.close();}
+  });
+},90_000);

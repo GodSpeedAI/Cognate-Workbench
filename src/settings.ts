@@ -7,6 +7,7 @@
 // sentences, same precedent as Work details' own "Choose how much detail to show for tool calls".
 import { isWorkDetailsMode, type WorkDetailsMode } from "./workDetails.ts";
 import { isShortcutOverrides, type ShortcutOverrides } from "./shortcuts.ts";
+import { parseSpendingCeilings } from "./experts/billing.ts";
 
 // -- Permission (default access mode for NEW sessions) -----------------------------------------
 
@@ -143,10 +144,29 @@ export interface SettingsPatch {
    *  (the last write wins). Absent or a missing action id means "use the shipped default";
    *  `null` means explicitly unbound. See `src/shortcuts.ts`. */
   readonly shortcuts?: ShortcutOverrides;
+  /** J-CONTEXT-BUDGET: operator-configured ordinary-session and global spending ceilings in USD.
+   *  Enforcement fails closed — with ceilings configured, unpriced model activity is refused. */
+  readonly spending?: { sessionUsd?: number; globalUsd?: number };
 }
 
-/** Every General setting, fully resolved with defaults — the read-side shape the UI consumes. */
-export interface GeneralSettings extends Required<SettingsPatch> {}
+/** Every General setting, fully resolved with defaults — the read-side shape the UI consumes.
+ *  Spending ceilings stay optional: absence is the documented "no ceiling configured" default. */
+export interface GeneralSettings extends Required<Omit<SettingsPatch, "spending">> {
+  readonly spending?: { sessionUsd?: number; globalUsd?: number };
+}
+
+// -- Spending ceilings (J-CONTEXT-BUDGET) ------------------------------------------------------
+
+/** Validates the durable spending-ceiling patch. Mirrors the billing ledger's own parser so the
+ *  capability and the enforcement layer cannot drift apart. */
+export function isSpendingCeilings(value: unknown): value is { sessionUsd?: number; globalUsd?: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  try {
+    return parseSpendingCeilings(value) !== undefined;
+  } catch {
+    return false;
+  }
+}
 
 // -- Global plugins -----------------------------------------------------------------------------
 
@@ -199,5 +219,8 @@ export function resolveGeneralSettings(value: unknown, legacyAppearance?: string
     // T11: an absent shortcuts field means "no overrides", which resolveAll() falls back to the
     // shipped defaults for — so a fresh home behaves exactly as before editing existed.
     shortcuts: isShortcutOverrides(row.shortcuts) ? row.shortcuts : {},
+    // J-CONTEXT-BUDGET: absent ceilings mean "no ceiling configured"; invalid stored values are
+    // ignored on read but fail closed at dispatch time through the ledger's own parser.
+    spending: isSpendingCeilings(row.spending) ? row.spending : undefined,
   };
 }

@@ -24,8 +24,10 @@ import { SCHEDULES_THREAD } from "./schedules/types.ts";
 import { agentExpert } from "./agents/agentExpert.ts";
 import { expertsComponent, ExpertsService } from "./experts/service.ts";
 import { ExpertCompletionBridge } from "./experts/bridge.ts";
+import { reconcileBilling, runInvocationInspector } from "./experts/billing.ts";
 import { EXPERT_AGENT, EXPERTS_THREAD } from "./experts/types.ts";
 import { expertsProjection } from "./projections/experts.ts";
+import { expertsBillingProjection } from "./projections/expertsBilling.ts";
 import { providerRoutesProjection } from "./projections/providerRoutes.ts";
 import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
@@ -131,6 +133,7 @@ const GRANTED_CAPABILITIES = [
   "settings.changePreset",
   "settings.changePlugin",
   "settings.changeShortcuts",
+  "settings.changeSpending",
   "session.setArchived",
   "provider.delete",
   "model.catalog",
@@ -342,6 +345,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ],
     projections: [
       { projection: expertsProjection, public: true },
+      { projection: expertsBillingProjection, public: true },
       { projection: providerRoutesProjection, public: true },
       { projection: modelConfigProjection, public: true },
       { projection: workspacesProjection, public: true },
@@ -372,7 +376,15 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // Re-register durable SSH/WSL worlds (lazy: nothing connects until a workspace uses one).
   await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, containmentConfig });
 
-  const registry = new ProviderRegistry(runtime.kernel, bindings.modelGenerate.semanticRef);
+  // J-CONTEXT-BUDGET: the billing ledger backs every ordinary-session dispatch with a durable
+  // reservation and enforces the operator's spending ceilings. Prices and protocol resolve from
+  // the registry's current configuration at dispatch time, never from run input.
+  const registry = new ProviderRegistry(runtime.kernel, bindings.modelGenerate.semanticRef, {
+    getService: () => runtime.service,
+    systemCaller: LOCAL_OPERATOR,
+    prices: () => registry.current?.prices ?? null,
+    protocol: () => registry.current?.protocol,
+  });
   await runtime.kernel.mount(
     workspaceSelectComponent({
       getService,
@@ -404,11 +416,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // it can call `model.generate` again.
   const modelConfigRows = ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "model-config" }))).rows;
   const currentModelConfig = modelConfigRows.find((r) => r.key === "current")?.value as
-    | { readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible"; readonly model: string }
+    | { readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible"; readonly model: string; readonly prices?: { inputUsdPerMillion: number; outputUsdPerMillion: number } }
     | undefined;
   if (currentModelConfig) {
     await registry.swap(
-      { providerId: currentModelConfig.providerId, baseURL: currentModelConfig.baseURL, protocol: currentModelConfig.protocol, model: currentModelConfig.model },
+      { providerId: currentModelConfig.providerId, baseURL: currentModelConfig.baseURL, protocol: currentModelConfig.protocol, model: currentModelConfig.model, ...(currentModelConfig.prices ? { prices: currentModelConfig.prices } : {}) },
       secrets,
     );
   }
@@ -421,6 +433,19 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   await scheduleEvaluator.reconcile(LOCAL_OPERATOR.tenant);
   const expertBridge = new ExpertCompletionBridge(experts,LOCAL_OPERATOR.tenant);
   await expertBridge.start();
+
+  // J-CONTEXT-BUDGET: reconcile reservations whose owner died between reservation and outcome.
+  // Committed invocation evidence settles them; anything unresolvable books conservatively as
+  // unknown — never zero, never blindly repeated. Reconciliation failure never blocks boot: the
+  // reserved entries themselves fail closed until a later reconciliation resolves them.
+  try {
+    const reconciled = await reconcileBilling(runtime.service, LOCAL_OPERATOR, runInvocationInspector(runtime.service, LOCAL_OPERATOR));
+    if (reconciled.settled + reconciled.released + reconciled.unknown > 0) {
+      console.warn(`[cognate-workbench] billing: reconciled ${reconciled.settled} settled, ${reconciled.released} released, ${reconciled.unknown} unknown reservation(s)`);
+    }
+  } catch (error) {
+    console.warn(`[cognate-workbench] billing: boot reconciliation failed (${error instanceof Error ? error.message : String(error)}); interrupted reservations stay fail-closed`);
+  }
 
   // Usage pass U6: the RealityTrace observation adapter — an at-least-once background drain from
   // the committed outbox to the pinned SXR CLI. SXR-down never blocks or breaks the app (the

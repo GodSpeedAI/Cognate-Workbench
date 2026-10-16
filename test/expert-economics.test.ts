@@ -1,6 +1,7 @@
 import { expect,test } from "bun:test";
 import type { StoredEvent } from "@godspeedai/cognate-events";
-import { enforceExpertBudget,estimateRequestTokens,modelAccounting,parseExpertBudget,priorModelConsumption } from "../src/experts/economics.ts";
+import { enforceExpertBudget,estimateRequestTokens,estimateMethodOf,LEGACY_ESTIMATE_METHOD,modelAccounting,parseExpertBudget,priorModelConsumption } from "../src/experts/economics.ts";
+import { tokenizerForRoute } from "../src/experts/tokenizer.ts";
 import { configureDefaultRoutes,invoke,route,waitForAssignment,withExpertApp } from "./expert-helpers.ts";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import type { ModelRequest } from "@godspeedai/cognate-capabilities";
@@ -78,3 +79,22 @@ test("J-CONTEXT-BUDGET freezes limits across Expert edits, clamps output and rec
     expect((await app.state()).assignments[assignment.id]?.execution.budget).toEqual(budget);
   });
 },45_000);
+
+test("J-CONTEXT-BUDGET tokenizes with the route's model-specific tokenizer and labels the method",async()=>{
+  const o200k=await tokenizerForRoute("gpt-4o-mini","openai-compatible");
+  const cl100k=await tokenizerForRoute("gpt-4-turbo","openai-compatible");
+  const approximate=await tokenizerForRoute("claude-3-5-sonnet","anthropic-messages");
+  expect(o200k!.method).toBe("model-tokenizer:o200k_base");
+  expect(cl100k!.method).toBe("model-tokenizer:cl100k_base");
+  expect(approximate!.method).toBe("model-tokenizer:cl100k_base:approximate");
+  const request={messages:[{role:"user" as const,content:"hello 世界"}]};
+  const tokenized=estimateRequestTokens(request,o200k);
+  const legacy=estimateRequestTokens(request);
+  expect(tokenized).toBeLessThan(legacy);
+  expect(tokenized).toBe(o200k!.count(JSON.stringify(request))+256);
+  expect(estimateMethodOf(o200k)).toBe("model-tokenizer:o200k_base-with-envelope-margin");
+  expect(estimateMethodOf(undefined)).toBe(LEGACY_ESTIMATE_METHOD);
+  // CJK text: the legacy byte estimate undercounts real tokens; the tokenizer does not.
+  expect(o200k!.count("你好世界，这是一个分词测试。")).toBeGreaterThan(6);
+  expect(await tokenizerForRoute("","openai-compatible")).toBeUndefined();
+});

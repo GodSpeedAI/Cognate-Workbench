@@ -115,6 +115,9 @@ function classifyModelFailure(error: InvocationFailedError): { readonly code: st
   const failure = error.failure as { readonly details?: Record<string, unknown>; readonly message?: unknown } | null;
   const details = failure?.details;
   if(details?.kind==="budget_exceeded")return {code:"BUDGET_EXCEEDED",message:typeof failure?.message==="string" ? failure.message:"Model budget exceeded before invocation"};
+  // J-CONTEXT-BUDGET: spending-ceiling refusals and interrupted-reservation blocks surface with
+  // the same honest BUDGET_EXCEEDED failure code instead of a generic HTTP_500.
+  if(details?.kind==="ceiling_exceeded"||details?.kind==="reconciliation_required")return {code:"BUDGET_EXCEEDED",message:typeof failure?.message==="string" ? failure.message:"Model spending ceiling or billing reconciliation is required before invocation"};
 
   // Prefer structured error details over message regex fallback
   if (details?.kind === "cancelled") return { code: "TIMEOUT", message: "Request timed out." };

@@ -58,6 +58,10 @@ const secrets: SecretStore = {
 };
 
 function serviceFor(routes: Readonly<Record<string, ModelConfig>>) {
+  // J-CONTEXT-BUDGET: the capability now reads the run's invocation history, resolves spending
+  // ceilings and holds a durable billing reservation, so the fake service carries a small
+  // in-memory billing ledger alongside the run snapshots.
+  const billing: { version: number; state: unknown } = { version: 0, state: { schema: 1, reservations: {} } };
   return {
     async getRun(_caller: unknown, { runId }: { readonly runId: string }) {
       const selected = routes[runId];
@@ -67,6 +71,20 @@ function serviceFor(routes: Readonly<Record<string, ModelConfig>>) {
         conversationId: `conversation-${runId}`,
         route: selected,
       } } } : { agent: "agent.expert", input: {} };
+    },
+    async *events(_caller: unknown, _request: unknown) {},
+    async readProjection(_caller: unknown, _request: unknown) { return { rows: [] }; },
+    async readSharedState(_caller: unknown, { threadId }: { readonly threadId: string }) {
+      return threadId === "experts:billing:v1"
+        ? { version: billing.version, state: structuredClone(billing.state) }
+        : { version: 0 };
+    },
+    async updateSharedState(_caller: unknown, request: { readonly threadId: string; readonly expectedVersion: number; readonly update: { readonly snapshot?: unknown } }) {
+      if (request.threadId !== "experts:billing:v1") throw new Error(`unexpected billing thread ${request.threadId}`);
+      if (request.expectedVersion !== billing.version) throw new Error("billing ledger version conflict");
+      billing.version += 1;
+      billing.state = structuredClone(request.update.snapshot ?? { schema: 1, reservations: {} });
+      return { version: billing.version, state: structuredClone(billing.state) };
     },
   } as never;
 }

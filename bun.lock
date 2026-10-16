@@ -29,6 +29,7 @@
         "@godspeedai/cognate-runtime-bun": "0.5.0",
         "@godspeedai/cognate-store-postgres": "0.5.0",
         "@godspeedai/cognate-ui-astryx": "0.5.0",
+        "gpt-tokenizer": "^4.0.3",
         "react": "19.3.0",
         "react-dom": "19.3.0",
       },
@@ -250,6 +251,8 @@
     "dom-accessibility-api": ["dom-accessibility-api@0.5.16", "", {}, "sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg=="],
 
     "entities": ["entities@7.0.1", "", {}, "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=="],
+
+    "gpt-tokenizer": ["gpt-tokenizer@4.0.3", "", {}, "sha512-GrrPDreSy2c3ZgM/u+5JN+lnHTLrJKm7QAFfTD5J+vgcSP69C+fFIUaJWiey/QQ8lS5u79OvluKuEmGBAbOS4A=="],
 
     "happy-dom": ["happy-dom@20.14.6", "", { "dependencies": { "@types/node": ">=20.0.0", "@types/whatwg-mimetype": "^3.0.2", "@types/ws": "^8.18.1", "buffer-image-size": "^0.6.4", "entities": "^7.0.1", "whatwg-mimetype": "^3.0.0", "ws": "^8.21.0" } }, "sha512-5DDsf4QmEIlRL6NkCv/fxSjYHHkZceL/IaYQdJc2h3G7DRTEai++VTjbfL0LB9geW2VrA3+vrjF3Efx+OTtX0Q=="],
 

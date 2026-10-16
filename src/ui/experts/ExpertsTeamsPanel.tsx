@@ -11,6 +11,7 @@ import { TeamEditor, type TeamDraft } from "./TeamEditor.tsx";
 import { SchedulesSurface } from "./SchedulesSurface.tsx";
 import { AssignmentUsage } from "./AssignmentUsage.tsx";
 import { RuntimeExecutionStatus } from "./RuntimeExecutionStatus.tsx";
+import { SpendingStatus } from "./SpendingStatus.tsx";
 
 type ConversationSummary = Pick<Conversation, "id" | "scope" | "expertId" | "teamId" | "workspaceId" | "title" | "createdAt" | "updatedAt"> & { readonly messageCount: number };
 const historyScopeKey=(scope:Conversation["scope"]|undefined,expertId:string|undefined,teamId:string|undefined)=>JSON.stringify([scope,scope==="team" ? teamId:expertId,scope==="private-team" ? teamId:null]);
@@ -263,6 +264,7 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
       </header>
 
       <RuntimeExecutionStatus inspect={inspectRuntimeExecution} />
+      <SpendingStatus />
       {notice && <p className={notice.kind === "error" ? "experts-notice error" : "experts-notice"} role={notice.kind === "error" ? "alert" : "status"}>{notice.text}</p>}
       {showSchedules && <SchedulesSurface experts={experts} teams={teams} workspaceId={workspaceId} onInspect={occurrence=>{
         if(!occurrence.conversationId)return;

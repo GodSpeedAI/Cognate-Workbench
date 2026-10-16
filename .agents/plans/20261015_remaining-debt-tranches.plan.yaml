@@ -34,8 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T5
-  last_settled_task: T4
+  current_task: T6
+  last_settled_task: T5
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -116,6 +116,31 @@ progress:
     partition to evaluate global invariants and fingerprint unchanged sections, so the root CAS
     remains a global contention point and no SQL full-text index, garbage collection or vector index
     is claimed. Evidence: docs/experts-storage.md, docs/experts-scale-baseline.md.
+  T5: >-
+    Exact tokenization, durable reservations and budget ceilings are settled. Context accounting
+    tokenizes the complete visible request with the route's model-specific tokenizer (published
+    encodings per family, labeled approximation otherwise) behind an explicit envelope margin, with
+    the accounting method naming the encoding. Every Expert and ordinary-session model dispatch
+    holds a durable reservation on the governed experts:billing:v1 ledger before provider dispatch
+    and settles from provider-reported usage or its full conservative amount; deterministic
+    reservation ids make crash recovery collide with the interrupted reservation, which is booked
+    conservatively as reconciled-unknown (never zero) while the recovery re-dispatch proceeds under
+    a separately booked generation — no dropped, double-counted or blindly repeated usage. Boot
+    reconciliation settles open reservations from committed invocation evidence and books the
+    unestablishable as unknown. Operator ceilings (settings.changeSpending: ordinary-session and
+    global USD, fail-closed on unpriced activity) refuse over-ceiling dispatch before any provider
+    call; unknown prices surface as unknown in the ledger, the assignment usage disclosure and the
+    new Experts-panel spending inspection (public experts-billing projection). The model journey
+    J-CONTEXT-BUDGET was extended first and re-validated. `test/J-CONTEXT-BUDGET-billing.test.ts`
+    passes 3 actual PostgreSQL journeys (real native runs, ceiling refusals with zero provider
+    calls, interrupted-reservation generations, restart reconciliation, session reservations under
+    the session ceiling, fail-closed transitions); `test/expert-economics.test.ts` covers the
+    tokenizer; `test/E2E-experts-debt.test.ts` adds a real Chromium spending-inspection journey.
+    `just verify` passed 1,172 tests / 1,166 pass / 6 skip / 0 fail across 112 files. Known
+    boundaries: tokenization remains a labeled estimate of the visible request, not a provider
+    receipt; provider-side billing of aborted dispatches cannot be undone; the generation mechanism
+    trusts the durable executor's at-most-once step semantics pending T6 fencing; ledger garbage
+    collection is not claimed. Evidence: docs/expert-economics.md.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh

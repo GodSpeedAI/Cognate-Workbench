@@ -4,7 +4,7 @@ import { openAICompatible } from "@godspeedai/cognate-provider-openai-compatible
 import { openAIResponses } from "@godspeedai/cognate-provider-openai-responses";
 import { anthropicCompatible } from "@godspeedai/cognate-provider-anthropic-compatible";
 import { apiKeySource } from "@godspeedai/cognate-provider-auth";
-import { streamingProviderComponent } from "./modelProvider.ts";
+import { streamingProviderComponent, type ModelGenerateBilling } from "./modelProvider.ts";
 import type { SecretStore } from "../secrets.ts";
 
 /** Legacy openai-compatible remains accepted for persisted configurations. */
@@ -14,6 +14,8 @@ export interface ModelConfig {
   readonly baseURL: string;
   readonly protocol: ModelWireProtocol;
   readonly model: string;
+  /** Operator-declared price estimates per million tokens; absent means cost is unknown. */
+  readonly prices?: { inputUsdPerMillion: number; outputUsdPerMillion: number };
 }
 export function buildProvider(config: ModelConfig, secrets: SecretStore): ModelProvider {
   const key = async () => (await secrets.get("model-provider:" + config.providerId)) ?? "";
@@ -35,8 +37,9 @@ export class ProviderRegistry {
   #semanticRef: SemanticRef | undefined;
   #handle: ComponentHandle | undefined;
   #current: ModelConfig | undefined;
-  constructor(kernel: Kernel, semanticRef?: SemanticRef) {
-    this.#kernel = kernel; this.#semanticRef = semanticRef;
+  #billing: ModelGenerateBilling | undefined;
+  constructor(kernel: Kernel, semanticRef?: SemanticRef, billing?: ModelGenerateBilling) {
+    this.#kernel = kernel; this.#semanticRef = semanticRef; this.#billing = billing;
   }
   get current(): ModelConfig | undefined { return this.#current; }
   /** T11 (J-CFG-provider-delete): dismounts whatever is mounted and clears the active route, so a
@@ -50,7 +53,7 @@ export class ProviderRegistry {
   }
   async swap(config: ModelConfig, secrets: SecretStore): Promise<void> {
     const provider = buildProvider(config, secrets);
-    const nextHandle = await this.#kernel.mount(streamingProviderComponent(provider, this.#semanticRef));
+    const nextHandle = await this.#kernel.mount(streamingProviderComponent(provider, this.#semanticRef, this.#billing));
     try {
       await nextHandle.waitFor("ACTIVE",5000);
     } catch (error) {
