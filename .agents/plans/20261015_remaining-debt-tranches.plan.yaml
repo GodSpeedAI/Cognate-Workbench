@@ -36,6 +36,7 @@ dependency_graph:
 initial_state:
   current_task: T6
   last_settled_task: T5
+  note: T6 store-level slice settled upstream (worktree commit ae80c1c); executor integration and operator-gated publication remain
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -141,6 +142,33 @@ progress:
     receipt; provider-side billing of aborted dispatches cannot be undone; the generation mechanism
     trusts the durable executor's at-most-once step semantics pending T6 fencing; ledger garbage
     collection is not claimed. Evidence: docs/expert-economics.md.
+  T6: >-
+    IN PROGRESS — the store-level slice is settled in the isolated upstream worktree; executor
+    integration and the release gates remain. Worktree: /home/sprime01/projects/cognate-run-ownership,
+    branch feature/run-write-ownership (based on the authorized PR44 head 033029d), commit ae80c1c.
+    Settled there: the run-write ownership design contract (docs/contracts/run-write-ownership.md —
+    one authoritative ownership row per enrolled run, store-maintained generations advanced by every
+    reclaim and release, exclusive claims that refuse a live holder, exact-identity renewal,
+    commit-phase fencing of run-scoped appends, and the enrollment rule that keeps unenrolled runs
+    exactly legacy for single-process/older workers); the shared types and typed errors
+    (StaleRunOwnerError, RunOwnershipHeldError) as optional additive extensions in cognate-events;
+    the PostgreSQL implementation (schema migration 5, claim/renew/release, fencing under the
+    append transaction); and RED/GREEN two-process journeys (3 tests / 71 assertions) proving a
+    reclaimed owner fences a killed owner's late write with nothing appended, enrolled runs refuse
+    uncredited/stale/smuggled writes, and unenrolled runs keep legacy behavior. Upstream
+    verification: bun test packages/store-postgres 42 pass; packages/runtime-bun 155 pass / 0 fail
+    with the pinned pg0; packages/events passes; full upstream `just verify` 81/81 gates on the
+    branch head (three consecutive runs). Evidence: docs/evidence/run-write-ownership.md in the
+    worktree. Remaining for settlement: the executor-side bounded slice (dispatcher claims
+    ownership before executing a run, presents the credential on every run-scoped append, renews
+    around external-effect steps, halts without retry on StaleRunOwnerError, releases on terminal
+    states, and marks a prior generation's started-but-unrecorded step ambiguous for
+    reconciliation instead of replaying it) with two-process runtime crash and stale-writer
+    journeys; then the PR44-style publication gates — exact-head CI/packaging review,
+    operator-authorized merge, linked 45-package release, registry gitHead audit and
+    fresh-consumer proof. The merge and publication steps are operator-gated by upstream policy
+    ("no merge/publication" until exact-head checks) and cannot be completed by the agent alone.
+    Workbench continues to consume only published 0.5.0 packages.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh
