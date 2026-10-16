@@ -182,13 +182,20 @@ contracts and their limits.
 ## Trust and security boundaries
 
 Published Cognate0.5.0 owns bounded run scheduling. Workbench defaults to capacity1; host startup
-`COGNATE_RUN_CAPACITY=2`,4 or8 enables only model-only solo Experts and Specialists to overlap.
-Admission resolves the registered run and frozen Assignment; no cache or prompt grants authority.
-Tool-bearing runs, Team Orchestrators and configuration use one conservative resource-exclusion
-key. Configuration never waits on Expert boot readiness, avoiding seed dependency loops. Native
-continuations and recovery re-enter this admission path. `execution.runtime.inspect` reports
-effective capacity/policy, with no synthetic live-worker telemetry. General workspace effect
-parallelism remains open; see [measurements](experts-concurrency-benchmark.md).
+`COGNATE_RUN_CAPACITY=2`,4 or8 enables overlapping execution. Admission resolves the registered run
+and frozen Assignment; no cache or prompt grants authority. Model-only solo Experts and Team
+Specialists may overlap freely. All other work is keyed by canonical per-resource identities
+derived from authoritative state — workspace records, execution-world records and configuration —
+never from run-supplied input: runs that share a workspace serialize, runs on different workspaces
+overlap, workspace/world mutators name every record they affect (a world disconnect enumerates its
+workspaces), and unknown, forged or unclassifiable identities fail closed to the unchanged global
+`workbench:workspace-effects` exclusion key. On the local execution world, `tool.bash`/`tool.run_code`
+are not OS-contained, so workspace-keyed overlap relies on the workspace-scoped authority plane,
+not sandbox isolation. Configuration never waits on Expert boot readiness, avoiding seed dependency
+loops. Native continuations and recovery re-enter this admission path. `execution.runtime.inspect`
+reports effective capacity/policy, with no synthetic live-worker telemetry. Admission remains
+process-local by SDK contract; see [measurements](experts-concurrency-benchmark.md) for the
+workspace-effect conflict inventory.
 
 ```mermaid
 flowchart LR

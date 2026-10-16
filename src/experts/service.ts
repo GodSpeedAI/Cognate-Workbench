@@ -272,7 +272,7 @@ export class ExpertsService {
           const previous = state.teams[tId];const l = input.limits ? record(input.limits) : {};
           if (!input.teamId && previous) throw new Error("Team identity already exists; edit by teamId");
           const t: Team = {id:tId,name:text(input.name,"name",100),lifecycle:previous?.lifecycle ?? "draft",members:previous?.members ?? [],tools:tools(input.tools ?? previous?.tools ?? EXPERT_TOOLS),
-            limits:{maxDepth:integer(l.maxDepth,previous?.limits.maxDepth ?? 2,1,5),maxAssignments:integer(l.maxAssignments,previous?.limits.maxAssignments ?? 12,1,30),maxUnread:integer(l.maxUnread,previous?.limits.maxUnread ?? 20,1,100),maxRounds:integer(l.maxRounds,previous?.limits.maxRounds ?? 8,1,30)}};
+            limits:{maxDepth:integer(l.maxDepth,previous?.limits.maxDepth ?? 2,1,5),maxAssignments:integer(l.maxAssignments,previous?.limits.maxAssignments ?? 12,1,30),maxUnread:integer(l.maxUnread,previous?.limits.maxUnread ?? 20,1,100),maxRounds:integer(l.maxRounds,previous?.limits.maxRounds ?? 8,1,30),maxConcurrentRuns:integer(l.maxConcurrentRuns,previous?.limits.maxConcurrentRuns ?? 2,1,8),admissionBatch:integer(l.admissionBatch,previous?.limits.admissionBatch ?? 1,1,8)}};
           state.teams[tId]=t;return {teamId:tId};
         }
         case "team.copy": {
@@ -303,6 +303,11 @@ export class ExpertsService {
         }
         case "expert.converse":
         case "team.converse": {
+          // T2 tooth: client-supplied Team policy is refused. Admission and batching policy
+          // resolves only from authoritative Team metadata (`team.save`), never from run input.
+          if (["maxConcurrentRuns", "admissionBatch", "policy", "limits", "teamPolicy"].some((field) => input[field] !== undefined)) {
+            throw new Error("Client-supplied Team policy is refused; admission policy resolves from authoritative Team metadata");
+          }
           if (state.messages[`message:${id}`] || !input.conversationId && state.conversations[`conversation:${id}`]) throw new Error("Conversation message identity already exists");
           const t=input.teamId ? team(state,input.teamId,true) : undefined;
           const e=capability === "team.converse" ? expert(state,t!.members.find(m=>m.role==="orchestrator")!.expertId) : expert(state,input.expertId);

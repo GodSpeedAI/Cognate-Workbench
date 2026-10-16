@@ -27,7 +27,7 @@ describe("J-EXPERT-MODEL-PARALLEL runtime inspection", () => {
 
     await waitFor(() => expect(ui.getByText("Configured capacity: 4 concurrent runs")).toBeTruthy());
     expect(ui.getByText(/Model-only solo Experts and Team Specialists may overlap/)).toBeTruthy();
-    expect(ui.getByText(/Tool-bearing Experts, Team Orchestrators and coding sessions share a serialized admission group/)).toBeTruthy();
+    expect(ui.getByText(/Tool-bearing work is admitted per canonical workspace/)).toBeTruthy();
     expect(ui.queryByRole("button")).toBeNull();
     expect(ui.queryByText(/active|running now/i)).toBeNull();
   });

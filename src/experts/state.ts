@@ -54,7 +54,7 @@ export function seedExperts(state: ExpertState): void {
   state.teams["cognate-team"] ??= {
     id:"cognate-team",name:"Cognate Team",lifecycle:"active",tools:[...EXPERT_TOOLS],
     members:PROFILES.map(([expertId]) => ({expertId,role:expertId === "product-manager" ? "orchestrator" : "specialist",tools:[...EXPERT_TOOLS]})),
-    limits:{maxDepth:2,maxAssignments:12,maxUnread:20,maxRounds:8},
+    limits:{maxDepth:2,maxAssignments:12,maxUnread:20,maxRounds:8,maxConcurrentRuns:2,admissionBatch:1},
   };
   state.receipts["seed:v1"] = {fingerprint:"seed:v1",result:{ok:true}};
 }

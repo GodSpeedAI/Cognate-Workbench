@@ -14,6 +14,7 @@ export class ExpertCompletionBridge {
     const service:RuntimeService=this.experts.service;
     const caller=this.experts.caller(this.tenant);
     let state=await this.experts.state(this.tenant);
+    const startedThisPass=new Map<string,number>();
     for(const a of Object.values(state.assignments)){
       if(this.controller.signal.aborted)return;
       if(a.status==="cancelled"){
@@ -24,11 +25,23 @@ export class ExpertCompletionBridge {
         continue;
       }
       if(a.status==="queued" && !a.runId){
-        // Serialize roots within a Team/conversation; children are admitted while their parent waits.
-        const busy=!a.parentId && Object.values(state.assignments).some(other=>other.id!==a.id && !other.parentId && other.runId && isUnfinished(other) && (a.teamId ? other.teamId===a.teamId : other.conversationId===a.conversationId));
-        if(busy)continue;
-        if(a.parentId && !isUnfinished(state.assignments[a.parentId]!))continue;
+        if(a.parentId){
+          // Children are admitted while their parent waits; they never consume root batch slots.
+          if(!isUnfinished(state.assignments[a.parentId]!))continue;
+        }else{
+          // T2 batching policy: a Team's queued roots dispatch in batches of its authoritative
+          // `admissionBatch` (solo conversations keep one-at-a-time); concurrency is separately
+          // bounded by the Team's admission lanes at the eligibility lookup.
+          const groupKey=a.teamId ? `team:${a.teamId}` : `conversation:${a.conversationId}`;
+          const batch=a.teamId ? (state.teams[a.teamId]?.limits.admissionBatch ?? 1) : 1;
+          const boundedBatch=Number.isSafeInteger(batch) && (batch as number)>=1 && (batch as number)<=8 ? batch as number : 1;
+          const activeRoots=Object.values(state.assignments).filter(other=>other.id!==a.id && !other.parentId && other.runId && isUnfinished(other) && (a.teamId ? other.teamId===a.teamId : other.conversationId===a.conversationId)).length;
+          const dispatchedThisPass=startedThisPass.get(groupKey) ?? 0;
+          if(activeRoots+dispatchedThisPass>=boundedBatch)continue;
+        }
+        const groupKey=a.teamId ? `team:${a.teamId}` : `conversation:${a.conversationId}`;
         const run=await service.startRun(caller,{agent:EXPERT_AGENT,input:{assignmentId:a.id,attempt:a.attempt},idempotencyKey:`expert-run:${a.id}:${a.attempt}`,correlationId:`expert:${a.id}:${a.attempt}`});
+        startedThisPass.set(groupKey,(startedThisPass.get(groupKey) ?? 0)+1);
         await this.experts.mutate(this.tenant,`bind:${a.id}:${a.attempt}`,{runId:run.runId},s=>{
           const current=s.assignments[a.id]!;
           if(!isUnfinished(current))return {ok:true};

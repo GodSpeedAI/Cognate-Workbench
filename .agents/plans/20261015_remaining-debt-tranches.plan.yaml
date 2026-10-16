@@ -34,8 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T1
-  last_settled_task: T0
+  current_task: T3
+  last_settled_task: T2
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -50,6 +50,34 @@ progress:
     Experts-registry shared-state reads and aggregate CAS commits, with 48/49 and 44/45 CAS
     conflicts concentrated in concurrent assignment submission. Evidence:
     docs/experts-concurrency-benchmark.md.
+  T1: >-
+    Conflict-aware workspace-effect admission replaces the single global exclusion key with
+    canonical per-resource keys derived from authoritative state (src/experts/admission.ts):
+    tool-bearing Expert work keys by its Assignment's workspace record, coding sessions and
+    subagents key by their validated workspace record, workspace/config runs key configuration plus
+    the exact records they name, world mutators enumerate the workspaces they affect, cognitive runs
+    key configuration plus their named world. Model-only Expert overlap semantics are unchanged;
+    unknown, forged or unclassifiable identities fail closed to the unchanged global
+    workbench:workspace-effects key. `test/J-EXPERT-workspace-admission.test.ts` passes 4 actual
+    PostgreSQL journeys (disjoint-workspace overlap at capacity two with disjoint keys, aliased
+    spellings collide on one key and serialize, forged identity denied effects and excluded,
+    per-resource keys and overlap/serialization survive restart); `test/E2E-expert-workspace-admission.test.ts`
+    passes a real Chromium two-workspace tool-bearing overlap journey; `test/expert-admission.test.ts`
+    covers authoritative key derivation and fail-closed cases (10 tests). Known boundary recorded:
+    local bash/run_code are not OS-contained; admission stays process-local by SDK contract and a
+    key-waiting run occupies one bounded dispatch slot.
+  T2: >-
+    Team admission/batching policy resolves from authoritative Team metadata only: Team.limits gains
+    maxConcurrentRuns (1-8, default 2) and admissionBatch (1-8, default 1). The eligibility lookup
+    gives each Team run one admission lane key so a Team exceeding its policy waits even when host
+    capacity is free; the completion bridge dispatches queued Team roots in the Team's batch; the
+    Team editor and runtime inspection state the effective policy and serialized reasons; client
+    policy fields (maxConcurrentRuns/admissionBatch/policy/limits) are refused on converse.
+    `test/J-TEAM-admission.test.ts` passes 2 actual PostgreSQL journeys at capacity four (policy-one
+    serializes disjoint runs with three free slots; policy-two overlaps them; batch-one defers the
+    second root; forged policy refused), `test/E2E-team-admission.test.ts` passes a real Chromium
+    Team-editor/inspection journey, and `test/expert-admission.test.ts` covers lane derivation
+    (11 tests). Cross-process Team fairness is not claimed.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh

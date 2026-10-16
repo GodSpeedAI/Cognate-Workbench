@@ -31,7 +31,7 @@ Statuses describe observed implementation, not promised work. Cost/risk is relat
 | Finding / source | Owner and controlling invariant | Required change / acceptance evidence | Cost / risk | Disposition |
 |---|---|---|---|---|
 | Autonomous scheduling; `src/workbench/automation.ts` only records intent | Workbench definitions; Cognate dispatch. Stable schedule/version/occurrence identity | Native evaluator and UI; actual PostgreSQL SIGKILL/restart, recurrence/DST, idempotency, failure, cancellation and approval tests; `docs/schedules.md` | Large / high | Partially closed — native Expert/Team schedules work in one process; legacy workflow intent is not automatically migrated; distributed ownership absent |
-| Parallel Experts; runtime dispatcher serial | Cognate. Per-run order, authority and replay remain isolated | SDK 0.4.0 published/consumed; capacities 1/2/4/8, exclusion, cancellation, continuation, PG and consumer overlap pass | Medium / high | Partially closed — app authoritative eligibility, Team policy and UI pending; async eligibility extension upstream/unpublished |
+| Parallel Experts; runtime dispatcher serial | Cognate. Per-run order, authority and replay remain isolated | SDK 0.4.0 published/consumed; capacities 1/2/4/8, exclusion, cancellation, continuation, PG and consumer overlap pass | Medium / high | Partially closed — conflict-aware per-resource workspace/world/configuration keys now derive from authoritative state with overlap, alias-collision, forged-identity and restart journeys; Team admission/batching policy now resolves from authoritative Team metadata (lanes + batch) with capacity-free-wait and client-policy-refusal journeys |
 | Live steering; `ExpertsService` next-assignment queue | Native recorded capability + Workbench routing. Only authorized safe-boundary incorporation | `team.inbox.*` records ordered, bounded, deduplicated receipts; active-run next-decision and SIGKILL replay tests pass; no inference interruption | Large / high | Partially closed — shared Team live inbox works; generalized SDK inbox and standalone live steering remain open |
 | Memory aggregate and character budgets; `src/experts/state.ts`, `service.ts` | Workbench. Immutable identity/scope and event traceability | Hash-verified partitions, >5 MiB interrupted migration, erasure, paginated 205-item scoped reads, comparable and 8.49 MB PG benchmarks; actual budget invocation receipts | Large / high | Partially closed — bounded writes/responses and budgets work; global root CAS, materialized lexical retrieval and model-specific tokenization remain |
 | Multiple processes; live-context effect dispatch | Cognate. One current authorized owner, stale writers fenced | PostgreSQL claims, renewal, fence checks, compatibility and fault injection; ambiguous effects blocked | Large / very high | Still open — not implemented |
@@ -90,6 +90,28 @@ Full integration initially exposed an actual SDK pool-starvation deadlock during
 
 ## Verification log
 
+- T2 Team admission/batching policy: `test/J-TEAM-admission.test.ts` passes **2 tests** against
+  actual PostgreSQL at capacity four — a Team limited to one concurrent run serializes its second
+  disjoint-workspace run while three host slots stay free (the policy, not the process, decides),
+  raising the authoritative limit to two lets the same pair overlap; a batch-one policy keeps the
+  second queued root undispatched until the first finishes; client-supplied policy fields
+  (`maxConcurrentRuns`, `admissionBatch`, `policy`) are refused on `expert.converse`/`team.converse`.
+  `test/E2E-team-admission.test.ts` passes **1 test** in real Chromium: the Team editor exposes both
+  policy fields with the effective-policy text and serialized reason, and a saved policy change
+  lands only in authoritative Team metadata (screenshot
+  `screenshots/concurrency/team-admission-policy.png`). Unit coverage: `test/expert-admission.test.ts`
+  11 tests including Team-lane derivation, fail-closed invalid policy and lane/workspace key
+  composition.
+- T1 conflict-aware workspace-effect admission: `test/J-EXPERT-workspace-admission.test.ts` passes
+  **4 tests** against actual PostgreSQL — two tool-bearing Experts on different workspaces overlap at
+  capacity two with disjoint authoritative keys; aliased spellings of one workspace canonicalize to
+  one record and serialize; a forged workspace identity is denied its effects (no provider call) and
+  fails closed to the global exclusion key; per-resource keys and both overlap/serialization survive
+  a full restart. `test/E2E-expert-workspace-admission.test.ts` passes **1 test** in real Chromium
+  with two visible tool-bearing Expert results bound to two different workspaces at capacity two
+  (screenshot `screenshots/concurrency/workspace-admission-desktop.png`). Unit coverage:
+  `test/expert-admission.test.ts` 10 tests over authoritative-identity key derivation, configuration
+  record keys, world-mutator enumeration and fail-closed cases.
 - Fresh baseline: `just verify > /tmp/workbench-debt-baseline.log 2>&1` passed **1,064 tests, zero failures, 6,536 assertions, 85 files, 407.91 seconds**. Started before behavior edits; test discovery was fixed at invocation. Later canonical formatting changed the semantic source digest without changing its meaning. Final exact-tree verification will be separate.
 - First Workbench slices: `just typecheck` passed; `bun test --timeout 15000 test/sea-format.test.ts test/ui-observability.test.tsx test/J-F-delegation.test.ts test/workbench-config-file.test.ts` passed **18 tests, zero failures, 48 assertions** (5.34 seconds), using authorized local fixtures. Earlier unprivileged fixture startup failed; it was sandbox denial, not a product regression.
 - Repository starts clean at `a892120` on `feature/expert-teams`.

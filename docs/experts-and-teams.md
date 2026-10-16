@@ -24,6 +24,19 @@ An individual Expert's **Solo conversation** is independent of Teams. A member's
 
 The invariant is checked during versioned mutations, including simultaneous updates. It does not depend on prompts or the editor.
 
+## Team admission and batching policy
+
+Each Team's admission policy lives in its authoritative Team metadata — edited in the Team editor
+and persisted through `team.save`, never supplied by a run or a client. Two fields decide it:
+**Maximum concurrent runs** (1–8, default 2) bounds how many of that Team's runs may execute at
+once; **Admission batch** (1–8, default 1) bounds how many queued roots dispatch together as slots
+free. A Team exceeding its limit is serialized and waits for a free slot even when host capacity is
+free; the Team editor and the runtime inspection state the effective policy and the serialized
+reason truthfully. Stale or unauthorized client-supplied policy fields (`maxConcurrentRuns`,
+`admissionBatch`, `policy`, `limits`) are refused on `expert.converse`/`team.converse`; only
+authoritative metadata decides. Solo conversations keep one-at-a-time root dispatch. These lanes
+are process-local by SDK contract — cross-process Team fairness is not claimed.
+
 ## Models and tools
 
 An Expert may inherit the current model route when an Assignment is created, select a saved provider route, or specify a provider ID, endpoint, protocol and model explicitly. Workbench retains safe provider configurations in `provider-routes`; the original `model-config/current` route continues serving ordinary coding sessions.

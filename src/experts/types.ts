@@ -24,7 +24,13 @@ export interface TeamMembership { expertId: string; role: "orchestrator" | "spec
 export interface Team {
   id: string; name: string; lifecycle: "draft" | "active" | "inactive";
   members: TeamMembership[]; tools: ExpertTool[];
-  limits: { maxDepth: number; maxAssignments: number; maxUnread: number; maxRounds: number };
+  limits: {
+    maxDepth: number; maxAssignments: number; maxUnread: number; maxRounds: number;
+    /** T2 admission policy: at most N of this Team's runs may be admitted concurrently. */
+    maxConcurrentRuns: number;
+    /** T2 batching policy: at most N queued runs of this Team are dispatched per dispatch pass. */
+    admissionBatch: number;
+  };
 }
 export interface Conversation {
   id: string; scope: "solo" | "team" | "private-team"; expertId: string | null; teamId: string | null;

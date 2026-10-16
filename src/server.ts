@@ -249,20 +249,42 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let experts: ExpertsService;
   let finishExpertsBoot!: (value: ExpertsService) => void;
   const expertsBoot = new Promise<ExpertsService>(resolve => { finishExpertsBoot = resolve; });
-  const admissionKeys = createExpertAdmissionResourceKeys(signal => {
+  // Runtime-service readiness is independent of Expert boot: configuration and coding runs derive
+  // their resource keys from projections and must never wait on the Experts registry seed.
+  let finishServiceBoot!: (value: RuntimeService) => void;
+  const serviceBoot = new Promise<RuntimeService>(resolve => { finishServiceBoot = resolve; });
+  const awaitService = (signal?: AbortSignal) => {
     signal?.throwIfAborted();
-    if (experts) return Promise.resolve(experts);
-    return new Promise<ExpertsService>((resolve, reject) => {
+    if (serviceRef.current) return Promise.resolve(serviceRef.current);
+    return new Promise<RuntimeService>((resolve, reject) => {
       const aborted = () => {
         signal?.removeEventListener("abort", aborted);
-        reject(signal?.reason ?? new Error("Expert admission cancelled during boot"));
+        reject(signal?.reason ?? new Error("Admission cancelled during runtime boot"));
       };
       signal?.addEventListener("abort", aborted, { once: true });
-      void expertsBoot.then(value => {
+      void serviceBoot.then(value => {
         signal?.removeEventListener("abort", aborted);
         resolve(value);
       });
     });
+  };
+  const admissionKeys = createExpertAdmissionResourceKeys({
+    getService: awaitService,
+    ready: signal => {
+      signal?.throwIfAborted();
+      if (experts) return Promise.resolve(experts);
+      return new Promise<ExpertsService>((resolve, reject) => {
+        const aborted = () => {
+          signal?.removeEventListener("abort", aborted);
+          reject(signal?.reason ?? new Error("Expert admission cancelled during boot"));
+        };
+        signal?.addEventListener("abort", aborted, { once: true });
+        void expertsBoot.then(value => {
+          signal?.removeEventListener("abort", aborted);
+          resolve(value);
+        });
+      });
+    },
   });
   let schedules: SchedulesService;
   let scheduleEvaluator: ScheduleEvaluator;
@@ -338,6 +360,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   });
   const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
   serviceRef.current = governedService;
+  finishServiceBoot(governedService);
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
   finishExpertsBoot(experts);
 

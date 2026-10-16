@@ -84,7 +84,7 @@ test("J-EXPERT-MODEL-PARALLEL: browser-visible capacity matches two real model-o
       await desktop.getByRole("button", { name: "Experts and Teams", exact: true }).click();
       await desktop.getByText("Configured capacity: 2 concurrent runs", { exact: true }).waitFor();
       await desktop.getByText(/Model-only solo Experts and Team Specialists may overlap/).waitFor();
-      await desktop.getByText(/Tool-bearing Experts, Team Orchestrators and coding sessions share a serialized admission group/).waitFor();
+      await desktop.getByText(/Tool-bearing work is admitted per canonical workspace/).waitFor();
       expect(await desktop.getByRole("button", { name: /capacity|concurrency/i }).count()).toBe(0);
 
       await openExpertChat(desktop, "Builder", "Review the first independent objective.");

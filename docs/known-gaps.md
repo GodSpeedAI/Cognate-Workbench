@@ -50,11 +50,12 @@ From the workbench design source:
 ## Experts and Teams limits
 
 - Published Cognate0.5.0 provides bounded native concurrency and awaitable admission. Workbench
-  defaults to capacity1; host opt-in1/2/4/8 enables actual overlapping model-only solo Experts and
-  Specialists, with frozen authority and native capacity inspection. Tool-bearing work, Team
-  Orchestrators and configuration share conservative exclusion. General workspace-effect parallelism
-  and Team-specific limits/batching remain open. Parallelism plans remain advisory. See
-  [measured capacity evidence](experts-concurrency-benchmark.md).
+  defaults to capacity1; host opt-in1/2/4/8 enables overlapping execution. Model-only solo Experts
+  and Specialists overlap freely; tool-bearing Experts and coding sessions are admitted per
+  canonical workspace (disjoint workspaces overlap, shared workspaces serialize, forged identities
+  fail closed to serialized exclusion). Team-specific limits/batching remain open. Admission is
+  process-local by SDK contract; a key-waiting run occupies one bounded dispatch slot. Parallelism
+  plans remain advisory. See [measured capacity evidence](experts-concurrency-benchmark.md).
 - Native one-time/daily/weekly Expert and Team schedules execute independently of the browser,
   recover after process termination, and retain occurrence receipts. Legacy automation workflows
   are not automatically converted. Schedule state remains one CAS aggregate; high-volume history

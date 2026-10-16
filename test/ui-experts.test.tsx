@@ -129,7 +129,7 @@ describe("AssignmentSettlement", () => {
 describe("Expert context and effect recovery", () => {
   test("shows provenance-bound memory controls and distinct private/shared Team scopes", () => {
     const expert: Expert = { id: "builder", name: "Builder", lifecycle: "active", definition: { id: "def-builder", specialization: "Build", instructions: "Build carefully", route: null, tools: ["read"], contextBudget: 8000, maxSteps: 4 } };
-    const html = renderToStaticMarkup(<ExpertMemoryPanel expert={expert} teams={[{ id: "team-1", name: "Build Team", lifecycle: "active", members: [], tools: ["read"], limits: { maxDepth: 2, maxAssignments: 8, maxUnread: 10, maxRounds: 6 } }]} assignments={[]} onInvoke={async () => []} />);
+    const html = renderToStaticMarkup(<ExpertMemoryPanel expert={expert} teams={[{ id: "team-1", name: "Build Team", lifecycle: "active", members: [], tools: ["read"], limits: { maxDepth: 2, maxAssignments: 8, maxUnread: 10, maxRounds: 6, maxConcurrentRuns: 2, admissionBatch: 1 } }]} assignments={[]} onInvoke={async () => []} />);
     expect(html).toContain("Context stewardship");
     expect(html).toContain("Source Assignments");
     expect(html).toContain("Personal to this Expert");

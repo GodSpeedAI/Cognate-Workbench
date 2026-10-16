@@ -174,7 +174,7 @@ function createTeam(id: string, name: string, expertIds: readonly string[]): Tea
       tools: [...EXPERT_TOOLS],
     })),
     tools: [...EXPERT_TOOLS],
-    limits: { maxDepth: 2, maxAssignments: 12, maxUnread: 20, maxRounds: 8 },
+    limits: { maxDepth: 2, maxAssignments: 12, maxUnread: 20, maxRounds: 8, maxConcurrentRuns: 2, admissionBatch: 1 },
   };
 }
 

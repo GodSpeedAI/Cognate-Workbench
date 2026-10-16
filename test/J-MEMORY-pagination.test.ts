@@ -25,7 +25,7 @@ test("J-MEMORY-PAGINATE: capability pages keep stable bounded ordering and rejec
       state.teams["pagination-other-team"] = {
         id: "pagination-other-team", name: "Other Team", lifecycle: "active",
         members: [{ expertId: "builder", role: "orchestrator", tools: [...EXPERT_TOOLS] }], tools: [...EXPERT_TOOLS],
-        limits: { maxDepth: 2, maxAssignments: 8, maxUnread: 10, maxRounds: 6 },
+        limits: { maxDepth: 2, maxAssignments: 8, maxUnread: 10, maxRounds: 6, maxConcurrentRuns: 2, admissionBatch: 1 },
       };
       for (let index = 1; index <= 205; index++) {
         const id = `pagination-message-${String(index).padStart(3, "0")}`;

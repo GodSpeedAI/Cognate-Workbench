@@ -17,7 +17,7 @@ export function TeamEditor({ initial, busy, onCancel, onSave }: {
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [tools, setTools] = useState<ExpertTool[]>(initial?.tools ?? [...EXPERT_TOOLS]);
-  const [limits, setLimits] = useState<Team["limits"]>(initial?.limits ?? { maxDepth: 2, maxAssignments: 12, maxUnread: 20, maxRounds: 8 });
+  const [limits, setLimits] = useState<Team["limits"]>(initial?.limits ?? { maxDepth: 2, maxAssignments: 12, maxUnread: 20, maxRounds: 8, maxConcurrentRuns: 2, admissionBatch: 1 });
   const toggleTool = (tool: ExpertTool, checked: boolean) => setTools((current) => checked ? [...new Set([...current, tool])] : current.filter((value) => value !== tool));
   return <section className="experts-editor" aria-labelledby="team-editor-heading"><header className="experts-section-head"><div><p className="experts-eyebrow">Team definition</p><h2 id="team-editor-heading">{initial ? "Configure Team" : "Create Team"}</h2><p>A draft Team needs exactly one Orchestrator before it can run.</p></div></header>
     <form className="experts-form" onSubmit={(event) => { event.preventDefault(); onSave({ name: name.trim(), tools, limits }); }}>
@@ -28,7 +28,13 @@ export function TeamEditor({ initial, busy, onCancel, onSave }: {
         <label htmlFor="team-max-assignments">Maximum assignments<input id="team-max-assignments" type="number" min={1} max={30} value={limits.maxAssignments} onChange={(event) => setLimits({ ...limits, maxAssignments: Number(event.currentTarget.value) })} /></label>
         <label htmlFor="team-max-unread">Maximum unread work<input id="team-max-unread" type="number" min={1} max={100} value={limits.maxUnread} onChange={(event) => setLimits({ ...limits, maxUnread: Number(event.currentTarget.value) })} /></label>
         <label htmlFor="team-max-rounds">Maximum speaking rounds<input id="team-max-rounds" type="number" min={1} max={30} value={limits.maxRounds} onChange={(event) => setLimits({ ...limits, maxRounds: Number(event.currentTarget.value) })} /></label>
-      </div></fieldset>
+      </div>
+      <div className="experts-route-fields">
+        <label htmlFor="team-max-concurrent">Maximum concurrent runs<input id="team-max-concurrent" type="number" min={1} max={8} value={limits.maxConcurrentRuns} onChange={(event) => setLimits({ ...limits, maxConcurrentRuns: Number(event.currentTarget.value) })} /></label>
+        <label htmlFor="team-admission-batch">Admission batch<input id="team-admission-batch" type="number" min={1} max={8} value={limits.admissionBatch} onChange={(event) => setLimits({ ...limits, admissionBatch: Number(event.currentTarget.value) })} /></label>
+      </div>
+      <p className="experts-muted">Effective admission policy (from this Team’s authoritative metadata, never from run input): at most {limits.maxConcurrentRuns} of this Team’s runs may execute at once, and queued runs dispatch in batches of {limits.admissionBatch}. Runs beyond the limit are serialized and wait for a free slot even when host capacity is free.</p>
+      </fieldset>
       <p className="experts-muted">After saving, add Experts as Specialists, designate one Orchestrator, then activate the Team.</p>
       <div className="experts-actions"><button type="button" className="global-panel-btn" disabled={busy} onClick={onCancel}>Cancel</button><button type="submit" className="global-panel-btn primary" disabled={busy || !name.trim()}>{busy ? "Saving…" : initial ? "Save Team" : "Create draft Team"}</button></div>
     </form>

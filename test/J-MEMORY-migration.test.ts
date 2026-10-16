@@ -43,7 +43,7 @@ function expertState(): ExpertState {
         expertId, role: memberIndex === 0 ? "orchestrator" : "specialist", tools: [...EXPERT_TOOLS],
       })),
       tools: [...EXPERT_TOOLS],
-      limits: { maxDepth: 2, maxAssignments: 12, maxUnread: 20, maxRounds: 8 },
+      limits: { maxDepth: 2, maxAssignments: 12, maxUnread: 20, maxRounds: 8, maxConcurrentRuns: 2, admissionBatch: 1 },
     };
     state.teams[id] = team;
   }

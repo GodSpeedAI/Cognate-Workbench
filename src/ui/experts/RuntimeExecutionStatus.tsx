@@ -43,7 +43,8 @@ export function RuntimeExecutionStatus({ inspect }: { readonly inspect: () => Pr
     </> : <>
       <p>Configured capacity: {inspection.configuredCapacity} concurrent runs</p>
       <p className="experts-muted">Model-only solo Experts and Team Specialists may overlap up to this capacity.</p>
-      <p className="experts-muted">Tool-bearing Experts, Team Orchestrators and coding sessions share a serialized admission group.</p>
+      <p className="experts-muted">Tool-bearing work is admitted per canonical workspace: runs sharing one workspace serialize; runs on different workspaces may overlap. Unknown or forged workspace identities fail closed to serialized exclusion.</p>
+      <p className="experts-muted">Team runs follow each Team’s authoritative admission policy (maximum concurrent runs and admission batch): a Team exceeding its limit is serialized and waits for a free slot even when host capacity is free.</p>
     </> : unavailable ? <p role="status">Runtime capacity unavailable. This server did not provide a valid execution inspection.</p>
       : <p role="status">Reading host runtime capacity…</p>}
   </section>;
