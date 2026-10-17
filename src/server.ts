@@ -78,11 +78,31 @@ import { secretStore } from "./secrets.ts";
 export const LOCAL_OPERATOR = { actor: { id: "operator", kind: "user" as const }, tenant: "local" };
 const SYSTEM_CALLER = { actor: { id: "system", kind: "system" as const }, tenant: "local" };
 
+export interface RunOwnershipMode {
+  readonly mode: "single-process" | "multi-process";
+}
+
+/** T7 (J-EXPERT-PARALLEL): resolve the multi-process run-ownership configuration. "multi-process"
+ * is exposed only behind this verified configuration, backed by the published fenced run-write
+ * ownership release: every execution pass claims authoritative store-time ownership, a stale
+ * owner's late run-scoped writes are fenced, and a killed process's in-flight effect requires
+ * explicit reconciliation instead of a blind repeat (ambiguousSteps: "wait"). The default keeps
+ * the historical single-process restart semantics. */
+export function parseRunOwnershipMode(raw: string | undefined): "single-process" | "multi-process" {
+  if (raw === undefined || raw === "") return "single-process";
+  if (raw === "single-process" || raw === "multi-process") return raw;
+  throw new Error("COGNATE_RUN_OWNERSHIP must be 'single-process' or 'multi-process'");
+}
+
 export interface ServerOptions {
   readonly port: number;
   readonly home: string;
   /** Host startup capacity; default one. Eligibility never widens captured Expert authority. */
   readonly runCapacity?: 1 | 2 | 4 | 8;
+  /** T7: verified multi-process run-ownership configuration (defaults to COGNATE_RUN_OWNERSHIP,
+   * then "single-process"). Multi-process semantics: fenced run writes + ambiguous-effect
+   * reconciliation; single-process keeps the historical restart behavior. */
+  readonly runOwnership?: "single-process" | "multi-process";
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
@@ -215,6 +235,7 @@ function indexHtml(): string {
 export async function startServer(options: ServerOptions): Promise<AppServer> {
   const home = options.home;
   const runCapacity = parseExpertAdmissionCapacity(options.runCapacity === undefined ? process.env.COGNATE_RUN_CAPACITY : String(options.runCapacity));
+  const runOwnershipMode = options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP);
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
   if (!containmentConfig && containmentConfigPath) {
@@ -304,7 +325,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     store,
     // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
     // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
-    ...(runCapacity > 1 ? { execution: { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } } : {}),
+    ...(runCapacity > 1 || runOwnershipMode === "multi-process"
+      ? {
+        execution: {
+          ...(runCapacity > 1 ? { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } : {}),
+          ...(runOwnershipMode === "multi-process" ? { runOwnership: { ambiguousSteps: "wait" as const } } : {}),
+        },
+      }
+      : {}),
     // Usage pass U6 (RealityTrace, Option A): trace-worthy events get an observation intent
     // committed atomically with the event (the runtime's generic hook — no runtime dependency on
     // RealityTrace; the adapter only drains the outbox).

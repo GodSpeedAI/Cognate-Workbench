@@ -118,3 +118,26 @@ Full integration initially exposed an actual SDK pool-starvation deadlock during
 - Context indexing was rejected by automatic approval review for external repository-data egress. Local bounded inspection continues; no external index is required.
 - Integrated focused gate: 41 tests, zero failures, 303 assertions across 11 files, 88.69 seconds. Ownership/race hardening: 18 tests, zero failures, 96 assertions. Real budget gate: five tests, zero failures, 21 assertions. Browser schedule/usage journey: one desktop/mobile test passed; observations and screenshots in `screenshots/experts-debt/`.
 - A prior integrated candidate after immutable preparation coalescing passed 1,100 tests, zero failures, and 6,856 assertions across 96 files (629.97 seconds). The later published-SDK migration and capacity characterization passed `just verify` with **1,104 tests, zero failures, and 6,884 assertions across 96 files (408.21 seconds)**. [The complete report](experts-debt-verification.md) records scope, commits, failures, measurements and unfulfilled acceptance conditions.
+
+## Verification log (T6/T7, 2026-10-17)
+
+- T6 upstream run-write ownership: PR #48 (store fencing + executor ownership lifecycle +
+  ambiguous-effect reconciliation) and PR #55 (held-lease recovery re-arm) merged into the
+  Cognate main with green exact-head CI; the linked SDK releases **0.6.0** (recovered
+  publication with the receipts gate and an independent 45/45 registry audit) and **0.6.1**
+  (normal train, 45/45 publish + receipts in one run) are published. Full provenance:
+  [sdk-0.6.0-release.md](sdk-0.6.0-release.md). A fresh clean-room consumer exercised the fenced
+  ownership API and a runtime boot against the published packages.
+- T7 Workbench multi-process integration: the Workbench pins all SDK dependencies to **0.6.1**
+  (23 direct, 36 resolved) and exposes multi-process operation behind the verified
+  `runOwnership: "multi-process"` configuration (`ambiguousSteps: "wait"`); the default
+  single-process mode keeps historical restart semantics. `test/J-EXPERT-OWNERSHIP-MULTI.test.ts`
+  passes the two-process crash/stale-writer journey against actual PostgreSQL: the killed
+  process's in-flight effect is marked ambiguous and never re-performed (provider calls stay at
+  one; no model invocation is ever recorded), the interrupted attempt stays booked in the billing
+  ledger, the zombie writer's superseded-credential append is fenced with nothing appended, and
+  the assignment settles only from the operator's explicit reconciliation. The SIGKILL
+  (`J-EXPERT-INBOX-RECOVER`) and restart (`J-TEAM-RECOVER`) journeys that regressed against
+  published 0.6.0 — see [sdk-0.6.0-release.md](sdk-0.6.0-release.md) — pass unchanged against
+  0.6.1. Full gate: `just verify` passed **1,173 tests / 1,167 pass / 6 skip / 0 fail** across
+  113 files.

@@ -34,9 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T6
-  last_settled_task: T5
-  note: T6 store-level slice settled upstream (worktree commit ae80c1c); executor integration and operator-gated publication remain
+  current_task: T8
+  last_settled_task: T7
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -168,7 +167,38 @@ progress:
     operator-authorized merge, linked 45-package release, registry gitHead audit and
     fresh-consumer proof. The merge and publication steps are operator-gated by upstream policy
     ("no merge/publication" until exact-head checks) and cannot be completed by the agent alone.
-    Workbench continues to consume only published 0.5.0 packages.
+     The full publication train then completed under operator authorization: PR #48 merged
+    with green exact-head CI (verify, pack + clean-room install, CodeRabbit); the linked 0.6.0 release
+    recovered from an interrupted first publication through the exact-state restoration (umbrella
+    release, 45 component/unified tags minted by the workflow's own plan script at the release SHA)
+    plus the PR #54 dispatch-recovery input, with the receipts gate verifying 45/45 packages at 0.6.0,
+    an independent registry audit (all 45 latest = 0.6.0), and a fresh clean-room consumer exercising
+    the fenced ownership API and a runtime boot. The Workbench's suite against 0.6.0 found one real
+    defect — a lease-held back-off consumed the only recovery trigger and stranded hard-killed runs —
+    fixed by PR #55 (RED/GREEN seeded journey: hangs before, recovers after) and released as 0.6.1
+    through the normal train (release-please, tag-components, 45/45 publish, receipts gate, one green
+    run). Registry audit: all 45 linked packages at 0.6.1. Provenance: docs/sdk-0.6.0-release.md.
+    T6 is settled.
+  T7: >-
+    Workbench multi-process integration is settled against the published 0.6.1 ownership release.
+    The Workbench pins all 23 direct SDK dependencies to 0.6.1 (36 resolved) and exposes
+    multi-process operation behind the verified `runOwnership: "multi-process"` configuration
+    (COGNATE_RUN_OWNERSHIP), which enables `execution.runOwnership.ambiguousSteps: "wait"` on the
+    published runtime; the default single-process mode keeps historical restart semantics (the
+    upgrade alone changed no observable behavior). The model journey J-EXPERT-PARALLEL was extended
+    first and re-validated to name the multi-process settlement: a killed process's in-flight effect
+    is never blindly repeated, the recovery records the ambiguity and completes only from explicit
+    reconciliation, and a stale owner's late run-scoped write is fenced. `test/J-EXPERT-OWNERSHIP-MULTI.test.ts`
+    passes the two-process crash/stale-writer journey against actual PostgreSQL with two AppServers on
+    one shared store: the zombie writer's superseded-credential append is fenced with nothing
+    appended, exactly one `run.invocation.ambiguous` is recorded, the provider is never re-called, the
+    interrupted attempt stays booked in the durable billing ledger, and the assignment settles only
+    from the operator's reconciliation with zero recorded model-generation invocations. The SIGKILL
+    and restart journeys that regressed against 0.6.0 pass unchanged against 0.6.1. Full gate:
+    `just verify` passed 1,173 tests / 1,167 pass / 6 skip / 0 fail across 113 files (one
+    intermediate run showed a single E2E-workbench Chromium ERR_NETWORK_CHANGED console flake that
+    passes in isolation and in the final clean run). Evidence: docs/sdk-0.6.0-release.md,
+    docs/experts-debt-closure.md.
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh
