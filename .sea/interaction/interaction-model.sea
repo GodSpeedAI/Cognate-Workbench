@@ -73,6 +73,19 @@ Entity "NativeExecutionSlots"
 
 Entity "UsageLedger"
 
+// T8 production trust: a durable human/operator identity and its server-issued sessions. The
+// session record — never the bearer token — is the durable truth; tokens are stored only as
+// verified hashes and revocation is enforced at every request boundary.
+Entity "DurableIdentity"
+
+Entity "DurableSession"
+
+// T8: operator-configured aggregate resource containment for contained executions. Like
+// UserPreferences this is an operator-owned preference, but the quota is its own concept: an
+// aggregate ceiling across processes that new work fails closed against, never widened by
+// agent or browser input.
+Entity "ContainmentQuota"
+
 // Focus (adapted from the operator's gs-term): what "this" means is resolved by a fixed precedence and
 // frozen when a message is sent, so a referent never silently changes while an agent works.
 Entity "AttentionFocus"
@@ -536,7 +549,7 @@ Instance j_rw_contained_workspace of "CanonicalJourney" {
     purpose: "Create an explicitly contained workspace through Cognate execution-world ports without changing existing sessions or accepting binary trust assertions from an agent or browser",
     settlement: "A durable workspace references its own contained execution world; ordinary read/edit/Bash/run_code route through that provider; host sibling paths and network access are denied; restart restores the same boundary or marks it unavailable without local fallback",
     steps: "human inspects host containment configuration and limits -> explicitly selects a dedicated root for a new contained workspace -> mutation rejects agent invocation and canonicalizes the root -> native provider verifies binary and launches real namespace preflight -> typed configuration events record world and workspace -> existing tools use provider-owned root -> visible status and actual receipts establish the selected boundary",
-    variants: "missing configuration, unsupported platform, changed binary or failed namespaces leave no new selectable workspace; restart without approved configuration preserves unavailable identity and denies work; a local uncontained twin remains distinct; Linux child containment does not authenticate users, isolate the host application or impose aggregate CPU/memory quotas; failed or ambiguous external effects still require native reconciliation"
+    variants: "missing configuration, unsupported platform, changed binary or failed namespaces leave no new selectable workspace; restart without approved configuration preserves unavailable identity and denies work; a local uncontained twin remains distinct; Linux child containment does not authenticate users or isolate the host application — aggregate CPU/process ceilings and kernel per-execution caps over contained work are their own journey (J-RW-AGGREGATE-CONTAINMENT); failed or ambiguous external effects still require native reconciliation"
 }
 
 Instance j_rw_add_workspace of "CanonicalJourney" {
@@ -1240,4 +1253,43 @@ Instance j_expert_model_parallel of "CanonicalJourney" {
     settlement: "Two independently routed model-only Expert runs overlap at capacity two and return attributable durable results; forged tool calls cannot widen the frozen allowlist; all tool-bearing and ordinary coding runs share one exclusion key; no active-worker count or general workspace parallelism is claimed",
     steps: "operator configures host capacity and inspects effective policy -> native admission resolves the registered Assignment after application readiness -> only intrinsic-return assignments receive independent slots -> all other work retains conservative shared exclusion -> native runs return correlated handoffs -> operator inspects evidence",
     variants: "unknown or stale Assignment, attempt, sender or Team membership blocks admission before model effects; event-only agent.config bypasses application-readiness lookup to preserve seed boot; cancellation and recovery use the same native admission path; current frozen tools and model route survive profile edits; capacity remains a startup setting; Team-specific capacities and disjoint workspace effect parallelism remain deferred under J-EXPERT-PARALLEL"
+}
+
+Instance j_auth_session of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "identity.session.issue, identity.session.revoke, identity.inspect",
+    evidence_class: "proposed",
+    initiating_condition: "The operator replaces client-claimed identities with server-issued durable sessions",
+    journey_id: "J-AUTH-SESSION",
+    precondition: "A durable identity ledger exists; the browser entry and every remote request must present a session the server itself issued",
+    purpose: "Make the effective caller a durable, revocable server-side fact instead of a client-supplied string",
+    settlement: "Every admitted request resolves to a live unexpired unrevoked session bound to one identity; a revoked or expired session is refused with no durable effect; a captured token replayed after revocation produces no durable write anywhere in the store",
+    steps: "boot seeds the operator identity and issues one session for this browser entry -> every request authenticates against the durable session ledger -> operator may issue further sessions for provisioned identities -> operator revokes a session -> the revoked session's replayed request is refused before any capability or service mutation -> boot reconciles expired sessions",
+    variants: "the raw development bearer format is refused in the production posture unless an explicit dev opt-in is armed; revocation takes effect without restart; session tokens exist in cleartext only in the issued entry and the holder's memory, the ledger stores verified hashes; an unknown token, an altered token or a session for a missing identity is refused"
+}
+
+Instance j_auth_tenant_isolation of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "identity.session.issue",
+    evidence_class: "proposed",
+    initiating_condition: "The operator provisions an identity in a second tenant on one shared store",
+    journey_id: "J-AUTH-TENANT-ISOLATION",
+    precondition: "Sessions bind each caller to the tenant of its durable identity; public projections and run, artifact and stream reads are tenant-partitioned by the framework",
+    purpose: "Prove one tenant's session cannot observe or mutate another tenant's work on a shared store",
+    settlement: "Each authenticated caller sees only its own tenant's partition: its projections, runs, artifacts and streams; a cross-tenant replay or a forged tenant claim is refused with no durable effect; an empty foreign partition is indistinguishable from an absent one",
+    steps: "operator issues a session for a second-tenant identity -> both sessions drive the same shared store -> each caller's projection reads stay inside its tenant prefix -> cross-tenant run, artifact and event reads are refused as not found -> a client-claimed tenant string without a session is refused -> operator inspects both partitions",
+    variants: "a session token from one tenant cannot be replayed into another tenant's context; the framework's tenant partitioning is observed end to end, not assumed; multi-tenant application seeding (per-tenant Experts and schedules) is out of scope and not claimed"
+}
+
+Instance j_rw_aggregate_containment of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "settings.changeContainment, workspace.contained.select, process.exec",
+    evidence_class: "proposed",
+    initiating_condition: "The operator configures aggregate resource ceilings for contained executions",
+    journey_id: "J-RW-AGGREGATE-CONTAINMENT",
+    precondition: "A contained workspace is selected and its provider owns the OS boundary; the aggregate containment ledger is the durable admission truth across processes",
+    purpose: "Bound aggregate contained resource consumption across processes so exhaustion of a configured quota refuses new work instead of silently widening it",
+    settlement: "New contained work that would exceed the aggregate concurrent-execution ceiling or the aggregate CPU-second window budget is refused before any child process is launched, from any process sharing the store; each admitted execution runs under its kernel CPU and address-space caps; a cancelled or completed execution releases its aggregate slot; a crashed holder's stale slot is reaped after its lease and accounted conservatively",
+    steps: "operator configures aggregate containment quotas -> every contained execution acquires a durable aggregate slot under the quota before launch -> admitted executions run under kernel per-execution CPU and address-space limits -> completion, cancellation and crash release or reap the slot durably -> exhausted quota fails closed for new work across processes -> operator inspects the aggregate ledger",
+    variants: "an unconfigured quota keeps historical uncontained-aggregate behavior; a configured quota with kernel limit tooling unavailable inside the world refuses the execution rather than running uncapped; a CPU-capped execution is recorded as capped and booked conservatively; per-process memory accounting is bounded by the kernel address-space cap and the aggregate concurrency ceiling, not measured; local uncontained workspaces are not aggregate-contained and never were"
 }

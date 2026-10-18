@@ -24,7 +24,7 @@ describe("E2E remote workspaces", () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
       const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
-      const app = await startServer({ port: 0, home });
+      const app = await startServer({ devAuth: true, port: 0, home });
       const client = createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
       const browser = await chromium.launch();
       try {

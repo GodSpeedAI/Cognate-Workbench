@@ -6,7 +6,40 @@
 import type { AgentDefinition } from "@godspeedai/cognate-runtime-api";
 import type { Json } from "@godspeedai/cognate-events";
 import type { SettingsPatch } from "../settings.ts";
+import {
+  isAgentPreset, isAppearanceMode, isContainmentQuotas, isFontSizePx, isLanguageCode,
+  isPerformanceDetailMode, isPermissionMode, isPluginStatePatch, isSendBehavior, isSpendingCeilings,
+} from "../settings.ts";
+import { isWorkDetailsMode } from "../workDetails.ts";
+import { isShortcutOverrides } from "../shortcuts.ts";
 import { WORKBENCH_EVENTS } from "../workbench/types.ts";
+
+/** The recording run is a second validation gate: a settings event that skipped the
+ *  `settings.change*` capability (a direct service startRun) still cannot make an invalid
+ *  field durable. Every field is optional; present fields must validate exactly as the
+ *  capability writers validate them. */
+function validateSettingsPatch(patch: Partial<Record<keyof SettingsPatch, unknown>>): void {
+  const checks: ReadonlyArray<readonly [string, unknown, (value: unknown) => boolean]> = [
+    ["workDetails", patch.workDetails, isWorkDetailsMode],
+    ["permission", patch.permission, isPermissionMode],
+    ["language", patch.language, isLanguageCode],
+    ["appearance", patch.appearance, isAppearanceMode],
+    ["fontSize", patch.fontSize, isFontSizePx],
+    ["performanceDetail", patch.performanceDetail, isPerformanceDetailMode],
+    ["codingTools", patch.codingTools, (v) => typeof v === "boolean"],
+    ["sendBehavior", patch.sendBehavior, isSendBehavior],
+    ["preset", patch.preset, isAgentPreset],
+    ["plugins", patch.plugins, isPluginStatePatch],
+    ["shortcuts", patch.shortcuts, isShortcutOverrides],
+    ["spending", patch.spending, isSpendingCeilings],
+    ["containment", patch.containment, isContainmentQuotas],
+  ];
+  const unknownFields = Object.keys(patch).filter(key => !checks.some(([name]) => name === key));
+  if (unknownFields.length > 0) throw new Error(`agent.config: unknown settings field(s): ${unknownFields.join(", ")}`);
+  for (const [field, value, check] of checks) {
+    if (value !== undefined && !check(value)) throw new Error(`agent.config: settings field ${field} failed validation`);
+  }
+}
 
 export type AgentConfigInput =
   | { readonly kind: "model.configured"; readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages"; readonly model: string }
@@ -126,6 +159,10 @@ export const agentConfigAgent: AgentDefinition = {
       }
       case "settings.changed": {
         const { kind: _kind, ...payload } = command;
+        // T8 (independent review finding): a settings event records durable operator-tenant
+        // state — containment quotas included — so the recording run validates exactly what the
+        // `settings.change*` capabilities validate. An unvalidated field never becomes durable.
+        validateSettingsPatch(payload);
         await ctx.emit("settings.changed", payload);
         return { ok: true };
       }

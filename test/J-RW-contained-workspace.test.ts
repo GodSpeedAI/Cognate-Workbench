@@ -73,7 +73,7 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
   let receivedHostLoopbackRequests = 0;
   try {
     const config = await verifiedContainmentConfig();
-    app = await startServer({ port: 0, home, containmentConfig: config });
+    app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     let client = clientFor(app);
 
     // A host listener is reachable only in the host namespace. The child must be unable to
@@ -153,7 +153,7 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
     expect(persisted).not.toContain(process.execPath);
 
     await stop(app);
-    app = await startServer({ port: 0, home, containmentConfig: config });
+    app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     client = clientFor(app);
     const afterRestart = await client.invoke("process.exec", {
       worldId: selected.executionWorldId,
@@ -163,7 +163,7 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
     expect(afterRestart).toMatchObject({ exitCode: 0, stdout: "after\n" });
 
     await stop(app);
-    app = await startServer({ port: 0, home });
+    app = await startServer({ devAuth: true, port: 0, home });
     client = clientFor(app);
     await expect(client.invoke("process.exec", {
       worldId: selected.executionWorldId,
@@ -193,7 +193,7 @@ integrationTest("J-RW-contained-workspace: lost configuration start acknowledgme
   let containedStartCalls = 0;
   try {
     const config = await verifiedContainmentConfig();
-    app = await startServer({ port: 0, home, containmentConfig: config });
+    app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     client = clientFor(app);
     const expectedWorldId = containedWorldId(config, workspace);
     service = app.runtime.service;
@@ -263,7 +263,7 @@ integrationTest("J-RW-contained-workspace: lost configuration start acknowledgme
     ]);
 
     await stop(app);
-    app = await startServer({ port: 0, home, containmentConfig: config });
+    app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     client = clientFor(app);
     const afterRestartSelection = await client.invoke("workspace.contained.select", { path: workspace }) as {
       readonly workspaceId: string;
@@ -310,6 +310,7 @@ integrationTest("J-RW-contained-workspace: a mismatched host binary digest fails
   try {
     const validConfig = await verifiedContainmentConfig();
     app = await startServer({
+      devAuth: true,
       port: 0,
       home,
       containmentConfig: {
@@ -349,7 +350,7 @@ integrationTest("J-RW-contained-workspace: a launcher copied into the writable r
       .toBe(hostConfig.provenance.binarySha256);
 
     const config: ContainmentConfig = { ...hostConfig, executablePath: copiedLauncher };
-    app = await startServer({ port: 0, home, containmentConfig: config });
+    app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     const client = clientFor(app);
     await expect(client.invoke("workspace.contained.select", { path: workspace }))
       .rejects.toThrow(/launcher must be outside the writable workspace/i);
@@ -393,6 +394,7 @@ integrationTest("J-RW-contained-workspace: queued contained configuration is can
   try {
     const config = await verifiedContainmentConfig();
     app = await startServer({
+      devAuth: true,
       port: 0,
       home,
       containmentConfig: config,

@@ -396,3 +396,27 @@ export function bindRuntimeExecution(domain: Domain): CapabilityContract["semant
   if (contracts.length !== 1) throw new Error("domain: expected one native runtime execution binding");
   return contracts[0]!.semanticRef;
 }
+
+/**
+ * T8 production trust: durable identities/revocable sessions (J-AUTH-SESSION,
+ * J-AUTH-TENANT-ISOLATION) and aggregate containment quotas (J-RW-AGGREGATE-CONTAINMENT). Session
+ * administration capabilities anchor on `DurableSession` (the durable session record is the truth;
+ * a browser or agent never supplies its own identity); the aggregate quota setting anchors on
+ * `ContainmentQuota` (an operator preference that the containment ledger enforces fail-closed
+ * across processes — it is deliberately NOT a per-user preference, so it gets its own anchor).
+ */
+export function bindT8Identity(domain: Domain) {
+  const bindings: readonly CapabilityBinding[] = [
+    { semanticId: domain.semanticId("DurableSession"), capability: { id: "identity.session.issue", version: "1.0.0" } },
+    { semanticId: domain.semanticId("DurableSession"), capability: { id: "identity.session.revoke", version: "1.0.0" } },
+    { semanticId: domain.semanticId("DurableSession"), capability: { id: "identity.inspect", version: "1.0.0" } },
+    { semanticId: domain.semanticId("ContainmentQuota"), capability: { id: "settings.changeContainment", version: "1.0.0" } },
+  ];
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} T8 identity contracts, got ${contracts.length}`);
+  const byId = Object.fromEntries(contracts.map(contract => [contract.id, contract.semanticRef])) as Record<string, CapabilityContract["semanticRef"]>;
+  return {
+    identity: { issue: byId["identity.session.issue"]!, revoke: byId["identity.session.revoke"]!, inspect: byId["identity.inspect"]! },
+    containment: byId["settings.changeContainment"]!,
+  };
+}

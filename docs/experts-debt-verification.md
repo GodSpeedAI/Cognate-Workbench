@@ -360,3 +360,63 @@ Published SDK 0.4.0 remains the dependency at this checkpoint. The writable-laun
 must be legitimately published and consumed before its protection is claimed for Workbench. Final
 full integration, commit and publication remain pending. Production authentication, tenant/session
 authorization, host isolation, aggregate resource quotas and formal security review remain open.
+
+## Production identity, tenant isolation and aggregate containment (T8) — 2026-10-17
+
+Model first: three journeys added to the authoritative interaction model and re-validated
+(`domainforge validate` 0 violations; `fmt --check` clean) — J-AUTH-SESSION (durable identities,
+server-issued revocable sessions, restart supersession), J-AUTH-TENANT-ISOLATION (a second tenant's
+session sees only its own partition on one shared store), J-RW-AGGREGATE-CONTAINMENT (operator
+ceilings over all contained executions, fail closed across processes), with the semantic anchors
+`DurableIdentity`, `DurableSession`, `ContainmentQuota` bound in `domain/index.ts`.
+
+- **Identity and sessions**: `src/auth/identity.ts` is the durable truth (thread `auth:identity:v1`):
+  256-bit random tokens stored only as SHA-256 hashes, timing-safe comparison, idempotent identity
+  provisioning, revocation and expiry, boot-time supersession of the previous boot's browser token,
+  and a read-through resolution cache invalidated by every in-process ledger write (revocation is
+  immediate in the process that revoked; a cross-process revocation lags ≤ 2 s — a documented
+  read-lag boundary). The production posture (`src/server.ts`) authenticates sessions only; the
+  legacy client-claimed dev format is armed solely behind an explicit `devAuth` opt-in
+  (`COGNATE_DEV_AUTH=1` or `ServerOptions.devAuth`) that prints a loud warning. The capability
+  policy now grants user-kind capabilities to exactly the one durable operator identity.
+- **Tenant isolation**: observed end to end on one PostgreSQL store with two server-issued sessions
+  (operator in `local`, a provisioned identity in `acme`): per-tenant projection partitions,
+  tenant-filtered runs, per-tenant event streams and thread streams, empty-partition
+  indistinguishability, server-derived tenants (a client-claimed tenant never changes the caller),
+  forged dev-format refusal in the production posture — and the system-only guard on both T8
+  ledgers so no session can forge the identity ledger or hand-free containment slots.
+- **Aggregate containment**: `src/capabilities/aggregateContainment.ts` (thread
+  `containment:aggregate:v1`) wraps every contained provider's process port: a durable admission
+  slot per execution, operator quotas via `settings.changeContainment`
+  (`maxConcurrent`, `cpuSecondsPerWindow` with `cpuSecondsPerExecution`, `cpuWindowHours`,
+  `maxAddressSpaceBytes`), kernel per-execution caps applied inside the namespace with
+  `prlimit --as/--cpu` (fail closed when the tooling is unavailable in the world), a 300 s hard
+  execution clamp whose lease provably covers the child, conservative CPU booking at the full
+  kernel cap (never a guessed smaller number), lease-lapse reaping of crashed holders, and boot
+  reconciliation. Local/ssh/wsl worlds are not aggregate-contained and never were.
+- **Deployment hardening**: hardening headers on every response including successful Connect API
+  replies; a strict CSP on the console document (`script-src 'self'`; the review's CSP caught and
+  fixed a pre-existing inline font handler without breaking the "slow fonts never block bootstrap"
+  journey); `maxRequestBodySize` 64 MiB; loopback bind retained; the generated browser entry is
+  untracked (`.generated/` ignored) so no token ever enters version control.
+- **Independent security review**: [security-review-2026-10-17-t8.md](security-review-2026-10-17-t8.md)
+  — a fresh-context adversarial review of the full change set. Its findings (one HIGH: the two new
+  ledgers initially outside the system-only thread guard; four MEDIUM; several LOW/INFO) and the
+  complete remediation record are in the artifact. All MUST-fix items are remediated and re-gated;
+  the accepted residual boundaries (cross-process session semantics in the two-process worker
+  posture, the ≤ 2 s cross-process revocation read lag, fail-closed prlimit probe caching, the
+  fail-closed malformed-ledger brick) are documented in the artifact and above.
+
+| Gate | Result |
+|---|---|
+| `bun run verify` (typecheck + full suite) | 1,188 tests / 1,179 pass / 9 skip / **0 fail** across 117 files; 7,722 assertions. |
+| `COGNATE_BWRAP_TESTS=1` + host attestation: `test/J-RW-AGGREGATE-CONTAINMENT.test.ts test/J-RW-contained-workspace.test.ts test/E2E-contained-workspace.test.ts` | 9 pass / 0 fail (164 assertions): real kernel SIGXCPU cap kills a burner and the exhausted CPU window refuses new work; the aggregate concurrency ceiling fails closed from a second Workbench process on the same store; provider-killed and crashed-holder slots release/reap; the pre-existing escape/egress/cancellation journeys stay green. |
+| `test/J-AUTH-SESSION.test.ts`, `test/J-AUTH-TENANT-ISOLATION.test.ts`, `test/aggregateContainment.test.ts` | 12 pass / 0 fail against actual PostgreSQL (97 assertions): revocation replay with zero durable events, restart token supersession, expiry aging, same-tenant issuance refusal, ledger write/read refusals for sessions, invalid settings never durable, tenant partition isolation, quota ceiling/window/cancellation/reap/clamp/clear semantics. |
+| `domainforge validate --format human .sea/interaction/interaction-model.sea` | 0 violations; `fmt --check` clean. |
+
+Known boundaries carried forward: multi-tenant application seeding (per-tenant Experts/schedules) is
+not claimed; aggregate memory is bounded per-execution (kernel RLIMIT_AS × the concurrency ceiling)
+rather than measured as a live sum; actual per-child CPU accounting is unobservable from the
+Workbench layer, so the window books the kernel cap conservatively; external effects remain
+at-least-once (commitments plus reconciliation); the single-operator development authenticator's
+replacement is now fact, but this is still not a production-hardened multi-user deployment.

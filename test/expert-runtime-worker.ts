@@ -10,6 +10,7 @@ const releaseFile = process.env.EXPERT_WORKER_RELEASE_FILE;
 if (!home || !portFile || !startedFile || !releaseFile) throw new Error("Expert runtime worker environment is incomplete");
 
 const server = await startServer({
+    devAuth: true,
   port: 0,
   home,
   expertProviderFactory(route: ModelConfig) {

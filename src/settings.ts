@@ -8,6 +8,7 @@
 import { isWorkDetailsMode, type WorkDetailsMode } from "./workDetails.ts";
 import { isShortcutOverrides, type ShortcutOverrides } from "./shortcuts.ts";
 import { parseSpendingCeilings } from "./experts/billing.ts";
+import { parseContainmentQuotas } from "./capabilities/aggregateContainment.ts";
 
 // -- Permission (default access mode for NEW sessions) -----------------------------------------
 
@@ -147,12 +148,23 @@ export interface SettingsPatch {
   /** J-CONTEXT-BUDGET: operator-configured ordinary-session and global spending ceilings in USD.
    *  Enforcement fails closed — with ceilings configured, unpriced model activity is refused. */
   readonly spending?: { sessionUsd?: number; globalUsd?: number };
+  /** T8 (J-RW-AGGREGATE-CONTAINMENT): operator-configured aggregate containment quotas for
+   *  contained executions, enforced across processes by the aggregate containment ledger.
+   *  Absence is the historical "no aggregate quota" behavior. Mirrors the ledger's own parser. */
+  readonly containment?: {
+    maxConcurrent?: number;
+    cpuSecondsPerExecution?: number;
+    cpuSecondsPerWindow?: number;
+    cpuWindowHours?: number;
+    maxAddressSpaceBytes?: number;
+  };
 }
 
 /** Every General setting, fully resolved with defaults — the read-side shape the UI consumes.
  *  Spending ceilings stay optional: absence is the documented "no ceiling configured" default. */
-export interface GeneralSettings extends Required<Omit<SettingsPatch, "spending">> {
+export interface GeneralSettings extends Required<Omit<SettingsPatch, "spending" | "containment">> {
   readonly spending?: { sessionUsd?: number; globalUsd?: number };
+  readonly containment?: SettingsPatch["containment"];
 }
 
 // -- Spending ceilings (J-CONTEXT-BUDGET) ------------------------------------------------------
@@ -163,6 +175,21 @@ export function isSpendingCeilings(value: unknown): value is { sessionUsd?: numb
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   try {
     return parseSpendingCeilings(value) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+// -- Aggregate containment quotas (T8, J-RW-AGGREGATE-CONTAINMENT) -------------------------------
+
+/** Validates the durable aggregate-containment patch. Mirrors the containment ledger's own
+ *  parser so the capability and the enforcement layer cannot drift apart. The empty object is
+ *  the explicit "clear the quotas" patch, like spending's. */
+export function isContainmentQuotas(value: unknown): value is NonNullable<SettingsPatch["containment"]> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (Object.keys(value).length === 0) return true; // {} = clear all quotas
+  try {
+    return parseContainmentQuotas(value) !== undefined;
   } catch {
     return false;
   }
@@ -222,5 +249,8 @@ export function resolveGeneralSettings(value: unknown, legacyAppearance?: string
     // J-CONTEXT-BUDGET: absent ceilings mean "no ceiling configured"; invalid stored values are
     // ignored on read but fail closed at dispatch time through the ledger's own parser.
     spending: isSpendingCeilings(row.spending) ? row.spending : undefined,
+    // T8: absent quotas keep the historical no-aggregate-quota behavior; the containment ledger's
+    // own parser fails closed on invalid stored values at admission time.
+    containment: isContainmentQuotas(row.containment) ? row.containment : undefined,
   };
 }

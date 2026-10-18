@@ -54,7 +54,7 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
 
     // The same UI with no host-supplied containment configuration must expose the reason and
     // leave the ordinary local selection available.
-    appWithoutConfig = await startServer({ port: 0, home: join(fixtureRoot, "app-no-config") });
+    appWithoutConfig = await startServer({ devAuth: true, port: 0, home: join(fixtureRoot, "app-no-config") });
     browser = await chromium.launch();
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -76,7 +76,7 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
 
     // Configure a mock model and select a real contained workspace only through the visible UI.
     const config = await containmentConfig();
-    appWithConfig = await startServer({ port: 0, home: join(fixtureRoot, "app-configured"), containmentConfig: config });
+    appWithConfig = await startServer({ devAuth: true, port: 0, home: join(fixtureRoot, "app-configured"), containmentConfig: config });
     const client = clientFor(appWithConfig);
     await client.invoke("onboarding.dismiss", { step: "notice" });
     await client.invoke("onboarding.dismiss", { step: "apikey" });

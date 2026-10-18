@@ -26,6 +26,7 @@ ExpertsService.prototype.command=async function(capability,input,ctx){
 
 let modelCalls=0;
 const server=await startServer({
+    devAuth: true,
   port:0,
   home,
   expertProviderFactory(route:ModelConfig){

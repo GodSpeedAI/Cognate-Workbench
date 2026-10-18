@@ -15,6 +15,7 @@ import { isWorkDetailsMode } from "../workDetails.ts";
 import {
   isAgentPreset,
   isAppearanceMode,
+  isContainmentQuotas,
   isFontSizePx,
   isLanguageCode,
   isPerformanceDetailMode,
@@ -51,6 +52,9 @@ const SETTING_FIELDS: readonly SettingField[] = [
   // J-CONTEXT-BUDGET: the operator's ordinary-session and global spending ceilings. Enforcement is
   // fail-closed in the billing ledger, never in this writer.
   { capability: "settings.changeSpending", field: "spending", validate: isSpendingCeilings },
+  // T8 (J-RW-AGGREGATE-CONTAINMENT): the operator's aggregate contained-execution quotas. The
+  // containment ledger enforces them fail-closed across processes, never in this writer.
+  { capability: "settings.changeContainment", field: "containment", validate: isContainmentQuotas },
 ];
 
 export function settingsChangeComponent(options: {

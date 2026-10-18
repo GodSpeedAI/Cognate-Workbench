@@ -64,9 +64,13 @@ test("J-EXPERT-STEER: only a live same-Team Assignment accepts a human inbox upd
     await modelStarted;
     const assignment=await waitForAssignment(app,conversation.assignmentId,a=>a.status==="running" && !!a.runId);
     const sent=await invoke(app,"team.inbox.send",{assignmentId:assignment.id,text:"First update"}) as {messageId:string};
+    // T8 tightened the capability policy to the one durable operator identity, so a fabricated
+    // second human is now refused by the POLICY before the capability's own identity guard can
+    // answer (the guard remains defense in depth for a future multi-operator posture). Either
+    // refusal proves a foreign human cannot supersede or cancel the operator's pending message.
     const other={tenant:LOCAL_OPERATOR.tenant,actor:{id:"another-human",kind:"user" as const}};
-    await expect(app.app.runtime.service.invoke(other,{capability:"team.inbox.send",input:{assignmentId:assignment.id,text:"Forged replacement",supersedesId:sent.messageId}})).rejects.toThrow("Only your pending message");
-    await expect(app.app.runtime.service.invoke(other,{capability:"team.inbox.cancel",input:{messageId:sent.messageId}})).rejects.toThrow("Only the sender");
+    await expect(app.app.runtime.service.invoke(other,{capability:"team.inbox.send",input:{assignmentId:assignment.id,text:"Forged replacement",supersedesId:sent.messageId}})).rejects.toThrow(/Only your pending message|"kind":"denied"/);
+    await expect(app.app.runtime.service.invoke(other,{capability:"team.inbox.cancel",input:{messageId:sent.messageId}})).rejects.toThrow(/Only the sender|"kind":"denied"/);
     const replacement=await invoke(app,"team.inbox.send",{assignmentId:assignment.id,text:"Replacement update",supersedesId:sent.messageId}) as {messageId:string};
     await expect(invoke(app,"team.inbox.send",{assignmentId:assignment.id,text:"Over the unread bound"})).rejects.toThrow("Unread message limit reached");
     await expect(invoke(app,"team.message",{assignmentId:assignment.id,recipientId:"builder",text:"Forged human sender"})).rejects.toThrow("Addressed messaging is not authorized");

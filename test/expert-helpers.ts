@@ -63,7 +63,7 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
   let closed = false;
   try {
     const launch = async () => {
-      app = await startServer({ port: 0, home, expertProviderFactory: providerFactory, enableScheduleEvaluation: false, ...options, runCapacity: options.runCapacity ?? 1 });
+      app = await startServer({ devAuth: true, port: 0, home, expertProviderFactory: providerFactory, enableScheduleEvaluation: false, ...options, runCapacity: options.runCapacity ?? 1 });
       const caller = LOCAL_OPERATOR;
       const service = createRemoteRuntimeService(connectTransport(app.url), () => devToken(caller));
       client = createClient({ service, caller });

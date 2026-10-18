@@ -34,8 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T8
-  last_settled_task: T7
+  current_task: T9
+  last_settled_task: T8
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -181,6 +181,7 @@ progress:
     T6 is settled.
   T7: >-
     Workbench multi-process integration is settled against the published 0.6.1 ownership release.
+
     The Workbench pins all 23 direct SDK dependencies to 0.6.1 (36 resolved) and exposes
     multi-process operation behind the verified `runOwnership: "multi-process"` configuration
     (COGNATE_RUN_OWNERSHIP), which enables `execution.runOwnership.ambiguousSteps: "wait"` on the
@@ -199,6 +200,36 @@ progress:
     intermediate run showed a single E2E-workbench Chromium ERR_NETWORK_CHANGED console flake that
     passes in isolation and in the final clean run). Evidence: docs/sdk-0.6.0-release.md,
     docs/experts-debt-closure.md.
+
+  T8: >-
+    Production identity, tenant isolation and aggregate containment are settled. The model grew first
+    (three validated journeys — J-AUTH-SESSION, J-AUTH-TENANT-ISOLATION, J-RW-AGGREGATE-CONTAINMENT
+    — anchored on the new DurableIdentity, DurableSession and ContainmentQuota concepts). Durable
+    server-issued sessions are now the default authentication posture: 256-bit tokens stored only as
+    SHA-256 hashes, revocation and expiry, boot-supersession of the previous boot's browser token,
+    an in-process-epoch-invalidated resolution cache (revocation is immediate where it is tested; a
+    documented ≤2s cross-process read lag), and the client-claimed dev format reduced to an
+    explicit loud opt-in (`devAuth`/`COGNATE_DEV_AUTH=1`). The capability policy grants user-kind
+    authority to exactly the one durable operator identity, session issuance refuses second humans
+    inside the operator tenant, and both T8 ledgers (identity, containment) are system-only
+    threads. Tenant isolation is observed end to end on one shared PostgreSQL store with two
+    server-issued sessions (per-tenant projections, runs, events and thread streams;
+    empty-partition indistinguishability; server-derived tenants; forged dev-format refusal).
+    Aggregate containment wraps every contained provider's process port: a durable admission slot
+    per execution, operator quotas via settings.changeContainment, kernel per-execution
+    CPU/address-space caps via prlimit (fail closed when unavailable), a 300s hard clamp whose lease
+    provably covers the child, conservative CPU booking at the full cap, lease-lapse reaping and
+    boot reconciliation — proven across two Workbench processes on one store. Deployment
+    hardening: security headers on every response including successful Connect replies, a strict
+    CSP on the console document (which caught and fixed a pre-existing inline font handler),
+    64MiB body ceiling, untracked generated entry. An independent fresh-context adversarial
+    security review produced docs/security-review-2026-10-17-t8.md (one HIGH, four MEDIUM, several
+    LOW/INFO); every MUST-fix was remediated and re-gated, and the accepted residual boundaries are
+    documented in the artifact's remediation record. Gates: full verify 1,188 tests / 0 fail; gated
+    real-bwrap OS journeys 9/9 (kernel SIGXCPU cap + window exhaustion, cross-process ceiling,
+    cancellation/reap); auth and containment journeys 12/12 against actual PostgreSQL; domainforge
+    validate 0 violations. T8 is settled.
+
 tasks:
   T0:
     title: Baseline, workspace-effect conflict inventory and benchmark refresh

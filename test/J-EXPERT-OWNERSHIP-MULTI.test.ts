@@ -47,6 +47,7 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
     },
   });
   const boot = (): Promise<AppServer> => startServer({
+    devAuth: true,
     port: 0,
     home,
     runOwnership: "multi-process",
