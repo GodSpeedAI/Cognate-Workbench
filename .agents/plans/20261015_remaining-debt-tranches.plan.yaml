@@ -3,7 +3,7 @@ schema_version: '1.0'
 metadata:
   id: remaining-debt-tranches
   title: Workspace concurrency, economics, distributed ownership and production trust
-  status: ready
+  status: settled
   version: '1.0'
   created: '2026-10-15'
   purpose: >-
@@ -34,8 +34,8 @@ dependency_graph:
   edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
   critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
 initial_state:
-  current_task: T9
-  last_settled_task: T8
+  current_task: none
+  last_settled_task: T9
 progress:
   T0: >-
     Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
@@ -229,6 +229,18 @@ progress:
     real-bwrap OS journeys 9/9 (kernel SIGXCPU cap + window exhaustion, cross-process ceiling,
     cancellation/reap); auth and containment journeys 12/12 against actual PostgreSQL; domainforge
     validate 0 violations. T8 is settled.
+  T9: >-
+    Adversarial reconciliation settled. Every debt-matrix disposition was checked against recorded
+    proof: the model was corrected (J-TEAM-ADMISSION added as an observed journey; J-EXPERT-PARALLEL
+    and J-EXPERT-MODEL-PARALLEL variant text rewritten so Team capacities and disjoint-workspace
+    effect parallelism point at their owning journeys) and re-validated (0 violations, fmt clean,
+    233 objects); docs/experts-debt-closure.md, .agents/DEBT.md and docs/known-gaps.md were
+    reconciled to the T4-T8 evidence while genuinely-open items stayed open; a genuine
+    E2E-experts save/open projection race was found and fixed. Final gates: the full suite is green
+    serialized (bun test --max-concurrency 1 --timeout 60000 test: 1,179 pass / 9 skip / 0 fail
+    across 1,188 tests); just verify at the default concurrency shows only host-contention
+    E2E/browser flakes that pass in isolation (recorded in .agents/DEBT.md); domainforge validate
+    0 violations and fmt --check clean; git diff --check clean. T9 is settled.
 
 tasks:
   T0:

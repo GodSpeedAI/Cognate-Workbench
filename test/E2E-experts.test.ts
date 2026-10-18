@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
-import { bootAimock, bootApp, seed, withTempHome } from "./wb-helpers.ts";
+import { LOCAL_OPERATOR, bootAimock, bootApp, seed, waitUntil, withTempHome } from "./wb-helpers.ts";
 
 const SHOTS = join(import.meta.dir, "..", "screenshots", "experts");
 
@@ -123,6 +123,10 @@ describe("E2E Experts and Teams", () => {
         await page.getByLabel("Instructions").fill("Compare evidence, cite sources and report uncertainty.");
         await page.getByRole("button", { name: "Save Expert" }).click();
         await page.getByRole("heading", { name: "Solo Analyst", exact: true }).waitFor();
+        await waitUntil("experts projection reflects the saved instructions", async () => {
+          const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "experts" })).rows;
+          return rows.some((row) => JSON.stringify(row.value).includes("cite sources")) || undefined;
+        }, 20_000);
         await page.getByRole("button", { name: "Edit", exact: true }).click();
         await page.waitForFunction(() => (document.querySelector("#expert-instructions") as HTMLTextAreaElement | null)?.value.includes("cite sources"));
         await page.getByRole("button", { name: "Cancel", exact: true }).click();

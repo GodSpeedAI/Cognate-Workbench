@@ -1229,6 +1229,22 @@ Instance j_expert_inbox_recover of "CanonicalJourney" {
     variants: "stale Team membership, cancelled Assignment and private scope mismatch deny incorporation; retry cannot widen captured tools or mode; provider call is never interrupted"
 }
 
+// Team-level admission policy: a Team's authoritative limits bound how many of its own runs may
+// overlap, independently of process capacity. Established by T2. The orthogonal process-capacity and
+// workspace-disjointness policy is J-EXPERT-PARALLEL.
+Instance j_team_admission of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "team.converse, expert.converse, team.retry, team.handoff, execution.runtime.inspect",
+    evidence_class: "observed",
+    initiating_condition: "An active Team admits new Expert work while other runs of the same Team are unfinished",
+    journey_id: "J-TEAM-ADMISSION",
+    precondition: "The Team is active with an authoritative limits policy (maximum concurrent runs and admission batch); each admitted root resolves to a canonical workspace identity",
+    purpose: "Bound how many of a Team's own runs may overlap from the Team's authoritative policy, independently of process capacity, and dispatch queued roots in the Team's configured batch",
+    settlement: "Admission lane count derives only from authoritative Team metadata; a Team exceeding its maxConcurrentRuns waits even when process capacity is free; disjoint roots overlap only up to the policy; queued roots dispatch in the configured batch; client-supplied policy is refused before any effect; unknown or inactive Teams and invalid policy fail closed to full Team serialization; a recovered run may re-enter a different lane, which can only serialize more and never admits beyond the policy",
+    steps: "operator saves authoritative Team limits -> a Team turn admits work through the native admission boundary -> per-Team lane keys serialize the Team's runs beyond its policy -> queued roots dispatch in the Team's batch -> operator inspects run and admission evidence",
+    variants: "forged or stale client-supplied maxConcurrentRuns or admissionBatch is refused before any effect; raising the authoritative policy permits genuine overlap without changing process capacity; process restart preserves the policy and never widens it; solo model-only work keeps its overlap semantics"
+}
+
 Instance j_expert_parallel of "CanonicalJourney" {
     actor: "User or OperatorAgent",
     capabilities: "execution.runtime.inspect, expert.converse, team.converse, subagent.start, team.retry, team.handoff",
@@ -1239,7 +1255,7 @@ Instance j_expert_parallel of "CanonicalJourney" {
     purpose: "Bound process-level run admission while permitting overlap only for work with disjoint canonical workspace roots; under the verified multi-process configuration, one store serves several Workbench processes with authoritative per-run ownership",
     settlement: "execution.runtime.inspect reports the effective configured capacity and admission policy without claiming active-worker counts; two Experts on distinct workspaces demonstrably overlap when capacity permits, while same, aliased, or nested roots serialize; unresolved root identity blocks admission without effects; restart, mutation ownership, Team invariants, authorization, and each run's captured model route remain intact; under the verified multi-process configuration a killed process's in-flight effect is never blindly repeated by the recovering process — the recovery records the ambiguity and completes only from explicit reconciliation, and a stale owner's late run-scoped write is fenced at the store with nothing appended",
     steps: "operator inspects native execution capacity -> direct coding, Expert, Team, delegated, resumed, and recovered run entries pass through the same nativeExecutionSlots admission boundary -> runtime resolves execution-world and canonical root identities -> unresolved identity blocks admission before effects -> only runs with non-overlapping known roots may occupy distinct slots -> operator inspects run evidence and the configured capacity -> under multi-process operation a crashed owner's run is recovered by the surviving process, whose ambiguous prior-generation effect requires reconciliation and whose store fences the killed owner's late writes",
-    variants: "default capacity one is serial; configured capacity accepts only 1, 2, 4, or 8; same-root, alias-root, and ancestor/descendant-root cases serialize; unresolved root identity blocks admission without effects until safely resolved; read-only work does not bypass human approval for protected effects; existing ParallelPlan recommendations remain advisory; Team-level maximum concurrency and batch delegation policy are not established by this journey; single-process deployments keep the historical restart semantics — multi-process semantics apply only when the verified ownership configuration is enabled"
+    variants: "default capacity one is serial; configured capacity accepts only 1, 2, 4, or 8; same-root, alias-root, and ancestor/descendant-root cases serialize; unresolved root identity blocks admission without effects until safely resolved; read-only work does not bypass human approval for protected effects; existing ParallelPlan recommendations remain advisory; Team-level maximum concurrency and batch delegation policy are established separately by J-TEAM-ADMISSION, not by this journey; single-process deployments keep the historical restart semantics — multi-process semantics apply only when the verified ownership configuration is enabled"
 }
 
 Instance j_expert_model_parallel of "CanonicalJourney" {
@@ -1252,7 +1268,7 @@ Instance j_expert_model_parallel of "CanonicalJourney" {
     purpose: "Overlap only Expert decisions whose frozen tools contain the intrinsic expert_return and no workspace, delegation, messaging or memory tools",
     settlement: "Two independently routed model-only Expert runs overlap at capacity two and return attributable durable results; forged tool calls cannot widen the frozen allowlist; all tool-bearing and ordinary coding runs share one exclusion key; no active-worker count or general workspace parallelism is claimed",
     steps: "operator configures host capacity and inspects effective policy -> native admission resolves the registered Assignment after application readiness -> only intrinsic-return assignments receive independent slots -> all other work retains conservative shared exclusion -> native runs return correlated handoffs -> operator inspects evidence",
-    variants: "unknown or stale Assignment, attempt, sender or Team membership blocks admission before model effects; event-only agent.config bypasses application-readiness lookup to preserve seed boot; cancellation and recovery use the same native admission path; current frozen tools and model route survive profile edits; capacity remains a startup setting; Team-specific capacities and disjoint workspace effect parallelism remain deferred under J-EXPERT-PARALLEL"
+    variants: "unknown or stale Assignment, attempt, sender or Team membership blocks admission before model effects; event-only agent.config bypasses application-readiness lookup to preserve seed boot; cancellation and recovery use the same native admission path; current frozen tools and model route survive profile edits; capacity remains a startup setting; Team-specific capacities are established by J-TEAM-ADMISSION, and disjoint workspace effect parallelism is established by J-EXPERT-PARALLEL"
 }
 
 Instance j_auth_session of "CanonicalJourney" {

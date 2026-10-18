@@ -1,44 +1,37 @@
-# Current status — revision 30
+# Current status — revision 31
 
-The remaining-debt tranche plan has settled **T0 through T8**; the active task is T9 (final
-adversarial review, full verification, evidence and publication). T4–T7 settled indexed
-retrieval, economics, the upstream fenced run-write ownership releases (0.6.0/0.6.1) and the
-Workbench multi-process integration.
+The remaining-debt tranche plan is fully settled (**T0 through T9**). T9 closed the adversarial
+reconciliation, final verification, evidence and publication.
 
-**T8 (production identity, tenant isolation and aggregate containment) is settled.** The model
-grew first: three new validated journeys (J-AUTH-SESSION, J-AUTH-TENANT-ISOLATION,
-J-RW-AGGREGATE-CONTAINMENT) anchored on new `DurableIdentity`, `DurableSession` and
-`ContainmentQuota` concepts. Durable server-issued sessions are now the default authentication
-posture — 256-bit tokens stored only as SHA-256 hashes, revocation and expiry, boot-supersession
-of the previous boot's browser token, immediate in-process revocation (epoch-invalidated cache;
-a documented ≤2 s cross-process read lag), and the client-claimed dev bearer format reduced to an
-explicit loud opt-in. The capability policy grants user-kind authority to exactly the one durable
-operator identity; both new ledgers are system-only threads. Tenant isolation is observed end to
-end on one shared PostgreSQL store with two server-issued sessions. Aggregate containment wraps
-every contained provider's process port: durable admission slots, operator quotas
-(`settings.changeContainment`), kernel per-execution CPU/address-space caps via `prlimit` (fail
-closed when unavailable), a 300 s hard clamp whose lease provably covers the child, conservative
-CPU booking, and lease-lapse reaping — proven across two Workbench processes on one store.
-Deployment hardening: security headers on every response (successful Connect replies included), a
-strict CSP on the console document (it caught and fixed a pre-existing inline font handler), a
-64 MiB body ceiling, and an untracked generated entry so no boot token enters version control.
+**T9 (adversarial review, full verification, evidence and publication) is settled.** Reconciliation
+checked every disposition in the debt matrix against recorded proof and corrected two stale claims:
+the authoritative model still described Team-specific limits, capacity and admission/batching as
+established elsewhere while the T2 Team admission/batching is live, so a new `J-TEAM-ADMISSION`
+canonical journey (`evidence_class: observed`) was added and the J-EXPERT-PARALLEL /
+J-EXPERT-MODEL-PARALLEL variant text rewritten to point Team capacities at J-TEAM-ADMISSION and
+leave only disjoint-workspace effect parallelism with J-EXPERT-PARALLEL (re-validated: 0 violations,
+`fmt --check` clean, 233 semantic objects); and `docs/experts-debt-closure.md`, `.agents/DEBT.md`
+and `docs/known-gaps.md` carried statements T4–T8 had overtaken, reconciled to the observed evidence
+while genuinely-open items stayed open.
 
-An **independent fresh-context adversarial security review**
-([security-review-2026-10-17-t8.md](docs/security-review-2026-10-17-t8.md)) found one HIGH (the
-two new ledgers initially outside the system-only thread guard) and four MEDIUM findings; every
-MUST-fix was remediated with journeys and re-gated, and the accepted residual boundaries are
-recorded in the artifact's remediation record.
+One genuine product-journey race was found and fixed: `test/E2E-experts.test.ts` waited on a heading
+that already existed after "Save Expert" and reopened the editor before the `experts` projection
+folded the new instructions (the editor snapshots its initial value at mount); it now waits for the
+projection row to carry the saved instructions.
 
-Gates: full `bun run verify` passed **1,188 tests / 1,179 pass / 9 skip / 0 fail**; the gated
-real-bwrap OS journeys passed **9/9** (kernel SIGXCPU cap + window exhaustion, cross-process
-ceiling, cancellation/reap; the pre-existing escape/egress/cancellation journeys stay green); the
-auth and containment journeys passed **12/12** against actual PostgreSQL; `domainforge validate`
-0 violations.
+Gates: the full suite is green serialized — `bun test --max-concurrency 1 --timeout 60000 test`
+passed **1,179 pass / 9 skip / 0 fail** across 1,188 tests (117 files); the E2E-experts race fix was
+also verified 3/3 under a synthetic CPU load. The default parallel `just verify` intermittently
+fails one or more E2E/browser or shared-store journeys at their deadlines on this co-tenanted host
+(rotating identity; every one passes standalone and in the serialized run) — a test-infrastructure
+property recorded in `.agents/DEBT.md`. `domainforge validate` 0 violations, `fmt --check` clean,
+`bun run typecheck` clean, `git diff --check` clean.
 
-Remaining open: T9's final reconciliation and publication; multi-tenant application seeding;
-live aggregate memory accounting; generalized SDK inbox/standalone live steering; and the
-explicit product debts in the disposition matrix. This remains a single-operator application —
-not a production-hardened multi-user deployment.
+Remaining open (unchanged, none claimed closed): live aggregate memory accounting; multi-tenant
+application seeding (per-tenant Experts/schedules); distributed schedule-evaluator ownership;
+generalized SDK inbox / standalone live steering; and the security review's residual boundaries.
+This remains a single-operator Workbench — the development authenticator survives only as an
+explicit, loud test/dev opt-in, not a production-hardened multi-user deployment.
 
-Next: execute T9 — reconcile all debt statuses against observed proof, run the final full gates,
-update DEBT/verification/status records, commit and push without force.
+Next: no tranche remains in this plan. Optionally cap suite/E2E concurrency for constrained hosts to
+make `just verify` deterministic there (see `.agents/DEBT.md`).

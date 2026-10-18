@@ -25,7 +25,7 @@ These render or record faithfully and do nothing else.
 | Capability substitution | Recorded. Does not rebind a running tool. |
 | Parallelism plans | Recorded. Do not start workers. |
 | Legacy automation records | Stored accepted-workflow intent still needs explicit migration. Native Expert/Team schedules now execute due work; see [schedules](schedules.md). |
-| Legacy budget information | Workbench planning economics remain informational. Expert Assignment attempts now enforce configured model limits before invocation. |
+| Legacy budget information | Workbench planning economics remain informational. Expert Assignment attempts enforce configured model limits before invocation, and session/global spending ceilings now fail closed with unknown prices rendered as unknown (T5). |
 | Composer / child usage | Main composer counts actual turns/steps; unknown child usage is explicitly unavailable. Expert assignments expose provider usage and labeled estimates. No measured token-per-second rate is claimed. |
 | Trajectory / developer tools | Present as a read view over the trace. |
 
@@ -49,13 +49,16 @@ From the workbench design source:
 
 ## Experts and Teams limits
 
-- Published Cognate0.5.0 provides bounded native concurrency and awaitable admission. Workbench
+- Published Cognate0.6.1 provides bounded native concurrency and awaitable admission. Workbench
   defaults to capacity1; host opt-in1/2/4/8 enables overlapping execution. Model-only solo Experts
   and Specialists overlap freely; tool-bearing Experts and coding sessions are admitted per
   canonical workspace (disjoint workspaces overlap, shared workspaces serialize, forged identities
-  fail closed to serialized exclusion). Team-specific limits/batching remain open. Admission is
-  process-local by SDK contract; a key-waiting run occupies one bounded dispatch slot. Parallelism
-  plans remain advisory. See [measured capacity evidence](experts-concurrency-benchmark.md).
+  fail closed to serialized exclusion). Team admission and batching now resolve from authoritative
+  Team limits (T2): a Team exceeding its `maxConcurrentRuns` waits even when process capacity is
+  free, queued roots dispatch in the Team's `admissionBatch`, and client-supplied policy is refused.
+  Admission is process-local by SDK contract; multi-process operation exists behind the verified
+  `runOwnership` configuration (T7). A key-waiting run occupies one bounded dispatch slot.
+  Parallelism plans remain advisory. See [measured capacity evidence](experts-concurrency-benchmark.md).
 - Native one-time/daily/weekly Expert and Team schedules execute independently of the browser,
   recover after process termination, and retain occurrence receipts. Legacy automation workflows
   are not automatically converted. Schedule state remains one CAS aggregate; high-volume history
@@ -67,22 +70,25 @@ From the workbench design source:
 - Memory retrieval uses bounded lexical search and recent scoped context, without embeddings or
   automatic model-generated trusted summaries. Context selection retains its character budget;
   optional model budgets additionally check the complete visible request plus reserved output using
-  a labeled conservative byte estimate. Model-specific tokenizer counts and hidden provider framing
-  remain unmeasured. Provider-reported input/output usage is recorded separately.
-  A crash after inference dispatch but before its native outcome persists can leave unknown billed
-  usage and repeat the call on recovery. Durable pre-dispatch billing reservations and provider
-  reconciliation remain open; configured prices/ceilings are not a billing guarantee.
+  model-specific tokenization (T5). Hidden provider framing remains unmeasured. Provider-reported
+  input/output usage is recorded separately. A crash after inference dispatch but before its native
+  outcome persists is reconciled by durable pre-dispatch billing reservations that never book an
+  unknown price as zero and never blindly repeat the call (T5); configured prices/ceilings are still
+  not a physical billing guarantee.
 - Expert state now uses bounded immutable native partitions and an atomic manifest. Scoped history
-  and memory responses are paginated; stale cursors explicitly reject. Reads still materialize all
-  partitions and filter lexically, and the root CAS remains a global contention point. No indexed
-  SQL retrieval or broad scaling guarantee is claimed; see [storage](experts-storage.md) and the
+  and memory responses are paginated; stale cursors explicitly reject. Reads use indexed SQL
+  retrieval and the global root CAS is fingerprinted rather than a full-scan contention point (T4).
+  No broad scaling guarantee is claimed; see [storage](experts-storage.md) and the
   [measured benchmark](experts-scale-baseline.md).
-- Multi-process effect dispatch fails closed without the owning live run context. The supported
-  Workbench deployment remains one Bun process.
-- A provider call can delay graceful runtime shutdown in consumed SDK 0.4.0. Upstream PR #44 fixes
-  cooperative abort and acknowledged-continuation recovery with PostgreSQL regressions; it is
-  unpublished and unconsumed. Signal-ignoring handlers can still delay shutdown. Abrupt-process
-  recovery is tested separately.
+- Multi-process effect dispatch is available behind the verified `runOwnership` configuration (T7):
+  one PostgreSQL store serves several Workbench processes with authoritative per-run ownership, a
+  killed owner's effect requires reconciliation, and its stale write is fenced. The default remains
+  a single Bun process and exactly-once physical effects are not claimed.
+- A provider call can delay graceful runtime shutdown in the consumed SDK line at the time this
+  finding was recorded (0.4.0; Workbench now pins 0.6.1). Upstream PR #44 fixes cooperative abort
+  and acknowledged-continuation recovery with PostgreSQL regressions; its status is tracked
+  separately and is not asserted here. Signal-ignoring handlers can still delay shutdown.
+  Abrupt-process recovery is tested separately.
 - Human reconciliation of an ambiguous effect does not prove an objective complete. A confirmed
   successful effect requires a new follow-up objective rather than blind retry of that objective.
 - Native commitment guards cover Expert `edit`, `bash` and `run_code`; legacy coding-session tools

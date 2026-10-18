@@ -420,3 +420,44 @@ rather than measured as a live sum; actual per-child CPU accounting is unobserva
 Workbench layer, so the window books the kernel cap conservatively; external effects remain
 at-least-once (commitments plus reconciliation); the single-operator development authenticator's
 replacement is now fact, but this is still not a production-hardened multi-user deployment.
+
+## Adversarial reconciliation and final verification (T9) — 2026-10-18
+
+Adversarial reconciliation of every disposition claim in the debt matrix against recorded proof,
+then the final gates. Two claims did not match the evidence and were corrected:
+
+- **Model divergence.** The authoritative model still described Team-specific limits, capacities and
+  admission/batching as "established separately"/"not established by this journey", while the T2
+  Team admission/batching implementation is live and journey-tested. Added the `J-TEAM-ADMISSION`
+  canonical journey (`evidence_class: observed`; capabilities `team.converse, expert.converse,
+  team.retry, team.handoff, execution.runtime.inspect`) and rewrote the J-EXPERT-PARALLEL and
+  J-EXPERT-MODEL-PARALLEL variant text so Team capacities point at J-TEAM-ADMISSION and only
+  disjoint-workspace effect parallelism stays with J-EXPERT-PARALLEL. Re-validated: 0 violations,
+  `fmt --check` clean, 233 semantic objects.
+- **Stale dispositions.** `docs/experts-debt-closure.md`, `.agents/DEBT.md` and `docs/known-gaps.md`
+  carried statements that T4–T8 had already overtaken (retrieval/CAS, economics and ceilings,
+  multi-process ownership, production trust, the consumption version). Reconciled each row to the
+  observed evidence and kept the genuinely-open items (live aggregate memory accounting,
+  multi-tenant application seeding, distributed schedule-evaluator ownership, the review's residual
+  boundaries).
+
+One genuine product-journey race was found and fixed: `test/E2E-experts.test.ts` waited on a heading
+that already existed after "Save Expert", then reopened the editor before the `experts` projection
+folded the new instructions (the editor snapshots `initial` at mount). It now waits for the
+projection row to carry the saved instructions before reopening; verified 3/3 under synthetic load
+and absent from the final runs.
+
+| Gate | Result |
+|---|---|
+| `bun test --max-concurrency 1 --timeout 60000 test` (full suite, serialized) | **1,179 pass / 9 skip / 0 fail** across 1,188 tests (117 files) — the whole suite green. |
+| `just verify` (parallel, default concurrency) | 1,177–1,178 pass / 9 skip / 1–8 fail; the failing set rotates run to run (E2E Experts and Teams, E2E remote-workspaces SSH, E2E cognitive console, E2E workbench cockpit, J-CFG-model-provider, J-CFG-model-catalog, J-PREFS-shortcuts, J-E-plan, J-H-provider-error, J-MEMORY-migrate, experts-runtime-scheduling capacity 1/2/4) and every one passes in isolation and in the concurrency-1 run. |
+| Gated real-bwrap OS journeys (T8 evidence, unchanged) | 9 pass / 0 fail — kernel SIGXCPU cap + window exhaustion, cross-process ceiling, cancellation/reap. |
+| `domainforge validate --format human .sea/interaction/interaction-model.sea` / `fmt --check` | 0 violations / already formatted. |
+| `git diff --check` | clean. |
+
+Known boundary carried forward for the gate itself: the default parallel `just test`/`just verify`
+is contention-sensitive. On a co-tenanted host (other agent processes saturating the cores) it
+intermittently fails one or more E2E/browser or shared-store journeys at their deadlines, while the
+identical suite at `--max-concurrency 1` is green and each failing file passes standalone. This is a
+test-infrastructure property, not product behavior; it is recorded in `.agents/DEBT.md`. All
+retained-open debts from the matrix are unchanged and still not claimed as closed.
