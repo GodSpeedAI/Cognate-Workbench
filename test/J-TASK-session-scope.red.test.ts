@@ -36,7 +36,7 @@ describe("J-TASK-session-scope — task identity, visibility and ownership (RED)
         expect(await boundRow(app, a.sessionId)).toBeUndefined();
         expect(await boundRow(app, b.sessionId)).toBeUndefined();
         // Workspace availability is not authorization to silently bind an active task.
-        const available = (await inv(client, "task.list", { workspaceId, sessionId: b.sessionId })) as { tasks: ScopedTask[] };
+        const available = (await inv(client, "task.list", { workspaceId, sessionId: b.sessionId })) as unknown as { tasks: ScopedTask[] };
         expect(available.tasks.map(t => t.id)).toContain(taskId);
       } finally {
         await client.close();
@@ -60,8 +60,8 @@ describe("J-TASK-session-scope — task identity, visibility and ownership (RED)
         const row = await waitForRow<ScopedTask>(app, `task/${taskId}`);
         expect(row.scope).toBe("session");
         expect(row.sessionId).toBe(a.sessionId);
-        const onlyA = (await inv(client, "task.list", { workspaceId, sessionId: a.sessionId })) as { tasks: ScopedTask[] };
-        const onlyB = (await inv(client, "task.list", { workspaceId, sessionId: b.sessionId })) as { tasks: ScopedTask[] };
+        const onlyA = (await inv(client, "task.list", { workspaceId, sessionId: a.sessionId })) as unknown as { tasks: ScopedTask[] };
+        const onlyB = (await inv(client, "task.list", { workspaceId, sessionId: b.sessionId })) as unknown as { tasks: ScopedTask[] };
         expect(onlyA.tasks.map(t => t.id)).toContain(taskId);
         expect(onlyB.tasks.map(t => t.id)).not.toContain(taskId);
         await expect(inv(client, "session.task.bind", { sessionId: b.sessionId, taskId }))
@@ -99,8 +99,8 @@ describe("J-TASK-session-scope — task identity, visibility and ownership (RED)
         expect(moved.contract.context?.workspaceId).toBe(ws2.workspaceId);
         const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "workbench" })).rows;
         expect(rows.filter(r => r.key.startsWith(`evidence/${taskId}/`))).toHaveLength(1);
-        const original = (await inv(client, "task.list", { workspaceId: ws1.workspaceId })) as { tasks: ScopedTask[] };
-        const destination = (await inv(client, "task.list", { workspaceId: ws2.workspaceId })) as { tasks: ScopedTask[] };
+        const original = (await inv(client, "task.list", { workspaceId: ws1.workspaceId })) as unknown as { tasks: ScopedTask[] };
+        const destination = (await inv(client, "task.list", { workspaceId: ws2.workspaceId })) as unknown as { tasks: ScopedTask[] };
         expect(original.tasks.map(t => t.id)).not.toContain(taskId);
         expect(destination.tasks.map(t => t.id)).toContain(taskId);
       } finally {
