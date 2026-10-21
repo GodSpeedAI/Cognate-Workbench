@@ -14,6 +14,22 @@ export interface AmbiguousInvocationReconcileInput {
   readonly reason: string;
 }
 
+/** Capabilities that only ask a model for a response (no external effect beyond cost). */
+const MODEL_GENERATION = new Set(["model.generate", "expert.model.generate"]);
+
+export function isModelGeneration(capability: string | undefined): boolean {
+  return capability !== undefined && MODEL_GENERATION.has(capability);
+}
+
+/** The interrupted capability, from the continuation the runtime opened (payload, else condition). */
+export function interruptedCapability(continuation: { readonly payload?: unknown; readonly condition?: unknown }): string | undefined {
+  for (const source of [continuation.payload, continuation.condition]) {
+    const capability = (source as { capability?: unknown } | null | undefined)?.capability;
+    if (typeof capability === "string") return capability;
+  }
+  return undefined;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Reconciliation requires an object input");
   return value as Record<string, unknown>;
@@ -47,6 +63,12 @@ export function ambiguousStepComponent(options: {
         if (!continuation) throw new Error("No such continuation for this operator");
         if (continuation.type !== AMBIGUOUS_INVOCATION_CONTINUATION) throw new Error("Continuation is not an interrupted run step awaiting reconciliation");
         if (continuation.status !== "OPEN") throw new Error(`Interrupted run step is already ${continuation.status.toLowerCase()}; it cannot be reconciled again`);
+        // A model call has no external effect for the operator to confirm, and its response cannot be
+        // reconstructed from an observation: "succeeded" would hand the agent a record where it needs
+        // a model response. The honest reconciliation is "failed", which lets the agent retry the call.
+        if (input.outcome === "succeeded" && isModelGeneration(interruptedCapability(continuation))) {
+          throw new Error("An interrupted model call cannot be confirmed as succeeded: its response cannot be reconstructed. Record \"failed\" to let the agent retry the call.");
+        }
         const resolution: Json = input.outcome === "succeeded"
           ? { result: { reconciled: true, outcome: "succeeded", reason: input.reason, reconciledBy: ctx.actor.id } }
           : { failure: { kind: "operator_reconciled_failure", message: input.reason } };

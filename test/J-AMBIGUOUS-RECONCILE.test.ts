@@ -136,17 +136,23 @@ test("J-AMBIGUOUS-RECONCILE: an interrupted step under the default posture waits
     await expect(serviceB.invoke(LOCAL_OPERATOR, { capability: RECONCILE, input: { continuationId: "not-a-continuation", outcome: "failed", reason: "wrong id" } })).rejects.toThrow();
     expect((await serviceB.getRun(LOCAL_OPERATOR, { runId })).status).toBe("waiting");
 
-    // A valid operator observation completes the step with the recorded result; the effect still ran once.
-    const reconciled = await serviceB.invoke(LOCAL_OPERATOR, { capability: RECONCILE, input: { continuationId, outcome: "succeeded", reason: "Operator confirmed the evidence file exists." } });
-    expect(reconciled).toMatchObject({ runId, continuationId, outcome: "succeeded" });
-    // The run resumes from the recorded observation. Its terminal status is not asserted here: an
-    // expert model step expects a native ModelResponse and rejects the reconciliation record, a
-    // consumer limitation recorded in docs/known-gaps.md. The invariant under test is that the
-    // interrupted effect was never repeated.
+    // The interrupted step is a model call: there is no external effect to confirm and no response to
+    // reconstruct, so "succeeded" is refused and the run keeps waiting.
+    await expect(serviceB.invoke(LOCAL_OPERATOR, { capability: RECONCILE, input: { continuationId, outcome: "succeeded", reason: "Operator says it worked." } })).rejects.toThrow("cannot be confirmed as succeeded");
+    expect((await serviceB.getRun(LOCAL_OPERATOR, { runId })).status).toBe("waiting");
+    expect((await serviceB.listContinuations(LOCAL_OPERATOR, { runId })).find(item => item.id === continuationId)?.status).toBe("OPEN");
+
+    // "failed" is the honest record for a model call: the agent retries it and the run completes.
+    const reconciled = await serviceB.invoke(LOCAL_OPERATOR, { capability: RECONCILE, input: { continuationId, outcome: "failed", reason: "The provider never produced a response." } });
+    expect(reconciled).toMatchObject({ runId, continuationId, outcome: "failed" });
     const after = await waitForRunLeaving(serviceB, runId, "waiting");
-    expect(after).not.toBe("waiting");
-    expect(await countEvents(serviceB, runId, "run.resumed")).toBeGreaterThanOrEqual(1);
-    expect(run.providerCalls()).toBe(1);
+    expect(["running", "completed"]).toContain(after);
+    const deadline = Date.now() + 60_000;
+    let status = after;
+    while (status !== "completed" && Date.now() < deadline) { await Bun.sleep(100); status = (await serviceB.getRun(LOCAL_OPERATOR, { runId })).status; }
+    expect(status).toBe("completed");
+    expect(run.providerCalls()).toBe(2); // the interrupted attempt once, the operator-sanctioned retry once
+    expect(await countEvents(serviceB, runId, "run.invocation.ambiguous")).toBe(1);
     expect((await serviceB.listContinuations(LOCAL_OPERATOR, { runId })).find(item => item.id === continuationId)?.status).toBe("RESUMED");
 
     // Reconciling the already-resolved continuation is refused.

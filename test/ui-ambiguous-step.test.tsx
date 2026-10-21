@@ -28,6 +28,14 @@ describe("AmbiguousStepCard", () => {
     expect(html).toMatch(/<button type="submit" disabled="">Record reconciliation<\/button>/);
   });
 
+  test("a model call offers only a retry, never a confirmed success", () => {
+    const html = renderToStaticMarkup(<AmbiguousStepCard capability="expert.model.generate" modelCall busy={false} onReconcile={() => {}} />);
+    expect(html).toContain("Retry the model call");
+    expect(html).not.toContain("Step completed");
+    expect(html).not.toContain('value="succeeded"');
+    expect(html).toContain("no external effect to confirm");
+  });
+
   test("shows a recording state while the reconciliation is in flight", () => {
     const html = renderToStaticMarkup(<AmbiguousStepCard capability="tool.bash" busy={true} onReconcile={() => {}} />);
     expect(html).toContain("Recording…");

@@ -4,11 +4,14 @@ import { useState } from "react";
 
 export function AmbiguousStepCard({
   capability,
+  modelCall = false,
   busy,
   error,
   onReconcile,
 }: {
   readonly capability: string;
+  /** A model call: nothing external to confirm and no response to reconstruct, so only "retry" is offered. */
+  readonly modelCall?: boolean;
   readonly busy: boolean;
   readonly error?: string | undefined;
   readonly onReconcile: (outcome: "succeeded" | "failed", reason: string) => void;
@@ -23,6 +26,12 @@ export function AmbiguousStepCard({
         The step <strong>{capability}</strong> was interrupted by a restart. Its outcome is unknown, it was NOT repeated, and the run is
         waiting. Only the operator can record what actually happened.
       </p>
+      {modelCall && (
+        <p>
+          This step only asked a model for a response. There is no external effect to confirm and the response cannot be
+          reconstructed, so the only choice is to let the agent retry the call.
+        </p>
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -32,8 +41,8 @@ export function AmbiguousStepCard({
         <label>
           Observed outcome
           <select value={outcome} onChange={(event) => setOutcome(event.currentTarget.value as "succeeded" | "failed")}>
-            <option value="failed">Step did not complete</option>
-            <option value="succeeded">Step completed</option>
+            <option value="failed">{modelCall ? "Retry the model call" : "Step did not complete"}</option>
+            {!modelCall && <option value="succeeded">Step completed</option>}
           </select>
         </label>
         <label>

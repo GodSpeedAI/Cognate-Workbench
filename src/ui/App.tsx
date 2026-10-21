@@ -8,6 +8,7 @@ import { ExpertsTeamsPanel } from "./experts/ExpertsTeamsPanel.tsx";
 import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "../workbench/focus.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { AmbiguousStepCard } from "./AmbiguousStepCard.tsx";
+import { interruptedCapability, isModelGeneration } from "../capabilities/ambiguousStep.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
 import { DirectoryField } from "./DirectoryField.tsx";
@@ -5701,7 +5702,8 @@ export function App() {
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
             ) : ambiguousContinuation ? (
               <AmbiguousStepCard
-                capability={String((ambiguousContinuation.payload as { readonly capability?: string }).capability ?? "step")}
+                capability={interruptedCapability(ambiguousContinuation) ?? "step"}
+                modelCall={isModelGeneration(interruptedCapability(ambiguousContinuation))}
                 busy={reconcileBusy}
                 error={reconcileError}
                 onReconcile={(outcome, reason) => void decideAmbiguous(outcome, reason)}

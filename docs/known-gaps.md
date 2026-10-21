@@ -97,8 +97,11 @@ From the workbench design source:
   shows "Needs reconciliation". The operator resolves it with `run.invocation.reconcile`
   (`succeeded` with a required observation, or `failed`). Agents and run-scoped calls are refused.
   A `succeeded` record stores only `{reconciled, outcome, reason, reconciledBy}`, not the step's
-  original output, so a consumer that expects the native result shape (for example a model
-  response) receives that record instead. Callers that need the native value must not assume it.
+  original output. For that reason an interrupted **model call** (`model.generate`,
+  `expert.model.generate`) cannot be confirmed as succeeded — its response cannot be reconstructed
+  and it has no external effect to confirm — so the card offers only "Retry the model call"
+  (`failed`), and the agent retries it. Other capabilities' consumers receive the observation record
+  in place of their native output.
   Exactly-once delivery of the external effect is still not claimed.
 - Human reconciliation of an ambiguous effect does not prove an objective complete. A confirmed
   successful effect requires a new follow-up objective rather than blind retry of that objective.
