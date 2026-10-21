@@ -176,6 +176,7 @@ export const WORKBENCH_EVENTS = [
   "workbench.task.created",
   "workbench.task.contract.updated",
   "workbench.task.status.changed",
+  "workbench.task.moved",
   "workbench.authority.elevated",
   "workbench.workflow.defined",
   "workbench.workflow.instantiated",

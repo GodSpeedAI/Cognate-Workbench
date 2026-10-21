@@ -14,6 +14,12 @@ import { isWorkDetailsMode } from "../workDetails.ts";
 import { isShortcutOverrides } from "../shortcuts.ts";
 import { WORKBENCH_EVENTS } from "../workbench/types.ts";
 
+/** Session-surface events a validated capability may record through the `session.recorded`
+ *  command (J-TASK-scope/link). `session.created` and `session.archived` have their own typed
+ *  commands; this list is the recording gate for everything else, mirroring `WORKBENCH_EVENTS`. */
+export const SESSION_EVENTS = ["session.task.bound"] as const;
+export type SessionEventType = (typeof SESSION_EVENTS)[number];
+
 /** The recording run is a second validation gate: a settings event that skipped the
  *  `settings.change*` capability (a direct service startRun) still cannot make an invalid
  *  field durable. Every field is optional; present fields must validate exactly as the
@@ -65,6 +71,14 @@ export type AgentConfigInput =
   /** T11 (J-SESSION-archive): reversible, durable archiving of a conversation. The flag only changes
    *  sidebar visibility; no turn, run or event is ever deleted. */
   | { readonly kind: "session.archived"; readonly sessionId: string; readonly archived: boolean }
+  /** J-SESSION-draft: durable creation of a conversation identity *before* any prompt. The
+   *  capability layer already validated the workspace and derived the deterministic session id;
+   *  this run only records the fact. `title` is the literal pre-turn sidebar label. */
+  | { readonly kind: "session.created"; readonly sessionId: string; readonly workspaceId: string; readonly title: string }
+  /** J-TASK-scope/link: an ordered batch of session-scoped events a validated capability decided to
+   *  record (task bindings and binding invalidations). Same shape as `workbench.recorded`: the
+   *  run body only emits, so it is replay-safe by construction. */
+  | { readonly kind: "session.recorded"; readonly events: readonly { readonly type: string; readonly payload: Json }[] }
   /** A remote execution world (SSH host / WSL distribution) the operator connected. `connection` and
    *  `metadata` carry only safe facts (host, user, auth *kind*, key *path*, pinned host-key fingerprint) —
    *  never a password, passphrase or key material. */
@@ -155,6 +169,19 @@ export const agentConfigAgent: AgentDefinition = {
       case "session.archived": {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("session.archived", payload);
+        return { ok: true };
+      }
+      case "session.created": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.created", payload);
+        return { ok: true };
+      }
+      case "session.recorded": {
+        // Only session events may be minted this way; the capability layer already validated them.
+        for (const event of command.events) {
+          if (!(SESSION_EVENTS as readonly string[]).includes(event.type)) throw new Error(`agent.config: ${event.type} is not a session event`);
+          await ctx.emit(event.type, event.payload);
+        }
         return { ok: true };
       }
       case "settings.changed": {

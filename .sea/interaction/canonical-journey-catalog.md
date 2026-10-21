@@ -773,3 +773,116 @@ workspace-isolation journey remains declared.
 - **Payment/authority**: Provider token/cost and captured attempt budgets still apply. Slot eligibility grants no tools, approval or coordination authority. Forged tool calls are rejected by the frozen tool dispatcher and invocation gates.
 - **Evidence/settlement**: Declared pending actual PostgreSQL overlap, distinct-route returns, forged-tool denial, configuration boot, serial tool-bearing work and recovery tests. Inspection exposes no invented active count.
 - **Failure/recovery/next**: Missing/stale/impersonated Assignments fail closed before model effects; native durable dispatch supplies retry/cancellation/recovery. Frozen authority survives profile edits. The operator can inspect results or restart with a deliberate capacity change. Team-specific limits and concurrent workspace effects remain open in J-EXPERT-PARALLEL.
+
+## Session / Workspace / Task / Run journeys (RED contract baseline)
+
+These six journeys accompany `docs/specs/session-workspace-task-red-journeys.md` and the
+`test/*red.test.ts` suites on `test/red-session-workspace-task-contracts-20261020`. They are
+canonical in the model (`.sea/interaction/interaction-model.sea`, instances `j_session_draft`,
+`j_ws_directory_discovery`, `j_task_scope`, `j_task_move`, `j_run_task_attribution`,
+`j_task_expert_provenance`); their capabilities are bound explicitly in `domain/index.ts`
+(`RED_BINDINGS`). Evidence class is **observed** once the formerly red suites pass; the journeys
+were added to the model before any implementation existed (model-first rule).
+
+### J-SESSION-draft (`j_session_draft`)
+
+- **Actor/intention**: User presses + and immediately gets a fresh conversation ready to type.
+- **Preconditions/affordance**: a workspace named by stable id; `session.create`, `session.history`.
+  No inference or model credential is needed to create a draft.
+- **Transition/output**: a deterministic recording run emits `session.created` correlated
+  `session:<id>`; the `sessions` projection folds a draft row (title New Session, status draft);
+  the first submitted turn reuses the same identity.
+- **Policy/authority**: creation validates the named workspace; duplicate create requests with
+  the same idempotency identity return the same Session and emit exactly one event; the creation
+  binds to the explicitly named workspace even when another workspace is current.
+- **Evidence/settlement**: durable before any prompt; survives reload and full restart; no stale
+  Task, approval, focus or conversation leaks from a previous Session; legacy sessions without
+  `session.created` remain readable.
+- **Failure/recovery/next**: unknown workspace refused with no durable effect; failures are
+  visible with retry; clicks disabled only while genuinely pending.
+- **Executable evidence**: `test/J-SESSION-draft-contract.red.test.ts`,
+  `test/E2E-workspace-session-ux.red.test.ts`.
+
+### J-WS-directory-discovery (`j_ws_directory_discovery`)
+
+- **Actor/intention**: User browses project directories without typing an entire absolute path.
+- **Preconditions/affordance**: `workspace.directory.suggest` — an authorized, bounded, read-only
+  query against the **selected execution world's** filesystem; `workspace.select` is the separate
+  governed act of opening a chosen folder.
+- **Transition/output**: matching directories only (never files), deterministic order, bounded
+  results, exact chosen destination shown before confirmation; the Add-workspace dialog, first-run
+  chooser and SSH/WSL folder step share one accessible picker (debounce, keyboard completion,
+  pointer selection, loading/empty/error states, stale-response discard).
+- **Policy/authority**: unknown or disconnected worlds fail closed — no local fallback; browsing
+  never creates a workspace and never bypasses host filesystem authorization; the server enforces
+  path normalization, symlink and protected application-home guards; responses carry no file
+  contents, secrets or stack traces.
+- **Evidence/settlement**: type a prefix, complete by keyboard, open the exact chosen workspace;
+  repeat for a connected world and for denied/unknown locations; typing stays responsive on slow
+  remote listings.
+- **Executable evidence**: `test/J-WS-directory-discovery.red.test.ts`,
+  `test/E2E-workspace-session-ux.red.test.ts`.
+
+### J-TASK-scope (`j_task_scope`)
+
+- **Actor/intention**: User knows which work a chat supports, and chooses a Task's visibility at
+  creation (**This workspace / This session**) without internal Run ids.
+- **Preconditions/affordance**: `task.create` (scope + optional owning session), `task.list`,
+  `session.task.bind` (attach/detach); one Task entity — scopes are visibility, not two ledgers.
+- **Transition/output**: session scope requires an existing Session of the same workspace and
+  binds it; the composer shows the bound Task with an accessible change/detach control; **No
+  task** is a valid, obvious state.
+- **Policy/authority**: a workspace Task is available in every Session of its workspace but is
+  never auto-selected; a session Task never appears as bindable in another Session unless
+  promoted; cross-workspace or cross-scope bindings are refused with a readable reason.
+- **Evidence/settlement**: bindings are durable rows in the public `session-task-bindings`
+  projection (keyed by session, `{sessionId, workspaceId, taskId}`), retained on reload; a new
+  Session starts unbound; a conversation with no Task remains valid.
+- **Failure/recovery/next**: invalid scope/destination refused; detaching preserves the Task, its
+  evidence and history.
+- **Executable evidence**: `test/J-TASK-session-scope.red.test.ts`,
+  `test/E2E-workspace-session-ux.red.test.ts`.
+
+### J-TASK-move (`j_task_move`)
+
+- **Actor/intention**: User promotes, moves or re-homes a Task without destroying its history.
+- **Preconditions/affordance**: `task.move` — one governed explicit mutation to a destination
+  workspace or session; destination must exist; in-flight work is not moved.
+- **Transition/output**: Task id, evidence ledger rows and original source-workspace provenance
+  are preserved; historical Runs are never reparented; contract context and scope are revalidated
+  for the destination (a session Task moved across workspaces promotes to workspace scope).
+- **Policy/authority**: cross-workspace moves recalculate resource and authority scope, not
+  rename; stale Session bindings are invalidated; consequence preview shows changed tools, paths,
+  executors, budget and acceptance applicability before confirmation.
+- **Evidence/settlement**: the moved Task appears only in the destination inventory with its
+  original evidence intact; nothing is silently accepted by moving.
+- **Executable evidence**: `test/J-TASK-session-scope.red.test.ts`.
+
+### J-RUN-task-attribution (`j_run_task_attribution`)
+
+- **Actor/intention**: User understands what inference happened and which objective it served.
+- **Preconditions/affordance**: every submitted turn invokes one Cognate Run (`agent.coding`),
+  with or without tools; an optional `taskId` validated against the Session/Workspace context.
+- **Transition/output**: the Run's initial task association is frozen into its
+  `session.turn.started` evidence; later binding changes never rewrite a started Run's
+  provenance; Runs, Tasks, plan steps and Expert Assignments stay distinct vocabularies.
+- **Policy/authority**: an absent taskId is a valid unbound conversation execution; an invalid
+  taskId is refused; conversation alone never creates a Task.
+- **Evidence/settlement**: a plain question completes a Run with no Task and an empty Task
+  ledger; a bound turn's frozen association is independently inspectable in event history.
+- **Executable evidence**: `test/J-TASK-session-scope.red.test.ts` (J-RUN describe block).
+
+### J-TASK-expert-provenance (`j_task_expert_provenance`)
+
+- **Actor/intention**: Delegation serves an accountable Task; the user can trace which objective
+  an Expert's work served.
+- **Preconditions/affordance**: `team.converse` / `expert.converse` accept an explicit `taskId`
+  validated against the Team's workspace; `team.delegate` inherits it on child Assignments.
+- **Transition/output**: the Orchestrator's Assignment and its Specialist children retain the
+  Task identity and their causal parent ids while keeping distinct Runs; attempts reuse the same
+  Assignment lineage and never duplicate the Task.
+- **Policy/authority**: unknown or cross-workspace Tasks are refused before any Assignment;
+  assignments hold identity, not acceptance authority.
+- **Evidence/settlement**: a successful Run, Expert handoff or Git commit never establishes
+  human acceptance — acceptance remains a separate human and criterion gate.
+- **Executable evidence**: `test/J-TASK-expert-provenance.red.test.ts`.

@@ -17,7 +17,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -42,6 +42,9 @@ import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
 import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
 import { ageExpiredSessions, createSessionAuthenticator, ensureIdentity, issueSession, OPERATOR_SESSION_TTL_MS, supersedeBootSessions, BOOT_SESSION_CAUSE, IDENTITY_THREAD } from "./auth/identity.ts";
 import { sessionHistoryComponent } from "./capabilities/sessionHistory.ts";
+import { sessionCreateComponent } from "./capabilities/sessionCreate.ts";
+import { sessionTaskBindComponent } from "./capabilities/sessionTaskBind.ts";
+import { sessionTaskBindingsProjection } from "./projections/sessionTaskBindings.ts";
 import { modelConfigureComponent } from "./capabilities/modelConfigure.ts";
 import { EXECUTION_CAPABILITY_IDS, createExecutionWorldRegistry, executionWorldsComponent, localExecutionWorld } from "@godspeedai/cognate-execution";
 import { executionWorldsManageComponent, restoreExecutionWorlds } from "./capabilities/executionWorlds.ts";
@@ -176,6 +179,9 @@ const GRANTED_CAPABILITIES = [
   "identity.session.revoke",
   "identity.inspect",
   "session.setArchived",
+  "session.create",
+  "session.task.bind",
+  "workspace.directory.suggest",
   "provider.delete",
   "model.catalog",
   "config.path",
@@ -321,6 +327,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // containment quota setting. The containment semanticRef sits at SETTING_FIELDS index 11
   // (`settings.changeContainment`), appended to the usage-2 refs in that component's order.
   const t8 = bindT8Identity(domain);
+  // RED journeys (J-SESSION-draft / J-WS-directory-discovery / J-TASK-scope / J-TASK-move):
+  // explicit bindings for the new capabilities; see RED_JOURNEY_ANCHORS in domain/index.ts.
+  const redRefs = bindRedJourneys(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -412,6 +421,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       identityAdminComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, semanticRefs: t8.identity }),
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
+      sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
+      sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),
       planStateComponent(getService, planBindings.planState.semanticRef),
@@ -419,7 +430,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       onboardingDismissComponent({ getService, systemCaller: SYSTEM_CALLER }),
       settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: [...usage2.settingsChange, t8.containment], shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
-      workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs }),
+      workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       pluginInstallComponent({
@@ -440,6 +451,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       { projection: cognitiveProjection, public: true },
       { projection: executionWorldsProjection, public: true },
       { projection: sessionsProjection, public: true },
+      { projection: sessionTaskBindingsProjection, public: true },
       { projection: plansProjection, public: true },
       { projection: subagentsProjection, public: true },
       { projection: onboardingProjection, public: true },
@@ -495,6 +507,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       getService,
       systemCaller: SYSTEM_CALLER,
       getKnownWorkspaceIds: () => knownWorkspaceIds,
+      noteKnownWorkspace: (workspaceId) => {
+        knownWorkspaceIds.add(workspaceId);
+      },
       registry: executionWorlds,
       semanticRef: bindings.workspaceSelect.semanticRef,
     }),

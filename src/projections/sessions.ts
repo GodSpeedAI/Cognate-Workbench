@@ -48,6 +48,27 @@ export const sessionsProjection: Projection = {
     // correlated `subagent:<parentRunId>:<id>`, not `session:<id>`. Excluding anything not
     // "session:"-correlated is what keeps children out of the sidebar's session tree (they are
     // tracked instead by the `subagents` projection — see `src/projections/subagents.ts`).
+    //
+    // J-SESSION-draft: the durable draft identity `session.create` recorded before any prompt.
+    // The fold is a no-op for a row that already exists (the idempotency key guarantees one
+    // `session.created` event; the guard keeps a replayed or legacy row's progress intact).
+    if (event.eventType === "session.created") {
+      const payload = event.payload as { readonly sessionId: string; readonly workspaceId: string; readonly title?: string };
+      const key = `${event.tenant}/${payload.sessionId}`;
+      if (state.get(key) !== undefined) return [];
+      return [
+        {
+          key,
+          value: {
+            id: payload.sessionId,
+            workspaceId: payload.workspaceId,
+            title: typeof payload.title === "string" && payload.title.trim() ? payload.title : "New Session",
+            lastStatus: "draft",
+            updatedAt: event.recordedAt,
+          },
+        },
+      ];
+    }
     if (event.eventType === "session.turn.started") {
       const payload = event.payload as { readonly sessionId: string; readonly workspaceId: string; readonly message: string; readonly mode?: string; readonly preset?: string };
       const key = `${event.tenant}/${payload.sessionId}`;

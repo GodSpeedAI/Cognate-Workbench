@@ -16,7 +16,7 @@ import { contractMissing, defaultAuthority } from "../workbench/contract.ts";
 import { validateGroundedFeedback, type GroundedFeedback } from "../workbench/grounded.ts";
 import { acceptanceReady, reviewReadiness } from "../workbench/ledger.ts";
 import { planParallelism, type WorkUnit } from "../workbench/parallelism.ts";
-import type { BindingRecord, CapabilityRecord, ElevationRecord, TaskRecord, WorkflowInstanceRecord } from "../workbench/state.ts";
+import type { BindingRecord, CapabilityRecord, ElevationRecord, ScopedTaskRecord, TaskRecord, WorkflowInstanceRecord } from "../workbench/state.ts";
 import { enqueue, emptyInbox, type Inbox } from "../workbench/steering.ts";
 import { advanceLifecycle, checkSubstitution, detectConflicts, seedBindings, seedCatalog } from "../workbench/skillOs.ts";
 import {
@@ -38,6 +38,8 @@ import { documentWorkflow, frontendProductActualization, nodeDone, readyNodes, v
 
 export const WORKBENCH_CAPABILITY_IDS = [
   "task.create",
+  "task.list",
+  "task.move",
   "task.contract.update",
   "task.status.change",
   "task.review.request",
@@ -83,6 +85,9 @@ export function workbenchComponent(options: {
   readonly systemCaller: Caller;
   /** One semantic ref per capability id (explicit bindings; see `domain/index.ts`). */
   readonly semanticRefs: Readonly<Record<string, SemanticRef | undefined>>;
+  /** Workspaces this process already knows — the `workspaces` projection fold is asynchronous, so
+   *  existence checks consult it too (J-TASK-scope: task.create right after workspace.select). */
+  readonly getKnownWorkspaceIds?: () => ReadonlySet<string>;
 }): Component {
   const contracts: CapabilityContract[] = WORKBENCH_CAPABILITY_IDS.map((id) => ({ id, version: "1.0.0", semanticRef: options.semanticRefs[id] }));
   const contractOf = (id: WorkbenchCapabilityId): CapabilityContract => contracts.find((c) => c.id === id) as CapabilityContract;
@@ -103,15 +108,33 @@ export function workbenchComponent(options: {
       idempotencyKey: randomUUID(),
     });
   };
+  // J-TASK-scope/link: session-surface events (task bindings, binding invalidations) recorded by
+  // validated workbench mutations, through the same deterministic `agent.config` seam. Correlated
+  // to the session so event history answers "which task did this conversation serve".
+  const recordSessionEvents = async (sessionId: string, events: readonly RecordedEvent[]): Promise<void> => {
+    await options.getService().startRun(options.systemCaller, {
+      agent: AGENT_CONFIG,
+      input: { kind: "session.recorded", events: JSON.parse(JSON.stringify(events)) as Json },
+      idempotencyKey: randomUUID(),
+      correlationId: `session:${sessionId}`,
+    });
+  };
   const requireUser = (ctx: HandlerContext, what: string): void => {
     if (ctx.actor.kind !== "user") throw new Error(`${what} is a human decision: only a user may do this, not ${ctx.actor.kind} "${ctx.actor.id}"`);
   };
-  const getTask = async (taskId: string): Promise<TaskRecord> => {
-    const task = await readOne<TaskRecord>(`task/${taskId}`);
+  const getTask = async (taskId: string): Promise<ScopedTaskRecord> => {
+    const task = await readOne<ScopedTaskRecord>(`task/${taskId}`);
     if (!task) throw new Error(`unknown task ${taskId}`);
     return task;
   };
   const evidenceOf = async (taskId: string): Promise<EvidenceEntry[]> => (await readRows(`evidence/${taskId}/`)).map((r) => r.value as EvidenceEntry);
+  /** Workspace existence without the fold race: the projection row, or a workspace this process
+   *  validated through `workspace.select` (which notes ids synchronously). */
+  const workspaceKnown = async (workspaceId: string): Promise<boolean> => {
+    if (options.getKnownWorkspaceIds?.().has(workspaceId)) return true;
+    const workspaces = (await options.getService().readProjection(options.systemCaller, { name: "workspaces" })).rows;
+    return workspaces.some((r) => r.key === `record/${workspaceId}`);
+  };
 
   return {
     id: "workbench:manage",
@@ -121,20 +144,112 @@ export function workbenchComponent(options: {
         fiber.provide(contractOf(id), async (raw, ctx) => handler(raw as I, ctx));
 
       // ---- Task Contract (J-WB-task-contract) ---------------------------------------------------
-      provide("task.create", async (input: { title: string; workspaceId: string; contract?: Partial<TaskContract> }) => {
+      provide("task.create", async (input: { title: string; workspaceId: string; contract?: Partial<TaskContract>; scope?: "workspace" | "session"; sessionId?: string }) => {
         const title = (input.title ?? "").trim();
         if (!title) throw new Error("task.create: a title is required");
-        const workspaces = (await options.getService().readProjection(options.systemCaller, { name: "workspaces" })).rows;
-        if (!workspaces.some((r) => r.key === `record/${input.workspaceId}`)) throw new Error(`task.create: unknown workspace ${input.workspaceId} — a task must bind to an explicit workspace`);
+        if (!(await workspaceKnown(input.workspaceId))) throw new Error(`task.create: unknown workspace ${input.workspaceId} — a task must bind to an explicit workspace`);
+        // J-TASK-scope: one Task entity; `scope` is visibility (where the task is available for
+        // binding), never an automatic active association. Workspace scope is the default for
+        // Workbench-created tasks; session scope requires an existing session of the same
+        // workspace and binds that session — the explicit choice the scope itself expresses.
+        const scope = input.scope === "session" ? "session" : "workspace";
+        let owningSessionId: string | undefined;
+        if (scope === "session") {
+          if (typeof input.sessionId !== "string" || !input.sessionId.trim()) throw new Error("task.create: a session task requires the sessionId of its owning session");
+          const sessions = (await options.getService().readProjection(options.systemCaller, { name: "sessions" })).rows;
+          const session = sessions.find((r) => r.key === input.sessionId)?.value as { readonly workspaceId: string } | undefined;
+          if (!session) throw new Error(`task.create: unknown session ${input.sessionId} — a session task must be created inside an existing conversation`);
+          if (session.workspaceId !== input.workspaceId) throw new Error("task.create: a session task must be created inside a session of the same workspace");
+          owningSessionId = input.sessionId;
+        } else if (input.sessionId !== undefined && input.sessionId !== null) {
+          throw new Error("task.create: a workspace task has no owning session — pass scope 'session' with a sessionId instead");
+        }
         const id = `task-${randomUUID().slice(0, 8)}`;
         const contract: Partial<TaskContract> = {
           ...(input.contract ?? {}),
           context: { ...(input.contract?.context ?? { files: [] }), workspaceId: input.workspaceId, files: input.contract?.context?.files ?? [] },
           authority: input.contract?.authority ?? defaultAuthority(),
         };
-        const task: TaskRecord = { id, title, workspaceId: input.workspaceId, status: "BRIEFING", contract, finished: false, produced: false, humanApproved: false, operationalized: false, createdAt: "" };
+        const task: ScopedTaskRecord = {
+          id,
+          title,
+          workspaceId: input.workspaceId,
+          status: "BRIEFING",
+          contract,
+          finished: false,
+          produced: false,
+          humanApproved: false,
+          operationalized: false,
+          createdAt: "",
+          scope,
+          ...(owningSessionId ? { sessionId: owningSessionId } : {}),
+        };
         await record([{ type: "workbench.task.created", payload: { task } as unknown as Json }]);
-        return { taskId: id, missing: contractMissing(contract) };
+        if (owningSessionId) {
+          // The "This session" choice IS the binding decision — record it durably, same as an
+          // explicit composer attach. Nothing is bound for workspace-scope tasks.
+          await recordSessionEvents(owningSessionId, [{ type: "session.task.bound", payload: { sessionId: owningSessionId, workspaceId: input.workspaceId, taskId: id } }]);
+        }
+        return { taskId: id, scope, missing: contractMissing(contract) };
+      });
+
+      // ---- Task visibility and movement (J-TASK-scope / J-TASK-move) ----------------------------
+      provide("task.list", async (input: { workspaceId: string; sessionId?: string }) => {
+        if (!(await workspaceKnown(input.workspaceId))) throw new Error(`task.list: unknown workspace ${input.workspaceId}`);
+        const all = (await readRows("task/")).map((r) => r.value as ScopedTaskRecord);
+        // A workspace task is available from every session of its workspace (but is never
+        // auto-bound); a session task only from its owning session. Legacy tasks without a scope
+        // are workspace tasks. Availability is a read — it grants no authority and binds nothing.
+        const tasks = all
+          .filter((t) => t.workspaceId === input.workspaceId)
+          .filter((t) => (t.scope ?? "workspace") !== "session" || (typeof input.sessionId === "string" && t.sessionId === input.sessionId))
+          .sort((a, b) => (a.createdAt === b.createdAt ? (a.id < b.id ? -1 : 1) : a.createdAt < b.createdAt ? -1 : 1));
+        return { tasks };
+      });
+
+      provide("task.move", async (input: { taskId: string; to: { workspaceId?: string; sessionId?: string } }) => {
+        const task = await getTask(input.taskId);
+        if (task.status === "RUNNING") throw new Error("task.move: the task is RUNNING — stop it before moving it; in-flight work is never silently reassigned");
+        const destination = input.to ?? {};
+        const hasWorkspace = typeof destination.workspaceId === "string" && destination.workspaceId.trim().length > 0;
+        const hasSession = typeof destination.sessionId === "string" && destination.sessionId.trim().length > 0;
+        if (hasWorkspace === hasSession) throw new Error("task.move: name exactly one destination — to.workspaceId or to.sessionId");
+        let toWorkspaceId: string;
+        let toScope: ScopedTaskRecord["scope"];
+        let toSessionId: string | undefined;
+        if (hasWorkspace) {
+          if (!(await workspaceKnown(destination.workspaceId as string))) throw new Error(`task.move: unknown workspace ${destination.workspaceId} — a task can only move to an existing workspace`);
+          toWorkspaceId = destination.workspaceId as string;
+          // A cross-workspace move promotes a session task to workspace scope: its owning
+          // session belongs to the old workspace and cannot follow. A same-workspace move keeps
+          // the task's scope.
+          toScope = toWorkspaceId === task.workspaceId ? ((task.scope ?? "workspace") as ScopedTaskRecord["scope"]) : "workspace";
+        } else {
+          const sessions = (await options.getService().readProjection(options.systemCaller, { name: "sessions" })).rows;
+          const session = sessions.find((r) => r.key === destination.sessionId)?.value as { readonly workspaceId: string } | undefined;
+          if (!session) throw new Error(`task.move: unknown session ${destination.sessionId} — a task can only move to an existing conversation`);
+          if (session.workspaceId !== task.workspaceId) throw new Error("task.move: moving a task into another workspace's session is a cross-workspace move — name the workspace destination instead");
+          toWorkspaceId = session.workspaceId;
+          toScope = "session";
+          toSessionId = destination.sessionId as string;
+        }
+        if (toWorkspaceId === task.workspaceId && toScope === (task.scope ?? "workspace") && toSessionId === task.sessionId) {
+          return { taskId: task.id, workspaceId: toWorkspaceId, scope: toScope, invalidatedBindings: 0, moved: false };
+        }
+        // Stale bindings are invalidated, never silently kept: every session currently bound to
+        // this task falls back to an explicit "no task" (its own runs keep their frozen history).
+        const bindings = (await options.getService().readProjection(options.systemCaller, { name: "session-task-bindings" })).rows
+          .map((r) => r.value as { readonly sessionId: string; readonly taskId: string | null })
+          .filter((b) => b.taskId === task.id);
+        const recordTaskMoved = record([{ type: "workbench.task.moved", payload: { taskId: task.id, workspaceId: toWorkspaceId, scope: toScope, ...(toSessionId ? { sessionId: toSessionId } : {}) } as unknown as Json }]);
+        const recordInvalidations = Promise.all(
+          bindings
+            .filter((b) => !(toScope === "session" && b.sessionId === toSessionId))
+            .map((b) => recordSessionEvents(b.sessionId, [{ type: "session.task.bound", payload: { sessionId: b.sessionId, workspaceId: task.workspaceId, taskId: null } }])),
+        );
+        await recordTaskMoved;
+        await recordInvalidations;
+        return { taskId: task.id, workspaceId: toWorkspaceId, scope: toScope, invalidatedBindings: bindings.length, moved: true };
       });
 
       provide("task.contract.update", async (input: { taskId: string; contract: Partial<TaskContract> }) => {
