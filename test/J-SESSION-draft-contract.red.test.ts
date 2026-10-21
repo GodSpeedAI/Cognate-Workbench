@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { LOCAL_OPERATOR } from "../src/server.ts";
-import { allEvents, bootApp, inv, waitUntil, withTempHome } from "./wb-helpers.ts";
+import { allEvents, bootApp, bootAimock, inv, waitForCompletion, waitUntil, withTempHome } from "./wb-helpers.ts";
 
 type SessionDraft = {
   readonly id: string;
@@ -111,4 +111,38 @@ describe("J-SESSION-draft — durable creation before first turn (RED)", () => {
       }
     });
   }, 30_000);
+  test("the first inference turn reuses the created draft identity instead of creating a duplicate", async () => {
+    await withTempHome(async home => {
+      const project = join(home, "repo");
+      await mkdir(project);
+      const aimock = await bootAimock();
+      const { app, client } = await bootApp(home);
+      try {
+        await inv(client, "model.configure", {
+          providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`,
+          protocol: "openai-compatible", model: "mock-model-1", apiKey: "",
+        });
+        const { workspaceId } = (await inv(client, "workspace.select", { path: project })) as { workspaceId: string };
+        const { sessionId } = (await inv(client, "session.create", {
+          workspaceId, requestId: "first-message-preserves-draft",
+        })) as { sessionId: string };
+        const run = await client.startRun("agent.coding",
+          { sessionId, workspaceId, message: "[[scenario:plain]] first real turn" } as never,
+          { idempotencyKey: crypto.randomUUID(), correlationId: `session:${sessionId}` });
+        expect((await waitForCompletion(app, run.runId)).status).toBe("completed");
+        await app.runtime.idle();
+        const sessions = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "sessions" })).rows;
+        const rows = sessions.filter(r => (r.value as { workspaceId?: string }).workspaceId === workspaceId);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.key).toBe(sessionId);
+        expect((rows[0]?.value as { title?: string; lastStatus?: string }).title).toContain("first real turn");
+        expect((rows[0]?.value as { lastStatus?: string }).lastStatus).toBe("completed");
+      } finally {
+        await client.close();
+        await app.stop();
+        await aimock.stop();
+      }
+    });
+  }, 60_000);
+
 });
