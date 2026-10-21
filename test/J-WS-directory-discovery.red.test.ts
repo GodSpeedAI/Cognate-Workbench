@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { bootApp, inv, withTempHome } from "./wb-helpers.ts";
+import { LOCAL_OPERATOR } from "../src/server.ts";
 
 type DirectorySuggestion = { readonly name: string; readonly path: string; readonly kind: "directory" };
 type DirectorySuggestionResult = { readonly suggestions: readonly DirectorySuggestion[]; readonly worldId: string };
@@ -34,7 +35,7 @@ describe("J-WS-directory-discovery — type-ahead workspace picker (RED)", () =>
         expect(names).not.toContain("profile.json");
         expect(result.suggestions.every(s => s.kind === "directory" && s.path.startsWith(browseRoot))).toBe(true);
         const rows = (await app.runtime.service.readProjection(
-          { actor: { id: "local-user", kind: "user" }, tenant: "local" },
+          LOCAL_OPERATOR,
           { name: "workspaces" },
         )).rows;
         expect(rows.filter(r => r.key.startsWith("record/"))).toHaveLength(0);
