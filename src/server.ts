@@ -18,7 +18,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -35,6 +35,7 @@ import { containedWorkspaceComponent, validateContainmentConfig, type Containmen
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
 import { expertEffectComponent } from "./capabilities/expertEffect.ts";
+import { ambiguousStepComponent } from "./capabilities/ambiguousStep.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
@@ -94,8 +95,8 @@ export interface RunOwnershipMode {
  * is exposed only behind this verified configuration, backed by the published fenced run-write
  * ownership release: every execution pass claims authoritative store-time ownership, a stale
  * owner's late run-scoped writes are fenced, and a killed process's in-flight effect requires
- * explicit reconciliation instead of a blind repeat (ambiguousSteps: "wait"). The default keeps
- * the historical single-process restart semantics. */
+ * explicit reconciliation instead of a blind repeat (ambiguousSteps: "wait"). Single-process
+ * restarts also wait for reconciliation of an interrupted effect; they never silently repeat it. */
 export function parseRunOwnershipMode(raw: string | undefined): "single-process" | "multi-process" {
   if (raw === undefined || raw === "") return "single-process";
   if (raw === "single-process" || raw === "multi-process") return raw;
@@ -138,7 +139,7 @@ export interface ServerOptions {
   readonly runCapacity?: 1 | 2 | 4 | 8;
   /** T7: verified multi-process run-ownership configuration (defaults to COGNATE_RUN_OWNERSHIP,
    * then "single-process"). Multi-process semantics: fenced run writes + ambiguous-effect
-   * reconciliation; single-process keeps the historical restart behavior. */
+   * reconciliation. Both modes wait for reconciliation of an interrupted effect (never a repeat). */
   readonly runOwnership?: "single-process" | "multi-process";
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
@@ -171,6 +172,7 @@ const GRANTED_CAPABILITIES = [
   RUNTIME_EXECUTION_INSPECT,
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
+  ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
   "secret.put",
@@ -322,7 +324,9 @@ function indexHtml(): string {
 export async function startServer(options: ServerOptions): Promise<AppServer> {
   const home = options.home;
   const runCapacity = parseExpertAdmissionCapacity(options.runCapacity === undefined ? process.env.COGNATE_RUN_CAPACITY : String(options.runCapacity));
-  const runOwnershipMode = options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP);
+  // The mode is still parsed (invalid COGNATE_RUN_OWNERSHIP fails boot); every mode now waits for
+  // operator reconciliation of an interrupted effect, so the value no longer changes runtime options.
+  void (options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP));
   const executionPosture = options.executionPosture ?? parseExecutionPosture(process.env[EXECUTION_POSTURE_ENV]);
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
@@ -350,6 +354,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
   const expertRefs = bindExpertCapabilities(domain);
+  const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const scheduleRefs = bindScheduleCapabilities(domain);
   const runtimeExecutionRef = bindRuntimeExecution(domain);
   // T8: identity-administration capabilities (session issue/revoke/inspect) and the aggregate
@@ -424,14 +429,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     store,
     // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
     // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
-    ...(runCapacity > 1 || runOwnershipMode === "multi-process"
-      ? {
-        execution: {
-          ...(runCapacity > 1 ? { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } : {}),
-          ...(runOwnershipMode === "multi-process" ? { runOwnership: { ambiguousSteps: "wait" as const } } : {}),
-        },
-      }
-      : {}),
+    // An interrupted external effect is never silently repeated: a recovering owner records
+    // `run.invocation.ambiguous` and waits for operator reconciliation (`run.invocation.reconcile`).
+    // This holds in every run-ownership mode and capacity (ambiguousSteps: "wait").
+    execution: {
+      ...(runCapacity > 1 ? { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } : {}),
+      runOwnership: { ambiguousSteps: "wait" as const },
+    },
     // Usage pass U6 (RealityTrace, Option A): trace-worthy events get an observation intent
     // committed atomically with the event (the runtime's generic hook — no runtime dependency on
     // RealityTrace; the adapter only drains the outbox).
@@ -445,6 +449,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
+      ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
       containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),

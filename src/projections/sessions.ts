@@ -144,7 +144,10 @@ export const sessionsProjection: Projection = {
       const key = `${event.tenant}/${sessionId}`;
       const existing = state.get(key) as Record<string, Json> | undefined;
       if (!existing) return [];
-      return [{ key, value: { ...existing, lastStatus: "waiting", runId: event.runId } }];
+      // The waiting continuation type (`run.waiting` payload.type) lets the sidebar name what the run
+      // needs; "ambiguous-invocation" is an operator reconciliation, not an approval.
+      const waitingType = typeof (event.payload as { readonly type?: unknown } | null)?.type === "string" ? (event.payload as { readonly type: string }).type : null;
+      return [{ key, value: { ...existing, lastStatus: "waiting", runId: event.runId, waitingType } }];
     }
     // Header mode badge ("Standard mode" / "PTC mode" — reference-behavior-matrix.md, round-2 critic
     // batch B P1): the reference's badge reads "PTC mode" for sessions that have ever needed a

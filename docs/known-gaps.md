@@ -89,6 +89,17 @@ From the workbench design source:
   and acknowledged-continuation recovery with PostgreSQL regressions; its status is tracked
   separately and is not asserted here. Signal-ignoring handlers can still delay shutdown.
   Abrupt-process recovery is tested separately.
+- Interrupted agent capability calls wait for operator reconciliation in every run-ownership mode
+  and capacity (`ambiguousSteps: "wait"`). When a process stops during a call, the recovering
+  process does not repeat the call: it records `run.invocation.ambiguous` and opens an
+  `ambiguous-invocation` continuation, and the run stays waiting. The chat view shows "Interrupted
+  step needs reconciliation" with the capability name and an observed-outcome form; the sidebar
+  shows "Needs reconciliation". The operator resolves it with `run.invocation.reconcile`
+  (`succeeded` with a required observation, or `failed`). Agents and run-scoped calls are refused.
+  A `succeeded` record stores only `{reconciled, outcome, reason, reconciledBy}`, not the step's
+  original output, so a consumer that expects the native result shape (for example a model
+  response) receives that record instead. Callers that need the native value must not assume it.
+  Exactly-once delivery of the external effect is still not claimed.
 - Human reconciliation of an ambiguous effect does not prove an objective complete. A confirmed
   successful effect requires a new follow-up objective rather than blind retry of that objective.
 - Native commitment guards cover Expert `edit`, `bash` and `run_code`; legacy coding-session tools
