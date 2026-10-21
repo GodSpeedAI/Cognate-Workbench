@@ -169,6 +169,19 @@ Development authentication does not establish a production listener or hostile-u
 See [Linux contained workspaces](linux-contained-workspaces.md) for the explicit child-world
 configuration, refusal behavior and remaining limits.
 
+## Session / Workspace / Task RED journeys — recorded limits
+
+The five formerly red suites (`test/*red.test.ts`, `test/E2E-workspace-session-ux.red.test.ts`)
+are green against the real runtime. Limits observed while making them green:
+
+| Limit | Reality |
+|---|---|
+| Projection re-read amplification | The published client re-reads every mounted projection for every replayed event (a page reload replays the tenant's whole event log). Every always-mounted store multiplies that storm; `useSessionTaskBinding` therefore subscribes only while a session is open. Long event logs + many mounted stores can still exhaust Chromium's pending-request pool (`net::ERR_INSUFFICIENT_RESOURCES`) until the framework batches or deltas projection sync — a framework change to propose upstream, not something app code should paper over. |
+| Directory suggestions | Read-only completion from the selected execution world's provider. Symlinked directories surface as neither file nor directory and are therefore never suggested (conservative, by design). Browsing the Workbench's own application home is refused. There is no fuzzy or case-insensitive matching yet — suggestions are prefix matches. |
+| Session drafts | Draft identity is deterministic from (workspaceId, requestId); the runtime's idempotency key guarantees one `session.created` event per request identity. Sessions created implicitly before this tranche (turn-only rows without `session.created`) remain readable but never show draft state retroactively — a migration was deliberately not invented. |
+| Task movement | `task.move` refuses RUNNING tasks and nonexistent destinations, preserves identity/evidence/provenance and invalidates stale bindings. The UI's consequence preview is descriptive text about what changes (paths/tools/executors/budget/protection are revalidated); it does not yet diff the destination workspace's actual tool/budget configuration against the source. |
+| Session-scoped task bindings | One task may be bound per session at a time (the binding row names at most one `taskId`); a session task created in its owning session auto-binds that session — the explicit scope choice — while workspace tasks are never auto-bound anywhere. |
+
 ## Stale references in source comments
 
 The previously recorded missing-path comments have been repaired in this tranche. Their historical
