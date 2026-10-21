@@ -11,6 +11,7 @@ import { LOCAL_OPERATOR } from "../src/server.ts";
 
 async function startReady(home: string, repo: string) {
   const { app, client } = await bootApp(home);
+  await inv(client, "model.configure", { providerId: "mock", baseURL: "http://127.0.0.1:59999/v1", protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
   await inv(client, "onboarding.dismiss", { step: "notice" });
   await inv(client, "onboarding.dismiss", { step: "apikey" });
   const { workspaceId } = (await inv(client, "workspace.select", { path: repo })) as { workspaceId: string };
