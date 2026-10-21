@@ -26,8 +26,8 @@ describe("J-SESSION-draft — durable creation before first turn (RED)", () => {
       const workspace = join(home, "project");
       await mkdir(workspace);
       const first = await bootApp(home);
-      let sessionId: string;
-      let workspaceId: string;
+      let sessionId = "";
+      let workspaceId = "";
       try {
         ({ workspaceId } = (await inv(first.client, "workspace.select", { path: workspace })) as { workspaceId: string });
         const result = (await inv(first.client, "session.create", { workspaceId, requestId: "new-session-draft-1" })) as { sessionId: string };
