@@ -101,6 +101,27 @@ export function parseRunOwnershipMode(raw: string | undefined): "single-process"
   throw new Error("COGNATE_RUN_OWNERSHIP must be 'single-process' or 'multi-process'");
 }
 
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** The server binds loopback only, but a browser page whose name DNS-rebinds to 127.0.0.1 is
+ *  same-origin with it, and the UI bundle carries the operator session. The Host header (and
+ *  Origin, when a browser sends one) is the only signal of that, so any non-loopback name is
+ *  refused before routing. Ports are not compared, so local port forwards keep working. */
+export function loopbackRefusal(headers: Headers): { status: number; reason: string } | undefined {
+  const hostname = (value: string): string | undefined => {
+    try { return new URL(value).hostname.toLowerCase(); } catch { return undefined; }
+  };
+  const host = headers.get("host");
+  const h = host === null ? undefined : hostname(`http://${host}`);
+  if (h === undefined || !LOOPBACK_HOSTNAMES.has(h)) return { status: 421, reason: "misdirected request: non-loopback Host" };
+  const origin = headers.get("origin");
+  if (origin !== null) {
+    const o = hostname(origin);
+    if (o === undefined || !LOOPBACK_HOSTNAMES.has(o)) return { status: 403, reason: "forbidden: non-loopback Origin" };
+  }
+  return undefined;
+}
+
 /** T8 (J-AUTH-SESSION): the dev authenticator is opt-in and loud. Any value other than an explicit
  *  "1" keeps the production posture (durable sessions only). */
 export function parseDevAuth(raw: string | undefined): boolean {
@@ -707,6 +728,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     idleTimeout: 0,
     maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(request) {
+      const refusal = loopbackRefusal(request.headers);
+      if (refusal) return new Response(refusal.reason, { status: refusal.status, headers: hardened() });
       const url = new URL(request.url);
       if (url.pathname === "/health") {
         return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest } }, { headers: hardened() });
