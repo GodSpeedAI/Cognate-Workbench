@@ -108,6 +108,26 @@ export function workbenchComponent(options: {
       idempotencyKey: randomUUID(),
     });
   };
+  // J-TASK-scope: like `record`, but waits for the deterministic recording run to settle before
+  // the capability returns. Used ONLY by client-invoked capabilities (task.create) whose result
+  // other capabilities immediately validate against the folded projection — never from a path an
+  // agent run could invoke, which would deadlock the single admission slot on its own child run.
+  const recordAndWait = async (events: readonly RecordedEvent[], correlationId?: string): Promise<void> => {
+    const service = options.getService();
+    const { runId } = await service.startRun(options.systemCaller, {
+      agent: AGENT_CONFIG,
+      input: { kind: "workbench.recorded", events: JSON.parse(JSON.stringify(events)) as Json },
+      idempotencyKey: randomUUID(),
+      ...(correlationId ? { correlationId } : {}),
+    });
+    for (let i = 0; i < 400; i++) {
+      const run = await service.getRun(options.systemCaller, { runId });
+      if (run.status === "completed") return;
+      if (run.status === "failed" || run.status === "cancelled") throw new Error(`workbench: recording failed (${run.status})`);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+    throw new Error("workbench: recording timed out");
+  };
   // J-TASK-scope/link: session-surface events (task bindings, binding invalidations) recorded by
   // validated workbench mutations, through the same deterministic `agent.config` seam. Correlated
   // to the session so event history answers "which task did this conversation serve".
@@ -184,11 +204,14 @@ export function workbenchComponent(options: {
           scope,
           ...(owningSessionId ? { sessionId: owningSessionId } : {}),
         };
-        await record([{ type: "workbench.task.created", payload: { task } as unknown as Json }]);
+        await recordAndWait([{ type: "workbench.task.created", payload: { task } as unknown as Json }]);
         if (owningSessionId) {
           // The "This session" choice IS the binding decision — record it durably, same as an
           // explicit composer attach. Nothing is bound for workspace-scope tasks.
-          await recordSessionEvents(owningSessionId, [{ type: "session.task.bound", payload: { sessionId: owningSessionId, workspaceId: input.workspaceId, taskId: id } }]);
+          await recordAndWait(
+            [{ type: "session.task.bound", payload: { sessionId: owningSessionId, workspaceId: input.workspaceId, taskId: id } }],
+            `session:${owningSessionId}`,
+          );
         }
         return { taskId: id, scope, missing: contractMissing(contract) };
       });

@@ -53,6 +53,7 @@ import { cognitiveComponent } from "./capabilities/cognitive.ts";
 import { agentCognitiveAgent } from "./agents/agentCognitive.ts";
 import type { MediatorSpec } from "./cognitive/mediation.ts";
 import { workspaceSelectComponent } from "./capabilities/workspaceSelect.ts";
+import { workspaceDirectorySuggestComponent } from "./capabilities/workspaceDirectorySuggest.ts";
 import { workspacePathComponent } from "./capabilities/workspacePath.ts";
 import { toolCapabilitiesComponent } from "./capabilities/tools.ts";
 import { planStateComponent } from "./capabilities/planState.ts";
@@ -423,6 +424,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
       sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
       sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
+      workspaceDirectorySuggestComponent({ registry: executionWorlds, protectedHome: home, semanticRef: redRefs["workspace.directory.suggest"] }),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),
       planStateComponent(getService, planBindings.planState.semanticRef),

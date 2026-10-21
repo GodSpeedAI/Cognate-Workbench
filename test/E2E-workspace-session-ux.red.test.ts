@@ -36,7 +36,12 @@ describe("E2E J-SESSION-draft — + must visibly do something without a model ca
         await page.goto(app.url);
         await page.getByRole("button", { name: "Experts and Teams", exact: true }).click();
         await page.getByRole("button", { name: "New session", exact: true }).click();
-        await page.locator(".session-row-wrap.active").getByRole("button", { name: /New Session/i }).waitFor();
+        // Test-API mapping (behavior unchanged): the active row's *conversation* button is matched
+        // by its leading title — an anchored name — because the row's archive control
+        // ("Archive New Session") would otherwise also match a loose /New Session/i regex and
+        // violate strict mode. The assertion is as strong: the selected draft row shows a
+        // conversation titled New Session.
+        await page.locator(".session-row-wrap.active").getByRole("button", { name: /^New Session/ }).waitFor();
         const composer = page.getByRole("textbox", { name: /Message or run a task|describe your task/i });
         await composer.waitFor({ state: "visible" });
         await expect(composer.isEnabled()).resolves.toBe(true);
@@ -46,7 +51,7 @@ describe("E2E J-SESSION-draft — + must visibly do something without a model ca
           (row.value as { lastStatus?: string }).lastStatus === "draft");
         expect(draft).toHaveLength(1);
         await page.reload();
-        await page.locator(".session-row-wrap.active").getByRole("button", { name: /New Session/i }).waitFor();
+        await page.locator(".session-row-wrap.active").getByRole("button", { name: /^New Session/ }).waitFor();
         await page.getByRole("textbox", { name: /Message or run a task|describe your task/i }).waitFor();
         expect(errors).toEqual([]);
       } finally {
@@ -143,8 +148,27 @@ describe("E2E J-WS-directory-discovery — usable picker, not a raw full-path de
         await page.getByRole("button", { name: "Back to conversation" }).click();
         const binding = page.getByRole("combobox", { name: "Task" });
         await binding.waitFor();
-        expect(await binding.inputValue()).not.toBe("");
+        // Test-API mapping (behavior unchanged): the durable create settles in a projection round
+        // trip, so the read tolerates that settle while asserting the same fact — the conversation
+        // shows the session task it just created, without any internal Run id.
+        {
+          const deadline = Date.now() + 10_000;
+          for (;;) {
+            const value = await binding.inputValue();
+            if (value !== "") break;
+            if (Date.now() > deadline) throw new Error(`the session task never appeared in the Task combobox (last value: "${value}")`);
+            await Bun.sleep(50);
+          }
+        }
         await page.getByRole("button", { name: "New session", exact: true }).click();
+        // Test-API mapping (behavior unchanged, assertion strengthened): the + action's durable
+        // create settles in a round trip, so instead of racing it we wait for the state only the
+        // NEW session can show — the just-created session task is not even *offered* in it (its
+        // option list is exactly the "No task" entry) and nothing is selected.
+        await page.waitForFunction(() => {
+          const el = document.querySelector("select#wb-bind-task") as HTMLSelectElement | null;
+          return el !== null && el.options.length === 1 && el.value === "";
+        });
         expect(await page.getByRole("combobox", { name: "Task" }).inputValue()).toBe("");
       } finally {
         await browser.close();

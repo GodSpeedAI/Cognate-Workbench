@@ -143,9 +143,12 @@ export const agentConfigAgent: AgentDefinition = {
         return { ok: true };
       }
       case "workbench.recorded": {
-        // Only workbench events may be minted this way; the capability layer already validated them.
+        // Only workbench (and, for the session-task binding the workbench family owns, session)
+        // events may be minted this way; the capability layer already validated them. One batch
+        // keeps the ordering: `task.create` records the task row before its initial binding.
+        const recordable: readonly string[] = [...WORKBENCH_EVENTS, ...SESSION_EVENTS];
         for (const event of command.events) {
-          if (!(WORKBENCH_EVENTS as readonly string[]).includes(event.type)) throw new Error(`agent.config: ${event.type} is not a workbench event`);
+          if (!recordable.includes(event.type)) throw new Error(`agent.config: ${event.type} is not a recordable workbench or session event`);
           await ctx.emit(event.type, event.payload);
         }
         return { ok: true };
