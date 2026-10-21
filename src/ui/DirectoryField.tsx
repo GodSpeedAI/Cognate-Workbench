@@ -207,9 +207,13 @@ export function DirectoryField({
           ))}
         </ul>
       )}
-      <span className="dir-field-status" role="status" aria-live="polite">
-        {status === "loading" ? "Searching folders…" : status === "error" && error ? error : ""}
-      </span>
+      {(status === "loading" || (status === "error" && error)) && (
+        // Rendered only with content: an idle field announces nothing (and never competes with
+        // other live regions on the same surface for the "status" role).
+        <span className="dir-field-status" role="status" aria-live="polite">
+          {status === "loading" ? "Searching folders…" : error}
+        </span>
+      )}
     </div>
   );
 }

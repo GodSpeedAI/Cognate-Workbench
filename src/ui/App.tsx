@@ -220,7 +220,11 @@ export interface SessionTaskBindingRow {
 }
 
 function useSessionTaskBinding(sessionId: string | undefined): SessionTaskBindingRow | undefined {
-  const rows = useProjection("session-task-bindings");
+  // J-TASK-scope/link: subscribe only when a session is actually open. With no session there is no
+  // binding to show, and mounting the store anyway would make the client keep one more projection
+  // in sync for the whole app lifetime (the already-mounted "sessions" store is reused instead —
+  // the client memoizes projection stores by name, so this costs nothing extra).
+  const rows = useProjection(sessionId === undefined ? "sessions" : "session-task-bindings");
   return useMemo(
     () => (sessionId ? ((rows ?? []).find((r) => r.key === sessionId)?.value as unknown as SessionTaskBindingRow | undefined) : undefined),
     [rows, sessionId],
@@ -4872,6 +4876,12 @@ export function App() {
       if (newSessionPending) return;
       setNewSessionPending(true);
       setNewSessionError(undefined);
+      // J-SESSION-draft: the + action means "take me to the conversation" — the center surface
+      // switches immediately (from Workbench, Experts & Teams, Plugins or chat), so the composer
+      // is visible the moment the click lands; only the durable identity then arrives async.
+      setExpertsPanelOpen(false);
+      setPluginsPanelOpen(false);
+      setWorkbenchOpen(false);
       try {
         const result = (await client.invoke("session.create", { workspaceId, requestId: crypto.randomUUID() } as never)) as { sessionId: string };
         // No state may leak from a previous session: transcript, review, trace, plan tab and the
@@ -4884,11 +4894,6 @@ export function App() {
         setSessionTab("chat");
         setFocusSelection(undefined);
         rememberSession(workspaceId, result.sessionId);
-        // The + action lands on the conversation surface whatever was open — the composer must be
-        // visible from the Workbench, Experts & Teams, and Plugins screens too.
-        setExpertsPanelOpen(false);
-        setPluginsPanelOpen(false);
-        setWorkbenchOpen(false);
         setComposerFocusToken((token) => token + 1);
       } catch (e) {
         // Visible, actionable failure (never console-only); the + button retries.

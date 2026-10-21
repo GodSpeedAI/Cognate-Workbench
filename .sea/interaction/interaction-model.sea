@@ -1352,7 +1352,6 @@ Instance j_rw_aggregate_containment of "CanonicalJourney" {
 // Added before implementation per the model-first rule; capabilities below are bound explicitly
 // in domain/index.ts (RED_BINDINGS) and realized by the Cognate runtime, capabilities,
 // projections and UI surfaces.
-
 Instance j_session_draft of "CanonicalJourney" {
     actor: "User",
     capabilities: "session.create, workspace.select, session.history",
