@@ -26,7 +26,7 @@ describe("J-WS-directory-discovery — type-ahead workspace picker (RED)", () =>
         ]);
         const result = (await inv(client, "workspace.directory.suggest", {
           worldId: "local", typedPath: join(browseRoot, "pro"), limit: 20,
-        })) as DirectorySuggestionResult;
+        })) as unknown as DirectorySuggestionResult;
         expect(result.worldId).toBe("local");
         const names = result.suggestions.map(s => s.name);
         expect(names).toContain("projects");
@@ -69,7 +69,7 @@ describe("J-WS-directory-discovery — type-ahead workspace picker (RED)", () =>
         await Promise.all(Array.from({ length: 25 }, (_, i) => mkdir(join(browseRoot, `proj-${String(i).padStart(2,"0")}`))));
         const result = (await inv(client, "workspace.directory.suggest", {
           worldId: "local", typedPath: join(browseRoot, "proj"), limit: 5,
-        })) as DirectorySuggestionResult;
+        })) as unknown as DirectorySuggestionResult;
         expect(result.suggestions).toHaveLength(5);
         expect(result.suggestions.map(s => s.name)).toEqual(
           [...result.suggestions.map(s => s.name)].sort((a,b) => a.localeCompare(b)),
