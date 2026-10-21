@@ -3321,6 +3321,7 @@ function MessageBubble({
  *  the hero menu's "Add workspace…". (The reference's full directory-browser dialog is out of scope
  *  this pass — docs/known-gaps.md.) */
 type ContainmentInspection = {
+  readonly executionPosture?: "contained" | "uncontained-local";
   readonly configured: boolean;
   readonly platformSupported: boolean;
   readonly reason?: string;
@@ -3413,7 +3414,9 @@ export function LocalWorkspaceForm({
         <legend>Execution mode</legend>
         <label>
           <input type="radio" name="workspace-execution-mode" value="local" checked={mode === "local"} onChange={() => setMode("local")} />
-          Local · uncontained (default)
+          {inspection?.executionPosture === "uncontained-local"
+            ? "Local · uncontained — agents run commands and write files on this computer as you"
+            : "Local · read-only to agents — commands and writes need a contained workspace"}
         </label>
         <label title={containmentAvailable ? undefined : containmentReason}>
           <input
