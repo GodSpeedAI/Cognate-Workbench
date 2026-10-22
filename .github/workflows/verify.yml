@@ -49,5 +49,15 @@ jobs:
         run: bun x playwright install --with-deps chromium
       - name: Install pinned RealityTrace CLI for integration tests
         run: just setup-realitytrace
+      - name: Cache pinned DomainForge CLI
+        uses: actions/cache@v4
+        with:
+          path: .tmp/domainforge
+          key: domainforge-0.21.1-${{ runner.os }}
+      - name: Install pinned DomainForge CLI for the SEA format test
+        run: |
+          [ -x .tmp/domainforge/bin/domainforge ] || just setup-domainforge
+          echo "$PWD/.tmp/domainforge/bin" >> "$GITHUB_PATH"
+          [ "$(.tmp/domainforge/bin/domainforge --version)" = "domainforge 0.21.1" ]
       - name: Run complete Workbench application test suite
         run: just test
