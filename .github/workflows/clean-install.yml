@@ -5,7 +5,6 @@ name: clean-install
 # documented, then `just dev` must reach a healthy server on 127.0.0.1:3180.
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
