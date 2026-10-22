@@ -1,0 +1,47 @@
+name: clean-install
+
+# Readiness gate O01 (Cognate Workbench part): the README quick start on a machine with no author
+# environment. Fresh $HOME, no PostgreSQL service: pg0 is installed by `just db-setup` exactly as
+# documented, then `just dev` must reach a healthy server on 127.0.0.1:3180.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: extractions/setup-just@v2
+
+      - name: README quick start in a fresh HOME
+        run: |
+          export HOME="$RUNNER_TEMP/fresh-home"; mkdir -p "$HOME"
+          ! command -v psql || echo "note: runner image has psql; the app must not depend on it"
+          bun install
+          just db-setup
+          (just dev > "$RUNNER_TEMP/dev.log" 2>&1 &)
+          for i in $(seq 1 180); do
+            if body=$(curl -fsS http://127.0.0.1:3180/health 2>/dev/null); then break; fi
+            sleep 1
+          done
+          echo "health: ${body:-<none>}"
+          [ -n "${body:-}" ] || { tail -50 "$RUNNER_TEMP/dev.log"; exit 1; }
+          python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['ok'] is True and d['semantic']['objects'] > 0, d" "$body"
+          ./.tmp/pg0/pg0 info --name cognate-dev
+          test -d .data && echo "state in .data as documented"
+          ls "$HOME/.pg0" >/dev/null && echo "pg0 data under the fresh HOME"
+          echo "clean install OK"
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -100 "$RUNNER_TEMP/dev.log" || true
