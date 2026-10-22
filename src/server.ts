@@ -18,7 +18,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -37,6 +37,9 @@ import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from 
 import { expertEffectComponent } from "./capabilities/expertEffect.ts";
 import { ambiguousStepComponent } from "./capabilities/ambiguousStep.ts";
 import { externalAuthorityFromEnv, governanceComponent, type ExternalAuthority } from "./capabilities/governance.ts";
+import { recordWorkbenchEvents, settlementComponent } from "./capabilities/settlement.ts";
+import { createSettlementOrchestrator } from "./settlement/orchestrator.ts";
+import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/realitytrace.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
@@ -161,6 +164,9 @@ export interface ServerOptions {
   /** SEA-Forge as the external authority (P02). `undefined` reads COGNATE_GOVERNANCE and friends;
    *  `null` forces governance off. Requires the contained execution posture. */
   readonly externalAuthority?: ExternalAuthority | null;
+  /** RealityTrace for governed settlement (readiness P03); default from COGNATE_REALITYTRACE_*.
+   *  `null` forces it off. Requires SEA-Forge governance. */
+  readonly realitytrace?: RealityTraceSettings | null;
 }
 
 export interface AppServer {
@@ -169,6 +175,8 @@ export interface AppServer {
   readonly executionPosture: ExecutionPosture;
   /** T8: this boot's operator browser session token (the session-authenticated HTTP test seam). */
   readonly operatorSessionToken: string;
+  /** P03: the settlement orchestrator, when SEA-Forge governance and RealityTrace are configured. */
+  readonly settlement?: { settleRun(runId: string): Promise<void>; idle(): Promise<void> };
   stop(): Promise<void>;
 }
 
@@ -178,6 +186,7 @@ const GRANTED_CAPABILITIES = [
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
   ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
   ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
+  ...Object.keys(SETTLEMENT_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
   "secret.put",
@@ -340,6 +349,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   if (externalAuthority && executionPosture !== "contained") {
     throw new Error("SEA-Forge governance requires COGNATE_EXECUTION_POSTURE=contained: under uncontained-local an agent could reach the SEA-Forge socket and approve its own escalation");
   }
+  // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
+  const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
+  if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
   if (!containmentConfig && containmentConfigPath) {
@@ -368,6 +380,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const expertRefs = bindExpertCapabilities(domain);
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const governanceRefs = bindGovernanceCapabilities(domain);
+  const settlementRefs = bindSettlementCapabilities(domain);
   const scheduleRefs = bindScheduleCapabilities(domain);
   const runtimeExecutionRef = bindRuntimeExecution(domain);
   // T8: identity-administration capabilities (session issue/revoke/inspect) and the aggregate
@@ -468,6 +481,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
       governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
+      settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
       containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
@@ -548,6 +562,20 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
 
   // Re-register durable SSH/WSL worlds (lazy: nothing connects until a workspace uses one).
   await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, containmentConfig });
+
+  // P03: settle each governed agent run when it ends, and at boot any that ended while Workbench was down.
+  let settlement: ReturnType<typeof createSettlementOrchestrator> | undefined;
+  if (externalAuthority && realitytrace) {
+    if (!containmentConfig) throw new Error("governed settlement requires host containment (COGNATE_LINUX_CONTAINMENT_CONFIG): the proof runs contained");
+    const orchestrator = createSettlementOrchestrator({
+      authority: externalAuthority, realitytrace, containment: containmentConfig,
+      getService: () => runtime.service, systemCaller: SYSTEM_CALLER,
+      record: (events, correlationId) => recordWorkbenchEvents(runtime.service, SYSTEM_CALLER, events, correlationId),
+    });
+    settlement = orchestrator;
+    runtime.store.onCommitted((events) => orchestrator.onCommitted(events));
+    void orchestrator.sweep();
+  }
 
   // J-CONTEXT-BUDGET: the billing ledger backs every ordinary-session dispatch with a durable
   // reservation and enforces the operator's spending ceilings. Prices and protocol resolve from
@@ -796,6 +824,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     /** T8: this boot's browser session token — the test seam for session-authenticated HTTP.
      *  In the real browser it never leaves the generated entry; production never logs it. */
     operatorSessionToken: operatorSession.token,
+    ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       eventsController.abort();
       await scheduleEvaluator.stop();

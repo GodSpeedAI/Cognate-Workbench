@@ -89,7 +89,7 @@ From the workbench design source:
   and acknowledged-continuation recovery with PostgreSQL regressions; its status is tracked
   separately and is not asserted here. Signal-ignoring handlers can still delay shutdown.
   Abrupt-process recovery is tested separately.
-- SEA-Forge as the external authority ([docs](sea-forge-authority.md)) is opt-in. When on, every capability call is a SEA-Forge round trip and ledger entry. Settlement through SEA-Forge is not wired yet. It needs Cognate SDK 0.6.2 or later, in which an approval governs only the operation it was granted for (Cognate PR #60); with 0.6.1 an approved edit failed on its nested filesystem call.
+- SEA-Forge as the external authority ([docs](sea-forge-authority.md)) is opt-in. When on, every capability call is a SEA-Forge round trip and ledger entry. Settlement is wired (readiness P03): RealityTrace runs the operator's declared proof, contained and read-only, and SEA-Forge settles each consequential operation on that corroborated evidence; see the docs. It needs Cognate SDK 0.6.2 or later, in which an approval governs only the operation it was granted for (Cognate PR #60); with 0.6.1 an approved edit failed on its nested filesystem call.
 - Interrupted agent capability calls wait for operator reconciliation in every run-ownership mode
   and capacity (`ambiguousSteps: "wait"`). When a process stops during a call, the recovering
   process does not repeat the call: it records `run.invocation.ambiguous` and opens an

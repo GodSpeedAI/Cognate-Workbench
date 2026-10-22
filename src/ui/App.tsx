@@ -9,6 +9,7 @@ import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "
 import { renderMarkdown } from "./markdown.ts";
 import { AmbiguousStepCard } from "./AmbiguousStepCard.tsx";
 import { GovernanceApprovalCard, governanceApprovalOf } from "./GovernanceApprovalCard.tsx";
+import { SettlementCard, useSessionSettlement, type SettlementOperation } from "./SettlementCard.tsx";
 import { interruptedCapability, isModelGeneration } from "../capabilities/ambiguousStep.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
@@ -4830,6 +4831,12 @@ export function App() {
     },
     [governanceApproval, client],
   );
+  // P03: what SEA-Forge settled for this session's governed runs.
+  const loadSettlement = useCallback(
+    async (sessionId: string) => (await client.invoke("settlement.status", { sessionId } as never)) as unknown as { readonly active: boolean; readonly operations: readonly SettlementOperation[] },
+    [client],
+  );
+  const settlementOperations = useSessionSettlement(loadSettlement, activeSessionId);
   // Generic fallback: an open continuation of a type this view does not render is still visible.
   const otherContinuation = openContinuations.find((c) => !["tool-approval", "plan-review", "ambiguous-invocation", "governance-approval"].includes(c.type));
 
@@ -5721,6 +5728,7 @@ export function App() {
             {otherContinuation && (
               <p role="status" className="continuation-waiting">Waiting on {otherContinuation.type} ({otherContinuation.status.toLowerCase()})</p>
             )}
+            <SettlementCard operations={settlementOperations} />
             {pendingApproval ? (
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
             ) : governanceApproval ? (

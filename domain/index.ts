@@ -404,6 +404,18 @@ export function bindGovernanceCapabilities(domain: Domain): Readonly<Record<stri
   return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
 }
 
+/** Governed settlement (readiness P03): the declared proof and the settlement status. */
+export const SETTLEMENT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "workspace.proof.declare": "Verification",
+  "settlement.status": "Verification",
+};
+export function bindSettlementCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(SETTLEMENT_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} settlement bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
 /** Operator reconciliation of an interrupted agent capability call (`ambiguous-invocation`). */
 export const AMBIGUOUS_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "run.invocation.reconcile": "AgentRun",

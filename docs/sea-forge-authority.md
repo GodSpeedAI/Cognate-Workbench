@@ -77,6 +77,9 @@ rules:
     verdict: allow
     actor_role: operator
     operation_kind: approval_resolution
+  # Settlement (below): Workbench submits RealityTrace's evidence and asks SEA-Forge to settle.
+  - { name: evidence, verdict: allow, actor_role: service, operation_kind: evidence_mutation }
+  - { name: settlement, verdict: allow, actor_role: service, operation_kind: settlement_declaration }
 ```
 
 ## Turning it on
@@ -98,11 +101,56 @@ When an agent asks for a consequential action, the chat shows **Action awaiting 
 capability and the SEA-Forge approval id, and the session reads "Waiting for approval". Approve, and the
 run resumes and the action runs once. Reject, and it never runs.
 
+## Settlement: did the authorized work achieve what was expected?
+
+An approval says the agent may act. Settlement says whether the action did what the operator expected.
+SEA-Forge decides it, on evidence RealityTrace recorded. Workbench only carries the evidence and reports
+the outcome.
+
+1. **Declare the proof before the run.** `workspace.proof.declare { workspaceId, argv, cwd?, timeoutS? }`
+   (operator only, outside any run) fixes the command that judges the workspace's agent runs, e.g.
+   `["bun", "test"]`. It applies to runs that start after the declaration. An agent can neither declare
+   nor change it.
+2. **RealityTrace runs it.** When a governed agent run ends, RealityTrace runs the declared proof with
+   its `command` verifier. The proof runs under the same bubblewrap containment as agent tools, with the
+   workspace mounted read-only and nothing else reachable. RealityTrace records the exit code, the
+   output and a digest of the workspace tree it verified.
+3. **SEA-Forge settles.** For each consequential operation of the run (`tool.edit`, `tool.bash`,
+   `tool.run_code`), Workbench submits RealityTrace's evidence and asks SEA-Forge to settle. With
+   `cep_authority.realitytrace` configured, SEA-Forge corroborates each evidence item against
+   RealityTrace's own ledger and refuses a packet that differs from it.
+   - A passing proof is **settled**; a failing one is **rejected**; both are final.
+   - With no proof declared, the run is **not settled**, and the session says why.
+
+The session shows each operation's outcome, the proof's exit code and the verified digest
+(`settlement.status`). A run that ended while Workbench was down is settled at the next boot, once.
+
+Turn it on with the same RealityTrace homes in both places:
+
+```bash
+export COGNATE_REALITYTRACE_BIN=/usr/local/bin/realitytrace
+export COGNATE_REALITYTRACE_DATA_HOME=$HOME/.local/share      # RealityTrace's XDG_DATA_HOME
+export COGNATE_REALITYTRACE_STATE_HOME=$HOME/.local/state     # RealityTrace's XDG_STATE_HOME
+```
+
+```yaml
+# SEA-Forge server.yaml, under cep_authority:
+realitytrace:
+  bin: /usr/local/bin/realitytrace
+  data_home: /home/op/.local/share
+  state_home: /home/op/.local/state
+```
+
+Settlement needs SEA-Forge governance and host containment; a partial configuration is a startup error.
+The workspace must be a git checkout, because RealityTrace enrolls it by its repository identity.
+
 ## Limits
 
 - Every capability call, including ordinary UI calls, makes a round trip to SEA-Forge and adds a ledger
   entry.
-- Settlement through SEA-Forge (RealityTrace evidence → `authority_settle`) is not wired yet.
+- The proof judges the workspace as it is when the run ends. Two concurrent runs in one workspace are
+  judged together.
+- The verifier's sandbox mirrors the SDK's bubblewrap world, whose argv is not exported. Keep them in step.
 - The in-app approval gate still applies inside SEA-Forge's decision as a stricter local check.
 
 Evidence: `test/J-SEA-FORGE-AUTHORITY.test.ts` (opt-in: `SEA_FORGE_SERVER_BIN`, the real-bwrap
