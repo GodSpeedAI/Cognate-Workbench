@@ -7,6 +7,8 @@ import { WorkbenchView, useBindableTasks } from "./workbench/Workbench.tsx";
 import { ExpertsTeamsPanel } from "./experts/ExpertsTeamsPanel.tsx";
 import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "../workbench/focus.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { AmbiguousStepCard } from "./AmbiguousStepCard.tsx";
+import { interruptedCapability, isModelGeneration } from "../capabilities/ambiguousStep.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
 import { DirectoryField } from "./DirectoryField.tsx";
@@ -404,18 +406,29 @@ export function SessionRowButton({
 }) {
   const archived = session.archived === true;
   const label = session.title || "New Session";
+  // A waiting run is labelled by what it is blocked on: an interrupted step needs operator
+  // reconciliation (never an approval); other known non-approval waits name their type.
+  const waiting = session.lastStatus === "waiting" && !planPending;
+  const needsReconciliation = waiting && session.waitingType === "ambiguous-invocation";
+  const otherWait = waiting && !needsReconciliation && session.waitingType && session.waitingType !== "tool-approval" ? session.waitingType : undefined;
   return (
     <div role="treeitem" aria-selected={active} className={active ? "session-row-wrap active" : "session-row-wrap"}>
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
         <span className="session-row-title">
-          {planPending ? "Plan awaiting review " : session.lastStatus === "waiting" && !planPending ? "Waiting for approval " : ""}
+          {planPending ? "Plan awaiting review " : needsReconciliation ? "Needs reconciliation " : otherWait ? `Waiting: ${otherWait} ` : waiting ? "Waiting for approval " : ""}
           {label}
           {archived ? " (archived)" : ""}
         </span>
-        {session.lastStatus === "waiting" && !planPending && (
-          <span className="approval-badge" title="Waiting for approval">
+        {needsReconciliation && (
+          <span className="approval-badge" title="Needs reconciliation">
             <span className="approval-badge-dot" aria-hidden="true" />
-            Approval
+            Reconcile
+          </span>
+        )}
+        {waiting && !needsReconciliation && (
+          <span className="approval-badge" title={otherWait ? `Waiting: ${otherWait}` : "Waiting for approval"}>
+            <span className="approval-badge-dot" aria-hidden="true" />
+            {otherWait ? "Waiting" : "Approval"}
           </span>
         )}
         <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
@@ -4774,6 +4787,28 @@ export function App() {
     },
     [planReviewContinuation, resolveContinuation],
   );
+  // An interrupted agent step (`run.invocation.reconcile`): the run waits, unrepeated, until the
+  // operator records what actually happened. Only a direct operator call can resolve it.
+  const ambiguousContinuation = openContinuations.find((c) => c.type === "ambiguous-invocation");
+  const [reconcileBusy, setReconcileBusy] = useState(false);
+  const [reconcileError, setReconcileError] = useState<string>();
+  const decideAmbiguous = useCallback(
+    async (outcome: "succeeded" | "failed", reason: string) => {
+      if (!ambiguousContinuation) return;
+      setReconcileBusy(true);
+      setReconcileError(undefined);
+      try {
+        await client.invoke("run.invocation.reconcile", { continuationId: ambiguousContinuation.id, outcome, reason } as never);
+      } catch (failure: unknown) {
+        setReconcileError(failure instanceof Error ? failure.message : String(failure));
+      } finally {
+        setReconcileBusy(false);
+      }
+    },
+    [ambiguousContinuation, client],
+  );
+  // Generic fallback: an open continuation of a type this view does not render is still visible.
+  const otherContinuation = openContinuations.find((c) => !["tool-approval", "plan-review", "ambiguous-invocation"].includes(c.type));
 
   // Sidebar auto-collapses *below* 1024px viewport width, matching the reference's
   // `SIDEBAR_AUTO_COLLAPSE = 1024px` breakpoint (product-characterization.md §2: "sidebar
@@ -5652,7 +5687,7 @@ export function App() {
                 onTaskChange={(taskId) => void bindTask(taskId ?? null)}
                 bindError={taskBindError}
                 onOpenWorkbench={() => setWorkbenchOpen(true)}
-                state={pendingApproval || planReviewContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
+                state={pendingApproval || planReviewContinuation || ambiguousContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
                 steps={toolEntries.length + 1}
                 elapsedSeconds={elapsedSeconds}
                 approvalsPending={pendingApproval ? 1 : 0}
@@ -5660,8 +5695,19 @@ export function App() {
                 onClearFocus={() => setFocusSelection(undefined)}
               />
             )}
+            {otherContinuation && (
+              <p role="status" className="continuation-waiting">Waiting on {otherContinuation.type} ({otherContinuation.status.toLowerCase()})</p>
+            )}
             {pendingApproval ? (
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
+            ) : ambiguousContinuation ? (
+              <AmbiguousStepCard
+                capability={interruptedCapability(ambiguousContinuation) ?? "step"}
+                modelCall={isModelGeneration(interruptedCapability(ambiguousContinuation))}
+                busy={reconcileBusy}
+                error={reconcileError}
+                onReconcile={(outcome, reason) => void decideAmbiguous(outcome, reason)}
+              />
             ) : planReviewContinuation ? (
               <PlanReviewCard
                 heading={String((planReviewContinuation.payload as { readonly heading?: string }).heading ?? "")}

@@ -391,6 +391,17 @@ export function bindScheduleCapabilities(domain:Domain):Readonly<Record<string,C
   return Object.fromEntries(contracts.map(contract=>[contract.id,contract.semanticRef]));
 }
 
+/** Operator reconciliation of an interrupted agent capability call (`ambiguous-invocation`). */
+export const AMBIGUOUS_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "run.invocation.reconcile": "AgentRun",
+};
+export function bindAmbiguousCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(AMBIGUOUS_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} ambiguous-invocation bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
 /**
  * RED journeys (J-SESSION-draft, J-WS-directory-discovery, J-TASK-scope, J-TASK-move,
  * J-RUN-task-attribution, J-TASK-expert-provenance — see
