@@ -18,7 +18,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -36,6 +36,7 @@ import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabili
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
 import { expertEffectComponent } from "./capabilities/expertEffect.ts";
 import { ambiguousStepComponent } from "./capabilities/ambiguousStep.ts";
+import { externalAuthorityFromEnv, governanceComponent, type ExternalAuthority } from "./capabilities/governance.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
@@ -157,6 +158,9 @@ export interface ServerOptions {
    *  "contained", commands and writes in uncontained `local` worlds are refused; "uncontained-local"
    *  is the operator's explicit opt-in to run them on this host as this user (src/executionPosture.ts). */
   readonly executionPosture?: ExecutionPosture;
+  /** SEA-Forge as the external authority (P02). `undefined` reads COGNATE_GOVERNANCE and friends;
+   *  `null` forces governance off. Requires the contained execution posture. */
+  readonly externalAuthority?: ExternalAuthority | null;
 }
 
 export interface AppServer {
@@ -173,6 +177,7 @@ const GRANTED_CAPABILITIES = [
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
   ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
+  ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
   "secret.put",
@@ -328,6 +333,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // operator reconciliation of an interrupted effect, so the value no longer changes runtime options.
   void (options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP));
   const executionPosture = options.executionPosture ?? parseExecutionPosture(process.env[EXECUTION_POSTURE_ENV]);
+  const externalAuthority = options.externalAuthority === null ? undefined : options.externalAuthority ?? externalAuthorityFromEnv(process.env);
+  // Any process of this OS user can speak on_behalf_of the operator to SEA-Forge. Only the contained
+  // posture keeps agent processes away from the SEA-Forge socket (readiness S02), so governance
+  // without it would let an agent approve its own escalation.
+  if (externalAuthority && executionPosture !== "contained") {
+    throw new Error("SEA-Forge governance requires COGNATE_EXECUTION_POSTURE=contained: under uncontained-local an agent could reach the SEA-Forge socket and approve its own escalation");
+  }
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
   if (!containmentConfig && containmentConfigPath) {
@@ -355,6 +367,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const t11 = bindTranche11(domain);
   const expertRefs = bindExpertCapabilities(domain);
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
+  const governanceRefs = bindGovernanceCapabilities(domain);
   const scheduleRefs = bindScheduleCapabilities(domain);
   const runtimeExecutionRef = bindRuntimeExecution(domain);
   // T8: identity-administration capabilities (session issue/revoke/inspect) and the aggregate
@@ -425,8 +438,12 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // additional `PluginSource` can be registered at boot without touching the capability.
   const pluginRegistry = new PluginRegistry();
 
+  let pollApprovals: (() => Promise<number>) | undefined;
   const runtime: Runtime = await createRuntime({
     store,
+    // P02: with an external authority, every capability invoke and consequential action is decided by
+    // SEA-Forge; escalations wait for the operator's resolution there.
+    ...(externalAuthority ? { governance: externalAuthority.governance } : {}),
     // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
     // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
     // An interrupted external effect is never silently repeated: a recovering owner records
@@ -450,6 +467,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
+      governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
       containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
@@ -501,6 +519,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   });
   const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
   serviceRef.current = governedService;
+  pollApprovals = () => runtime.pollApprovals();
   finishServiceBoot(governedService);
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
   finishExpertsBoot(experts);
