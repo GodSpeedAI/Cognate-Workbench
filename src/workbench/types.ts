@@ -196,5 +196,9 @@ export const WORKBENCH_EVENTS = [
   "workbench.protection.blocked",
   "workbench.task.activity",
   "workbench.feedback.recorded",
+  // Governed settlement (readiness P03): the operator's declared proof, RealityTrace's evidence, SEA-Forge's settlement.
+  "workbench.proof.declared",
+  "workbench.settlement.evidence",
+  "workbench.settlement.recorded",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];
