@@ -13,8 +13,8 @@ Off by default. A standalone Workbench is unchanged.
   containment configured (`COGNATE_LINUX_CONTAINMENT_CONFIG`). Workbench refuses to start with SEA-Forge
   governance under `uncontained-local`. Any process running as your OS user can speak to SEA-Forge on
   the operator's behalf, and only containment keeps agent processes away from the SEA-Forge socket.
-- A SEA-Forge server with the `resources` policy filter, and a Cognate SDK in which an approval governs
-  only the operation it was granted for (Cognate PR #60).
+- A SEA-Forge server with the `resources` policy filter, and Cognate SDK 0.6.2 or later, in which an approval
+  governs only the operation it was granted for (Cognate PR #60).
 - DomainForge at the stack lockstep version (0.21.1) for the governed world.
 
 ## Identity: one OS user, two actors

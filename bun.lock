@@ -6,29 +6,29 @@
       "name": "@godspeedai/cognate-workbench",
       "dependencies": {
         "@connectrpc/connect": "2.2.0",
-        "@godspeedai/cognate-capabilities": "0.6.1",
-        "@godspeedai/cognate-cli": "0.6.1",
-        "@godspeedai/cognate-client": "0.6.1",
-        "@godspeedai/cognate-continuations": "0.6.1",
-        "@godspeedai/cognate-domainforge": "0.6.1",
-        "@godspeedai/cognate-events": "0.6.1",
-        "@godspeedai/cognate-execution": "0.6.1",
-        "@godspeedai/cognate-execution-ssh": "0.6.1",
-        "@godspeedai/cognate-execution-wsl": "0.6.1",
-        "@godspeedai/cognate-kernel-api": "0.6.1",
-        "@godspeedai/cognate-projections": "0.6.1",
-        "@godspeedai/cognate-protocol-connect": "0.6.1",
-        "@godspeedai/cognate-protocol-connect-bun": "0.6.1",
-        "@godspeedai/cognate-provider-anthropic-compatible": "0.6.1",
-        "@godspeedai/cognate-provider-auth": "0.6.1",
-        "@godspeedai/cognate-provider-openai-compatible": "0.6.1",
-        "@godspeedai/cognate-provider-openai-responses": "0.6.1",
-        "@godspeedai/cognate-react": "0.6.1",
-        "@godspeedai/cognate-realitytrace": "0.6.1",
-        "@godspeedai/cognate-runtime-api": "0.6.1",
-        "@godspeedai/cognate-runtime-bun": "0.6.1",
-        "@godspeedai/cognate-store-postgres": "0.6.1",
-        "@godspeedai/cognate-ui-astryx": "0.6.1",
+        "@godspeedai/cognate-capabilities": "0.6.2",
+        "@godspeedai/cognate-cli": "0.6.2",
+        "@godspeedai/cognate-client": "0.6.2",
+        "@godspeedai/cognate-continuations": "0.6.2",
+        "@godspeedai/cognate-domainforge": "0.6.2",
+        "@godspeedai/cognate-events": "0.6.2",
+        "@godspeedai/cognate-execution": "0.6.2",
+        "@godspeedai/cognate-execution-ssh": "0.6.2",
+        "@godspeedai/cognate-execution-wsl": "0.6.2",
+        "@godspeedai/cognate-kernel-api": "0.6.2",
+        "@godspeedai/cognate-projections": "0.6.2",
+        "@godspeedai/cognate-protocol-connect": "0.6.2",
+        "@godspeedai/cognate-protocol-connect-bun": "0.6.2",
+        "@godspeedai/cognate-provider-anthropic-compatible": "0.6.2",
+        "@godspeedai/cognate-provider-auth": "0.6.2",
+        "@godspeedai/cognate-provider-openai-compatible": "0.6.2",
+        "@godspeedai/cognate-provider-openai-responses": "0.6.2",
+        "@godspeedai/cognate-react": "0.6.2",
+        "@godspeedai/cognate-realitytrace": "0.6.2",
+        "@godspeedai/cognate-runtime-api": "0.6.2",
+        "@godspeedai/cognate-runtime-bun": "0.6.2",
+        "@godspeedai/cognate-store-postgres": "0.6.2",
+        "@godspeedai/cognate-ui-astryx": "0.6.2",
         "gpt-tokenizer": "^4.0.3",
         "react": "19.3.0",
         "react-dom": "19.3.0",
@@ -78,77 +78,77 @@
 
     "@formatjs/icu-skeleton-parser": ["@formatjs/icu-skeleton-parser@2.1.11", "", {}, "sha512-j8cUmOJzVgkHuS0QiQ6ga76UIoLOFSAMWhs7aZJztH3aAdCOAE6vpC8KVvFB4cU10ON0y2/5oOVmPJ43s2lTwA=="],
 
-    "@godspeedai/cognate-ag-ui": ["@godspeedai/cognate-ag-ui@0.6.1", "", { "dependencies": { "@ag-ui/core": "1.0.0", "@ag-ui/encoder": "1.0.0", "@godspeedai/cognate-client": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1" } }, "sha512-Kzrwa9lWiE76+VnU6Vhq3vp6OlOFfRd2odfGRfwGamG3xQq1EYnygc1v24IlimhkL1kz7AqOUDLfMHSWjFjrdg=="],
+    "@godspeedai/cognate-ag-ui": ["@godspeedai/cognate-ag-ui@0.6.2", "", { "dependencies": { "@ag-ui/core": "1.0.0", "@ag-ui/encoder": "1.0.0", "@godspeedai/cognate-client": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2" } }, "sha512-/EZdoQ3LCdlL2SeGp+S6Yr4GeSb6ud5qHdR4xoNqoik/8v/IOp9jCXMWTfi41SDFKalcE4PUpN8Wg1M9fDbGcQ=="],
 
-    "@godspeedai/cognate-artifacts": ["@godspeedai/cognate-artifacts@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-N61i8fSe4I/xYH/NkhNY8tXO76uqlp+CBAkq3caKSC+EUkOhG/+NyQYZGJ/FVfPVIAMc4lwP5PZNEcBm7w/BxA=="],
+    "@godspeedai/cognate-artifacts": ["@godspeedai/cognate-artifacts@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-FMJwXXg0bX69E0GfZw4rcUg7DOyHzLzH0gPvf5cjfJbU2JSqqpV5G3HjSVOLutFHRcWeB8QPHuOF+I2IHrfsTw=="],
 
-    "@godspeedai/cognate-capabilities": ["@godspeedai/cognate-capabilities@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/cognate-projections": "^0.6.1" } }, "sha512-w/S+Ck2iycwlhQ88tsGxz/XY3QQuGR9VebYKln/AMSgypVA2ZflvMdW4uCENYFjDXMulevAJNfMUxjZgTcrcdw=="],
+    "@godspeedai/cognate-capabilities": ["@godspeedai/cognate-capabilities@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/cognate-projections": "^0.6.2" } }, "sha512-0Ps6yP8tptT+Y/x9Wc62m76fSAeLpbyhL0K/eauJEvfv3qOfPmfbEtQvVC4NbrXSuY8j+RKNlM/prHlTTa/kkw=="],
 
-    "@godspeedai/cognate-cli": ["@godspeedai/cognate-cli@0.6.1", "", { "dependencies": { "@godspeedai/cognate-client": "^0.6.1", "@godspeedai/cognate-domainforge": "^0.6.1", "@godspeedai/cognate-profile-copilot": "^0.6.1", "@godspeedai/cognate-profile-harness": "^0.6.1", "@godspeedai/cognate-protocol-connect": "^0.6.1", "@godspeedai/cognate-protocol-connect-bun": "^0.6.1", "@godspeedai/cognate-provider-local": "^0.6.1", "@godspeedai/cognate-react": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1", "@godspeedai/cognate-ui-astryx": "^0.6.1", "react": "19.3.0", "react-dom": "19.3.0" }, "bin": { "cognate": "src/bin.ts" } }, "sha512-ho3+hsUPW56HeMxoFweLLdjZVjU+O4M/LlstCbmVzoM/pyDJPFuBZOyhqlK28hXW2JzNeavScVWogOXZRu24jw=="],
+    "@godspeedai/cognate-cli": ["@godspeedai/cognate-cli@0.6.2", "", { "dependencies": { "@godspeedai/cognate-client": "^0.6.2", "@godspeedai/cognate-domainforge": "^0.6.2", "@godspeedai/cognate-profile-copilot": "^0.6.2", "@godspeedai/cognate-profile-harness": "^0.6.2", "@godspeedai/cognate-protocol-connect": "^0.6.2", "@godspeedai/cognate-protocol-connect-bun": "^0.6.2", "@godspeedai/cognate-provider-local": "^0.6.2", "@godspeedai/cognate-react": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2", "@godspeedai/cognate-ui-astryx": "^0.6.2", "react": "19.3.0", "react-dom": "19.3.0" }, "bin": { "cognate": "src/bin.ts" } }, "sha512-rShWPx95DJZ+XgqFTPjzfrDoQ0aYmt9wQTUmftKOTZuzCxrQ2btHYyHrNNA7PTfPpI9yKI2AZoPh2zbAZZa3gQ=="],
 
-    "@godspeedai/cognate-client": ["@godspeedai/cognate-client@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1" } }, "sha512-xyn55d6G755NHWA9wBXbqnrmLUyFhv281wa1NP8unWIpiQYIvAJ8Yn+nFQTc49OcXHyunfY36G4X16QLkmwn4A=="],
+    "@godspeedai/cognate-client": ["@godspeedai/cognate-client@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2" } }, "sha512-WAOquUytDGhTwdMN6kvYei6Z+Pvk0aeMUs7rOhQqpu6/c0lECmKirhz/O+YH8OI34moWgrv71/fm4KUom/hfIQ=="],
 
-    "@godspeedai/cognate-cognitive-api": ["@godspeedai/cognate-cognitive-api@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/cognate-projections": "^0.6.1" } }, "sha512-lMoBcJxf65xkCqCE2VY22/9GR3lC1uGR0zUQ8LK5SHxDjX6YFfiIKFGgjg/Oghw0Ug4L0Wk1Plqpzm1a/tW8iQ=="],
+    "@godspeedai/cognate-cognitive-api": ["@godspeedai/cognate-cognitive-api@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/cognate-projections": "^0.6.2" } }, "sha512-AVhKElkH8YvmhTXXPVc2DD7lHlGK7f3K9/P/Ht9ZBVeZtKWarvDvJfDB00BQ8a0HZ30sOZvrEbtdhmxAvdelRA=="],
 
-    "@godspeedai/cognate-continuations": ["@godspeedai/cognate-continuations@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-LTJr33KV45bmyC9qcGsZon/8lD9JRsnZ1obg2Fq1X3de7jQ05AWTXaOMj+qXAHdInr9/co4hysEckOsWThcMOA=="],
+    "@godspeedai/cognate-continuations": ["@godspeedai/cognate-continuations@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-fojL8h35d+fB/YcCkeuzKxYFIYZRMkTtV/4UBPRh4VxXW5+sjukL5Udr4DMw0HXhDhsyq/6tC515bRafboK5XQ=="],
 
-    "@godspeedai/cognate-domainforge": ["@godspeedai/cognate-domainforge@0.6.1", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/domainforge": "0.19.0" } }, "sha512-Utwpu+5z2xNjRKDx65qx8qtFGoKULW7P26RfEge9Qj93P7jNEaQU2JxjXrR141zE7nLc8LRSDd5K0ZnSSr4bhA=="],
+    "@godspeedai/cognate-domainforge": ["@godspeedai/cognate-domainforge@0.6.2", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/domainforge": "0.21.1" } }, "sha512-28cvVQRzGTYTTIjgc+IuSYjV6+3JaKqbIijI4xhvgiv/V+KuOjfmkAjoTC8gz20olTxm0VQg5PbbvhLPhnXgrA=="],
 
-    "@godspeedai/cognate-events": ["@godspeedai/cognate-events@0.6.1", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-S+Krj0R9V7TllwXoH8vRwemIwpR/wgG1dkUiAPOvQsVxSnA4zXZ1B0veX9ccv5G1TD9U4R3k83GGdgM9LthaLA=="],
+    "@godspeedai/cognate-events": ["@godspeedai/cognate-events@0.6.2", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-fZZjwx2lQNH+lbyQZCkY8MthAqit4ZXT5FlNMc33MLg6OLUq+ATH3FFR11pa8MzaldTVdB/3cR68f19v39y8dg=="],
 
-    "@godspeedai/cognate-execution": ["@godspeedai/cognate-execution@0.6.1", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-bC3ost6G1MkPyELT7qjO7qqKAXQ9opkDOkulT1qnmzfO0dLxpMr/3g3K/W/CJjIIV4sn1uVJGNQ0UVGzAbnJ3Q=="],
+    "@godspeedai/cognate-execution": ["@godspeedai/cognate-execution@0.6.2", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-NDfVct4g2bGHoUYj8qFUtYm7UGXGslQR/u8Mv62cAtT0SyNmYfR7vaeMU9g20fC6VfGMLsNR1RCvEYIDpPbNnA=="],
 
-    "@godspeedai/cognate-execution-ssh": ["@godspeedai/cognate-execution-ssh@0.6.1", "", { "dependencies": { "@godspeedai/cognate-execution": "^0.6.1", "ssh2": "1.17.0" } }, "sha512-mL6ggKDEskSUVqlUSF+T22C8xl4UYA7ZdEq7kov8p1zd02Zhqgt95vfTzj4Ep78O2qgOxcuBYg6pfx4sLwXAPA=="],
+    "@godspeedai/cognate-execution-ssh": ["@godspeedai/cognate-execution-ssh@0.6.2", "", { "dependencies": { "@godspeedai/cognate-execution": "^0.6.2", "ssh2": "1.17.0" } }, "sha512-N55BtEilAlNQJy+GrMmHZVwzYdd72CFApspoUmCxwY6GVNev8/WRwHlPULBLHhd1cBKhU+p8KooRqlH3HDKCHA=="],
 
-    "@godspeedai/cognate-execution-wsl": ["@godspeedai/cognate-execution-wsl@0.6.1", "", { "dependencies": { "@godspeedai/cognate-execution": "^0.6.1" } }, "sha512-sFo4HEeS2G+sjCxBWLA+CDr8xlVywTpCxwZ48I14tS8vDJTaC0zymlbczrF8t4omKg2pVm3hsz5jxHzE6VzyeA=="],
+    "@godspeedai/cognate-execution-wsl": ["@godspeedai/cognate-execution-wsl@0.6.2", "", { "dependencies": { "@godspeedai/cognate-execution": "^0.6.2" } }, "sha512-cxlTrOYlOmNYnl1sqrNZz41GD5Z4oF7v56U2fyCz1d6oAd7ctTfkjCruWGr9zP6mq46TuRkZ0yig21pxKqeVmA=="],
 
-    "@godspeedai/cognate-kernel-api": ["@godspeedai/cognate-kernel-api@0.6.1", "", {}, "sha512-EMbEErZq8Qs+0PecErE15xEfx2KDiXPPSpaGfiuB15/NFyFt08uVLELtUUy4QLIAzF5zJFrqpWYgDwZqpLnurg=="],
+    "@godspeedai/cognate-kernel-api": ["@godspeedai/cognate-kernel-api@0.6.2", "", {}, "sha512-nUiHCwOnj3QcoyTC+UWNhMr/QookrLXFdTRchWQ68dDWTifGbFD/lhc02hN1AEYqgibr582+DHThTYp90foZww=="],
 
-    "@godspeedai/cognate-kernel-cordis": ["@godspeedai/cognate-kernel-cordis@0.6.1", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.1", "cordis": "4.0.0-rc.10" } }, "sha512-4+b9U8aFMemEp5lhp5L9lOUCByJptWieHQ04gl61aVXaMtr6JgM4MCwArApXBTw3u9Inu9BM4V1olizCTKnKxw=="],
+    "@godspeedai/cognate-kernel-cordis": ["@godspeedai/cognate-kernel-cordis@0.6.2", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.2", "cordis": "4.0.0-rc.10" } }, "sha512-XpDBcXj+FSeY5yKsHTUQ+5zHjLy42PMFA1A2D3g83UZSjCr9lrT7MHrtKyEGZZip2hQYu0uZMQFkKdUAJR6mtg=="],
 
-    "@godspeedai/cognate-profile": ["@godspeedai/cognate-profile@0.6.1", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-FIgZ0jOG0/qU69dyPM2QjWmOPnFtm92wLKwKBcnOtbQnPHWR+7QvaZr0BDsEZ7uQ4Ib2q4PY3LcFztVOiUbKqA=="],
+    "@godspeedai/cognate-profile": ["@godspeedai/cognate-profile@0.6.2", "", { "dependencies": { "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-DXoQZgJzkS1EILVIl7yG/+1b8nQ4u6a+NTb78Q8oNKf3enWX921Q2UyRBbklADnvCdUIgNp513NbxhbQ0VlL7A=="],
 
-    "@godspeedai/cognate-profile-copilot": ["@godspeedai/cognate-profile-copilot@0.6.1", "", { "dependencies": { "@godspeedai/cognate-ag-ui": "^0.6.1", "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-client": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/cognate-profile": "^0.6.1", "@godspeedai/cognate-protocol-connect-bun": "^0.6.1", "@godspeedai/cognate-provider-openai-compatible": "^0.6.1", "@godspeedai/cognate-react": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1", "@godspeedai/cognate-runtime-bun": "^0.6.1", "@godspeedai/cognate-ui-astryx": "^0.6.1" }, "peerDependencies": { "react": "19.3.0", "react-dom": "19.3.0" } }, "sha512-9le7+AAPz4bEvpBdZ9NPJIaLmX574zkxRAzQ5BZx0v/m611V49RA6XlUHFKxrg+8YXv7gNq2xHuGP8bMKrMyeA=="],
+    "@godspeedai/cognate-profile-copilot": ["@godspeedai/cognate-profile-copilot@0.6.2", "", { "dependencies": { "@godspeedai/cognate-ag-ui": "^0.6.2", "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-client": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/cognate-profile": "^0.6.2", "@godspeedai/cognate-protocol-connect-bun": "^0.6.2", "@godspeedai/cognate-provider-openai-compatible": "^0.6.2", "@godspeedai/cognate-react": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2", "@godspeedai/cognate-runtime-bun": "^0.6.2", "@godspeedai/cognate-ui-astryx": "^0.6.2" }, "peerDependencies": { "react": "19.3.0", "react-dom": "19.3.0" } }, "sha512-GUH4H+xG72pjf01PVo/9Y7fwIpit9RVUKf+LJVvIDta0IKPNfuPD9LZJDEuc8X9yUeiK5GbWYmuRelEp2RDZiA=="],
 
-    "@godspeedai/cognate-profile-harness": ["@godspeedai/cognate-profile-harness@0.6.1", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/cognate-profile": "^0.6.1", "@godspeedai/cognate-provider-openai-compatible": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1", "@godspeedai/cognate-runtime-bun": "^0.6.1" } }, "sha512-XdpX8LRmvXbWnvv715sxoqjsH83ZSVBPUowJ2qMNMWyTCn6YSm54GZKUw9OJczZ9tGRHo3hOjdduz6BRYC9/7g=="],
+    "@godspeedai/cognate-profile-harness": ["@godspeedai/cognate-profile-harness@0.6.2", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/cognate-profile": "^0.6.2", "@godspeedai/cognate-provider-openai-compatible": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2", "@godspeedai/cognate-runtime-bun": "^0.6.2" } }, "sha512-GSVvOnYS31ubYI/EnlGv9bsnB2mz0NBiI1qUAi81KQGIo+HwqlyZYCwwcEBEbCVZ0t6WfBuuECNbCoeFrXZCfA=="],
 
-    "@godspeedai/cognate-projections": ["@godspeedai/cognate-projections@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1" } }, "sha512-h85SxFMR3vNTKMCDqZZGj7lkK2xbeyw+Qmaxqadc1X7qyo2K7o27LAJT8Ck6oSCDnzFuDavfI/a2nAz4vdEKBg=="],
+    "@godspeedai/cognate-projections": ["@godspeedai/cognate-projections@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2" } }, "sha512-FLeffurVVz7a77qZfoB8Q04HH1OylDIQU3rGJ6tRrGChK7JtqEIxLWNeyIw/enTzmJ0mfA09OXs6RDG6o8NDBw=="],
 
-    "@godspeedai/cognate-proto": ["@godspeedai/cognate-proto@0.6.1", "", { "dependencies": { "@bufbuild/protobuf": "2.15.0" } }, "sha512-sx1TIK1GgzJ8pIl8VqqgMiF+GxL7K2IzraXAFWMTHYbPQMsgIw/Bc/BtB2bONUu9ybqrHYIP/wF3FBgXZ5xzCQ=="],
+    "@godspeedai/cognate-proto": ["@godspeedai/cognate-proto@0.6.2", "", { "dependencies": { "@bufbuild/protobuf": "2.15.0" } }, "sha512-0WWhvKvZtFx8lIG/ZWpJECociYVBx5N+cDLeWnrW5nB82sULi5+TD6aguqzlsvgGdMuvBAe0ylpNguzSMZnwWw=="],
 
-    "@godspeedai/cognate-protocol-connect": ["@godspeedai/cognate-protocol-connect@0.6.1", "", { "dependencies": { "@bufbuild/protobuf": "2.15.0", "@connectrpc/connect": "2.2.0", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/cognate-proto": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1" } }, "sha512-QWYlhBCbUbaXgRRNkDCoGY/AcI4jzIAqQ75cY/S/cgcUpC9xFffAmM0m/NEAB9csm08sPhZ0o7qCiTwmXIJ5Ig=="],
+    "@godspeedai/cognate-protocol-connect": ["@godspeedai/cognate-protocol-connect@0.6.2", "", { "dependencies": { "@bufbuild/protobuf": "2.15.0", "@connectrpc/connect": "2.2.0", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/cognate-proto": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2" } }, "sha512-itePuw6CaNGz+O7jQqR8GTWX4jvv/DaP6ru1iWeBfNujxSlWhzMiniQQ5tQif7APHRcVoNPlCDQW9/wg7RJdyg=="],
 
-    "@godspeedai/cognate-protocol-connect-bun": ["@godspeedai/cognate-protocol-connect-bun@0.6.1", "", { "dependencies": { "@connectrpc/connect": "2.2.0", "@connectrpc/connect-web": "2.2.0", "@godspeedai/cognate-protocol-connect": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1" } }, "sha512-a4ttinqfO3WoG19oHotLWjbszEby7HsBmAYRRO0sRsq5UiLkturUB7mnVSKJcZQ4jqgbmlOsK6cLbtvLGhYpEw=="],
+    "@godspeedai/cognate-protocol-connect-bun": ["@godspeedai/cognate-protocol-connect-bun@0.6.2", "", { "dependencies": { "@connectrpc/connect": "2.2.0", "@connectrpc/connect-web": "2.2.0", "@godspeedai/cognate-protocol-connect": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2" } }, "sha512-Uo1LnhX0ASuHMZpb0JXE38ZJZQD5dJ++sohkVtWZ6csYD04zoswLCgj3D2UnvG/s7khBjKkNL8Px9sUTU0sNqA=="],
 
-    "@godspeedai/cognate-provider-anthropic-compatible": ["@godspeedai/cognate-provider-anthropic-compatible@0.6.1", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-provider-auth": "^0.6.1", "@godspeedai/cognate-provider-wire": "^0.6.1" } }, "sha512-d6BYRrAY1bvS4Y7LeHEjXH8UeI1EsUBu6tIudaKNNIzDxQ123aazH8Mzt9qz1agEVbawDe8Lr1F+N0/il6poPg=="],
+    "@godspeedai/cognate-provider-anthropic-compatible": ["@godspeedai/cognate-provider-anthropic-compatible@0.6.2", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-provider-auth": "^0.6.2", "@godspeedai/cognate-provider-wire": "^0.6.2" } }, "sha512-THQ0qTq0QYHK22aB3fIVirZEN4TwkfHrTjx1RTN/CKnvkNWsGgwvY9ojBbbYCgSdDA/UbXHB9XDMmM46zz/JZA=="],
 
-    "@godspeedai/cognate-provider-auth": ["@godspeedai/cognate-provider-auth@0.6.1", "", {}, "sha512-btE/k/6jXbv0ezT80cC/mI8r1B3mKu1LBdQKrjn/j8XJ4g21seST5EqpzdUCgI1aj2xGMgITuew7SfIzfai54g=="],
+    "@godspeedai/cognate-provider-auth": ["@godspeedai/cognate-provider-auth@0.6.2", "", {}, "sha512-Ln9lvjEVRB77f1PZb576Y6AlI2RgACy/iHicfqRkkYyF95ZbV4XjcELAZlbFBfyguMwbIE5mvvP7BeEB8HtwMA=="],
 
-    "@godspeedai/cognate-provider-local": ["@godspeedai/cognate-provider-local@0.6.1", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-o1IBu5jD+53C/U0T2RNCLRHxaj7azEkFgh+/nL7GYKvrFYCaU3W8Qr2PZHA8qwdQRRPSg0vC6o0TRrkdkP0+mA=="],
+    "@godspeedai/cognate-provider-local": ["@godspeedai/cognate-provider-local@0.6.2", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-IVFXzPp96aPEy0I/yITK0005wq/geyDqZQ5jKKnRORqKO/Sx4I5CCA4fR8rl+zPRskvjB8kbs3Ztd6CZIg3CWQ=="],
 
-    "@godspeedai/cognate-provider-openai-compatible": ["@godspeedai/cognate-provider-openai-compatible@0.6.1", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-33VeXP6eVGK/Y2p+1udTAc0rx/Ul0eSV0+AB40OgT3IbN1nBwQhmykHEBvk40oLT/hV2m7utUP9Kif09+wJ16A=="],
+    "@godspeedai/cognate-provider-openai-compatible": ["@godspeedai/cognate-provider-openai-compatible@0.6.2", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-CKbg/IV9GJDrUCm5Rpqd2oZbAkMgTgl5p/8bXZsnOqf6/iy3GjsM2ZIBWRwfglHPQ6wR/4FFFRII+eSAkgQViQ=="],
 
-    "@godspeedai/cognate-provider-openai-responses": ["@godspeedai/cognate-provider-openai-responses@0.6.1", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-provider-auth": "^0.6.1", "@godspeedai/cognate-provider-wire": "^0.6.1" } }, "sha512-k6mLlcGakW59ECWm/ijyjPNMAeXjuJRNEuGLTcBiPY4rgKEf5Uq8Fdwort6VpMvHcaD7nmaQF3kKHS//GIw2Hw=="],
+    "@godspeedai/cognate-provider-openai-responses": ["@godspeedai/cognate-provider-openai-responses@0.6.2", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-provider-auth": "^0.6.2", "@godspeedai/cognate-provider-wire": "^0.6.2" } }, "sha512-31S6pHn3iKb82woAq5GwfhS3wyBpKCRuc+5SR4ntsEN47rtM3jaBiqHvU7eRryLtZMAa5qUvocdiJIUZVRnFJQ=="],
 
-    "@godspeedai/cognate-provider-wire": ["@godspeedai/cognate-provider-wire@0.6.1", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.1" } }, "sha512-uSPaOGTFBtkmz4v8xd3F2YkRI6EU4meoSzO2lM20wHN5sGA3Bm5MpmUXuo3um3A1p/K7JHIwqcJYv82CBLwZ8w=="],
+    "@godspeedai/cognate-provider-wire": ["@godspeedai/cognate-provider-wire@0.6.2", "", { "dependencies": { "@godspeedai/cognate-capabilities": "^0.6.2" } }, "sha512-25TBWMvT75LquMDsW3bfCvkONkTpvz0tHtZvdXqS7K35hdXYIEkAUtg/k17A7onVAAioXYz0NBN8vnMxIw0RUQ=="],
 
-    "@godspeedai/cognate-react": ["@godspeedai/cognate-react@0.6.1", "", { "dependencies": { "@godspeedai/cognate-client": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1" }, "peerDependencies": { "react": "19.3.0" } }, "sha512-Bl7AI8Ogo7mvYjaAxYbkKa0bCJjfX76BSAWBeXDqpIoNAQiK3yKdYWom3odmbOjJjCQOI6M0wcV9diabxXA9lg=="],
+    "@godspeedai/cognate-react": ["@godspeedai/cognate-react@0.6.2", "", { "dependencies": { "@godspeedai/cognate-client": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2" }, "peerDependencies": { "react": "19.3.0" } }, "sha512-I9iz8SeTLDz90ubVlz6xd8jMD1im3jnmU2cSruSDHs1BeM6HELNLd00wQfPUSWRS6ly8xEhkNHRDBed/FyI95Q=="],
 
-    "@godspeedai/cognate-realitytrace": ["@godspeedai/cognate-realitytrace@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-/pNLUF/8mWRSXIlb6Ol+s3cmpk9aRqV5doNmWYKSA8BxXQ1fw20BO+rJ9GWBhGkiyROk1hVpilGG3zAa1c8K/w=="],
+    "@godspeedai/cognate-realitytrace": ["@godspeedai/cognate-realitytrace@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-Fv2vdg+iOOMy24LJS/oTHwlZo3AE13N4fzvHagG0gCIjwHYrUNRfdHKag6Q6KTlm5zFq7WggPa2CGfKFptBROw=="],
 
-    "@godspeedai/cognate-runtime-api": ["@godspeedai/cognate-runtime-api@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1" } }, "sha512-7h/xLsX42A+bGylaYvoL21KKKGy8toNwhU8fVK6YWI95NP1MDJ3Tuy8nzJHhsQAM+mnnxeMaP8x+z5mpOIfnGw=="],
+    "@godspeedai/cognate-runtime-api": ["@godspeedai/cognate-runtime-api@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2" } }, "sha512-QusA5JRIH/8nwiu0dxMG5m7d/eXLgQQ38dh9kg6MUoh3EtZ/JVgkE42tHCRStNg9gnfwIIOpUy4g6g26stngwA=="],
 
-    "@godspeedai/cognate-runtime-bun": ["@godspeedai/cognate-runtime-bun@0.6.1", "", { "dependencies": { "@godspeedai/cognate-artifacts": "^0.6.1", "@godspeedai/cognate-capabilities": "^0.6.1", "@godspeedai/cognate-cognitive-api": "^0.6.1", "@godspeedai/cognate-continuations": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-kernel-api": "^0.6.1", "@godspeedai/cognate-kernel-cordis": "^0.6.1", "@godspeedai/cognate-projections": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1", "@godspeedai/cognate-store-memory": "^0.6.1", "@godspeedai/cognate-store-postgres": "^0.6.1", "@godspeedai/cognate-store-sqlite": "^0.6.1" } }, "sha512-OppETeWN0NGtxrctg3McpkTKhj3BItMRTTVM01tQs14k68FHPBT+fvXVhXd4w9LHIyvZCKB2Wocp0YbW7m/ZmQ=="],
+    "@godspeedai/cognate-runtime-bun": ["@godspeedai/cognate-runtime-bun@0.6.2", "", { "dependencies": { "@godspeedai/cognate-artifacts": "^0.6.2", "@godspeedai/cognate-capabilities": "^0.6.2", "@godspeedai/cognate-cognitive-api": "^0.6.2", "@godspeedai/cognate-continuations": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-kernel-api": "^0.6.2", "@godspeedai/cognate-kernel-cordis": "^0.6.2", "@godspeedai/cognate-projections": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2", "@godspeedai/cognate-store-memory": "^0.6.2", "@godspeedai/cognate-store-postgres": "^0.6.2", "@godspeedai/cognate-store-sqlite": "^0.6.2" } }, "sha512-obrNu1MvTZx4hVXv4voqIF1sN1g+Gr1GmlKJy0NAdRT5lPNVwnILrU3xOvshZ3Gb+C34yeksGYWhAgH/7SmAkA=="],
 
-    "@godspeedai/cognate-store-memory": ["@godspeedai/cognate-store-memory@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1" } }, "sha512-b6EmmC3zdciWoNFId7rb7DlRB3ERKnTJEWqx1SyjXOdxeYUOsLqriNL5JHNB9fiEY7sp484gUlU5QHnJCwxk1Q=="],
+    "@godspeedai/cognate-store-memory": ["@godspeedai/cognate-store-memory@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2" } }, "sha512-Dzh/Wfe4ihREXt0vK1Zb+CmXTGgRtU+kXRoq9P3sWVJQs+wsd83jGESp6kh0rM+m4Pc3d86HqUWkIhbIRwbXlA=="],
 
-    "@godspeedai/cognate-store-postgres": ["@godspeedai/cognate-store-postgres@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1", "postgres": "^3.4.9" } }, "sha512-SHUPZhSpiCSS31Mn/L2XBEtiHZlSEgl+AlqKgH94ytYbJIUU0mTQoDav/g3ocLR9+HspRKkEgfvt5e46tub0hw=="],
+    "@godspeedai/cognate-store-postgres": ["@godspeedai/cognate-store-postgres@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2", "postgres": "^3.4.9" } }, "sha512-KjKRiYWMQPtJZ0zSZaTeRj4f/LPxTUt8ypxcKvasR7PCT78T6W4dtV+iNrtfXNouhJMpFGWYS1LMZI0c0oUdvw=="],
 
-    "@godspeedai/cognate-store-sqlite": ["@godspeedai/cognate-store-sqlite@0.6.1", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.1" } }, "sha512-4IgehpS55oZPmxnKOMfBlNg8IubGruASrxwc6sQSjroJDhC4pj6T4vmmIZNEFVwMFW2r8m72gb5X5rJnPbPaTA=="],
+    "@godspeedai/cognate-store-sqlite": ["@godspeedai/cognate-store-sqlite@0.6.2", "", { "dependencies": { "@godspeedai/cognate-events": "^0.6.2" } }, "sha512-LKOvEd7hCUdJtn/fSjAz5eSX7HC2eD0HQSaHYJ8hhmRB3xVXa9xmHyP29hSjbK07Q2PThJl25+btHsa+l+9lpQ=="],
 
-    "@godspeedai/cognate-ui-astryx": ["@godspeedai/cognate-ui-astryx@0.6.1", "", { "dependencies": { "@astryxdesign/core": "0.6.3", "@astryxdesign/theme-neutral": "0.6.3", "@godspeedai/cognate-client": "^0.6.1", "@godspeedai/cognate-events": "^0.6.1", "@godspeedai/cognate-react": "^0.6.1", "@godspeedai/cognate-runtime-api": "^0.6.1" }, "peerDependencies": { "react": "19.3.0", "react-dom": "19.3.0" } }, "sha512-uoMdA8kI/lm5KAzTI05w9uPJdegc0P2aI/GNk/zYC+iCfrLn9/1yNN4pAVDftIJD00TT8J5v07mS/ph+Ot5wrw=="],
+    "@godspeedai/cognate-ui-astryx": ["@godspeedai/cognate-ui-astryx@0.6.2", "", { "dependencies": { "@astryxdesign/core": "0.6.3", "@astryxdesign/theme-neutral": "0.6.3", "@godspeedai/cognate-client": "^0.6.2", "@godspeedai/cognate-events": "^0.6.2", "@godspeedai/cognate-react": "^0.6.2", "@godspeedai/cognate-runtime-api": "^0.6.2" }, "peerDependencies": { "react": "19.3.0", "react-dom": "19.3.0" } }, "sha512-Ao7XIQyAj+QVCPn9B/xIhRhMWnBa0CJ/w2lPYKCPGUWIFnqsFA2EG44zMHL/kmkbrcT282jKYKl4ttULEMiwiA=="],
 
-    "@godspeedai/domainforge": ["@godspeedai/domainforge@0.19.0", "", {}, "sha512-s0PBszj+cfJ2mFSGOZK46UXWvsTssFXqLEABwo9fTdTmM0P+KM/nB38WTAv8ShGmFU+BJOvzB1eq/API2bjy5w=="],
+    "@godspeedai/domainforge": ["@godspeedai/domainforge@0.21.1", "", {}, "sha512-d0nggoF6wIVxw3H4/nzb9a7GB8sn0HvAcAarOjN/CMiFy27Hg6GhL+2aBZctUfZto0FuA4qFZLLV4qSx6A8Kjg=="],
 
     "@happy-dom/global-registrator": ["@happy-dom/global-registrator@20.14.5", "", { "dependencies": { "@types/node": ">=20.0.0", "happy-dom": "^20.14.5" } }, "sha512-B05ID9DhSwLs6mlm1fzlkAtTIvB3duCvjJjfr19LBrlTK7VZtRjDqoTRIVv13GuYuNdhByu8LSZgThwV3Rkj7g=="],
 
