@@ -8,6 +8,7 @@ import { ExpertsTeamsPanel } from "./experts/ExpertsTeamsPanel.tsx";
 import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "../workbench/focus.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { AmbiguousStepCard } from "./AmbiguousStepCard.tsx";
+import { GovernanceApprovalCard, governanceApprovalOf } from "./GovernanceApprovalCard.tsx";
 import { interruptedCapability, isModelGeneration } from "../capabilities/ambiguousStep.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
@@ -410,7 +411,8 @@ export function SessionRowButton({
   // reconciliation (never an approval); other known non-approval waits name their type.
   const waiting = session.lastStatus === "waiting" && !planPending;
   const needsReconciliation = waiting && session.waitingType === "ambiguous-invocation";
-  const otherWait = waiting && !needsReconciliation && session.waitingType && session.waitingType !== "tool-approval" ? session.waitingType : undefined;
+  // A SEA-Forge escalation is an approval, decided by the external authority (P02).
+  const otherWait = waiting && !needsReconciliation && session.waitingType && session.waitingType !== "tool-approval" && session.waitingType !== "governance-approval" ? session.waitingType : undefined;
   return (
     <div role="treeitem" aria-selected={active} className={active ? "session-row-wrap active" : "session-row-wrap"}>
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
@@ -4807,8 +4809,29 @@ export function App() {
     },
     [ambiguousContinuation, client],
   );
+  // A consequential action escalated to SEA-Forge (P02): the run waits until the external authority
+  // records a decision. The operator's choice goes to SEA-Forge on the operator's behalf.
+  const governanceContinuation = openContinuations.find((c) => c.type === "governance-approval");
+  const governanceApproval = governanceContinuation ? governanceApprovalOf(governanceContinuation) : undefined;
+  const [governanceBusy, setGovernanceBusy] = useState(false);
+  const [governanceError, setGovernanceError] = useState<string>();
+  const decideGovernance = useCallback(
+    async (resolution: "approved" | "rejected") => {
+      if (!governanceApproval) return;
+      setGovernanceBusy(true);
+      setGovernanceError(undefined);
+      try {
+        await client.invoke("governance.approval.resolve", { approvalId: governanceApproval.approvalId, resolution } as never);
+      } catch (failure: unknown) {
+        setGovernanceError(failure instanceof Error ? failure.message : String(failure));
+      } finally {
+        setGovernanceBusy(false);
+      }
+    },
+    [governanceApproval, client],
+  );
   // Generic fallback: an open continuation of a type this view does not render is still visible.
-  const otherContinuation = openContinuations.find((c) => !["tool-approval", "plan-review", "ambiguous-invocation"].includes(c.type));
+  const otherContinuation = openContinuations.find((c) => !["tool-approval", "plan-review", "ambiguous-invocation", "governance-approval"].includes(c.type));
 
   // Sidebar auto-collapses *below* 1024px viewport width, matching the reference's
   // `SIDEBAR_AUTO_COLLAPSE = 1024px` breakpoint (product-characterization.md §2: "sidebar
@@ -5687,7 +5710,7 @@ export function App() {
                 onTaskChange={(taskId) => void bindTask(taskId ?? null)}
                 bindError={taskBindError}
                 onOpenWorkbench={() => setWorkbenchOpen(true)}
-                state={pendingApproval || planReviewContinuation || ambiguousContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
+                state={pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
                 steps={toolEntries.length + 1}
                 elapsedSeconds={elapsedSeconds}
                 approvalsPending={pendingApproval ? 1 : 0}
@@ -5700,6 +5723,14 @@ export function App() {
             )}
             {pendingApproval ? (
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
+            ) : governanceApproval ? (
+              <GovernanceApprovalCard
+                approvalId={governanceApproval.approvalId}
+                capability={governanceApproval.capability}
+                busy={governanceBusy}
+                error={governanceError}
+                onDecide={(resolution) => void decideGovernance(resolution)}
+              />
             ) : ambiguousContinuation ? (
               <AmbiguousStepCard
                 capability={interruptedCapability(ambiguousContinuation) ?? "step"}

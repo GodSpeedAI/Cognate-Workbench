@@ -144,6 +144,8 @@ Active development. Working today: coding-agent interactions, durable runtime st
 
 The development authenticator and tool guards are not a production multi-user security boundary. Path checks and best-effort shell parsing are not a sandbox, so by default agents cannot run commands or write files in a local (uncontained) workspace: use a [Linux contained workspace](docs/linux-contained-workspaces.md), or start with `COGNATE_EXECUTION_POSTURE=uncontained-local` to let agents act on this computer as you. Read the [known gaps and validation evidence](docs/known-gaps.md) before using Workbench with untrusted code or data.
 
+To let SEA-Forge, not Workbench, decide which agent actions may run, see [SEA-Forge as the external authority](docs/sea-forge-authority.md). It is off by default.
+
 ## Documentation
 
 [docs/README.md](docs/README.md) is the map of the system: orientation, architecture, subsystems, execution workflows, design explanation, tutorials, how-to guides and technical reference.

@@ -391,6 +391,19 @@ export function bindScheduleCapabilities(domain:Domain):Readonly<Record<string,C
   return Object.fromEntries(contracts.map(contract=>[contract.id,contract.semanticRef]));
 }
 
+/** SEA-Forge as the external authority (P02): status, pending approvals, operator resolution. */
+export const GOVERNANCE_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "governance.status": "ApprovalAuthority",
+  "governance.approvals.list": "ApprovalAuthority",
+  "governance.approval.resolve": "ApprovalAuthority",
+};
+export function bindGovernanceCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(GOVERNANCE_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} governance bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
 /** Operator reconciliation of an interrupted agent capability call (`ambiguous-invocation`). */
 export const AMBIGUOUS_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "run.invocation.reconcile": "AgentRun",

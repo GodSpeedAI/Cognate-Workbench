@@ -85,10 +85,11 @@ From the workbench design source:
   killed owner's effect requires reconciliation, and its stale write is fenced. The default remains
   a single Bun process and exactly-once physical effects are not claimed.
 - A provider call can delay graceful runtime shutdown in the consumed SDK line at the time this
-  finding was recorded (0.4.0; Workbench now pins 0.6.1). Upstream PR #44 fixes cooperative abort
+  finding was recorded (0.4.0; Workbench now pins 0.6.2). Upstream PR #44 fixes cooperative abort
   and acknowledged-continuation recovery with PostgreSQL regressions; its status is tracked
   separately and is not asserted here. Signal-ignoring handlers can still delay shutdown.
   Abrupt-process recovery is tested separately.
+- SEA-Forge as the external authority ([docs](sea-forge-authority.md)) is opt-in. When on, every capability call is a SEA-Forge round trip and ledger entry. Settlement through SEA-Forge is not wired yet. It needs Cognate SDK 0.6.2 or later, in which an approval governs only the operation it was granted for (Cognate PR #60); with 0.6.1 an approved edit failed on its nested filesystem call.
 - Interrupted agent capability calls wait for operator reconciliation in every run-ownership mode
   and capacity (`ambiguousSteps: "wait"`). When a process stops during a call, the recovering
   process does not repeat the call: it records `run.invocation.ambiguous` and opens an
