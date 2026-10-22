@@ -10,6 +10,7 @@ import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRuntime } from "@godspeedai/cognate-runtime-bun";
 import { storeConfigFor } from "./store.ts";
+import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
 import type { ActionPolicy, Runtime } from "@godspeedai/cognate-runtime-bun";
 import { devTokenAuthenticator } from "@godspeedai/cognate-protocol-connect-bun";
 import { registerRuntimeService } from "@godspeedai/cognate-protocol-connect";
@@ -151,11 +152,16 @@ export interface ServerOptions {
    *  dev/test opt-in re-arms the legacy client-claimed `Bearer <tenant>:<actorId>` format for the
    *  test harness; a production deployment never sets it (default COGNATE_DEV_AUTH, unset). */
   readonly devAuth?: boolean;
+  /** Where agent effects may run (default COGNATE_EXECUTION_POSTURE, unset = "contained"). Under
+   *  "contained", commands and writes in uncontained `local` worlds are refused; "uncontained-local"
+   *  is the operator's explicit opt-in to run them on this host as this user (src/executionPosture.ts). */
+  readonly executionPosture?: ExecutionPosture;
 }
 
 export interface AppServer {
   readonly url: string;
   readonly runtime: Runtime;
+  readonly executionPosture: ExecutionPosture;
   /** T8: this boot's operator browser session token (the session-authenticated HTTP test seam). */
   readonly operatorSessionToken: string;
   stop(): Promise<void>;
@@ -317,6 +323,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const home = options.home;
   const runCapacity = parseExpertAdmissionCapacity(options.runCapacity === undefined ? process.env.COGNATE_RUN_CAPACITY : String(options.runCapacity));
   const runOwnershipMode = options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP);
+  const executionPosture = options.executionPosture ?? parseExecutionPosture(process.env[EXECUTION_POSTURE_ENV]);
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
   if (!containmentConfig && containmentConfigPath) {
@@ -405,7 +412,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // providers (ssh, wsl, sandbox forks) register here without touching the tools or the agent.
   // T8: the registry is wrapped so every CONTAINED provider's executions pass the aggregate
   // containment ledger first — one operator-configured ceiling across processes, fail closed.
-  const executionWorlds = aggregateContainedRegistry(createExecutionWorldRegistry([localExecutionWorld()]), { getService, systemCaller: SYSTEM_CALLER });
+  // The execution posture wraps the registry first, so every `local`-kind provider — the base
+  // world and any directory-copy fork registered later — is effect-refused under "contained".
+  const executionWorlds = aggregateContainedRegistry(postureRegistry(createExecutionWorldRegistry([localExecutionWorld()]), executionPosture), { getService, systemCaller: SYSTEM_CALLER });
   // T11: the plugin catalog registry. Constructed here (not inside the component) so the same
   // instance can be handed to any future surface that needs to resolve a catalog entry, and so an
   // additional `PluginSource` can be registered at boot without touching the capability.
@@ -438,7 +447,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
-      containedWorkspaceComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
+      containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       identityAdminComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, semanticRefs: t8.identity }),
@@ -732,7 +741,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       if (refusal) return new Response(refusal.reason, { status: refusal.status, headers: hardened() });
       const url = new URL(request.url);
       if (url.pathname === "/health") {
-        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest } }, { headers: hardened() });
+        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest }, execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined } }, { headers: hardened() });
       }
       if (url.pathname.startsWith("/cognate.v1.RuntimeService/")) {
         const handler = connectHandlersByPath.get(url.pathname);
@@ -759,6 +768,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   return {
     url: `http://127.0.0.1:${server.port}`,
     runtime: {...runtime,service:governedService},
+    executionPosture,
     /** T8: this boot's browser session token — the test seam for session-authenticated HTTP.
      *  In the real browser it never leaves the generated entry; production never logs it. */
     operatorSessionToken: operatorSession.token,
@@ -781,4 +791,9 @@ if (import.meta.main) {
   const app = await startServer({ port, home });
   console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
   console.log(`[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is ${parseDevAuth(process.env.COGNATE_DEV_AUTH) ? "ARMED (test/dev only)" : "off"}`);
+  if (app.executionPosture === "contained") {
+    console.log(`[cognate-workbench] execution: contained — agent commands and writes run only in Linux-contained or explicitly connected remote workspaces; local workspaces are read-only to agents (${EXECUTION_POSTURE_ENV}=uncontained-local to opt out)`);
+  } else {
+    console.warn(`[cognate-workbench] execution: UNCONTAINED LOCAL — agents run commands and write files on this host as this user; path checks are not a sandbox (${EXECUTION_POSTURE_ENV}=uncontained-local)`);
+  }
 }

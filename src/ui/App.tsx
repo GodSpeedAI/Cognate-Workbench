@@ -3321,6 +3321,7 @@ function MessageBubble({
  *  the hero menu's "Add workspace…". (The reference's full directory-browser dialog is out of scope
  *  this pass — docs/known-gaps.md.) */
 type ContainmentInspection = {
+  readonly executionPosture?: "contained" | "uncontained-local";
   readonly configured: boolean;
   readonly platformSupported: boolean;
   readonly reason?: string;
@@ -3345,7 +3346,9 @@ export async function selectWorkspaceForExecution(
   await invoke("workspace.select", { path });
 }
 
-/** The local workspace picker keeps containment an explicit, per-workspace choice. */
+/** The local workspace picker. Under the default contained posture it preselects Linux child
+ *  containment once the host reports it available (until the operator picks a mode); under the
+ *  explicit uncontained-local posture, or without host support, it stays on local. */
 export function LocalWorkspaceForm({
   invoke,
   onClose,
@@ -3354,7 +3357,12 @@ export function LocalWorkspaceForm({
   readonly onClose: () => void;
 }) {
   const [path, setPath] = useState("");
-  const [mode, setMode] = useState<"local" | "contained">("local");
+  const [mode, setModeState] = useState<"local" | "contained">("local");
+  const [modeChosen, setModeChosen] = useState(false);
+  const setMode = useCallback((next: "local" | "contained") => {
+    setModeChosen(true);
+    setModeState(next);
+  }, []);
   const [inspection, setInspection] = useState<ContainmentInspection | undefined>();
   const [inspectionError, setInspectionError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>(undefined);
@@ -3371,6 +3379,11 @@ export function LocalWorkspaceForm({
   }, [invoke]);
 
   const containmentAvailable = inspection?.configured === true && inspection.platformSupported === true;
+  useEffect(() => {
+    if (!modeChosen && containmentAvailable && inspection?.executionPosture !== "uncontained-local") {
+      setModeState("contained");
+    }
+  }, [containmentAvailable, inspection?.executionPosture, modeChosen]);
   const containmentReason = inspectionError ?? inspection?.reason ??
     (inspection?.platformSupported === false ? "Linux child containment is unavailable on this platform." :
       inspection?.configured === false ? "Linux child containment is not configured by the host." :
@@ -3407,13 +3420,15 @@ export function LocalWorkspaceForm({
         onSubmit={() => {
           if (path.trim() && !busy) void submit();
         }}
-        hint="This computer · uncontained — start typing a folder path to see matches."
+        hint="This computer — start typing a folder path to see matches."
       />
       <fieldset className="workspace-execution-choice">
         <legend>Execution mode</legend>
         <label>
           <input type="radio" name="workspace-execution-mode" value="local" checked={mode === "local"} onChange={() => setMode("local")} />
-          Local · uncontained (default)
+          {inspection?.executionPosture === "uncontained-local"
+            ? "Local · uncontained — agents run commands and write files on this computer as you"
+            : "Local · read-only to agents — commands and writes need a contained workspace"}
         </label>
         <label title={containmentAvailable ? undefined : containmentReason}>
           <input

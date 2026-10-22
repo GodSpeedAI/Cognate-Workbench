@@ -98,8 +98,9 @@ From the workbench design source:
   dev format is an explicit opt-in test/dev seam, and the capability policy grants user-kind
   authority to the one durable operator identity only. Best-effort local command guards remain;
   capability checks are still not OS-level or multi-user isolation. Aggregate containment now
-  covers contained (Linux bubblewrap) executions across processes; local workspaces remain
-  uncontained. This is still not a production-hardened multi-user deployment — the independent
+  covers contained (Linux bubblewrap) executions across processes. Local workspaces are
+  uncontained worlds: under the default `contained` execution posture agents cannot launch
+  processes or write files in them; `COGNATE_EXECUTION_POSTURE=uncontained-local` opts back in. This is still not a production-hardened multi-user deployment — the independent
   review's residual boundaries are recorded in
   [security-review-2026-10-17-t8.md](security-review-2026-10-17-t8.md).
 
@@ -161,7 +162,7 @@ The historical fallback badge is superseded by a working preset selector using
 | Authentication | Durable server-issued sessions (T8): revocable, hash-stored, restart-superseded; the dev bearer format exists only behind the explicit `devAuth` opt-in. Single operator, tenant-partitioned. Still not a multi-user production deployment. |
 | Network exposure | The server binds `127.0.0.1` and has no other listener. Do not proxy it to untrusted clients. |
 | Tool guards | Local default uses best-effort path/shell guards. Explicit host-configured Linux child worlds add native filesystem/process/network containment; aggregate CPU/process ceilings across processes now fail closed (T8), with kernel per-execution CPU/address-space caps. Host application isolation remains open; aggregate memory is bounded per-execution × the concurrency ceiling, not measured as a live sum. |
-| `run_code` | Its `sandbox_permissions` field names an approval gate. Actual execution uses the selected world: local default is uncontained; opt-in Linux children use namespaces. Permission approval alone provides no OS isolation. |
+| `run_code` | Its `sandbox_permissions` field names an approval gate. Actual execution uses the selected world: local workspaces refuse it under the default `contained` posture (opt-in `uncontained-local` runs it uncontained); Linux children use namespaces. Permission approval alone provides no OS isolation. |
 | Secrets | In `<home>/secrets.json` with restrictive permissions. Not in the event log. |
 | Remote worlds | SSH host keys are probed and must be explicitly trusted by a human, compared against a known source. |
 

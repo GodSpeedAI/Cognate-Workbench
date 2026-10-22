@@ -32,7 +32,7 @@ test("J-AUTH-SESSION: a revoked session's replayed request is refused with no du
   let app: AppServer | undefined;
   try {
     // Production posture: devAuth unset → the raw `Bearer <tenant>:<actor>` format is dead.
-    app = await startServer({ port: 0, home });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     const operatorService = tokenService(app, app.operatorSessionToken);
     const operator = clientFor(operatorService);
 
@@ -78,7 +78,7 @@ test("J-AUTH-SESSION: a revoked session's replayed request is refused with no du
     // A restart issues a fresh browser session; the previous boot's token no longer authenticates.
     const staleToken = app.operatorSessionToken;
     await app.stop();
-    app = await startServer({ port: 0, home });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     expect(app.operatorSessionToken).not.toBe(staleToken);
     await expect(tokenService(app, staleToken).readProjection(LOCAL_OPERATOR, { name: "settings" })).rejects.toThrow("unauthenticated");
     await expect(tokenService(app, app.operatorSessionToken).readProjection(LOCAL_OPERATOR, { name: "settings" })).resolves.toBeTruthy();
@@ -92,7 +92,7 @@ test("J-AUTH-SESSION: expired sessions are aged by boot and refused, and only th
   const home = await mkdtemp(join(tmpdir(), "wb-auth-expiry-"));
   let app: AppServer | undefined;
   try {
-    app = await startServer({ port: 0, home });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     const operator = clientFor(tokenService(app, app.operatorSessionToken));
 
     // Only the documented fields are accepted — a quota or capability smuggled in is refused.
@@ -114,7 +114,7 @@ test("J-AUTH-SESSION: expired sessions are aged by boot and refused, and only th
 
     const staleToken = expired.token;
     await app.stop();
-    app = await startServer({ port: 0, home });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     const operator2 = clientFor(tokenService(app, app.operatorSessionToken));
     const overview = await operator2.invoke("identity.inspect", {}) as { sessions: { sid: string; status: string }[] };
     const aged = overview.sessions.find(s => s.sid === expired.session.sid);
@@ -130,7 +130,7 @@ test("J-AUTH-SESSION: deployment hardening headers are present on every response
   const home = await mkdtemp(join(tmpdir(), "wb-auth-headers-"));
   let app: AppServer | undefined;
   try {
-    app = await startServer({ port: 0, home });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     const html = await fetch(`${app.url}/`);
     expect(html.status).toBe(200);
     expect(html.headers.get("x-content-type-options")).toBe("nosniff");

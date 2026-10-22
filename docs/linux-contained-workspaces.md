@@ -1,8 +1,30 @@
 # Linux contained workspaces
 
-Workbench can opt a selected local workspace into Linux child-process containment. The default
-workspace mode remains **Local · uncontained**. Containment is an explicit choice for each
-workspace; it is not a global permission setting.
+Workbench runs agent effects (process launches and file writes) only in contained or explicitly
+connected remote workspaces. This is the **execution posture**, set per server by
+`COGNATE_EXECUTION_POSTURE`:
+
+| Posture | Agent commands and writes in a **local** workspace | How to get it |
+|---|---|---|
+| `contained` (default) | refused with an actionable error; reading and listing still work | nothing to set |
+| `uncontained-local` | run on this computer as the operator; path checks are not a sandbox | `COGNATE_EXECUTION_POSTURE=uncontained-local` |
+
+The guard sits on the execution-world registry, so it covers the base local world and every
+local-kind world registered later (cognitive directory-copy forks included). `/health` reports
+`execution.posture`, and the Add Workspace dialog labels the local option by posture.
+
+Containment itself is still an explicit choice for each workspace, made by selecting a Linux
+contained workspace below.
+
+## Draft a host config
+
+`bun scripts/containment-config.ts --bwrap /path/to/bwrap --source "<where it was built from>"`
+measures the binary (path, SHA-256, reported version, package origin) and checks for the
+CVE-2026-87766 fix (bubblewrap >= 0.12.0, or a distro build whose changelog applies the fix and has
+not dropped it). It refuses a binary known to be unpatched — Ubuntu's `0.11.1-1ubuntu0.3` dropped
+its fix. It writes `operatorVerified: true` only with `--attest`, which records that you reviewed
+the binary; `--out containment.json` writes the file. The script never vouches for a binary by
+itself.
 
 ## Configure the host
 
