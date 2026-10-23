@@ -72,6 +72,15 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
     const workspace = join(home, "workspace");
     await mkdir(workspace, { recursive: true });
     const selected = await client!.invoke("workspace.select", { path: workspace } as never) as { workspaceId: string };
+    // Projections catch up asynchronously; services that validate a workspace read the projection,
+    // so wait until it holds the new row before handing the app to a test.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const rows = (await app!.runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" })).rows;
+      if (rows.some((row) => (row.value as { id?: string } | null)?.id === selected.workspaceId)) break;
+      if (Date.now() > deadline) throw new Error(`workspaces projection never showed ${selected.workspaceId}`);
+      await Bun.sleep(20);
+    }
     const testApp: ExpertTestApp = {
       get app() { return app!; }, get client() { return client!; }, home, workspaceId: selected.workspaceId, providerCalls: calls,
       async state() {
