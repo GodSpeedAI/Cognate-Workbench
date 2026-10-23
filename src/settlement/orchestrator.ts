@@ -16,6 +16,7 @@ import type { ContainmentConfig } from "../capabilities/containedWorkspace.ts";
 import type { ExternalAuthority } from "../capabilities/governance.ts";
 import { containedVerifierLauncher } from "./launcher.ts";
 import { RealityTraceCli, type DeclaredProof, type RealityTraceSettings } from "./realitytrace.ts";
+import type { ProofSourceMode } from "./sweSeed.ts";
 
 /** Agent capabilities whose effects settlement must account for. */
 export const CONSEQUENTIAL_CAPABILITIES: ReadonlySet<string> = new Set(["tool.edit", "tool.bash", "tool.run_code"]);
@@ -33,6 +34,8 @@ export interface SettlementOptions {
   readonly systemCaller: Caller;
   /** Durably records workbench.* events and resolves once they are committed. */
   readonly record: (events: readonly { readonly type: string; readonly payload: Json }[], correlationId?: string) => Promise<void>;
+  /** `swe_seed` (readiness P05): a run is judged only by a proof declared from a SWE_SEED contract. */
+  readonly proofSource?: ProofSourceMode;
 }
 
 interface Operation {
@@ -50,6 +53,13 @@ async function collect(it: AsyncIterable<StoredEvent>): Promise<StoredEvent[]> {
   const out: StoredEvent[] = [];
   for await (const e of it) out.push(e);
   return out;
+}
+
+/** Where a recorded workspace lives on the host, or undefined. */
+export async function workspaceRoot(service: RuntimeService, caller: Caller, workspaceId: string): Promise<string | undefined> {
+  const rows = (await service.readProjection(caller, { name: "workspaces" })).rows;
+  const root = obj(rows.find((r) => r.key === `record/${workspaceId}` || r.key.endsWith(`/record/${workspaceId}`))?.value).root;
+  return typeof root === "string" ? root : undefined;
 }
 
 export function createSettlementOrchestrator(options: SettlementOptions) {
@@ -83,7 +93,7 @@ export function createSettlementOrchestrator(options: SettlementOptions) {
     const input = obj(obj(started.payload).input);
     const workspaceId = String(input.workspaceId ?? "");
     const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
-    const base = { runId, workspaceId, ...(sessionId ? { sessionId } : {}) };
+    let base: Record<string, Json> = { runId, workspaceId, ...(sessionId ? { sessionId } : {}) };
     const recordAll = async (status: SettlementStatus, final: boolean, extra: Record<string, Json>) =>
       options.record(open.map((op) => ({ type: SETTLEMENT_RECORDED, payload: { ...base, operationId: op.operationId, capability: op.capability, status, final, ...extra } as Json })), `settlement:${runId}`);
 
@@ -98,14 +108,20 @@ export function createSettlementOrchestrator(options: SettlementOptions) {
       return;
     }
     const declared = obj(proofEvent.payload);
+    // Every record names what judged the work: the SWE_SEED contract, or an operator-typed argv.
+    const source = obj(declared.source);
+    base = { ...base, proofSource: (source.kind === "swe_seed_eval_spec" ? source : { kind: "operator_argv" }) as Json };
+    if (options.proofSource === "swe_seed" && source.kind !== "swe_seed_eval_spec") {
+      await recordAll("not-attempted", true, { reason: "the proof declared before the run did not come from a SWE_SEED contract (COGNATE_PROOF_SOURCE=swe_seed)" });
+      return;
+    }
     const proof: DeclaredProof = { argv: declared.argv as string[], cwd: String(declared.cwd ?? "."), timeoutS: Number(declared.timeoutS ?? 900) };
 
     // The evidence: reuse what RealityTrace already recorded for this run, else have it verify now.
     let evidence = mine(SETTLEMENT_EVIDENCE).at(-1);
     if (!evidence) {
-      const rows = (await service().readProjection(options.systemCaller, { name: "workspaces" })).rows;
-      const root = obj(rows.find((r) => r.key === `record/${workspaceId}` || r.key.endsWith(`/record/${workspaceId}`))?.value).root;
-      if (typeof root !== "string") {
+      const root = await workspaceRoot(service(), options.systemCaller, workspaceId);
+      if (root === undefined) {
         await recordAll("not-attempted", true, { reason: "the run's workspace is not recorded" });
         return;
       }

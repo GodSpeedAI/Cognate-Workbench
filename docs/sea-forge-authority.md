@@ -111,6 +111,14 @@ the outcome.
    (operator only, outside any run) fixes the command that judges the workspace's agent runs, e.g.
    `["bun", "test"]`. It applies to runs that start after the declaration. An agent can neither declare
    nor change it.
+   **From a SWE_SEED contract instead:** `workspace.proof.declare_contract { workspaceId, specPath,
+   specSha256, checkId, timeoutS? }` names a SWE_SEED eval spec in the workspace, the sha256 you froze it
+   at, and one of its `command_check`s. Workbench runs `swe-seed eval proof` (`COGNATE_SWE_SEED_BIN`),
+   which refuses a spec whose digest differs and exports the check as SWE_SEED runs it (`sh -c <rule>`).
+   The declaration and every settlement record name the spec, check and digest (`proofSource`). Changing
+   the spec file afterwards does not change the declared proof. With `COGNATE_PROOF_SOURCE=swe_seed`, a
+   typed `workspace.proof.declare` is refused, and a run whose proof was not declared from a contract is
+   not settled.
 2. **RealityTrace runs it.** When a governed agent run ends, RealityTrace runs the declared proof with
    its `command` verifier. The proof runs under the same bubblewrap containment as agent tools, with the
    workspace mounted read-only and nothing else reachable. RealityTrace records the exit code, the
@@ -131,6 +139,9 @@ Turn it on with the same RealityTrace homes in both places:
 export COGNATE_REALITYTRACE_BIN=/usr/local/bin/realitytrace
 export COGNATE_REALITYTRACE_DATA_HOME=$HOME/.local/share      # RealityTrace's XDG_DATA_HOME
 export COGNATE_REALITYTRACE_STATE_HOME=$HOME/.local/state     # RealityTrace's XDG_STATE_HOME
+# optional: proofs from SWE_SEED contracts (required for every proof with COGNATE_PROOF_SOURCE=swe_seed)
+export COGNATE_SWE_SEED_BIN=/usr/local/bin/swe-seed
+export COGNATE_PROOF_SOURCE=swe_seed                           # default: any
 ```
 
 ```yaml
@@ -155,3 +166,5 @@ The workspace must be a git checkout, because RealityTrace enrolls it by its rep
 
 Evidence: `test/J-SEA-FORGE-AUTHORITY.test.ts` (opt-in: `SEA_FORGE_SERVER_BIN`, the real-bwrap
 prerequisites). It runs a real sea-forge-server, a real contained workspace and the mock model.
+Settlement: `test/J-SW01-SETTLEMENT.test.ts` and, for SWE_SEED contracts, `test/J-SW02-PROOF-CONTRACT.test.ts`
+(also `SWE_SEED_BIN`).

@@ -40,6 +40,7 @@ import { externalAuthorityFromEnv, governanceComponent, type ExternalAuthority }
 import { recordWorkbenchEvents, settlementComponent } from "./capabilities/settlement.ts";
 import { createSettlementOrchestrator } from "./settlement/orchestrator.ts";
 import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/realitytrace.ts";
+import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
@@ -167,6 +168,9 @@ export interface ServerOptions {
   /** RealityTrace for governed settlement (readiness P03); default from COGNATE_REALITYTRACE_*.
    *  `null` forces it off. Requires SEA-Forge governance. */
   readonly realitytrace?: RealityTraceSettings | null;
+  /** Readiness P05: the SWE_SEED binary and where declared proofs may come from (default
+   *  COGNATE_SWE_SEED_BIN / COGNATE_PROOF_SOURCE; null = no SWE_SEED, any source). */
+  readonly sweSeed?: SweSeedSettings | null;
 }
 
 export interface AppServer {
@@ -352,6 +356,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
   const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
   if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
+  const sweSeed: SweSeedSettings = options.sweSeed === null ? { mode: "any" } : options.sweSeed ?? sweSeedFromEnv(process.env);
+  if (sweSeed.mode === "swe_seed" && !realitytrace) throw new Error("COGNATE_PROOF_SOURCE=swe_seed requires governed settlement (COGNATE_REALITYTRACE_*)");
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
   if (!containmentConfig && containmentConfigPath) {
@@ -481,7 +487,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
       governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
-      settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs }),
+      settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs, sweSeed }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
       containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
@@ -571,6 +577,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       authority: externalAuthority, realitytrace, containment: containmentConfig,
       getService: () => runtime.service, systemCaller: SYSTEM_CALLER,
       record: (events, correlationId) => recordWorkbenchEvents(runtime.service, SYSTEM_CALLER, events, correlationId),
+      proofSource: sweSeed.mode,
     });
     settlement = orchestrator;
     runtime.store.onCommitted((events) => orchestrator.onCommitted(events));

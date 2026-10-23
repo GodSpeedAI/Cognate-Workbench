@@ -407,6 +407,7 @@ export function bindGovernanceCapabilities(domain: Domain): Readonly<Record<stri
 /** Governed settlement (readiness P03): the declared proof and the settlement status. */
 export const SETTLEMENT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "workspace.proof.declare": "Verification",
+  "workspace.proof.declare_contract": "Verification",
   "settlement.status": "Verification",
 };
 export function bindSettlementCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
