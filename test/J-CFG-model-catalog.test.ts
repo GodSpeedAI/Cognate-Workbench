@@ -150,6 +150,59 @@ describe("J-CFG-model-catalog", () => {
     });
   });
 
+  test("the saved key goes only to the saved provider, never to a URL the caller names", async () => {
+    const saved = await serveModels(() => ({ status: 200, body: { data: [{ id: "m-saved" }] } }));
+    const foreign = await serveModels(() => ({ status: 200, body: { data: [{ id: "m-foreign" }] } }));
+    await withTempHome(async (home) => {
+      const { app, client } = await bootApp(home);
+      try {
+        await client.invoke("model.configure", {
+          providerId: "mock",
+          baseURL: `http://127.0.0.1:${saved.port}/v1`,
+          protocol: "openai-compatible",
+          model: "m-saved",
+          apiKey: "sk-saved-secret",
+        });
+        // No key typed, foreign URL: refused before any request, so the foreign server sees nothing.
+        const refused = (await client.invoke("model.catalog", {
+          protocol: "openai-compatible",
+          baseURL: `http://127.0.0.1:${foreign.port}/v1`,
+        })) as unknown as CatalogResult;
+        expect(refused.ok).toBe(false);
+        expect(refused.reason).toContain("only sent to the saved provider");
+        expect(foreign.seen.path).toBeUndefined();
+        expect(foreign.seen.auth).toBeUndefined();
+        // Same saved URL with a different protocol is also refused.
+        const otherProtocol = (await client.invoke("model.catalog", {
+          protocol: "anthropic-messages",
+          baseURL: `http://127.0.0.1:${saved.port}/v1`,
+        })) as unknown as CatalogResult;
+        expect(otherProtocol.ok).toBe(false);
+        expect(saved.seen.path).toBeUndefined();
+        // Positive control: the saved URL (trailing slash ignored) receives the saved key.
+        const ok = (await client.invoke("model.catalog", {
+          protocol: "openai-compatible",
+          baseURL: `http://127.0.0.1:${saved.port}/v1/`,
+        })) as unknown as CatalogResult;
+        expect(ok.ok).toBe(true);
+        expect(ok.models).toEqual(["m-saved"]);
+        expect(saved.seen.auth).toBe("Bearer sk-saved-secret");
+        // A typed key may still go to any URL: it is the caller's own key.
+        const typed = (await client.invoke("model.catalog", {
+          protocol: "openai-compatible",
+          baseURL: `http://127.0.0.1:${foreign.port}/v1`,
+          apiKey: "sk-typed",
+        })) as unknown as CatalogResult;
+        expect(typed.ok).toBe(true);
+        expect(foreign.seen.auth).toBe("Bearer sk-typed");
+      } finally {
+        await app.stop();
+        await saved.stop();
+        await foreign.stop();
+      }
+    });
+  });
+
   test("an empty base URL is refused without any network call", async () => {
     await withTempHome(async (home) => {
       const { app, client } = await bootApp(home);
