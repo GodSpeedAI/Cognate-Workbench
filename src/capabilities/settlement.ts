@@ -6,6 +6,8 @@
 //   workspace, pinned by the operator's sha256: SWE_SEED checks the digest and exports the command_check as it
 //   would run it. The declaration records the contract (spec id, check id, digest) as the proof's source.
 //   With COGNATE_PROOF_SOURCE=swe_seed it is the only way to declare a proof.
+// - `workspace.proof.current` reports the proof a workspace's runs are judged by now: the latest declaration, the
+//   proof source the operator configured, and whether settlement runs at all. Read-only, operator only.
 // - `settlement.status` reports, per run, what RealityTrace observed and what SEA-Forge settled.
 import { randomUUID } from "node:crypto";
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
@@ -17,6 +19,7 @@ import { ENV_PROOF_SOURCE, exportSweSeedProof, normaliseSha256, type SweSeedSett
 
 export const PROOF_DECLARE = "workspace.proof.declare";
 export const PROOF_DECLARE_CONTRACT = "workspace.proof.declare_contract";
+export const PROOF_CURRENT = "workspace.proof.current";
 export const SETTLEMENT_STATUS = "settlement.status";
 
 /** Durably record workbench.* events through the replay-safe configuration agent, and wait until committed. */
@@ -83,12 +86,13 @@ export function settlementComponent(options: {
   const declareContract = contract(PROOF_DECLARE_CONTRACT);
   const mode = options.sweSeed?.mode ?? "any";
   const status = contract(SETTLEMENT_STATUS);
+  const current = contract(PROOF_CURRENT);
   const operatorOnly = (ctx: HandlerContext, id: string) => {
     if (ctx.actor.kind !== "user" || ctx.runId) throw new Error(`${id}: only a direct human operator may do this`);
   };
   return {
     id: "settlement:governed",
-    provides: [declare, declareContract, status],
+    provides: [declare, declareContract, current, status],
     activate(fiber) {
       fiber.provide(declare, async (raw, ctx) => {
         operatorOnly(ctx, PROOF_DECLARE);
@@ -111,6 +115,27 @@ export function settlementComponent(options: {
         const proof = validateProof({ workspaceId: input.workspaceId, argv: exported.argv, cwd: exported.cwd, timeoutS: input.timeoutS });
         await recordWorkbenchEvents(options.getService(), options.systemCaller, [{ type: PROOF_DECLARED, payload: { ...proof, source: { ...exported.source }, declaredBy: ctx.actor.id } as unknown as Json }], `proof:${proof.workspaceId}`);
         return { ...proof, source: { ...exported.source }, appliesTo: "runs that start after this declaration" } as unknown as Json;
+      });
+      fiber.provide(current, async (raw, ctx) => {
+        operatorOnly(ctx, PROOF_CURRENT);
+        const v = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+        // Without a workspace the answer is the settlement configuration alone (declared: null).
+        if (v.workspaceId !== undefined && (typeof v.workspaceId !== "string" || !v.workspaceId)) throw new Error(`${PROOF_CURRENT}: workspaceId must be a non-empty string`);
+        const workspaceId = v.workspaceId as string | undefined;
+        if (workspaceId !== undefined && !options.getKnownWorkspaceIds().has(workspaceId)) throw new Error(`${PROOF_CURRENT}: unknown workspace ${workspaceId}`);
+        // The latest declaration for the workspace is the proof that judges the runs that start from now on.
+        let declared: Json | null = null;
+        if (workspaceId !== undefined) {
+          for await (const e of options.getService().events(options.systemCaller, {})) {
+            if (e.eventType === PROOF_DECLARED && (e.payload as Record<string, unknown>).workspaceId === workspaceId) declared = e.payload;
+          }
+        }
+        return {
+          settlementActive: options.active,
+          proofSource: mode,
+          sweSeedConfigured: Boolean(options.sweSeed?.bin),
+          declared,
+        } as unknown as Json;
       });
       fiber.provide(status, async (raw, ctx) => {
         operatorOnly(ctx, SETTLEMENT_STATUS);
