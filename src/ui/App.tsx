@@ -10,6 +10,7 @@ import { renderMarkdown } from "./markdown.ts";
 import { AmbiguousStepCard } from "./AmbiguousStepCard.tsx";
 import { GovernanceApprovalCard, governanceApprovalOf } from "./GovernanceApprovalCard.tsx";
 import { SettlementCard, useSessionSettlement, type SettlementOperation } from "./SettlementCard.tsx";
+import { GovernancePane } from "./GovernancePane.tsx";
 import { interruptedCapability, isModelGeneration } from "../capabilities/ambiguousStep.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
@@ -1667,8 +1668,11 @@ function SettingsModels({
   onClose,
   settings,
   onOpenShortcuts,
+  workspaceId,
 }: {
   readonly onClose: () => void;
+  /** The app's selected workspace, for the Governance & evidence proof. */
+  readonly workspaceId: string | undefined;
   /** Every General setting, resolved with defaults from the durable `settings` row (usage pass
    *  U2, reference-behavior-matrix.md §11) — the General pane is the full inventory: Permission,
    *  Language, Appearance, Font size, Work details, Performance & usage, Coding Tools, Keyboard
@@ -1680,7 +1684,7 @@ function SettingsModels({
 }) {
   const client = useCognate();
   const config = useModelConfig();
-  const [section, setSection] = useState<"general" | "models" | "plugins" | "presets">("models");
+  const [section, setSection] = useState<"general" | "models" | "plugins" | "presets" | "governance">("models");
   // Full-access confirmation (checkpoint 22f): opened by selecting "Full access" in the Permission
   // menu; the Permission control stays disabled while it is open, and only the checked-state
   // "Enable Full access" button commits the durable change.
@@ -1928,6 +1932,14 @@ function SettingsModels({
             >
               Agent presets
             </button>
+            <button
+              type="button"
+              className={section === "governance" ? "settings-nav-item active" : "settings-nav-item"}
+              aria-current={section === "governance" ? "page" : undefined}
+              onClick={() => setSection("governance")}
+            >
+              Governance &amp; evidence
+            </button>
           </nav>
           <div className="settings-content">
             {section === "general" ? (
@@ -1936,6 +1948,8 @@ function SettingsModels({
               <BuiltInPluginsPane settings={settings} />
             ) : section === "presets" ? (
               <AgentPresetsPane settings={settings} />
+            ) : section === "governance" ? (
+              <GovernancePane workspaceId={workspaceId} />
             ) : view === "list" ? (
               <>
                 <h3>Models</h3>
@@ -5788,7 +5802,7 @@ export function App() {
       ) : (
         openChildRow ? <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} /> : <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
       )}
-      {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} />}
+      {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} workspaceId={currentWorkspaceId} />}
       {shortcutsOpen && (
         <ShortcutsDialog
           overrides={settings.shortcuts}

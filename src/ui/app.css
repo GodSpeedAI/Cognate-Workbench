@@ -3269,3 +3269,39 @@ input:focus-visible {
   background: rgba(125, 125, 125, 0.06);
   width: 100%;
 }
+
+/* Settings → Governance & evidence */
+.governance-card h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.governance-card .settings-description {
+  margin: 0;
+}
+
+.governance-world-ref {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.governance-world-ref code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.governance-copy {
+  flex: none;
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-xs);
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
