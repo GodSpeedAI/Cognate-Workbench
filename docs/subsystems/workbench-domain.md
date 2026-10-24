@@ -137,4 +137,4 @@ Human-only decisions (`task.review.decide`, `authority.elevate`) must check the 
 - `src/workbench/reducer.ts` — the `workbench.*` fold
 - `src/workbench/shellSafety.ts`, `src/workbench/glob.ts`, `src/workbench/grounded.ts`,
   `src/workbench/parallelism.ts`, `src/workbench/focus.ts`, `src/workbench/state.ts`
-- `test/workbench-*.test.ts` (14 files), `test/J-WB-*.test.ts` (8 files)
+- `test/workbench-*.test.ts` (20 files), `test/J-WB-*.test.ts` (9 files)

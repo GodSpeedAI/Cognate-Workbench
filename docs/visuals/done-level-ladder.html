@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en" data-register="blueprint">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Done levels are contiguous - Cognate Workbench</title>
+<meta name="description" content="Interactive model of doneLevel: seven levels, each requiring the one before it. A later level cannot skip an unmet earlier one.">
+<style>
+:root{
+--paper:oklch(98.5% 0.004 250);--paper-2:oklch(96.5% 0.006 250);
+--ink:oklch(24% 0.02 258);--ink-2:oklch(34% 0.018 257);--muted:oklch(52% 0.014 257);
+--rule:oklch(88% 0.008 255);--rule-2:oklch(80% 0.01 255);
+--accent:oklch(52% 0.19 256);--accent-ink:oklch(99% 0.006 256);
+--graphite:oklch(22% 0.016 260);--graphite-ink:oklch(94% 0.01 258);
+--danger:oklch(52% 0.19 25);--danger-bg:oklch(96% 0.03 25);
+--success:oklch(55% 0.14 152);--success-bg:oklch(96% 0.03 152);
+--warn:oklch(55% 0.12 75);--warn-bg:oklch(96% 0.035 80);
+--focus:oklch(52% 0.19 256);
+--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;
+--r1:6px;--r2:10px;
+--font-display:"Space Grotesk","Avenir Next",ui-sans-serif,system-ui,sans-serif;
+--font-body:"Inter",ui-sans-serif,system-ui,sans-serif;
+--font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+body{margin:0;padding:var(--s7) var(--s5) var(--s8);background-image:linear-gradient(color-mix(in oklch,var(--rule) 45%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in oklch,var(--rule) 45%,transparent) 1px,transparent 1px);background-size:24px 24px;background-position:-1px -1px}
+.wrap{max-width:1060px;margin:0 auto}
+h1,h2,h3{font-family:var(--font-display);font-weight:600;letter-spacing:-0.02em;line-height:1.2;margin:0}
+h1{font-size:30px;margin-bottom:var(--s2)}
+h2{font-size:19px;margin-bottom:var(--s2)}
+h3{font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);font-family:var(--font-mono);font-weight:500;margin:0 0 var(--s3)}
+p{margin:0 0 var(--s3);max-width:68ch;color:var(--ink-2)}
+.lede{font-size:17px;color:var(--ink);max-width:62ch}
+.eyebrow{font-family:var(--font-mono);font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:var(--s3)}
+code{font-family:var(--font-mono);font-size:0.9em;background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--r1);padding:1px 5px;overflow-wrap:anywhere}
+header{border-bottom:1px solid var(--rule-2);padding-bottom:var(--s5);margin-bottom:var(--s6)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s6);align-items:start}
+@media (max-width:880px){.grid2{grid-template-columns:minmax(0,1fr)}}
+fieldset{border:1px solid var(--rule);border-radius:var(--r2);padding:var(--s4);margin:0 0 var(--s4);background:var(--paper)}
+legend{font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);padding:0 var(--s2)}
+.toggle{display:grid;grid-template-columns:auto 1fr auto;gap:var(--s3);align-items:center;padding:var(--s2) 0;border-bottom:1px solid var(--rule);cursor:pointer}
+.toggle:last-child{border-bottom:0}
+.toggle input{width:16px;height:16px;accent-color:oklch(52% 0.19 256);cursor:pointer}
+.toggle .t{font-family:var(--font-mono);font-size:12.5px;color:var(--ink)}
+.toggle .m{font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.result{border:1px solid var(--rule-2);border-radius:var(--r2);overflow:hidden;background:var(--paper)}
+.result-head{padding:var(--s4) var(--s5);border-bottom:1px solid var(--rule)}
+.reached{font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:4px}
+.reached b{font-family:var(--font-display);font-size:22px;letter-spacing:-0.01em;text-transform:none;color:var(--ink);display:block;margin-top:2px}
+.capped{padding:var(--s3) var(--s5);border-bottom:1px solid var(--rule);font-size:12.5px;background:var(--warn-bg);color:oklch(40% 0.1 70)}
+.capped[hidden]{display:none}
+.ladder{padding:var(--s4) var(--s5)}
+ol.steps{list-style:none;margin:0;padding:0}
+ol.steps li{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:7px 0;border-bottom:1px solid var(--rule)}
+ol.steps li:last-child{border-bottom:0}
+.num{font-family:var(--font-mono);font-size:10.5px;color:var(--muted);text-align:right}
+.nm{font-family:var(--font-mono);font-size:12.5px;color:var(--ink)}
+.nm em{display:block;font-style:normal;font-size:11.5px;color:var(--muted);font-family:var(--font-body)}
+.st{font-family:var(--font-mono);font-size:10px;letter-spacing:0.05em;text-transform:uppercase;padding:2px 7px;border-radius:var(--r1);border:1px solid;white-space:nowrap}
+.st[data-s="met"]{color:var(--success);border-color:var(--success);background:var(--success-bg)}
+.st[data-s="blocked"]{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+.st[data-s="unreached"]{color:var(--muted);border-color:var(--rule-2)}
+ol.steps li[data-r="unreached"]{opacity:.45}
+ol.steps li[data-r="capped"]{background:var(--warn-bg)}
+figure{margin:var(--s6) 0 0}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:var(--s2);max-width:76ch}
+.note{font-size:12.5px;color:var(--muted);max-width:76ch}
+details{margin-top:var(--s5);border:1px solid var(--rule);border-radius:var(--r2);background:var(--paper)}
+summary{cursor:pointer;padding:var(--s3) var(--s4);font-family:var(--font-mono);font-size:11.5px;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-2)}
+details pre{margin:0;padding:var(--s4);border-top:1px solid var(--rule);overflow:auto;background:var(--graphite);color:var(--graphite-ink);font-family:var(--font-mono);font-size:11.5px;line-height:1.6}
+footer{margin-top:var(--s8);border-top:1px solid var(--rule);padding-top:var(--s5);font-size:12.5px;color:var(--muted)}
+footer ul{margin:var(--s2) 0 0;padding-left:var(--s5)}
+footer li{margin-bottom:var(--s1);overflow-wrap:anywhere}
+@media (prefers-reduced-motion:no-preference){ol.steps li,.reached b{transition:opacity .18s ease}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <p class="eyebrow">docs/visuals &middot; evidence and done</p>
+  <h1>Done has seven levels, and they do not skip</h1>
+  <p class="lede">An agent that says "I fixed it" can move the first level, maybe the second. It cannot reach <code>ready-for-review</code>, and it can never reach <code>accepted</code>. The function that enforces this is <code>doneLevel</code>, and its rule is contiguity.</p>
+</header>
+
+<figure>
+  <svg viewBox="0 0 1000 172" width="100%" role="img" aria-labelledby="ladcap" style="display:block;max-height:230px">
+    <title id="ladcap">Seven levels in order. Each depends on every level before it, so a gap stops the ladder there.</title>
+    <g font-family="JetBrains Mono, ui-monospace, monospace">
+      <g stroke="oklch(80% 0.01 255)" fill="oklch(98.5% 0.004 250)">
+        <rect x="8" y="52" width="132" height="50" rx="6"/>
+        <rect x="148" y="52" width="132" height="50" rx="6"/>
+        <rect x="288" y="52" width="132" height="50" rx="6"/>
+        <rect x="428" y="52" width="132" height="50" rx="6"/>
+        <rect x="568" y="52" width="132" height="50" rx="6" stroke="oklch(52% 0.19 256)" stroke-width="1.6"/>
+        <rect x="708" y="52" width="132" height="50" rx="6"/>
+        <rect x="848" y="52" width="132" height="50" rx="6"/>
+      </g>
+      <g font-size="11.5" fill="oklch(24% 0.02 258)">
+        <text x="20" y="74">not-started</text>
+        <text x="160" y="74">finished</text>
+        <text x="300" y="74">produced</text>
+        <text x="440" y="74">tested</text>
+        <text x="580" y="74">ready-for-review</text>
+        <text x="720" y="74">accepted</text>
+        <text x="860" y="74">operationalized</text>
+      </g>
+      <g font-size="10" fill="oklch(52% 0.014 257)">
+        <text x="20" y="92">the gate below</text>
+        <text x="160" y="92">run completed</text>
+        <text x="300" y="92">artifact exists</text>
+        <text x="440" y="92">tests closed</text>
+        <text x="580" y="92">readiness.ready</text>
+        <text x="720" y="92">human decided</text>
+        <text x="860" y="92">reusable</text>
+      </g>
+      <g stroke="oklch(52% 0.014 257)" stroke-width="1.2" fill="none">
+        <path d="M140 77 H148"/><path d="M280 77 H288"/><path d="M420 77 H428"/><path d="M560 77 H568"/><path d="M700 77 H708"/><path d="M840 77 H848"/>
+      </g>
+      <path d="M8 122 H980" stroke="oklch(88% 0.008 255)" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="8" y="142" font-size="10" fill="oklch(52% 0.014 257)">EACH LEVEL REQUIRES THE ONE BEFORE IT - ONE GAP AND THE LADDER STOPS THERE</text>
+      <text x="8" y="160" font-size="10" fill="oklch(52% 0.014 257)">a tool result alone moves at most the first two</text>
+    </g>
+  </svg>
+  <figcaption>The fifth box is the one a run cannot reach on its own: <code>ready-for-review</code> needs <code>reviewReadiness</code> to return <code>ready: true</code>, and <code>accepted</code> needs a human actor.</figcaption>
+</figure>
+
+<h2 style="margin-top:var(--s7)">Set the inputs</h2>
+<p class="note" style="margin-bottom:var(--s4)">The five flags below are exactly what <code>doneLevel</code> takes. Turn on a later flag while an earlier one is off to see contiguity refuse it.</p>
+
+<div class="grid2">
+  <div>
+    <fieldset>
+      <legend>doneLevel input</legend>
+      <label class="toggle"><input type="checkbox" id="finished" checked><span class="t">finished</span><span class="m">step ran</span></label>
+      <label class="toggle"><input type="checkbox" id="produced" checked><span class="t">produced</span><span class="m">artifact exists</span></label>
+      <label class="toggle"><input type="checkbox" id="testedClosed" checked><span class="t">testedClosed</span><span class="m">required tests closed</span></label>
+      <label class="toggle"><input type="checkbox" id="ready" checked><span class="t">readiness.ready</span><span class="m">review gates pass</span></label>
+      <label class="toggle"><input type="checkbox" id="accepted"><span class="t">accepted</span><span class="m">human decided</span></label>
+      <label class="toggle"><input type="checkbox" id="operationalized"><span class="t">operationalized</span><span class="m">reusable</span></label>
+    </fieldset>
+    <div style="display:flex;gap:var(--s2);flex-wrap:wrap">
+      <button class="note" id="preset-agent" style="cursor:pointer;font-family:var(--font-mono);font-size:12px;padding:8px 12px;border:1px solid var(--rule-2);border-radius:var(--r1);background:var(--paper);color:var(--ink)">An agent says it fixed it</button>
+      <button class="note" id="preset-human" style="cursor:pointer;font-family:var(--font-mono);font-size:12px;padding:8px 12px;border:1px solid var(--rule-2);border-radius:var(--r1);background:var(--paper);color:var(--ink)">A human accepted it</button>
+    </div>
+  </div>
+  <div>
+    <h3>doneLevel returns</h3>
+    <div class="result">
+      <div class="result-head">
+        <span class="reached">highest contiguous level<b id="level">accepted</b></span>
+      </div>
+      <div class="capped" id="capped" hidden></div>
+      <div class="ladder">
+        <ol class="steps" id="steps"></ol>
+      </div>
+    </div>
+    <details>
+      <summary>The function</summary>
+      <pre id="src"></pre>
+    </details>
+  </div>
+</div>
+</div>
+<script>
+(function () {
+"use strict";
+
+// Literal port of doneLevel() from src/workbench/ledger.ts.
+// The whole point is the early return: a level is reached only if every
+// preceding gate passed, so contiguity is structural rather than checked.
+var LEVELS = [
+  { id: "not-started", label: "not-started", means: "nothing has happened yet" },
+  { id: "finished", label: "finished", means: "the step ran", gate: "finished" },
+  { id: "produced", label: "produced", means: "there is an artifact", gate: "produced" },
+  { id: "tested", label: "tested", means: "required checks closed", gate: "testedClosed" },
+  { id: "ready-for-review", label: "ready-for-review", means: "reviewReadiness says ready", gate: "ready" },
+  { id: "accepted", label: "accepted", means: "a human decided", gate: "accepted" },
+  { id: "operationalized", label: "operationalized", means: "it compounds into something reusable", gate: "operationalized" }
+];
+
+function doneLevel(input) {
+  var maxLevel = "not-started";
+  if (input.finished) maxLevel = "finished"; else return maxLevel;
+  if (input.produced) maxLevel = "produced"; else return maxLevel;
+  if (input.testedClosed) maxLevel = "tested"; else return maxLevel;
+  if (input.readiness && input.readiness.ready) maxLevel = "ready-for-review"; else return maxLevel;
+  if (input.accepted) maxLevel = "accepted"; else return maxLevel;
+  if (input.operationalized) maxLevel = "operationalized"; else return maxLevel;
+  return maxLevel;
+}
+
+var input = { finished: true, produced: true, testedClosed: true, ready: true, accepted: false, operationalized: false };
+function $(id) { return document.getElementById(id); }
+
+function render() {
+  var reached = doneLevel({ finished: input.finished, produced: input.produced, testedClosed: input.testedClosed, readiness: { ready: input.ready }, accepted: input.accepted, operationalized: input.operationalized });
+  $("level").textContent = reached;
+
+  var reachedIdx = LEVELS.findIndex(function (l) { return l.id === reached; });
+  var claimIdx = input.operationalized ? 6 : input.accepted ? 5 : input.ready ? 4 : input.testedClosed ? 3 : input.produced ? 2 : input.finished ? 1 : 0;
+  var capped = $("capped");
+  if (claimIdx > reachedIdx) {
+    var firstBlock = LEVELS[reachedIdx + 1];
+    capped.hidden = false;
+    capped.textContent = "Capped at " + reached + ". The gate for " + (firstBlock ? firstBlock.id : "the next level") + " is not satisfied, so later flags cannot be reached.";
+  } else {
+    capped.hidden = true;
+  }
+
+  var ol = $("steps");
+  ol.innerHTML = "";
+  LEVELS.forEach(function (l, i) {
+    var li = document.createElement("li");
+    var state, rel;
+    if (i <= reachedIdx) { state = "met"; rel = "met"; }
+    else if (i === reachedIdx + 1) { state = "blocked"; rel = "capped"; }
+    else { state = "unreached"; rel = "unreached"; }
+    li.setAttribute("data-r", rel);
+    li.innerHTML = '<span class="num">' + i + '</span>' +
+      '<span class="nm">' + l.label + '<em>' + l.means + '</em></span>' +
+      '<span class="st" data-s="' + state + '">' + (state === "blocked" ? "next gate" : state) + '</span>';
+    ol.appendChild(li);
+  });
+}
+
+["finished", "produced", "testedClosed", "ready", "accepted", "operationalized"].forEach(function (k) {
+  $(k).checked = input[k];
+  $(k).addEventListener("change", function () { input[k] = this.checked; render(); });
+});
+
+$("preset-agent").addEventListener("click", function () {
+  input = { finished: true, produced: true, testedClosed: false, ready: false, accepted: false, operationalized: false };
+  sync();
+});
+$("preset-human").addEventListener("click", function () {
+  input = { finished: true, produced: true, testedClosed: true, ready: true, accepted: true, operationalized: false };
+  sync();
+});
+function sync() {
+  Object.keys(input).forEach(function (k) { $(k).checked = input[k]; });
+  render();
+}
+
+$("src").textContent = [
+  "// src/workbench/ledger.ts",
+  "export function doneLevel(input) {",
+  "  let maxLevel = \"not-started\";",
+  "  if (input.finished) maxLevel = \"finished\"; else return maxLevel;",
+  "  if (input.produced) maxLevel = \"produced\"; else return maxLevel;",
+  "  if (input.testedClosed) maxLevel = \"tested\"; else return maxLevel;",
+  "  if (input.readiness && input.readiness.ready) maxLevel = \"ready-for-review\"; else return maxLevel;",
+  "  if (input.accepted) maxLevel = \"accepted\"; else return maxLevel;",
+  "  if (input.operationalized) maxLevel = \"operationalized\"; else return maxLevel;",
+  "  return maxLevel;",
+  "}",
+  "",
+  "// The source comment states the rule:",
+  "// Contiguity matters: if accepted=true but ready-for-review readiness",
+  "// is not satisfied, cap at \"tested\"."
+].join("\n");
+
+render();
+})();
+</script>
+</div>
+
+<footer class="wrap">
+  <p style="margin-bottom:var(--s3)"><b>Source trail.</b></p>
+  <ul>
+    <li><code>src/workbench/ledger.ts</code> - <code>doneLevel</code>, <code>readiness.ready</code>, and the contiguity comment above <code>doneLevel</code></li>
+    <li><code>src/workbench/types.ts</code> - <code>DoneLevel</code>, <code>TaskStatus</code>, <code>AcceptanceKind</code>, <code>EvidenceKind</code></li>
+    <li><code>src/workbench/ledger.ts</code> - <code>reviewReadiness</code> produces the <code>readiness</code> this consumes; <code>ledgerRows</code> decides closed, failed, open</li>
+    <li><code>src/capabilities/workbench.ts</code> - <code>task.review.decide</code> is human-only, which is why <code>accepted</code> cannot be self-granted</li>
+    <li><a href="../concepts/evidence-and-done.md">Concept: evidence and done</a> - the taxonomy in prose</li>
+  </ul>
+  <p style="margin-top:var(--s4)">The script is a literal port, not an import. If it and the source disagree, the source wins and this page is stale.</p>
+</footer>
+</body>
+</html>

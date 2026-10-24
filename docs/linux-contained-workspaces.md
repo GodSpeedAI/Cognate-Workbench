@@ -65,7 +65,7 @@ The provenance fields remain operator assertions; a JSON file or matching hash a
 prove that a binary contains a security fix. Review the actual binary, source, and build record.
 See [the fixture provenance record](bubblewrap-fixture-provenance.md) for the binary used in the
 current OS tests. Keep the launcher and optional Bun executable outside every selectable writable
-workspace. Workbench consumes published Cognate0.5.0, whose native provider rejects trusted
+workspace. Workbench consumes published Cognate 0.6.1, whose native provider rejects trusted
 launcher/Bun executable paths inside the writable root. The actual Workbench adversarial test
 copies the correctly hashed launcher into that root and proves refusal before configuration events.
 

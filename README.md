@@ -65,7 +65,7 @@ Some features record intent but do not act on it yet.
 | Capability substitution | Recorded. Does not rebind a running tool. |
 | Parallelism plans | Recorded. Do not start workers. |
 | Legacy automation records | Stored workflow intent; native Expert/Team schedules now execute due work through Cognate. See [schedules](docs/schedules.md). |
-| Budget information | Informational. Not enforced as a runtime limit. |
+| Budget information | Workbench planning economics remain informational. Expert Assignment attempts enforce configured model limits before invocation, and session and global spending ceilings fail closed. |
 
 
 ## Quick start
@@ -140,7 +140,7 @@ Workbench began as a reconstruction of the DeepSeek Harness experience. It has s
 
 ## Status
 
-Active development. Working today: coding-agent interactions, durable runtime state, traces, approval workflows, task contracts, and a browser cockpit. In progress: orchestration, automation, isolation, and execution-policy enforcement.
+Active development. Working today: coding-agent interactions, durable runtime state, traces, approval workflows, task contracts, native Experts and Teams, and a browser cockpit. Partial: orchestration and automation. Isolation is opt-in only — a host-configured Linux execution world can contain a workspace, but it is not the default. Read the [known gaps](docs/known-gaps.md) for the specific limitation on each.
 
 The development authenticator and tool guards are not a production multi-user security boundary. Path checks and best-effort shell parsing are not a sandbox, so by default agents cannot run commands or write files in a local (uncontained) workspace: use a [Linux contained workspace](docs/linux-contained-workspaces.md), or start with `COGNATE_EXECUTION_POSTURE=uncontained-local` to let agents act on this computer as you. Read the [known gaps and validation evidence](docs/known-gaps.md) before using Workbench with untrusted code or data.
 

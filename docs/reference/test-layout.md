@@ -1,19 +1,19 @@
 # Reference: test layout
 
-63 files. The naming tells you what kind of test it is and what it establishes.
+123 files. The naming tells you what kind of test it is and what it establishes.
 
 ## By class
 
 | Prefix | Count | Kind | Infrastructure |
 |---|---|---|---|
-| `J-*` | 33 | Canonical journey | Boots a real server against a real database |
-| `workbench-*` | 14 | Pure workbench domain unit | None |
-| `ui-*` | 6 | Component render | None (`renderToStaticMarkup`) |
-| `E2E-*` | 3 | Browser | Playwright + Chromium |
-| `cognitive-*` | 2 | Pure cognitive domain unit | None |
-| `providerRegistry` | 1 | Provider switch and rollback | None |
-| `skill-bundle` | 1 | Skill bundle + registry-only SDK consumption | None |
-| `executionWorlds` | 1 | Execution world behaviour | Server |
+| `J-*` | 64 | Canonical journey | Boots a real server against a real database |
+| `workbench-*` | 20 | Pure workbench domain unit | None |
+| `ui-*` | 11 | Component render | None (`renderToStaticMarkup`) |
+| `E2E-*` | 11 | Browser | Playwright + Chromium |
+| `cognitive-*` | 3 | Pure cognitive domain unit | None |
+| `expert-*`, `experts-*` | 9 | Expert admission, routing, economics, scheduling | Mixed; several boot a server |
+| `providerRegistry`, `executionWorlds`, `containedWorkspace`, `aggregateContainment` | 4 | Provider switch, execution worlds, containment | None or server |
+| `sea-format`, `skill-bundle` | 2 | Semantic model formatter, registry-only SDK consumption | None |
 | `helpers`, `wb-helpers` | 2 | Shared harness | — |
 
 `just smoke` runs three of the pure ones: `workbench-contract`, `workbench-glob`, `skill-bundle`.

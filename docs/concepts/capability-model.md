@@ -51,7 +51,7 @@ Bindings were added in tranches, and the tranche grouping survives in `domain/in
 | execution worlds | the `filesystem.*` / `process.exec` family plus `execution.world.*` |
 | `usage2` / `bindUsage2` | the 10 `settings.change*`, anchored on `UserPreferences` |
 | `usage3` / `bindUsage3` | `workspace.rename`, `workspace.delete`, anchored on `WorkspaceRecord` |
-| `bindWorkbench` | the 23 workbench capabilities |
+| `bindWorkbench` | the 25 workbench capabilities |
 
 ## Three shapes of "not a capability contract"
 
@@ -71,13 +71,30 @@ DurableStore `observations` collection, which is not the event log. `onboarding.
 durable UI-flow flag. No entity describes either, and inventing one would misstate the domain. Both
 are left unbound on purpose.
 
-## One known gap
+## Cognitive bindings
 
-The cognitive-navigation capabilities (`case.open`, `world.settle`, `verification.run`,
-`risk.assess`, the `experiment.*`, `method.*` and `ui.*` family) are real, executable capabilities
-that are **not** bound to the `.sea` model. The reason recorded in the legacy bindings document is
-that the `.sea` file carries another tranche's uncommitted edits. That is a gap, not a decision.
-It is listed in [Known gaps](../known-gaps.md).
+The cognitive-navigation family (`case.open`, `criterion.freeze`, `world.*`, `verification.run`,
+`risk.assess`, `case.observe`, the `experiment.*`, `method.*` and `ui.*` capabilities) **is** bound.
+`bindCognitiveCapabilities(domain)` runs during boot, immediately after `loadDomain()`, and anchors
+each capability on an entity that exists in the model:
+
+| Capability | Anchored on |
+|---|---|
+| `case.open`, `case.derive`, `case.observe` | `Case` |
+| `criterion.freeze` | `SuccessCriterion` |
+| `world.freeze`, `world.fork`, `world.attach`, `world.discard`, `world.settle` | `WorldSnapshot` |
+| `verification.run` | `Verification` |
+| `risk.assess` | `RiskAssessment` |
+| `experiment.round`, `experiment.status` | `Experiment` |
+| `method.review`, `method.accept`, `method.active` | `MethodRecommendation` |
+| `ui.focus.publish`, `ui.context`, `ui.request`, `ui.pending` | `AttentionFocus` |
+
+The table lives in `COGNITIVE_CAPABILITY_ANCHORS` in `domain/index.ts` and every anchored entity is
+present in `.sea/interaction/interaction-model.sea`.
+
+An earlier revision of this page recorded these as an unbound gap, on the stated grounds that the
+`.sea` file carried another tranche's uncommitted edits. That is no longer true of the current tree:
+the entities exist and the bindings are asserted at boot.
 
 ## Consequences you will feel
 

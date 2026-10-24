@@ -104,7 +104,7 @@ Non-negotiables when writing one:
 
 ## Source trail
 
-- `src/capabilities/` — all 14 files listed above
+- `src/capabilities/` — all 27 files listed above
 - `src/capabilities/tools.ts` — `PathEscapeError`, `ToolReadResult`, `ToolEditResult`,
   `ToolBashResult`, `ToolRunCodeResult`
 - `src/capabilities/workbench.ts` — `WORKBENCH_CAPABILITY_IDS`, `workbenchComponent`
