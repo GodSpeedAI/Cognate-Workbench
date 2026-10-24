@@ -20,7 +20,7 @@ const events = async (app: AppServer) => { const out: { position: number; eventT
 describe("J-COG-search", () => {
   test("bounded rounds, discard/retain, no auto-settlement, recommendation without promotion", async () => {
     await withTempHome(async (home) => {
-      let app = await startServer({ port: 0, home });
+      let app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       let client = clientFor(app);
       try {
         const repo = join(home, "repo");
@@ -75,7 +75,7 @@ describe("J-COG-search", () => {
 
         // restart: rounds, lineage and the unchanged active method reconstruct from events
         await app.stop();
-        app = await startServer({ port: 0, home });
+        app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
         client = clientFor(app);
         expect(((await client.invoke("method.active", {})) as { methodHash: string }).methodHash).toBe(method0);
         expect(foldSearch((await events(app)).filter((e) => e.eventType === "experiment.round.completed").map((e) => e.payload as ExperimentRound)).bestRound?.score).toBe(7);

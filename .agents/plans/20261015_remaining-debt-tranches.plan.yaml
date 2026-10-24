@@ -1,0 +1,371 @@
+schema: agent.development_plan
+schema_version: '1.0'
+metadata:
+  id: remaining-debt-tranches
+  title: Workspace concurrency, economics, distributed ownership and production trust
+  status: settled
+  version: '1.0'
+  created: '2026-10-15'
+  purpose: >-
+    Project the operator-accepted remaining-debt order (A2 residual, then A4 residual, then A5
+    upstream ownership, then A6 production trust) into a settlement graph on top of the settled
+    20261014_experts-debt-closure mission and published Cognate 0.5.0.
+source:
+  authority: Operator acceptance of the recommended tranche order in this session (2026-10-15)
+  inventory: docs/experts-debt-closure.md
+  predecessor: .agents/plans/20261014_experts-debt-closure.plan.yaml (settled at fdc709b)
+decisions:
+  - Tranche order is operator-accepted as A2 residual, A4 residual, A5 upstream ownership, A6 production trust; dependency edges encode this order even where no technical prerequisite exists.
+  - Consume only complete published Cognate releases; no local SDK sources, vendored tarballs or workspace aliases. Upstream work happens in the Cognate repo through an isolated task worktree with PR44-style gates (RED/GREEN regressions, exact-head CI/packaging, operator-authorized merge, linked release, registry audit, fresh-consumer proof).
+  - Parallelism stays opt-in and conflict-aware. Unknown or unclassifiable work fails closed to the workspace-effects exclusion; eligibility is never widened silently.
+  - Resource identities derive from authoritative application state (assignment/workspace/world records), not from run-supplied input; aliases must canonicalize or be denied.
+  - Team admission/batching policy resolves from authoritative Team metadata inside the async eligibility lookup; the UI must state the effective policy truthfully, including serialized reasons.
+  - Economics never treat unknown prices as zero; interrupted billing reservations reconcile rather than blindly repeat.
+  - A3 generalization (generalized SDK inbox, standalone live steering) and the enumerated product debts remain tracked in the disposition matrix; they are out of this plan's scope.
+  - Baseline and every settlement require actual store/runtime/browser evidence, not mock-only proofs.
+  - Single-process admission remains the default until the T6/T7 verified multi-process release exists.
+global_gates:
+  - just typecheck
+  - just verify
+  - domainforge validate --format human .sea/interaction/interaction-model.sea
+  - domainforge fmt --check .sea/interaction/interaction-model.sea
+  - git diff --check
+dependency_graph:
+  edges: [[T0,T1],[T1,T2],[T2,T3],[T0,T4],[T3,T5],[T4,T5],[T5,T6],[T6,T7],[T7,T8],[T8,T9]]
+  critical_path: [T0,T1,T2,T3,T5,T6,T7,T8,T9]
+initial_state:
+  current_task: none
+  last_settled_task: T9
+progress:
+  T0: >-
+    Baseline settled on the clean fdc709b tree (7eabd82 adds only this plan): `just verify` passed
+    1,153 tests / 1,147 pass / 6 skip / 0 fail, 7,408 assertions across 105 files in 583.82 s. The
+    workspace-effect conflict inventory names all 11 mutating surfaces with their canonical resource
+    identity (workspace / execution world / configuration) and authoritative source, and pins
+    canonicalization, mutator-enumeration and fail-closed rules. The capacity 1/2/4/8 benchmark was
+    refreshed with four fresh sweeps (medians 5643.9 / 4985.1 / 5064.5 / 5151.9 ms); the earlier
+    single-trial capacity-8 regression did not reproduce (capacity 4 and 8 ranges overlap, 1.7 %
+    median gap). New instrumented attribution (`test/experts-capacity-attribution.test.ts`) rules
+    out full context materialization (0.03 % of elapsed) and attributes 62-64 % of elapsed to
+    Experts-registry shared-state reads and aggregate CAS commits, with 48/49 and 44/45 CAS
+    conflicts concentrated in concurrent assignment submission. Evidence:
+    docs/experts-concurrency-benchmark.md.
+  T1: >-
+    Conflict-aware workspace-effect admission replaces the single global exclusion key with
+    canonical per-resource keys derived from authoritative state (src/experts/admission.ts):
+    tool-bearing Expert work keys by its Assignment's workspace record, coding sessions and
+    subagents key by their validated workspace record, workspace/config runs key configuration plus
+    the exact records they name, world mutators enumerate the workspaces they affect, cognitive runs
+    key configuration plus their named world. Model-only Expert overlap semantics are unchanged;
+    unknown, forged or unclassifiable identities fail closed to the unchanged global
+    workbench:workspace-effects key. `test/J-EXPERT-workspace-admission.test.ts` passes 4 actual
+    PostgreSQL journeys (disjoint-workspace overlap at capacity two with disjoint keys, aliased
+    spellings collide on one key and serialize, forged identity denied effects and excluded,
+    per-resource keys and overlap/serialization survive restart); `test/E2E-expert-workspace-admission.test.ts`
+    passes a real Chromium two-workspace tool-bearing overlap journey; `test/expert-admission.test.ts`
+    covers authoritative key derivation and fail-closed cases (10 tests). Known boundary recorded:
+    local bash/run_code are not OS-contained; admission stays process-local by SDK contract and a
+    key-waiting run occupies one bounded dispatch slot.
+  T2: >-
+    Team admission/batching policy resolves from authoritative Team metadata only: Team.limits gains
+    maxConcurrentRuns (1-8, default 2) and admissionBatch (1-8, default 1). The eligibility lookup
+    gives each Team run one admission lane key so a Team exceeding its policy waits even when host
+    capacity is free; the completion bridge dispatches queued Team roots in the Team's batch; the
+    Team editor and runtime inspection state the effective policy and serialized reasons; client
+    policy fields (maxConcurrentRuns/admissionBatch/policy/limits) are refused on converse.
+    `test/J-TEAM-admission.test.ts` passes 2 actual PostgreSQL journeys at capacity four (policy-one
+    serializes disjoint runs with three free slots; policy-two overlaps them; batch-one defers the
+    second root; forged policy refused), `test/E2E-team-admission.test.ts` passes a real Chromium
+    Team-editor/inspection journey, and `test/expert-admission.test.ts` covers lane derivation
+    (11 tests). Cross-process Team fairness is not claimed.
+  T3: >-
+    Capacity-8 throughput settlement. The capacity 1/2/4/8 benchmark was re-run (four sweeps) on
+    the T1/T2 tree; the model-only solo workload holds no keys, so the policies neither widen nor
+    narrow it. Medians: 6548.2 / 5230.5 / 5230.3 / 5690.4 ms. The measured capacity-8 shortfall is
+    recorded as an accepted measured limit with isolated cause attribution (docs/experts-concurrency-benchmark.md):
+    (a) no discrete capacity-8 regression exists — both four-sweep batches show overlapping
+    capacity-4/8 ranges (T0 +1.7 %, T3 +8.8 % median gap against up to 20 % run-to-run spread);
+    (b) the dominant cost is the capacity-independent Experts-registry read-modify-write traffic
+    (62-64 % of elapsed at both capacities, 2.7-2.8 CAS retries per committed creation write),
+    which saturates throughput near 1.5 assignments/s and is the A4 tranche's target; (c) a
+    key-waiting run occupies one bounded dispatch slot (published-SDK semantics), recorded as a
+    limit. Default capacity remains 1; single-trial measurements stay labeled as such.
+  T4: >-
+    Indexed retrieval and the global root CAS are settled. The root manifest is now a fingerprinted
+    partition directory v2: it carries one content fingerprint per present logical section, every
+    restored section is verified against its fingerprint, unchanged sections are carried forward by
+    verified content address without re-reading, re-serializing or re-writing their leaves, and only
+    changed sections re-partition (writing only leaves whose path+hash changed). Workbench read paths
+    no longer materialize the aggregate: `expert.context` conversation pages locate records through the
+    manifest's SHA-256 nibble trie (root + one conversation leaf + at most N message-leaf reads + the
+    trailing assignment leaf, independent of aggregate size), `expert.memory.read` and the
+    listing/review/cancel/invocation pre-checks read only the sections they touch, and legacy/empty
+    roots fall back to the full read. `test/J-MEMORY-scoped-loads.test.ts` proves with counted
+    shared-state calls that a 50-message page of a 240-message conversation never touches memory,
+    expert, team, receipt or audit partitions, that a one-record memory mutation writes exactly the
+    changed memory leaf plus the command's receipt leaf, that the accepted root is a fingerprinted v2
+    directory, and that restart, section-directory aliasing and source-event erasure preserve the
+    fail-closed contract (the erased leaf fails content verification and the public projection
+    invalidates). `test/J-MEMORY-migration.test.ts` extends to fingerprint-inconsistent manifest
+    rejection; `test/J-MEMORY-pagination.test.ts` passes unchanged semantics with an explicit
+    PostgreSQL timeout. `just verify` passed 1,167 tests / 1,161 pass / 6 skip / 0 fail across 111
+    files in 1148.64 s. Back-to-back storage benchmarks on one machine: large profile p50 mutation
+    1,589 -> 782 ms and 632 -> 444 partition reads per four-op sweep (eliminated per-command
+    existence re-reads of unchanged leaves); small profile parity (six leaves; the eliminated reads
+    are milliseconds there). Known boundary: mutation commands still restore every accepted
+    partition to evaluate global invariants and fingerprint unchanged sections, so the root CAS
+    remains a global contention point and no SQL full-text index, garbage collection or vector index
+    is claimed. Evidence: docs/experts-storage.md, docs/experts-scale-baseline.md.
+  T5: >-
+    Exact tokenization, durable reservations and budget ceilings are settled. Context accounting
+    tokenizes the complete visible request with the route's model-specific tokenizer (published
+    encodings per family, labeled approximation otherwise) behind an explicit envelope margin, with
+    the accounting method naming the encoding. Every Expert and ordinary-session model dispatch
+    holds a durable reservation on the governed experts:billing:v1 ledger before provider dispatch
+    and settles from provider-reported usage or its full conservative amount; deterministic
+    reservation ids make crash recovery collide with the interrupted reservation, which is booked
+    conservatively as reconciled-unknown (never zero) while the recovery re-dispatch proceeds under
+    a separately booked generation — no dropped, double-counted or blindly repeated usage. Boot
+    reconciliation settles open reservations from committed invocation evidence and books the
+    unestablishable as unknown. Operator ceilings (settings.changeSpending: ordinary-session and
+    global USD, fail-closed on unpriced activity) refuse over-ceiling dispatch before any provider
+    call; unknown prices surface as unknown in the ledger, the assignment usage disclosure and the
+    new Experts-panel spending inspection (public experts-billing projection). The model journey
+    J-CONTEXT-BUDGET was extended first and re-validated. `test/J-CONTEXT-BUDGET-billing.test.ts`
+    passes 3 actual PostgreSQL journeys (real native runs, ceiling refusals with zero provider
+    calls, interrupted-reservation generations, restart reconciliation, session reservations under
+    the session ceiling, fail-closed transitions); `test/expert-economics.test.ts` covers the
+    tokenizer; `test/E2E-experts-debt.test.ts` adds a real Chromium spending-inspection journey.
+    `just verify` passed 1,172 tests / 1,166 pass / 6 skip / 0 fail across 112 files. Known
+    boundaries: tokenization remains a labeled estimate of the visible request, not a provider
+    receipt; provider-side billing of aborted dispatches cannot be undone; the generation mechanism
+    trusts the durable executor's at-most-once step semantics pending T6 fencing; ledger garbage
+    collection is not claimed. Evidence: docs/expert-economics.md.
+  T6: >-
+    IN PROGRESS — the store-level slice is settled in the isolated upstream worktree; executor
+    integration and the release gates remain. Worktree: /home/sprime01/projects/cognate-run-ownership,
+    branch feature/run-write-ownership (based on the authorized PR44 head 033029d), commit ae80c1c.
+    Settled there: the run-write ownership design contract (docs/contracts/run-write-ownership.md —
+    one authoritative ownership row per enrolled run, store-maintained generations advanced by every
+    reclaim and release, exclusive claims that refuse a live holder, exact-identity renewal,
+    commit-phase fencing of run-scoped appends, and the enrollment rule that keeps unenrolled runs
+    exactly legacy for single-process/older workers); the shared types and typed errors
+    (StaleRunOwnerError, RunOwnershipHeldError) as optional additive extensions in cognate-events;
+    the PostgreSQL implementation (schema migration 5, claim/renew/release, fencing under the
+    append transaction); and RED/GREEN two-process journeys (3 tests / 71 assertions) proving a
+    reclaimed owner fences a killed owner's late write with nothing appended, enrolled runs refuse
+    uncredited/stale/smuggled writes, and unenrolled runs keep legacy behavior. Upstream
+    verification: bun test packages/store-postgres 42 pass; packages/runtime-bun 155 pass / 0 fail
+    with the pinned pg0; packages/events passes; full upstream `just verify` 81/81 gates on the
+    branch head (three consecutive runs). Evidence: docs/evidence/run-write-ownership.md in the
+    worktree. Remaining for settlement: the executor-side bounded slice (dispatcher claims
+    ownership before executing a run, presents the credential on every run-scoped append, renews
+    around external-effect steps, halts without retry on StaleRunOwnerError, releases on terminal
+    states, and marks a prior generation's started-but-unrecorded step ambiguous for
+    reconciliation instead of replaying it) with two-process runtime crash and stale-writer
+    journeys; then the PR44-style publication gates — exact-head CI/packaging review,
+    operator-authorized merge, linked 45-package release, registry gitHead audit and
+    fresh-consumer proof. The merge and publication steps are operator-gated by upstream policy
+    ("no merge/publication" until exact-head checks) and cannot be completed by the agent alone.
+     The full publication train then completed under operator authorization: PR #48 merged
+    with green exact-head CI (verify, pack + clean-room install, CodeRabbit); the linked 0.6.0 release
+    recovered from an interrupted first publication through the exact-state restoration (umbrella
+    release, 45 component/unified tags minted by the workflow's own plan script at the release SHA)
+    plus the PR #54 dispatch-recovery input, with the receipts gate verifying 45/45 packages at 0.6.0,
+    an independent registry audit (all 45 latest = 0.6.0), and a fresh clean-room consumer exercising
+    the fenced ownership API and a runtime boot. The Workbench's suite against 0.6.0 found one real
+    defect — a lease-held back-off consumed the only recovery trigger and stranded hard-killed runs —
+    fixed by PR #55 (RED/GREEN seeded journey: hangs before, recovers after) and released as 0.6.1
+    through the normal train (release-please, tag-components, 45/45 publish, receipts gate, one green
+    run). Registry audit: all 45 linked packages at 0.6.1. Provenance: docs/sdk-0.6.0-release.md.
+    T6 is settled.
+  T7: >-
+    Workbench multi-process integration is settled against the published 0.6.1 ownership release.
+
+    The Workbench pins all 23 direct SDK dependencies to 0.6.1 (36 resolved) and exposes
+    multi-process operation behind the verified `runOwnership: "multi-process"` configuration
+    (COGNATE_RUN_OWNERSHIP), which enables `execution.runOwnership.ambiguousSteps: "wait"` on the
+    published runtime; the default single-process mode keeps historical restart semantics (the
+    upgrade alone changed no observable behavior). The model journey J-EXPERT-PARALLEL was extended
+    first and re-validated to name the multi-process settlement: a killed process's in-flight effect
+    is never blindly repeated, the recovery records the ambiguity and completes only from explicit
+    reconciliation, and a stale owner's late run-scoped write is fenced. `test/J-EXPERT-OWNERSHIP-MULTI.test.ts`
+    passes the two-process crash/stale-writer journey against actual PostgreSQL with two AppServers on
+    one shared store: the zombie writer's superseded-credential append is fenced with nothing
+    appended, exactly one `run.invocation.ambiguous` is recorded, the provider is never re-called, the
+    interrupted attempt stays booked in the durable billing ledger, and the assignment settles only
+    from the operator's reconciliation with zero recorded model-generation invocations. The SIGKILL
+    and restart journeys that regressed against 0.6.0 pass unchanged against 0.6.1. Full gate:
+    `just verify` passed 1,173 tests / 1,167 pass / 6 skip / 0 fail across 113 files (one
+    intermediate run showed a single E2E-workbench Chromium ERR_NETWORK_CHANGED console flake that
+    passes in isolation and in the final clean run). Evidence: docs/sdk-0.6.0-release.md,
+    docs/experts-debt-closure.md.
+
+  T8: >-
+    Production identity, tenant isolation and aggregate containment are settled. The model grew first
+    (three validated journeys — J-AUTH-SESSION, J-AUTH-TENANT-ISOLATION, J-RW-AGGREGATE-CONTAINMENT
+    — anchored on the new DurableIdentity, DurableSession and ContainmentQuota concepts). Durable
+    server-issued sessions are now the default authentication posture: 256-bit tokens stored only as
+    SHA-256 hashes, revocation and expiry, boot-supersession of the previous boot's browser token,
+    an in-process-epoch-invalidated resolution cache (revocation is immediate where it is tested; a
+    documented ≤2s cross-process read lag), and the client-claimed dev format reduced to an
+    explicit loud opt-in (`devAuth`/`COGNATE_DEV_AUTH=1`). The capability policy grants user-kind
+    authority to exactly the one durable operator identity, session issuance refuses second humans
+    inside the operator tenant, and both T8 ledgers (identity, containment) are system-only
+    threads. Tenant isolation is observed end to end on one shared PostgreSQL store with two
+    server-issued sessions (per-tenant projections, runs, events and thread streams;
+    empty-partition indistinguishability; server-derived tenants; forged dev-format refusal).
+    Aggregate containment wraps every contained provider's process port: a durable admission slot
+    per execution, operator quotas via settings.changeContainment, kernel per-execution
+    CPU/address-space caps via prlimit (fail closed when unavailable), a 300s hard clamp whose lease
+    provably covers the child, conservative CPU booking at the full cap, lease-lapse reaping and
+    boot reconciliation — proven across two Workbench processes on one store. Deployment
+    hardening: security headers on every response including successful Connect replies, a strict
+    CSP on the console document (which caught and fixed a pre-existing inline font handler),
+    64MiB body ceiling, untracked generated entry. An independent fresh-context adversarial
+    security review produced docs/security-review-2026-10-17-t8.md (one HIGH, four MEDIUM, several
+    LOW/INFO); every MUST-fix was remediated and re-gated, and the accepted residual boundaries are
+    documented in the artifact's remediation record. Gates: full verify 1,188 tests / 0 fail; gated
+    real-bwrap OS journeys 9/9 (kernel SIGXCPU cap + window exhaustion, cross-process ceiling,
+    cancellation/reap); auth and containment journeys 12/12 against actual PostgreSQL; domainforge
+    validate 0 violations. T8 is settled.
+  T9: >-
+    Adversarial reconciliation settled. Every debt-matrix disposition was checked against recorded
+    proof: the model was corrected (J-TEAM-ADMISSION added as an observed journey; J-EXPERT-PARALLEL
+    and J-EXPERT-MODEL-PARALLEL variant text rewritten so Team capacities and disjoint-workspace
+    effect parallelism point at their owning journeys) and re-validated (0 violations, fmt clean,
+    233 objects); docs/experts-debt-closure.md, .agents/DEBT.md and docs/known-gaps.md were
+    reconciled to the T4-T8 evidence while genuinely-open items stayed open; a genuine
+    E2E-experts save/open projection race was found and fixed. Final gates: the full suite is green
+    serialized (bun test --max-concurrency 1 --timeout 60000 test: 1,179 pass / 9 skip / 0 fail
+    across 1,188 tests); just verify at the default concurrency shows only host-contention
+    E2E/browser flakes that pass in isolation (recorded in .agents/DEBT.md); domainforge validate
+    0 violations and fmt --check clean; git diff --check clean. T9 is settled.
+
+tasks:
+  T0:
+    title: Baseline, workspace-effect conflict inventory and benchmark refresh
+    depends_on: []
+    changes: >-
+      Record the fresh baseline on fdc709b (1153 tests); inventory every workspace-effect surface
+      (tool-bearing Expert work, coding sessions, schedule dispatch, configuration) with the
+      canonical resource identity each requires; refresh the capacity 1/2/4/8 benchmark and
+      isolate the capacity-8 regression hypothesis (registry CAS, full context materialization).
+    proves: The conflict inventory names each mutating surface and its authoritative resource identity source.
+    does_not_prove: Any new overlap behavior; the inventory only grounds T1.
+    gate: [just verify]
+    evidence: docs/experts-concurrency-benchmark.md
+  T1:
+    title: Conflict-aware workspace-effect admission
+    depends_on: [T0]
+    changes: >-
+      Replace the single global workspace-effects exclusion key with canonical per-resource keys
+      (workspace, execution world, configuration) derived from authoritative state so provably
+      disjoint work overlaps; same-resource work serializes; unknown classification fails closed.
+      Keep model-only Expert overlap semantics unchanged.
+    proves: Two tool-bearing runs on different workspaces overlap at capacity; runs sharing a canonical resource serialize; forged or aliased identities are denied.
+    does_not_prove: Distributed safety; admission remains process-local by SDK contract.
+    gate: [actual PostgreSQL overlap/exclusion/denial/restart journeys, browser journeys]
+    teeth:
+      - {attack: Two runs present aliased paths or distinct spellings of one workspace, expected: Canonical keys collide and the runs serialize}
+      - {attack: A run claims a workspace identity absent from authoritative state, expected: Admission fails closed to exclusion}
+    evidence: docs/experts-debt-closure.md
+  T2:
+    title: Team admission and batching policy
+    depends_on: [T1]
+    changes: >-
+      Resolve per-Team maximum concurrent runs and batch policy from authoritative Team metadata
+      inside the async eligibility lookup; surface the effective policy and serialized reasons in
+      the Team editor and runtime inspection UI.
+    proves: A Team exceeding its policy waits even when process capacity is free; policy reads come only from authoritative metadata.
+    does_not_prove: Cross-process Team fairness.
+    gate: [actual PostgreSQL Team policy journeys, browser journeys]
+    teeth:
+      - {attack: Stale or unauthorized client-supplied Team policy influences admission, expected: Refused; only authoritative metadata decides}
+    evidence: docs/experts-and-teams.md
+  T3:
+    title: Capacity-8 throughput settlement
+    depends_on: [T2]
+    changes: >-
+      Profile and repair the measured capacity-8 throughput regression, or record its cause as an
+      accepted limit with evidence; re-run the benchmark across 1/2/4/8 with the T1/T2 policies.
+    proves: Benchmark table refreshed with isolated cause attribution for capacity 8.
+    does_not_prove: Portable throughput guarantees; single-trial measurements remain labeled as such.
+    gate: [bun test --timeout 120000 test/experts-app-capacity.test.ts, just verify]
+    evidence: docs/experts-concurrency-benchmark.md
+  T4:
+    title: Indexed retrieval and global root CAS
+    depends_on: [T0]
+    changes: >-
+      Replace unbounded materialization on Workbench read paths with scoped indexed/paginated
+      queries; complete the global root CAS over memory partitions and history.
+    proves: Large-history reads stay bounded; source-erased or aliased partitions fail verification and invalidate projections.
+    does_not_prove: Model tokenization or budget enforcement (T5).
+    gate: [migration/recovery/scoped-load tests, storage benchmarks]
+    teeth:
+      - {attack: A partition row is erased or aliased at the source, expected: CAS verification fails and the public projection invalidates}
+    evidence: docs/experts-storage.md
+  T5:
+    title: Exact tokenization, durable reservations and budget ceilings
+    depends_on: [T3, T4]
+    changes: >-
+      Add model-specific tokenization for context accounting; durable pre-dispatch billing
+      reservations with crash reconciliation; ordinary-session and global spending ceilings that
+      fail closed on exhaustion.
+    proves: Over-ceiling dispatch is refused; an interrupted reservation reconciles without double-counting or blind repeat; unknown prices surface as unknown.
+    does_not_prove: Provider-side billing accuracy beyond observed usage receipts.
+    gate: [economics journeys including real native runs and restart, browser usage inspection]
+    teeth:
+      - {attack: Owner is interrupted between reservation and provider dispatch, expected: Reconciliation required without blind repeat}
+      - {attack: A price is unavailable at dispatch, expected: Never booked as zero}
+    evidence: docs/expert-economics.md
+  T6:
+    title: Upstream run-write ownership design and supported publication
+    depends_on: [T5]
+    changes: >-
+      In the Cognate repo through an isolated worktree: run-write fencing, authoritative
+      store-time ownership, worker compatibility, two-process fault injection and
+      ambiguous-effect recovery. PR44-style gates: RED/GREEN regressions, exact-head
+      CI/packaging, operator-authorized merge, linked release, registry audit, fresh-consumer
+      proof. Workbench does not consume until the release is complete and legitimate.
+    proves: Stale owner writes are fenced; a killed owner's ambiguous external effects require reconciliation without blind repeat.
+    does_not_prove: Exactly-once physical effects; commitments and reconciliation remain the contract.
+    gate: [upstream conformance suites, two-process PostgreSQL crash and stale-writer journeys]
+    teeth:
+      - {attack: Owner killed after an external effect before receipt, expected: Reconciliation required without blind repeat}
+      - {attack: An expired owner attempts to settle reclaimed work, expected: Stale settlement refused}
+    evidence: upstream evidence documents plus a new docs/sdk release receipt
+  T7:
+    title: Workbench multi-process integration
+    depends_on: [T6]
+    changes: >-
+      Consume only the complete published ownership release; expose multi-process operation
+      behind verified configuration; add Workbench two-process crash and stale-writer journeys.
+    proves: Two Workbench processes against one PostgreSQL store pass crash and stale-writer gates.
+    does_not_prove: Production trust (T8); multi-user tenancy.
+    gate: [just verify, two-process crash/stale-writer journeys]
+    evidence: docs/experts-debt-closure.md
+  T8:
+    title: Production identity, authorization and aggregate containment
+    depends_on: [T7]
+    changes: >-
+      Durable identities and sessions with revocation, tenant isolation, aggregate resource
+      containment across processes, deployment hardening, and an independent security review.
+      Replace the single-operator development authenticator only after isolation gates pass.
+    proves: Cross-tenant access is refused; revoked sessions produce no further effects; aggregate quota exhaustion fails closed.
+    does_not_prove: A production certification claim; findings from the independent review govern any residual label.
+    gate: [tenant isolation, revocation, OS escape/egress/cancellation tests, independent security review]
+    teeth:
+      - {attack: A revoked session replays a captured request, expected: Refused with no durable effect}
+      - {attack: Aggregate CPU/memory/process usage exceeds the configured quota, expected: New work fails closed}
+    evidence: docs/experts-debt-verification.md plus the review artifact
+  T9:
+    title: Adversarial review, full verification, evidence and publication
+    depends_on: [T8]
+    changes: >-
+      Reconcile all debt statuses against observed proof, run the final full gates, update
+      DEBT/verification/status records, and commit and push without force.
+    proves: Every disposition claim in the debt matrix matches recorded evidence; no claim exceeds its proof.
+    does_not_prove: Closure of debts explicitly retained as open.
+    gate: [just verify, upstream conformance/release verification, git diff --check]
+    evidence: docs/experts-debt-verification.md

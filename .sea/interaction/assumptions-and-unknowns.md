@@ -1,5 +1,36 @@
 # Assumptions, Unknowns, and Contradictions
 
+## Current observations (2026-10-15)
+
+- **Observed:** Published SDK 0.4.0 supports bounded native concurrent runs; Workbench still defaults
+  to serialized dispatch until authoritative resource eligibility and Team policy are integrated.
+- **Observed:** Single-process Expert/Team schedules and shared-Team safe-boundary inbox delivery
+  have real restart evidence. Generalized inbox and distributed run ownership remain open.
+- **Under final regression:** Host-configured, human-selected Linux contained workspaces have actual
+  PostgreSQL, namespace and browser evidence. This does not establish production authentication,
+  host application isolation or aggregate resource quotas.
+- **Corrected provenance:** Ubuntu Bubblewrap 0.11.1-1ubuntu0.3 reverted the cited CVE fix. The new OS
+  fixture is upstream 0.12.0, with separate source/build/hash evidence and no system replacement.
+- **Still open:** Indexed memory retrieval, model tokenization, durable global budgets, production
+  identities and run-write fencing. The complete disposition is in the debt verification report.
+
+## Historical native Experts & Teams observations (2026-10-13)
+
+- **Observed:** Cognate 0.2.0 stores durable waits but does not automatically evaluate child-run
+  completion conditions. The explicit native completion bridge is tested through process kill and restart.
+- **Observed:** SDK dispatch is serialized. Teams expose bounded serialized collaboration, not parallel workers.
+- **Observed:** Atomic native shared-thread writes plus command receipts preserve membership and return invariants.
+- **Observed:** Side-effect invocation alone is not crash-atomic. Native commitments now prevent
+  ambiguous Expert effects from being repeated, and reserve reconciliation for the human.
+- **Observed:** Per-Expert model routes work through the installed adapters without global provider swapping.
+- **Observed:** Public projections redact private contexts; authorized scoped reads and bounded
+  provenance-backed memory preserve the distinctions in the canonical model.
+- **Deferred:** Autonomous schedules, vector search and multi-process effect dispatch; the one-process
+  deployment remains the supported boundary. See `docs/known-gaps.md`.
+- **Resolved authority:** Existing Cognate SDK transitive Cordis dependency predates this work. The
+  operator explicitly approved retaining it while Workbench adds no direct Cordis or donor integration.
+- **Security limitation:** Development authentication and command guards remain unsuitable for hostile multi-user isolation.
+
 ## Representation decisions (proposed, evidence class: proposed)
 
 0. **Remote Workspaces are modeled as framework-level journeys (`J-RW-*`) in this IDM.** The
@@ -71,6 +102,25 @@ None found. The two evidence sources (product-characterization.md, runtime-and-p
 the spec's Phase 6 journeys are consistent with each other everywhere they overlap (e.g. both
 describe the approval waterfall, tool observation policy, and mock-server error injection the same
 way). No claim in one source was found to directly contradict a claim in another.
+
+## Experts and Teams extension (proposed, 2026-10-13)
+
+- The 12 `J-EXPERT-*` / `J-TEAM-*` journeys and their added entities/resources/roles are proposed
+  semantics from the Workbench mission, not observed working behavior. Keep their evidence class
+  `proposed` until runtime capabilities, UI paths and journey tests supply evidence.
+- An active Team has exactly one active Orchestrator; a draft may have none. Mutation must enforce
+  the invariant atomically. Replacement must be one compare-and-swap state transition.
+- Proposed persistence uses Cognate shared thread state with CAS updates and run-completion
+  continuations for Specialist returns. The event log remains durable truth; this model does not
+  authorize a second event store, scheduler or agent runtime.
+- Initial dispatch is proposed as serialized. Parallel execution remains unknown until concurrency
+  and isolation are tested against the installed runtime.
+- `expert.model.generate` expresses per-Expert route selection. Each run must capture immutable
+  route/config so later edits cannot hot-swap an active run.
+- `team.settle` presents a decision surface; it does not grant the Team or Orchestrator power to
+  accept protected work. `team.review` can recommend, not settle.
+- Memory provenance, epistemic classification, prompt-injection handling and cross-scope access
+  checks are requirements whose enforcement remains unverified.
 
 ## Grammar/tooling limitations encountered (not IDM semantics)
 

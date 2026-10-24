@@ -1,3 +1,20 @@
+== Current native Experts & Teams validation (2026-10-15 UTC) ==
+domainforge 0.19.0
+domainforge validate --format human .sea/interaction/interaction-model.sea
+Validation succeeded: 0 violations total
+domainforge parse .sea/interaction/interaction-model.sea --format human
+Entities: 51; Resources: 47; Flows: 47; Roles: 8; Relations: 6; Entity instances: 64; Policies: 1
+Cognate loadDomain: 225 semantic objects
+bindExpertCapabilities: 27 explicit contracts resolve
+bindScheduleCapabilities: 4; bindCognitiveCapabilities: 20; execution-world bindings: 7
+bindRuntimeExecution: execution.runtime.inspect -> NativeExecutionSlots resolves
+domainforge fmt --check: already formatted
+J-EXPERT-PARALLEL is declared pending supported native integration and overlap proof; the binding does not claim runtime implementation.
+J-RW-contained-workspace is under final integration: real PostgreSQL/Linux/Chromium focused suite31pass/177assertions after receipt correction.
+Full just verify with declared model and published SDK0.4.0 before final receipt correction:1127pass/0fail/7027assertions/100files586.06s. Final supported-release regression remains pending.
+The historical formatter finding below is corrected by validation/formatter-fidelity.md; upstream 0.19.0 already contains the fix.
+
+== Historical tranche validation follows ==
 == domainforge --version ==
 domainforge 0.18.1
 
@@ -21,6 +38,18 @@ Resource instances: 0
 Entity instances: 20
 Policies: 1
 Patterns: 0
+
+=== Experts & Teams extension (2026-10-13, DomainForge CLI 0.19.0) ===
+$ domainforge validate --format human .sea/interaction/interaction-model.sea
+Validation succeeded: 0 violations total
+
+=== Cognate adapter binding check ===
+$ bun -e 'import { loadDomain, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS } from "./domain/index.ts"; const d = await loadDomain(); const b = bindExpertCapabilities(d); if (Object.keys(b).length !== Object.keys(EXPERT_CAPABILITY_ANCHORS).length) throw new Error("binding count mismatch"); console.log(`bound ${Object.keys(b).length} expert capabilities`);'
+[domain] loaded 187 semantic objects (digest sha256:2f9044080e47e26c53ee1d65d370bb557401ca9fe4865f6de9848abeb517e0b4) from .sea/interaction/interaction-model.sea
+bound 22 expert capabilities
+
+The 12 new journey records have `evidence_class: "proposed"`; adapter resolution verifies the
+semantic anchors, not capability registration or working runtime behavior.
 
 == domainforge parse interaction-model.sea --ast --format human ==
 AST parsed successfully: interaction-model.sea

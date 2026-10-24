@@ -156,3 +156,4 @@ vite.config.ts.timestamp-*
 *.sqlite-shm
 playwright-report/
 test-results/
+.generated/

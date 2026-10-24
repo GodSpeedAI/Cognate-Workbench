@@ -11,6 +11,7 @@ import type {
   CapabilityRecord,
   ElevationRecord,
   FeedbackRecord,
+  ScopedTaskRecord,
   TaskRecord,
   UsageRow,
   WorkflowInstanceRecord,
@@ -62,6 +63,28 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const changed = typeof p.changed === "string" && !act.changed.includes(p.changed) ? [...act.changed, p.changed] : act.changed;
       const commands = typeof p.command === "string" ? [...act.commands, p.command].slice(-30) : act.commands;
       return [{ key: `task/${prev.id}`, value: j({ ...prev, activity: { changed, commands } }) }];
+    }
+    // J-TASK-move: one governed mutation rewrites where the task is available, never its identity,
+    // its evidence rows or its historical run lineage. `originWorkspaceId` preserves where the
+    // task was born (set once, then carried forward); a cross-workspace move of a session-scoped
+    // task promotes it to workspace scope because its owning session cannot follow.
+    case "workbench.task.moved": {
+      const prev = get(`task/${String(p.taskId)}`) as ScopedTaskRecord | undefined;
+      if (!prev) return [];
+      const workspaceId = String(p.workspaceId);
+      const scope = (p.scope === "session" ? "session" : "workspace") as ScopedTaskRecord["scope"];
+      // Drop the old owning-session field (a workspace-scope result has none) rather than writing
+      // `undefined` into JSON state; a session-scope result carries its new owner explicitly.
+      const { sessionId: _oldSessionId, ...rest } = prev;
+      const next: ScopedTaskRecord = {
+        ...rest,
+        workspaceId,
+        scope,
+        ...(scope === "session" && typeof p.sessionId === "string" ? { sessionId: p.sessionId } : {}),
+        ...(prev.originWorkspaceId ? { originWorkspaceId: prev.originWorkspaceId } : { originWorkspaceId: prev.workspaceId }),
+        contract: { ...prev.contract, context: { ...(prev.contract.context ?? { files: [] }), workspaceId } },
+      };
+      return [{ key: `task/${prev.id}`, value: j(next) }];
     }
     case "workbench.authority.elevated": {
       const key = `elevation/${String(p.workspaceId)}`;

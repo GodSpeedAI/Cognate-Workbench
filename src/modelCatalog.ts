@@ -50,6 +50,24 @@ export function catalogRequest(protocol: ModelWireProtocol, baseURL: string): Ca
   return { ok: true, url: `${base}${spec.path}`, method: "GET", authHeader: spec.authHeader, authScheme: spec.authScheme };
 }
 
+/** A saved provider key may only be sent to the provider it was saved for. Without this, any caller of
+ *  `model.catalog` could name its own URL and receive the saved key in the request headers. The URLs are
+ *  compared after parsing, ignoring trailing slashes; the protocol must match too. */
+export function storedKeyTarget(
+  saved: { readonly baseURL: string; readonly protocol: ModelWireProtocol } | undefined,
+  requested: { readonly baseURL: string; readonly protocol: ModelWireProtocol },
+): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
+  if (!saved) return { ok: false, reason: "No provider is saved yet. Enter an API key to fetch models." };
+  const norm = (value: string): string | undefined => {
+    try { return new URL(value.trim()).href.replace(/\/+$/, ""); } catch { return undefined; }
+  };
+  const savedURL = norm(saved.baseURL);
+  if (savedURL === undefined || savedURL !== norm(requested.baseURL) || saved.protocol !== requested.protocol) {
+    return { ok: false, reason: `The saved API key is only sent to the saved provider (${saved.baseURL}). Enter an API key to fetch models from a different URL.` };
+  }
+  return { ok: true };
+}
+
 /** What `model.catalog` returns to the caller: either the discovered ids, or a specific reason the
  *  UI shows verbatim. Never contains the API key. */
 export type ModelCatalogResult =

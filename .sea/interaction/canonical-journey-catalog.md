@@ -6,6 +6,68 @@ cannot carry cleanly (nested failure/recovery detail, cross-references) document
 Evidence tags refer to `../reference/observations/{product-characterization.md,
 runtime-and-provider.md}` and `.agents/prompts/deepseek-harness-reconstruction-test.md` (Phase 6).
 
+## Cognitive navigation (observed in the Cognate runtime)
+
+These entries map to the executable `test/J-COG-*.test.ts` journeys. The model separates
+Case intent, frozen criterion, world identity, verification evidence, operational risk, bounded
+experimentation, method decisions, and ephemeral human attention. A candidate that is eligible for
+settlement is still unsettled until the human acts.
+
+### J-COG-cleanup (`j_cog_cleanup`)
+
+- **Actor/intention**: User proposes a desired repository change against a known settled world.
+- **Preconditions/affordance**: workspace and execution world; `case.open`, `criterion.freeze`,
+  `world.freeze`, `world.fork`, `risk.assess`, `verification.run`, `case.derive`, `world.settle`.
+- **Transition/output**: declare the outcome and checks; freeze criterion and baseline; fork a
+  candidate; mediate consequential actions; freeze and verify candidate; repair deviations.
+- **Evidence/settlement**: event-backed Case and world lineage; failed checks block settlement;
+  only a human can move the settled head.
+- **Failure/recovery/next**: restart reconstructs state; denied or unresolved approval leaves the
+  protected action unapplied; failed checks return to inspection and repair. Observed by
+  `test/J-COG-cleanup.test.ts`.
+
+### J-COG-liveverify (`j_cog_liveverify`)
+
+- **Actor/intention**: OperatorAgent changes a workspace within a Case that declared its checks.
+- **Preconditions/affordance**: settled baseline and frozen criterion; `case.observe`, `world.freeze`,
+  `verification.run`, `case.derive`.
+- **Transition/output**: consequential edit triggers candidate hashing and the declared checks;
+  observations are appended as facts and Case derivation exposes the deviation or next action.
+- **Evidence/settlement**: unchanged work emits no new verification; failed checks keep settlement
+  unreachable; a repair creates and verifies a distinct candidate. Observed by
+  `test/J-COG-liveverify.test.ts`.
+
+### J-COG-attention (`j_cog_attention`)
+
+- **Actor/intention**: User focuses a recorded failure and asks what happened.
+- **Preconditions/affordance**: a semantic evidence reference; `ui.focus.publish`, `ui.context`,
+  `ui.request`, `ui.pending`.
+- **Transition/output**: focus selects a small neighborhood derived from recorded facts; the agent
+  answers from that neighborhood or asks the page to render a read-only Surface.
+- **Evidence/settlement**: changing focus changes the grounded answer; attention changes no
+  authoritative facts and grants no authority. Invalid focus or mutation requests are refused.
+  Observed by `test/J-COG-attention.test.ts`.
+
+### J-COG-search (`j_cog_search`)
+
+- **Actor/intention**: User compares candidate approaches under a fixed criterion and round budget.
+- **Preconditions/affordance**: settled parent, frozen criterion and checks; `experiment.round`,
+  `experiment.status`, `method.review`, `method.accept`, `method.active`.
+- **Transition/output**: isolated rounds are scored and retained/discarded/escalated; repeated
+  residuals may produce a candidate MethodRecommendation.
+- **Evidence/settlement**: candidates never auto-settle; recommendation alone does not change the
+  active method; only explicit human acceptance does. Observed by `test/J-COG-search.test.ts`.
+
+### J-COG-realitytrace (`j_cog_realitytrace`)
+
+- **Actor/intention**: OperatorAgent records verification or world-lineage facts while observation
+  delivery is enabled.
+- **Preconditions/affordance**: configured runtime outbox; `world.freeze`, `verification.run`.
+- **Transition/output**: durable event and observation intent are correlated, delivered, and queried
+  through the existing RealityTrace adapter.
+- **Evidence/settlement**: accepted or duplicate observer status links back to the original durable
+  event. Observed by `test/J-COG-realitytrace.test.ts`.
+
 ---
 
 ## J-A-first-use (`j_a_first_use`)
@@ -303,7 +365,16 @@ runtime-and-provider.md}` and `.agents/prompts/deepseek-harness-reconstruction-t
 
 # Remote Workspaces (T1) — `J-RW-*`
 
-These ten journeys model the execution-world abstraction (user-facing: **Remote Workspaces**).
+These journeys model the execution-world abstraction (user-facing: **Remote Workspaces** and explicit contained workspaces).
+
+### J-RW-contained-workspace — explicitly add a Linux-contained workspace
+
+- **Actor/intention/current state**: human operator adds a new workspace through contained filesystem/process ports; existing local and remote workspaces retain their identity.
+- **Preconditions/visible affordance**: `execution.containment.inspect` reports host configuration and limits; `workspace.contained.select` requires host-owned patched-binary provenance, exact hash, approved runtime roots, supported Linux namespaces and real preflight. Browser and agent input cannot attest binary trust.
+- **Payment/authority**: a human selects a dedicated canonical root and accepts the child-process-only boundary; agents cannot establish or change it. Wall time/output limits are enforced; aggregate CPU/memory/network-enabled execution and production authentication are not promised.
+- **Transition/artifacts/evidence**: typed configuration events record a distinct world and workspace; native tool invocations retain world identity and ordinary results. Real tests inspect read/write/process success, host sibling/network denial, cancellation cleanup and restart.
+- **Settlement/failure/recovery**: restart reconstructs the same provider from safe root identity and host configuration. Missing configuration, wrong hash or failed preflight refuses new placement; a recorded but unavailable world never falls back locally. An uncontained same-path workspace remains separate.
+- **Next affordance/status**: open an ordinary coding or Expert conversation in the chosen workspace; inspect execution evidence. **Declared** until native integration, OS adversarial tests and browser journeys pass. No production trust claim.
 They are framework-level journeys — they apply to any Cognate app whose workspaces have an
 execution location — recorded here because this reconstruction is where the workspace journeys
 live. Their evidence class is **proposed**: derived from Cognate's own architecture and the donor
@@ -531,3 +602,287 @@ Declared by `.agents/plans/unified_harness_experience_model_v2.md`; implemented 
 - **Settlement criteria**: The agent receives the referent chosen by fixed precedence (explicit selection, keyboard focus, active run, pinned focus, workspace) as a frozen focus line, only when the message refers to something; the person can see what this means and clear an explicit selection.
 - **Failure/recovery and variants**: explicit selection; fallback to the bound task; nothing in focus; a message that refers to nothing carries no focus line; a selection in another workspace is ignored.
 - **Evidence class**: proposed. Tested by `test/E2E-workbench.test.ts` and `test/workbench-focus.test.ts`.
+
+## Experts and Teams journeys (proposed)
+
+These journeys extend the Workbench IDM and remain proposed until capabilities and journey tests
+exist. State is expected to use Cognate shared thread state with compare-and-swap mutation; durable
+run-completion continuations resolve specialist returns. Execution starts serialized. This section
+is a semantic contract, not an implementation claim.
+
+### J-EXPERT-CREATE (`j_expert_create`)
+- **Actor/intention**: User creates or copies a reusable Expert identity.
+- **Current → desired**: missing specialization → durable editable definition and persistent Expert identity.
+- **Preconditions/affordance**: catalog available; `expert.save`, `expert.copy`, `expert.archive`.
+- **Payment/authority**: operator configures tools/model/context; copied Expert receives no inherited private memory or elevated authority.
+- **Transition/output**: save/copy persists definition and identity; archive preserves history and blocks new runs.
+- **Evidence/settlement**: projection shows configuration and lifecycle; IDs and scope survive restart.
+- **Failure/recovery/next**: invalid config explains field; then J-EXPERT-SOLO or J-TEAM-CREATE. Proposed.
+
+### J-EXPERT-SOLO (`j_expert_solo`)
+- **Actor/intention**: User converses with one Expert outside any Team.
+- **Current → desired**: no solo context → durable scoped Conversation and attributable Cognate run.
+- **Preconditions/affordance**: active Expert and configured route; `expert.converse`, `expert.context`, `expert.model.generate`.
+- **Payment/authority**: user context and run budget; Expert uses only its allowlist and operator grant.
+- **Transition/output**: persist message, run with captured route, store result and run receipt.
+- **Evidence/settlement**: solo history survives restart and cannot read Team/other Expert private context.
+- **Failure/recovery/next**: provider failure is visible/retryable, cancellation preserves partial evidence; continue or create Team. Proposed.
+
+### J-TEAM-CREATE (`j_team_create`)
+- **Actor/intention**: User creates/copies a governed collaboration space.
+- **Current → desired**: none → draft Team with explicit members, roles, permission/context scopes and policy.
+- **Preconditions/affordance**: eligible Experts; `team.save`, `team.copy`, `team.member`.
+- **Payment/authority**: operator selects membership; joining defaults to Specialist; copy has fresh identity and isolated context.
+- **Transition/output**: persist Team and membership records; draft may have zero Orchestrators.
+- **Evidence/settlement**: projection shows membership and draft; it cannot execute until exactly one Orchestrator is active.
+- **Failure/recovery/next**: stale/inactive member refused with reason; designate Orchestrator in J-TEAM-ACTIVATE. Proposed.
+
+### J-TEAM-ACTIVATE (`j_team_activate`)
+- **Actor/intention**: User makes a draft Team runnable.
+- **Current → desired**: draft → active with exactly one Orchestrator.
+- **Preconditions/affordance**: all memberships resolve to active Experts and one Orchestrator; `team.activate`.
+- **Payment/authority**: operator confirms governance; activation cannot expand permissions.
+- **Transition/output**: mutation boundary validates and CAS-commits Team state.
+- **Evidence/settlement**: projected active state identifies its sole Orchestrator, including after concurrent writes.
+- **Failure/recovery/next**: invalid cardinality refuses; CAS conflict reloads state; then J-TEAM-CONVERSE. Proposed.
+
+### J-TEAM-REPLACE-ORCHESTRATOR (`j_team_replace_orchestrator`)
+- **Actor/intention**: User transfers coordination or removes the current Orchestrator.
+- **Current → desired**: one lead → different sole lead, or inactive Team.
+- **Preconditions/affordance**: eligible replacement; `team.replaceOrchestrator`.
+- **Payment/authority**: operator decision; invariant enforced atomically at mutation boundary.
+- **Transition/output**: one CAS update demotes/promotes, or demotes and deactivates atomically.
+- **Evidence/settlement**: durable old/new roles and exactly one lead if still active.
+- **Failure/recovery/next**: stale update fails without partial state; reload and retry. Proposed.
+
+### J-TEAM-DELEGATE (`j_team_delegate`)
+- **Actor/intention**: Orchestrator delegates a bounded unit to a Specialist.
+- **Current → desired**: team request → durable authorized Assignment and real Cognate run.
+- **Preconditions/affordance**: active Team, sole Orchestrator, active Specialist, human-authorized scope; `team.delegate`, `expert.context`, `expert.model.generate`.
+- **Payment/authority**: run cost; authority is intersection of human grant, Team policy, Expert allowlist and Assignment limits.
+- **Transition/output**: persist assignment before serialized dispatch; freeze route/config and correlate run.
+- **Evidence/settlement**: queued/running is not complete; run ID and acceptance/return contract are visible.
+- **Failure/recovery/next**: deduplicate retry, typed abstention, provider failure and recursion limits are explicit; await J-TEAM-HANDOFF. Proposed.
+
+### J-TEAM-HANDOFF (`j_team_handoff`)
+- **Actor/intention**: Specialist returns output and evidence to its Orchestrator.
+- **Current → desired**: terminal run → durable attributable return.
+- **Preconditions/affordance**: Assignment, terminal run event and return contract; `team.handoff`.
+- **Payment/authority**: delivery/reconciliation; return cannot expand authority or approve effects.
+- **Transition/output**: completion continuation resolves Handoff with output, artifacts, evidence, uncertainty, failures and follow-up.
+- **Evidence/settlement**: correlated return available to parent once logically, including after restart/redelivery without a browser.
+- **Failure/recovery/next**: missing result becomes reconciliation-required; late cancelled result is evidence only; reconcile/retry. Proposed.
+
+### J-TEAM-CONVERSE (`j_team_converse`)
+- **Actor/intention**: User asks an active Team to coordinate work.
+- **Current → desired**: addressed task → bounded conversation with reconciled contributions.
+- **Preconditions/affordance**: active Team and durable Team Conversation; `team.converse`, `team.message`, `team.delegate`, `team.handoff`, `team.review`.
+- **Payment/authority**: coordination and run budget; mentions route but do not authorize; Orchestrator cannot elevate or self-accept.
+- **Transition/output**: request routes to sole Orchestrator, who selects necessary Specialists and records addressed assignments/messages.
+- **Evidence/settlement**: sender, recipient, scope, assignment, run and handoff are attributable; limits/duplicates visible.
+- **Failure/recovery/next**: cycles refused, limits queue/escalate, abstention and contradictions remain visible; review or settle. Proposed.
+
+### J-EXPERT-STEER (`j_expert_steer`)
+- **Actor/intention**: Human or authorized same-Team Expert sends an update to a running recipient.
+- **Current → desired**: addressed update → ordered message incorporated at the next model decision.
+- **Preconditions/affordance**: shared Team Conversation, active same-Team recipient Assignment/run; `team.inbox.send`, `team.message`, `team.inbox.consume`.
+- **Payment/authority**: message affects context only; captured Assignment tools, execution mode and settlement authority remain unchanged.
+- **Transition/output**: bounded message is CAS-appended with sequence, sender, recipient, correlation and target; the agent consumes only at a deterministic safe boundary.
+- **Evidence/settlement**: one run-and-boundary receipt records the ordered batch and incorporation acknowledgement; a crash retry returns that same batch.
+- **Failure/recovery/next**: active model calls are not interrupted; stale recipient or Team membership denies delivery; human can cancel or supersede an unincorporated message. Proposed.
+
+### J-EXPERT-INBOX-RECOVER (`j_expert_inbox_recover`)
+- **Actor/intention**: Operator resumes a live Team conversation after process restart.
+- **Current → desired**: pending or acknowledged inbox → same logical delivery state after restart.
+- **Preconditions/affordance**: native Experts thread state and Cognate run history are available; `team.inbox.consume`, `expert.context`.
+- **Payment/authority**: replay reuses the target Assignment and authority snapshot.
+- **Transition/output**: stable recorded consume invocation and registry CAS receipt reconcile the run-boundary batch.
+- **Evidence/settlement**: message sequence and `incorporatedAtBoundary` point to one durable receipt; later boundaries do not redeliver it.
+- **Failure/recovery/next**: cancellation and private conversation scopes remain isolated; stale assignment or team membership blocks incorporation. Proposed.
+
+### J-TEAM-RECOVER (`j_team_recover`)
+- **Actor/intention**: User resumes unfinished collaboration after restart.
+- **Current → desired**: uncertain work → reconciled durable state and safe continuation.
+- **Preconditions/affordance**: shared state and run-event history; `team.handoff`, `team.retry`, `team.cancel`, `expert.context`.
+- **Payment/authority**: reconciliation cost; retries retain original authority and cancellation checks.
+- **Transition/output**: reconcile queued messages, assignments, terminal runs and receipts before resuming.
+- **Evidence/settlement**: all work has queued/running/waiting/completed/failed/cancelled/reconciliation-required status; no duplicate logical handoff.
+- **Failure/recovery/next**: missing run becomes failed/reconciliation-required; late cancelled return is non-authorizing evidence. Proposed.
+
+### J-TEAM-REVIEW (`j_team_review`)
+- **Actor/intention**: Reviewer compares implementation, critique and independent verification.
+- **Current → desired**: contributions → accept/revise/escalate recommendation with gaps and contradictions.
+- **Preconditions/affordance**: Builder artifact, Critic result and Verifier receipts present or explicitly missing; `team.review`.
+- **Payment/authority**: independent review effort; only human can settle protected acceptance.
+- **Transition/output**: correlate claims to evidence and record rationale, gaps, and unresolved disagreement.
+- **Evidence/settlement**: failed/missing check or contradiction prevents supported acceptance; recommendation cites receipts.
+- **Failure/recovery/next**: failed verifier prompts repair/retest; request revision or present J-TEAM-SETTLEMENT. Proposed.
+
+### J-EXPERT-MEMORY (`j_expert_memory`)
+- **Actor/intention**: Expert retains or retrieves useful scoped continuity.
+- **Current → desired**: transient context → attributable, scoped, searchable memory.
+- **Preconditions/affordance**: explicit access to personal or Team scope; `expert.memory.write`, `expert.memory.read`, `expert.context`.
+- **Payment/authority**: context budget; promotion follows provenance and trust rules.
+- **Transition/output**: record provenance, scope and observation/assertion/inference/accepted-knowledge class; retrieve bounded relevant entries.
+- **Evidence/settlement**: source and scope accompany retrieval; event log is truth, summaries/indexes rebuildable.
+- **Failure/recovery/next**: private cross-scope read denied; assertions stay unverified; retrieved instructions are untrusted; restore commitments. Proposed.
+
+### J-TEAM-SETTLEMENT (`j_team_settlement`)
+- **Actor/intention**: Human decides whether Team evidence warrants acceptance.
+- **Current → desired**: completion proposal → separately attributed human accept/revise/escalate decision.
+- **Preconditions/affordance**: criteria, handoffs and independent evidence inspectable; `team.settle` presents decision.
+- **Payment/authority**: human accountability; only human accepts protected work or approves gated effects.
+- **Transition/output**: Orchestrator assembles artifacts, critique, verification, uncertainty and blockers; human decision is persisted.
+- **Evidence/settlement**: acceptance requires human identity and supported criteria; contradiction/missing evidence keeps it open.
+- **Failure/recovery/next**: unsupported proposal refused; revision creates follow-up assignment; then operationalize or continue. Proposed.
+
+## Observed debt-closure journeys (2026-10-14)
+
+These journeys extend the existing source and use published Cognate 0.2.0. They do not establish parallel or distributed Workbench execution.
+
+| Journey / actor and intention | Preconditions, reachable capability, burden and authority | Transition, artifacts and observable settlement | Failure, recovery and next affordance |
+| --- | --- | --- | --- |
+| J-SCHEDULE-CREATE — human authorizes a bounded future objective | Active Expert or sole-Orchestrator Team and existing workspace; `schedule.save/manage/list`; creator owns intent, read-only effects require human approval | Versioned intent and next-due instant persist; create/edit/pause/resume/cancel/delete controls invoke native capabilities | Invalid rule/target refused; tombstone retains receipts; inspect next due or J-SCHEDULE-FIRE |
+| J-SCHEDULE-FIRE — internal evaluator delivers due intent | Current creator, target, revision and workspace validated; `schedule.dispatch` is internal-only; one unresolved global slot by default | Stable occurrence reserves a deterministic Assignment and native run; receipts expose queued/running/waiting/result/failure; dispatch is not settlement | Misfires skip or coalesce without bursts; provider failure stays visible; inspect occurrence and human review |
+| J-SCHEDULE-RECOVER — evaluator recovers interrupted delivery | PostgreSQL events and command identities intact; same native capabilities and authority revalidated | SIGKILL before due then fresh process after due produces one logical occurrence/Assignment/run; repeated delivery reuses identity | Cancelled intent stays inert; ambiguous effects keep reconciliation gate; retry eligible dispatch or review failure |
+| J-MEMORY-MIGRATE — operator removes the single-event storage limit | Intact schema-1 event history; internal state writes preserve identity, scope and Team invariant | Immutable bounded partitions prepare before root CAS; >5 MiB fixture survives restart and rebuild; native erasure invalidates public current/cache rows | Pre-publication failure leaves old root authoritative; missing/hash-invalid references fail closed; restore source or explicitly recover; no automatic event rewrite |
+| J-MEMORY-PAGINATE — human retrieves older scoped history | `expert.context` / `expert.memory.read`; scope/query/version-bound cursor; at most 100 items | 205-message and 205-memory fixtures page in order without duplicate IDs; private and other-Team material excluded | Changed state/query/scope and malformed cursor explicitly reject; restart from a fresh first page; materialized retrieval remains a limitation |
+| J-CONTEXT-BUDGET — human constrains per-attempt inference | `expert.save` freezes limits; `expert.model.generate` includes visible messages/instructions/tool schemas and output reserve; explicit prices needed for cost cap | Over-budget native invocation never dispatches provider; active limits survive edits/restart; provider usage is observed, byte estimate labeled, unknown price stays unknown | Failed/unreported calls retain conservative reservations; required context is not silently discarded; inspect receipt and revise task/budget |
+
+Executable evidence: `test/J-SCHEDULE-execution.test.ts`, `test/J-MEMORY-migration.test.ts`, `test/J-MEMORY-pagination.test.ts`, `test/expert-economics.test.ts`, and `test/E2E-experts-debt.test.ts`. Live inbox evidence and cognitive bindings are documented in the handoff. These tests use actual PostgreSQL/native execution with deterministic providers; they do not establish general Expert competence.
+
+## Declared native run admission (implementation and proof pending)
+
+### J-EXPERT-PARALLEL (`j_expert_parallel`)
+
+The narrower J-EXPERT-MODEL-PARALLEL below establishes only intrinsic-return model work; this broader
+workspace-isolation journey remains declared.
+
+- **Actor/intention**: User or OperatorAgent wants independent coding and Expert work to overlap without concurrent mutation of a shared workspace.
+- **Preconditions/affordance**: Planned native Cognate 0.4 runtime exposes process-level `maxConcurrentRuns` (default 1; opt-in 2, 4, or 8); `execution.runtime.inspect` reports configured capacity and policy. Mutating run entries must resolve execution-world and canonical-root identity before admission.
+- **Transition/output**: Every direct coding, Expert/Team, delegation, resume, and recovery entry uses `nativeExecutionSlots`. Distinct known roots may use separate native slots; equal, aliased, or nested roots serialize. Unknown root identity blocks admission without effects until safely resolved. The existing `ParallelPlan` remains an advisory plan, not admission authority.
+- **Policy/authority**: Slot admission does not change captured model routing, mutation ownership, Team invariants, authorization, or human approval for protected effects. Inspection reports no active-worker count unless native telemetry later supplies one. Team-level maximum concurrency and batch delegation policy remain unsettled.
+- **Evidence/settlement**: Pending native binding and journey tests must show two Experts actually overlap on distinct workspaces at capacity 2, while same/alias/nested roots serialize; restart preserves ownership, routing, and Team invariants. This is declared semantics, not observed implementation.
+- **Failure/recovery/next**: Unresolvable roots block admission without effects; after resolving identity, the operator may retry. Operator inspects effective configured capacity/policy and may wait or retry after a run settles; no active-count or queue-position claim is implied. Read-only work does not bypass protected-effect approval.
+
+### J-EXPERT-MODEL-PARALLEL (`j_expert_model_parallel`)
+
+- **Actor/intention**: The operator enables bounded overlap of independent model decisions, retaining conservative workspace-effect serialization.
+- **Preconditions/affordance**: Supported asynchronous native admission; startup capacity one, two, four or eight. `execution.runtime.inspect` reports effective capacity and policy. Only a registered unfinished system-started Expert Assignment with the matching attempt and frozen intrinsic-return-only tool list is independently eligible.
+- **Transition/output**: Native slots execute eligible models concurrently and persist attributable handoffs. Tool-bearing Experts, ordinary coding and unknown agents share one exclusion key. Event-only `agent.config` is admitted without waiting for application readiness, avoiding seed deadlock.
+- **Payment/authority**: Provider token/cost and captured attempt budgets still apply. Slot eligibility grants no tools, approval or coordination authority. Forged tool calls are rejected by the frozen tool dispatcher and invocation gates.
+- **Evidence/settlement**: Declared pending actual PostgreSQL overlap, distinct-route returns, forged-tool denial, configuration boot, serial tool-bearing work and recovery tests. Inspection exposes no invented active count.
+- **Failure/recovery/next**: Missing/stale/impersonated Assignments fail closed before model effects; native durable dispatch supplies retry/cancellation/recovery. Frozen authority survives profile edits. The operator can inspect results or restart with a deliberate capacity change. Team-specific limits and concurrent workspace effects remain open in J-EXPERT-PARALLEL.
+
+## Session / Workspace / Task / Run journeys (RED contract baseline)
+
+These six journeys accompany `docs/specs/session-workspace-task-red-journeys.md` and the
+`test/*red.test.ts` suites on `test/red-session-workspace-task-contracts-20261020`. They are
+canonical in the model (`.sea/interaction/interaction-model.sea`, instances `j_session_draft`,
+`j_ws_directory_discovery`, `j_task_scope`, `j_task_move`, `j_run_task_attribution`,
+`j_task_expert_provenance`); their capabilities are bound explicitly in `domain/index.ts`
+(`RED_BINDINGS`). Evidence class is **observed** once the formerly red suites pass; the journeys
+were added to the model before any implementation existed (model-first rule).
+
+### J-SESSION-draft (`j_session_draft`)
+
+- **Actor/intention**: User presses + and immediately gets a fresh conversation ready to type.
+- **Preconditions/affordance**: a workspace named by stable id; `session.create`, `session.history`.
+  No inference or model credential is needed to create a draft.
+- **Transition/output**: a deterministic recording run emits `session.created` correlated
+  `session:<id>`; the `sessions` projection folds a draft row (title New Session, status draft);
+  the first submitted turn reuses the same identity.
+- **Policy/authority**: creation validates the named workspace; duplicate create requests with
+  the same idempotency identity return the same Session and emit exactly one event; the creation
+  binds to the explicitly named workspace even when another workspace is current.
+- **Evidence/settlement**: durable before any prompt; survives reload and full restart; no stale
+  Task, approval, focus or conversation leaks from a previous Session; legacy sessions without
+  `session.created` remain readable.
+- **Failure/recovery/next**: unknown workspace refused with no durable effect; failures are
+  visible with retry; clicks disabled only while genuinely pending.
+- **Executable evidence**: `test/J-SESSION-draft-contract.red.test.ts`,
+  `test/E2E-workspace-session-ux.red.test.ts`.
+
+### J-WS-directory-discovery (`j_ws_directory_discovery`)
+
+- **Actor/intention**: User browses project directories without typing an entire absolute path.
+- **Preconditions/affordance**: `workspace.directory.suggest` — an authorized, bounded, read-only
+  query against the **selected execution world's** filesystem; `workspace.select` is the separate
+  governed act of opening a chosen folder.
+- **Transition/output**: matching directories only (never files), deterministic order, bounded
+  results, exact chosen destination shown before confirmation; the Add-workspace dialog, first-run
+  chooser and SSH/WSL folder step share one accessible picker (debounce, keyboard completion,
+  pointer selection, loading/empty/error states, stale-response discard).
+- **Policy/authority**: unknown or disconnected worlds fail closed — no local fallback; browsing
+  never creates a workspace and never bypasses host filesystem authorization; the server enforces
+  path normalization, symlink and protected application-home guards; responses carry no file
+  contents, secrets or stack traces.
+- **Evidence/settlement**: type a prefix, complete by keyboard, open the exact chosen workspace;
+  repeat for a connected world and for denied/unknown locations; typing stays responsive on slow
+  remote listings.
+- **Executable evidence**: `test/J-WS-directory-discovery.red.test.ts`,
+  `test/E2E-workspace-session-ux.red.test.ts`.
+
+### J-TASK-scope (`j_task_scope`)
+
+- **Actor/intention**: User knows which work a chat supports, and chooses a Task's visibility at
+  creation (**This workspace / This session**) without internal Run ids.
+- **Preconditions/affordance**: `task.create` (scope + optional owning session), `task.list`,
+  `session.task.bind` (attach/detach); one Task entity — scopes are visibility, not two ledgers.
+- **Transition/output**: session scope requires an existing Session of the same workspace and
+  binds it; the composer shows the bound Task with an accessible change/detach control; **No
+  task** is a valid, obvious state.
+- **Policy/authority**: a workspace Task is available in every Session of its workspace but is
+  never auto-selected; a session Task never appears as bindable in another Session unless
+  promoted; cross-workspace or cross-scope bindings are refused with a readable reason.
+- **Evidence/settlement**: bindings are durable rows in the public `session-task-bindings`
+  projection (keyed by session, `{sessionId, workspaceId, taskId}`), retained on reload; a new
+  Session starts unbound; a conversation with no Task remains valid.
+- **Failure/recovery/next**: invalid scope/destination refused; detaching preserves the Task, its
+  evidence and history.
+- **Executable evidence**: `test/J-TASK-session-scope.red.test.ts`,
+  `test/E2E-workspace-session-ux.red.test.ts`.
+
+### J-TASK-move (`j_task_move`)
+
+- **Actor/intention**: User promotes, moves or re-homes a Task without destroying its history.
+- **Preconditions/affordance**: `task.move` — one governed explicit mutation to a destination
+  workspace or session; destination must exist; in-flight work is not moved.
+- **Transition/output**: Task id, evidence ledger rows and original source-workspace provenance
+  are preserved; historical Runs are never reparented; contract context and scope are revalidated
+  for the destination (a session Task moved across workspaces promotes to workspace scope).
+- **Policy/authority**: cross-workspace moves recalculate resource and authority scope, not
+  rename; stale Session bindings are invalidated; consequence preview shows changed tools, paths,
+  executors, budget and acceptance applicability before confirmation.
+- **Evidence/settlement**: the moved Task appears only in the destination inventory with its
+  original evidence intact; nothing is silently accepted by moving.
+- **Executable evidence**: `test/J-TASK-session-scope.red.test.ts`.
+
+### J-RUN-task-attribution (`j_run_task_attribution`)
+
+- **Actor/intention**: User understands what inference happened and which objective it served.
+- **Preconditions/affordance**: every submitted turn invokes one Cognate Run (`agent.coding`),
+  with or without tools; an optional `taskId` validated against the Session/Workspace context.
+- **Transition/output**: the Run's initial task association is frozen into its
+  `session.turn.started` evidence; later binding changes never rewrite a started Run's
+  provenance; Runs, Tasks, plan steps and Expert Assignments stay distinct vocabularies.
+- **Policy/authority**: an absent taskId is a valid unbound conversation execution; an invalid
+  taskId is refused; conversation alone never creates a Task.
+- **Evidence/settlement**: a plain question completes a Run with no Task and an empty Task
+  ledger; a bound turn's frozen association is independently inspectable in event history.
+- **Executable evidence**: `test/J-TASK-session-scope.red.test.ts` (J-RUN describe block).
+
+### J-TASK-expert-provenance (`j_task_expert_provenance`)
+
+- **Actor/intention**: Delegation serves an accountable Task; the user can trace which objective
+  an Expert's work served.
+- **Preconditions/affordance**: `team.converse` / `expert.converse` accept an explicit `taskId`
+  validated against the Team's workspace; `team.delegate` inherits it on child Assignments.
+- **Transition/output**: the Orchestrator's Assignment and its Specialist children retain the
+  Task identity and their causal parent ids while keeping distinct Runs; attempts reuse the same
+  Assignment lineage and never duplicate the Task.
+- **Policy/authority**: unknown or cross-workspace Tasks are refused before any Assignment;
+  assignments hold identity, not acceptance authority.
+- **Evidence/settlement**: a successful Run, Expert handoff or Git commit never establishes
+  human acceptance — acceptance remains a separate human and criterion gate.
+- **Executable evidence**: `test/J-TASK-expert-provenance.red.test.ts`.

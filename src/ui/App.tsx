@@ -4,10 +4,18 @@ import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
 import { WorkbenchView, useBindableTasks } from "./workbench/Workbench.tsx";
+import { ExpertsTeamsPanel } from "./experts/ExpertsTeamsPanel.tsx";
 import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "../workbench/focus.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { AmbiguousStepCard } from "./AmbiguousStepCard.tsx";
+import { GovernanceApprovalCard, governanceApprovalOf } from "./GovernanceApprovalCard.tsx";
+import { SettlementCard, useSessionSettlement, type SettlementOperation } from "./SettlementCard.tsx";
+import { GovernancePane } from "./GovernancePane.tsx";
+import { interruptedCapability, isModelGeneration } from "../capabilities/ambiguousStep.ts";
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
+import { DirectoryField } from "./DirectoryField.tsx";
+import { errorText } from "./workbench/data.ts";
 import type { TraceRow, TraceRequest, TraceTool, TraceTurn } from "../projections/sessionTrace.ts";
 import { TOOL_DEFS } from "../agents/agentCoding.ts";
 import {
@@ -144,7 +152,7 @@ interface ChatMessage {
    *  the "Verbose" Work details mode (reference-behavior-matrix.md §10a: `foldCompletedTurns: false`
    *  — every step stays visible individually instead of folding behind the "Took Ns" disclosure).
    *  Not persisted across a reload/session-switch (this app's `session.history` only returns
-   *  `stepCount`, not per-step detail — see APP/DEVIATIONS.md); a reloaded historical turn falls
+   *  `stepCount`, not per-step detail — see docs/known-gaps.md); a reloaded historical turn falls
    *  back to the folded view even under Verbose. */
   readonly steps?: readonly ToolEntry[];
 }
@@ -201,9 +209,30 @@ function useSessions(): readonly SessionRow[] {
   return useMemo(
     () =>
       (rows ?? [])
-        .map((r) => r.value as unknown as SessionRow)
-        .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+        .filter((r) => !r.key.includes("/"))
+        .map((r) => r.value as unknown as SessionRow),
     [rows],
+  );
+}
+
+/** J-TASK-scope/link: the durable Task↔Session binding row for one session (`session-task-bindings`
+ *  projection, written by the validated `session.task.bind` capability). Absent row = never bound
+ *  (an equally valid "no task"); `taskId: null` = an explicit detach. */
+export interface SessionTaskBindingRow {
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly taskId: string | null;
+}
+
+function useSessionTaskBinding(sessionId: string | undefined): SessionTaskBindingRow | undefined {
+  // J-TASK-scope/link: subscribe only when a session is actually open. With no session there is no
+  // binding to show, and mounting the store anyway would make the client keep one more projection
+  // in sync for the whole app lifetime (the already-mounted "sessions" store is reused instead —
+  // the client memoizes projection stores by name, so this costs nothing extra).
+  const rows = useProjection(sessionId === undefined ? "sessions" : "session-task-bindings");
+  return useMemo(
+    () => (sessionId ? ((rows ?? []).find((r) => r.key === sessionId)?.value as unknown as SessionTaskBindingRow | undefined) : undefined),
+    [rows, sessionId],
   );
 }
 
@@ -218,7 +247,7 @@ function usePlanState(sessionId: string | undefined): PlanStateRow | undefined {
   }, [rows, sessionId]);
 }
 
-interface SubagentRowView {
+export interface SubagentRowView {
   readonly sessionId: string;
   readonly toolCallId: string;
   readonly title: string;
@@ -380,18 +409,30 @@ export function SessionRowButton({
 }) {
   const archived = session.archived === true;
   const label = session.title || "New Session";
+  // A waiting run is labelled by what it is blocked on: an interrupted step needs operator
+  // reconciliation (never an approval); other known non-approval waits name their type.
+  const waiting = session.lastStatus === "waiting" && !planPending;
+  const needsReconciliation = waiting && session.waitingType === "ambiguous-invocation";
+  // A SEA-Forge escalation is an approval, decided by the external authority (P02).
+  const otherWait = waiting && !needsReconciliation && session.waitingType && session.waitingType !== "tool-approval" && session.waitingType !== "governance-approval" ? session.waitingType : undefined;
   return (
     <div role="treeitem" aria-selected={active} className={active ? "session-row-wrap active" : "session-row-wrap"}>
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
         <span className="session-row-title">
-          {planPending ? "Plan awaiting review " : session.lastStatus === "waiting" && !planPending ? "Waiting for approval " : ""}
+          {planPending ? "Plan awaiting review " : needsReconciliation ? "Needs reconciliation " : otherWait ? `Waiting: ${otherWait} ` : waiting ? "Waiting for approval " : ""}
           {label}
           {archived ? " (archived)" : ""}
         </span>
-        {session.lastStatus === "waiting" && !planPending && (
-          <span className="approval-badge" title="Waiting for approval">
+        {needsReconciliation && (
+          <span className="approval-badge" title="Needs reconciliation">
             <span className="approval-badge-dot" aria-hidden="true" />
-            Approval
+            Reconcile
+          </span>
+        )}
+        {waiting && !needsReconciliation && (
+          <span className="approval-badge" title={otherWait ? `Waiting: ${otherWait}` : "Waiting for approval"}>
+            <span className="approval-badge-dot" aria-hidden="true" />
+            {otherWait ? "Waiting" : "Approval"}
           </span>
         )}
         <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
@@ -505,7 +546,7 @@ function FirstRunNotice({ onContinue }: { readonly onContinue: () => void }) {
  *  key is entered; reference-behavior-matrix.md §1). This tranche has no default/preset provider to
  *  key-only configure (no DeepSeek-branded "official" provider) — "Save and continue" dismisses this
  *  step the same as "Configure later"; the entered key is not persisted here (an assumption, not an
- *  observed reference behavior — see APP/DEVIATIONS.md). Full provider setup happens in Settings →
+ *  observed reference behavior — see docs/known-gaps.md). Full provider setup happens in Settings →
  *  Models afterward. */
 function FirstRunApiKey({ onDismiss }: { readonly onDismiss: () => void }) {
   const [key, setKey] = useState("");
@@ -591,11 +632,19 @@ function WorkspaceChooser() {
             void client.invoke("settings.changePreset", { preset } as never).catch((e) => console.error("settings.changePreset failed", e));
           }}
         />
-        <input
-          aria-label="Workspace directory path"
+        {/* J-WS-directory-discovery: the same accessible folder type-ahead the Add-workspace
+            dialog uses — the first-run chooser and the dialog share one picker, not two flows. */}
+        <DirectoryField
+          worldId="local"
+          label="Workspace directory path"
           placeholder="/path/to/project"
           value={path}
-          onChange={(e) => setPath(e.currentTarget.value)}
+          onChange={setPath}
+          invoke={(capability, input) => client.invoke(capability, input as never) as unknown as Promise<unknown>}
+          onSubmit={() => {
+            if (path.trim() && !busy) void submit();
+          }}
+          hint="Type a folder path — matching folders appear as you type."
         />
         <button type="button" disabled={busy || path.trim().length === 0} onClick={submit}>
           Choose workspace
@@ -1165,10 +1214,10 @@ const PRESET_DETAILS: Readonly<Record<AgentPreset, string>> = {
 /** Settings → Built-in plugins (§14, checkpoints 25*): an inspect-only view of this deployment's
  *  plugins — Session plugins composed per agent preset (with the preset-inspect dropdown), Global
  *  plugins shared by everything. Search filters both. Read-only by design this pass (no
- *  enable/disable toggles of real capabilities — DEVIATIONS.md). */
+ *  enable/disable toggles of real capabilities — docs/known-gaps.md). */
 function BuiltInPluginsPane({ settings }: { readonly settings: GeneralSettings }) {
   // Usage pass U7: the RealityTrace row reads its durable state and toggles for real; the other
-  // rows stay informational (DEVIATIONS.md).
+  // rows stay informational (docs/known-gaps.md).
   const realitytrace = useRealityTracePlugin();
   const [inspect, setInspect] = useState<AgentPreset>(settings.preset);
   const [sessionOpen, setSessionOpen] = useState(true);
@@ -1266,7 +1315,7 @@ function BuiltInPluginsPane({ settings }: { readonly settings: GeneralSettings }
 /** Settings → Agent presets (§15, checkpoints 26*): preset cards for this app's three presets —
  *  "Set as new task default" (durable via settings.changePreset), "Mode details" and "View
  *  configuration" dialogs (this app's own copy/composition, not the reference's YAML). The
- *  reference's Creator mode is out of scope (DEVIATIONS.md). */
+ *  reference's Creator mode is out of scope (docs/known-gaps.md). */
 function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) {
   const client = useCognate();
   const [detailsFor, setDetailsFor] = useState<AgentPreset | undefined>(undefined);
@@ -1502,11 +1551,9 @@ function GeneralPane({
 /** Settings → Models: a provider list (row + Cancel/Apply for the configured provider's API key,
  *  Edit/Delete) plus a two-tab "Add model provider" wizard (Third-party combobox / Custom model API
  *  form with a Models sub-list and Cancel/Create provider) — critic round-1 P0-4/P1-4. This tranche's
- *  backend (`model.configure`) still only ever holds one live provider config (`model-config`
- *  projection's single `"current"` row — see APP/DEVIATIONS.md), so "Edit" reopens the wizard
- *  prefilled with the current config and "Delete" is present but disabled (no backend
- *  "unconfigure" capability exists this tranche) — same "control present, feature stubbed" pattern
- *  used throughout this app (see the Settings nav's inert items below). */
+ *  backend (`model.configure`) holds one live provider config (`model-config` projection's single
+ *  `"current"` row), so "Edit" reopens the wizard prefilled with the current config. Delete is a
+ *  real two-step action that removes the configured provider and its stored secret. */
 /** "Open configuration file" (T11, J-CFG-config-path): the browser cannot open a local file, so the
  *  button resolves where configuration lives and hands over the real, non-secret bytes — the path to
  *  copy, the recognised environment variables with sensitive values already redacted, and a
@@ -1621,8 +1668,11 @@ function SettingsModels({
   onClose,
   settings,
   onOpenShortcuts,
+  workspaceId,
 }: {
   readonly onClose: () => void;
+  /** The app's selected workspace, for the Governance & evidence proof. */
+  readonly workspaceId: string | undefined;
   /** Every General setting, resolved with defaults from the durable `settings` row (usage pass
    *  U2, reference-behavior-matrix.md §11) — the General pane is the full inventory: Permission,
    *  Language, Appearance, Font size, Work details, Performance & usage, Coding Tools, Keyboard
@@ -1634,7 +1684,7 @@ function SettingsModels({
 }) {
   const client = useCognate();
   const config = useModelConfig();
-  const [section, setSection] = useState<"general" | "models" | "plugins" | "presets">("models");
+  const [section, setSection] = useState<"general" | "models" | "plugins" | "presets" | "governance">("models");
   // Full-access confirmation (checkpoint 22f): opened by selecting "Full access" in the Permission
   // menu; the Permission control stays disabled while it is open, and only the checked-state
   // "Enable Full access" button commits the durable change.
@@ -1737,7 +1787,7 @@ function SettingsModels({
       if (!providerId || !displayName || !baseURL) throw new Error("Provider ID, display name, and base URL are required.");
       // This tranche's `model.configure` capability holds exactly one live provider config; a
       // Models sub-list with several rows is structurally supported (Fetch/Add), but only the first
-      // configured model is actually wired through to the backend — see APP/DEVIATIONS.md.
+      // configured model is actually wired through to the backend — see docs/known-gaps.md.
       await client.invoke("model.configure", {
         providerId,
         baseURL,
@@ -1882,6 +1932,14 @@ function SettingsModels({
             >
               Agent presets
             </button>
+            <button
+              type="button"
+              className={section === "governance" ? "settings-nav-item active" : "settings-nav-item"}
+              aria-current={section === "governance" ? "page" : undefined}
+              onClick={() => setSection("governance")}
+            >
+              Governance &amp; evidence
+            </button>
           </nav>
           <div className="settings-content">
             {section === "general" ? (
@@ -1890,6 +1948,8 @@ function SettingsModels({
               <BuiltInPluginsPane settings={settings} />
             ) : section === "presets" ? (
               <AgentPresetsPane settings={settings} />
+            ) : section === "governance" ? (
+              <GovernancePane workspaceId={workspaceId} />
             ) : view === "list" ? (
               <>
                 <h3>Models</h3>
@@ -2426,7 +2486,7 @@ function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; readonly 
  *  pending"`, reference-behavior-matrix.md §6.3) — renders as soon as `todo_write` has run, under
  *  Standard mode too, and persists after plan mode exits (`13c-plan-completed`). Expandable to the
  *  raw todo list; the reference's own expanded-state content was not captured, so this is this
- *  app's own minimal rendering, not a copy — see DEVIATIONS.md. */
+ *  app's own minimal rendering, not a copy — see docs/known-gaps.md. */
 function TodoWidget({ todos }: { readonly todos: readonly PlanTodo[] }) {
   const [expanded, setExpanded] = useState(false);
   if (todos.length === 0) return null;
@@ -2455,7 +2515,7 @@ function TodoWidget({ todos }: { readonly todos: readonly PlanTodo[] }) {
  *  ... in sidebar" opens the child's transcript in the right-hand panel (`RightPanel` below) — the
  *  only source for it is this row itself (prompt + output), since children are not sessions
  *  (`src/projections/sessions.ts`) and so have no `session.history` of their own to fetch. */
-function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowView[]; readonly onOpen: (row: SubagentRowView) => void }) {
+export function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowView[]; readonly onOpen: (row: SubagentRowView) => void }) {
   return (
     <div role="tree" aria-label="Subagent sessions" className="subagent-tree" data-subagent-card>
       {rows.map((row) => (
@@ -2470,7 +2530,7 @@ function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowVie
           <span className="subagent-row-text">
             {row.title} · {row.desc} · continuable · {row.status}
           </span>
-          <span className="subagent-row-stat">0 tok / 0s</span>
+          <span className="subagent-row-stat">Usage unavailable</span>
           <ChevronRightIcon aria-hidden="true" />
         </button>
       ))}
@@ -2479,7 +2539,7 @@ function SubagentTree({ rows, onOpen }: { readonly rows: readonly SubagentRowVie
 }
 
 /** Right-hand panel (reused for J-F-delegation's "Open <title> in sidebar"): the reference's own
- *  right sidebar is otherwise entirely inert this tranche (`DEVIATIONS.md` — "Open right sidebar"),
+ *  right sidebar is otherwise entirely inert this tranche (`docs/known-gaps.md` — "Open right sidebar"),
  *  so this is the first thing to actually populate it; a plan's "View full plan" (J-E-plan) still
  *  renders inline rather than here, unchanged. Shows the child's two-message transcript (its
  *  delegated prompt, its final answer) sourced entirely from its `subagents` projection row. */
@@ -2515,7 +2575,7 @@ function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly 
 /** Plan review card (J-E-plan): docked where the composer normally sits, same pattern as
  *  `ApprovalBar` — `region "Approve this plan and leave plan mode?"` (reference-behavior-matrix.md
  *  §6.3, `13b-plan-review-prompt`). The reference also auto-opens the plan in a right-sidebar tab;
- *  this tranche has no right sidebar (`DEVIATIONS.md` — "Open right sidebar" is already inert), so
+ *  this tranche has no right sidebar (`docs/known-gaps.md` — "Open right sidebar" is already inert), so
  *  the full plan is shown inline via "View full plan" instead. */
 function PlanReviewCard({
   heading,
@@ -3009,6 +3069,7 @@ function Composer({
   onBusySubmit,
   queued,
   onCancelQueued,
+  focusToken,
 }: {
   readonly disabled: boolean;
   readonly sending: boolean;
@@ -3037,8 +3098,16 @@ function Composer({
    *  surfaces that never queue (the hero composer). */
   readonly queued?: string;
   readonly onCancelQueued?: () => void;
+  /** J-SESSION-draft: bumped when this composer should take focus (a fresh draft, a reopened
+   *  session) — focusing only when the field is actually usable (not `disabled`). */
+  readonly focusToken?: number;
 }) {
   const [message, setMessage] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusToken === undefined || focusToken === 0 || disabled) return;
+    textareaRef.current?.focus();
+  }, [focusToken, disabled]);
   const submit = useCallback(() => {
     const trimmed = message.trim();
     if (!trimmed) return;
@@ -3057,6 +3126,7 @@ function Composer({
   return (
     <div className="composer-card">
       <textarea
+        ref={textareaRef}
         aria-label={planMode ? "describe your task to generate plan" : "Message or run a task, / commands, @ files or sessions"}
         disabled={disabled}
         placeholder={
@@ -3279,26 +3349,161 @@ function MessageBubble({
 /** Usage pass U3 (§12): the "Add workspace" dialog — the same path-input + `workspace.select`
  *  flow the no-workspace chooser uses, opened from the sidebar header's "Add workspace" button or
  *  the hero menu's "Add workspace…". (The reference's full directory-browser dialog is out of scope
- *  this pass — DEVIATIONS.md.) */
-function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
-  const client = useCognate();
-  const [place, setPlace] = useState<"local" | "ssh" | "wsl">("local");
+ *  this pass — docs/known-gaps.md.) */
+type ContainmentInspection = {
+  readonly executionPosture?: "contained" | "uncontained-local";
+  readonly configured: boolean;
+  readonly platformSupported: boolean;
+  readonly reason?: string;
+  readonly limits?: { readonly timeoutMs: number; readonly maxOutputBytes: number };
+};
+
+type WorkspaceInvoke = (capability: string, input: unknown) => Promise<unknown>;
+
+export async function selectWorkspaceForExecution(
+  invoke: WorkspaceInvoke,
+  path: string,
+  mode: "local" | "contained",
+  inspection: ContainmentInspection | undefined,
+): Promise<void> {
+  if (mode === "contained") {
+    if (inspection?.configured !== true || inspection.platformSupported !== true) {
+      throw new Error(inspection?.reason ?? "Linux child containment is not available.");
+    }
+    await invoke("workspace.contained.select", { path });
+    return;
+  }
+  await invoke("workspace.select", { path });
+}
+
+/** The local workspace picker. Under the default contained posture it preselects Linux child
+ *  containment once the host reports it available (until the operator picks a mode); under the
+ *  explicit uncontained-local posture, or without host support, it stays on local. */
+export function LocalWorkspaceForm({
+  invoke,
+  onClose,
+}: {
+  readonly invoke: WorkspaceInvoke;
+  readonly onClose: () => void;
+}) {
   const [path, setPath] = useState("");
+  const [mode, setModeState] = useState<"local" | "contained">("local");
+  const [modeChosen, setModeChosen] = useState(false);
+  const setMode = useCallback((next: "local" | "contained") => {
+    setModeChosen(true);
+    setModeState(next);
+  }, []);
+  const [inspection, setInspection] = useState<ContainmentInspection | undefined>();
+  const [inspectionError, setInspectionError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef, onClose);
+
+  useEffect(() => {
+    let active = true;
+    void invoke("execution.containment.inspect", {}).then((result) => {
+      if (active) setInspection(result as ContainmentInspection);
+    }).catch((err: unknown) => {
+      if (active) setInspectionError(err instanceof Error ? err.message : String(err));
+    });
+    return () => { active = false; };
+  }, [invoke]);
+
+  const containmentAvailable = inspection?.configured === true && inspection.platformSupported === true;
+  useEffect(() => {
+    if (!modeChosen && containmentAvailable && inspection?.executionPosture !== "uncontained-local") {
+      setModeState("contained");
+    }
+  }, [containmentAvailable, inspection?.executionPosture, modeChosen]);
+  const containmentReason = inspectionError ?? inspection?.reason ??
+    (inspection?.platformSupported === false ? "Linux child containment is unavailable on this platform." :
+      inspection?.configured === false ? "Linux child containment is not configured by the host." :
+        "Checking host support…");
+  const containmentLimits = inspection?.limits
+    ? ` Wall-time limit: ${Math.ceil(inspection.limits.timeoutMs / 1000)} seconds; output limit: ${(inspection.limits.maxOutputBytes / (1024 * 1024)).toFixed(1)} MiB.`
+    : "";
+
   const submit = useCallback(async () => {
     setBusy(true);
     setError(undefined);
     try {
-      await client.invoke("workspace.select", { path });
+      await selectWorkspaceForExecution(invoke, path, mode, inspection);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
     }
-  }, [client, path, onClose]);
+  }, [inspection, invoke, mode, onClose, path]);
+
+  return (
+    <>
+      <p className="settings-description">Choose a folder for the agent to read and edit files in.</p>
+      {/* J-WS-directory-discovery: folder completion from the *selected execution world* — for the
+          local tab that is this machine; typing a partial path shows matching folders, keyboard
+          (arrows + Tab/Enter) and pointer both complete, and pasting a full path still works. */}
+      <DirectoryField
+        worldId="local"
+        label="Workspace directory path"
+        placeholder="/path/to/project"
+        value={path}
+        onChange={setPath}
+        invoke={invoke}
+        onSubmit={() => {
+          if (path.trim() && !busy) void submit();
+        }}
+        hint="This computer — start typing a folder path to see matches."
+      />
+      <fieldset className="workspace-execution-choice">
+        <legend>Execution mode</legend>
+        <label>
+          <input type="radio" name="workspace-execution-mode" value="local" checked={mode === "local"} onChange={() => setMode("local")} />
+          {inspection?.executionPosture === "uncontained-local"
+            ? "Local · uncontained — agents run commands and write files on this computer as you"
+            : "Local · read-only to agents — commands and writes need a contained workspace"}
+        </label>
+        <label title={containmentAvailable ? undefined : containmentReason}>
+          <input
+            type="radio"
+            name="workspace-execution-mode"
+            value="contained"
+            checked={mode === "contained"}
+            disabled={!containmentAvailable}
+            aria-describedby="workspace-containment-status"
+            onChange={() => setMode("contained")}
+          />
+          Linux child containment
+        </label>
+        <p id="workspace-containment-status" className="settings-description" role="status" aria-live="polite">
+          {containmentAvailable ?
+            `Host configured. The workspace is preflighted when opened; child process network access is denied.${containmentLimits} The Workbench host application is not isolated.` :
+              containmentReason}
+        </p>
+      </fieldset>
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <div className="modal-actions">
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="btn-primary" disabled={busy || path.trim().length === 0} onClick={() => void submit()}>
+          Open
+        </button>
+      </div>
+    </>
+  );
+}
+
+function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
+  const client = useCognate();
+  const [place, setPlace] = useState<"local" | "ssh" | "wsl">("local");
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const invoke = useCallback<WorkspaceInvoke>(
+    (capability, input) => client.invoke(capability, input as never) as unknown as Promise<unknown>,
+    [client],
+  );
   const places = [["local", "This computer"], ["ssh", "SSH"], ["wsl", "WSL"]] as const;
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
@@ -3335,32 +3540,7 @@ function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
         </div>
         <div role="tabpanel" id="ws-place-panel" aria-labelledby={`ws-place-${place}`}>
           {place === "local" ? (
-            <>
-              <p className="settings-description">Choose a folder for the agent to read and edit files in.</p>
-              <input
-                aria-label="Workspace directory path"
-                placeholder="/path/to/project"
-                value={path}
-                onChange={(e) => setPath(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && path.trim() && !busy) void submit();
-                }}
-                autoFocus
-              />
-              {error && (
-                <p role="alert" className="form-error">
-                  {error}
-                </p>
-              )}
-              <div className="modal-actions">
-                <button type="button" onClick={onClose}>
-                  Cancel
-                </button>
-                <button type="button" className="btn-primary" disabled={busy || path.trim().length === 0} onClick={() => void submit()}>
-                  Open
-                </button>
-              </div>
-            </>
+            <LocalWorkspaceForm invoke={invoke} onClose={onClose} />
           ) : place === "ssh" ? (
             <>
               <p className="settings-description">Work in a folder on another machine over SSH. Files and commands stay on that machine.</p>
@@ -3848,7 +4028,7 @@ function AddPluginDialog({
 
 /** Usage pass U5 (reference-behavior-matrix.md SS13): the session's trace row from the public
  *  `session-trace` projection — live during a run, durable after a reload (the projection re-folds
- *  from SQLite events). */
+ *  from durable Cognate events). */
 function useSessionTrace(sessionId: string | undefined): TraceRow | undefined {
   const rows = useProjection("session-trace");
   return useMemo(() => {
@@ -3934,7 +4114,7 @@ function buildTrajectoryTimeline(trace: TraceRow | undefined): { readonly lanes:
  *  role-badged trace table (USER rows, ASSISTANT "Request #N" rows, TOOL `tool{args} -> result`
  *  rows), and the right-hand "Event details" panel (TOOL: Summary/Payload/Result/Schema/Timing;
  *  Request: Summary/Options/Timing). Structurally per the pinned reference; the timeline strip and
- *  the Calls toggle are approximated (DEVIATIONS.md). The SYSTEM row kind exists in the data model
+ *  the Calls toggle are approximated (docs/known-gaps.md). The SYSTEM row kind exists in the data model
  *  but this app sends no system prompt, so no SYSTEM rows appear — honest, not invented. */
 function TrajectoryView({
   trace,
@@ -4270,6 +4450,7 @@ function HeroLanding({
   workspaces,
   onSwitchWorkspace,
   onAddWorkspace,
+  composerFocusToken,
 }: {
   readonly workspaceLabel: string;
   readonly modeLabel: string;
@@ -4286,6 +4467,8 @@ function HeroLanding({
   readonly workspaces: readonly WorkspaceRow[];
   readonly onSwitchWorkspace: (ws: WorkspaceRow) => void;
   readonly onAddWorkspace: () => void;
+  /** J-SESSION-draft: forwarded to the composer so a fresh draft takes focus. */
+  readonly composerFocusToken?: number;
 }) {
   const [chooseOpen, setChooseOpen] = useState(false);
   const chooseRef = useRef<HTMLDivElement>(null);
@@ -4369,6 +4552,7 @@ function HeroLanding({
             onAccessModeChange={onAccessModeChange}
             sendBehavior={sendBehavior}
             onBusySubmit={() => undefined}
+            focusToken={composerFocusToken}
           />
         </div>
       </div>
@@ -4454,6 +4638,7 @@ export function App() {
   // column for the plugin manager (the reference's panel replaces the session surface, per the
   // 25b checkpoint's aria tree).
   const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
+  const [expertsPanelOpen, setExpertsPanelOpen] = useState(false);
   // T11: `#plugins/<id>` is the panel's only route. The hash is the source of truth, so Back,
   // Forward and a reload all restore the same view; opening pushes one history entry and closing
   // unwinds it (or replaces it when the page was deep-linked).
@@ -4499,22 +4684,9 @@ export function App() {
   // Workbench: the cockpit view (tasks, workflows, capabilities, automations) and the task the
   // conversation is bound to (scopes authority, attributes usage).
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
-  const [activeTaskId, setActiveTaskId] = useState<string | undefined>(undefined);
   // Focus (ported from gs-term): the person's explicit selection in the Workbench. "this" is resolved
   // by fixed precedence and FROZEN at send time, so it cannot drift while the agent works.
   const [focusSelection, setFocusSelection] = useState<FocusRef | undefined>(undefined);
-  const bindableTasks = useBindableTasks(currentWorkspaceId);
-  const attentionNow = useMemo(() => {
-    const bound = bindableTasks.find((t) => t.id === activeTaskId);
-    return {
-      workspaceId: currentWorkspaceId ?? "",
-      ...(focusSelection ? { selection: focusSelection } : {}),
-      ...(bound ? { activeRun: { kind: "task" as const, id: bound.id, workspaceId: bound.workspaceId, label: bound.title } } : {}),
-      pinned: [] as readonly FocusRef[],
-    };
-  }, [currentWorkspaceId, focusSelection, bindableTasks, activeTaskId]);
-  const resolvedAttention = useMemo(() => resolveAttention(attentionNow), [attentionNow]);
-  const messageWithFocus = useCallback((message: string) => withReferent(message, captureSnapshot(crypto.randomUUID(), attentionNow, new Date().toISOString())), [attentionNow]);
   // Usage pass U4 (§15): per-session agent preset (the header selector) — the value the composer
   // sends as `AgentCodingInput.preset` on this session's NEXT turn; the `sessions` projection folds
   // the last run's preset back into the row's `mode` badge field.
@@ -4526,6 +4698,55 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   const [transcript, setTranscript] = useState<readonly ChatMessage[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined);
+  // J-TASK-scope/link: which task this conversation serves is a *durable per-session binding*
+  // (the `session-task-bindings` projection, written by `session.task.bind`), not global UI state —
+  // a new session never inherits another session's task. Two presentation-only overlays span the
+  // sub-second fold window without ever becoming the truth:
+  //  - `optimisticBind`: the value the user just picked, until the projection row agrees;
+  //  - `pendingTaskId`: a task picked from the session-less hero surface, consumed (and made
+  //    durable) by the session-creating first send — same shape as `pendingAccessMode`.
+  const sessionTaskBinding = useSessionTaskBinding(activeSessionId);
+  const [optimisticBind, setOptimisticBind] = useState<{ readonly sessionId: string; readonly taskId: string | null } | undefined>(undefined);
+  const [pendingTaskId, setPendingTaskId] = useState<string | undefined>(undefined);
+  const [taskBindError, setTaskBindError] = useState<string | undefined>(undefined);
+  const activeTaskId = useMemo(() => {
+    if (!activeSessionId) return pendingTaskId;
+    if (optimisticBind && optimisticBind.sessionId === activeSessionId && sessionTaskBinding?.taskId !== optimisticBind.taskId) {
+      return optimisticBind.taskId ?? undefined;
+    }
+    return sessionTaskBinding?.taskId ?? undefined;
+  }, [activeSessionId, pendingTaskId, optimisticBind, sessionTaskBinding]);
+  /** Attach (`taskId`) or detach (`null`) the durable binding for the active session. */
+  const bindTask = useCallback(
+    async (taskId: string | null) => {
+      setTaskBindError(undefined);
+      if (!activeSessionId) {
+        // No conversation yet: park the choice for the session the next send creates.
+        setPendingTaskId(taskId ?? undefined);
+        return;
+      }
+      setOptimisticBind({ sessionId: activeSessionId, taskId });
+      try {
+        await client.invoke("session.task.bind", { sessionId: activeSessionId, taskId } as never);
+      } catch (e) {
+        setOptimisticBind(undefined);
+        setTaskBindError(errorText(e));
+      }
+    },
+    [client, activeSessionId],
+  );
+  const bindableTasks = useBindableTasks(currentWorkspaceId, activeSessionId);
+  const attentionNow = useMemo(() => {
+    const bound = bindableTasks.find((t) => t.id === activeTaskId);
+    return {
+      workspaceId: currentWorkspaceId ?? "",
+      ...(focusSelection ? { selection: focusSelection } : {}),
+      ...(bound ? { activeRun: { kind: "task" as const, id: bound.id, workspaceId: bound.workspaceId, label: bound.title } } : {}),
+      pinned: [] as readonly FocusRef[],
+    };
+  }, [currentWorkspaceId, focusSelection, bindableTasks, activeTaskId]);
+  const resolvedAttention = useMemo(() => resolveAttention(attentionNow), [attentionNow]);
+  const messageWithFocus = useCallback((message: string) => withReferent(message, captureSnapshot(crypto.randomUUID(), attentionNow, new Date().toISOString())), [attentionNow]);
   const runStartedAtRef = useRef<number>(0);
   const streaming = useStreamingTurn(activeRunId);
   const elapsedSeconds = useElapsedSeconds(streaming.status === "streaming", runStartedAtRef.current);
@@ -4583,6 +4804,55 @@ export function App() {
     },
     [planReviewContinuation, resolveContinuation],
   );
+  // An interrupted agent step (`run.invocation.reconcile`): the run waits, unrepeated, until the
+  // operator records what actually happened. Only a direct operator call can resolve it.
+  const ambiguousContinuation = openContinuations.find((c) => c.type === "ambiguous-invocation");
+  const [reconcileBusy, setReconcileBusy] = useState(false);
+  const [reconcileError, setReconcileError] = useState<string>();
+  const decideAmbiguous = useCallback(
+    async (outcome: "succeeded" | "failed", reason: string) => {
+      if (!ambiguousContinuation) return;
+      setReconcileBusy(true);
+      setReconcileError(undefined);
+      try {
+        await client.invoke("run.invocation.reconcile", { continuationId: ambiguousContinuation.id, outcome, reason } as never);
+      } catch (failure: unknown) {
+        setReconcileError(failure instanceof Error ? failure.message : String(failure));
+      } finally {
+        setReconcileBusy(false);
+      }
+    },
+    [ambiguousContinuation, client],
+  );
+  // A consequential action escalated to SEA-Forge (P02): the run waits until the external authority
+  // records a decision. The operator's choice goes to SEA-Forge on the operator's behalf.
+  const governanceContinuation = openContinuations.find((c) => c.type === "governance-approval");
+  const governanceApproval = governanceContinuation ? governanceApprovalOf(governanceContinuation) : undefined;
+  const [governanceBusy, setGovernanceBusy] = useState(false);
+  const [governanceError, setGovernanceError] = useState<string>();
+  const decideGovernance = useCallback(
+    async (resolution: "approved" | "rejected") => {
+      if (!governanceApproval) return;
+      setGovernanceBusy(true);
+      setGovernanceError(undefined);
+      try {
+        await client.invoke("governance.approval.resolve", { approvalId: governanceApproval.approvalId, resolution } as never);
+      } catch (failure: unknown) {
+        setGovernanceError(failure instanceof Error ? failure.message : String(failure));
+      } finally {
+        setGovernanceBusy(false);
+      }
+    },
+    [governanceApproval, client],
+  );
+  // P03: what SEA-Forge settled for this session's governed runs.
+  const loadSettlement = useCallback(
+    async (sessionId: string) => (await client.invoke("settlement.status", { sessionId } as never)) as unknown as { readonly active: boolean; readonly operations: readonly SettlementOperation[] },
+    [client],
+  );
+  const settlementOperations = useSessionSettlement(loadSettlement, activeSessionId);
+  // Generic fallback: an open continuation of a type this view does not render is still visible.
+  const otherContinuation = openContinuations.find((c) => !["tool-approval", "plan-review", "ambiguous-invocation", "governance-approval"].includes(c.type));
 
   // Sidebar auto-collapses *below* 1024px viewport width, matching the reference's
   // `SIDEBAR_AUTO_COLLAPSE = 1024px` breakpoint (product-characterization.md §2: "sidebar
@@ -4634,6 +4904,9 @@ export function App() {
       setOpenReview(undefined);
       setTraceDetail(undefined);
       setSessionTab("chat");
+      // J-SESSION-draft: reopening (a click, a reload, a restart) puts the person straight back in
+      // the conversation — the composer is focused and ready when prerequisites are satisfied.
+      setComposerFocusToken((token) => token + 1);
       // Reattach to a still-in-flight run (running, or waiting on an approval continuation) so its
       // live tool/approval state survives a reload (`11b-approval-pending-after-reload`) — the
       // `sessions` projection's `runId`/`lastStatus` are durable, so this works after a full
@@ -4682,29 +4955,69 @@ export function App() {
     if (remembered && sessions.some((s) => s.id === remembered)) void openSession(remembered);
   }, [currentWorkspaceId, sessions, activeSessionId, openSession]);
 
+  // J-SESSION-draft: pressing + creates a REAL, durable session (a `session.create` recording run,
+  // folded by the `sessions` projection) before any prompt — not an in-memory UUID. Each click
+  // mints a fresh idempotency identity, so each click is one new conversation; the invoke waits
+  // for its recording run to settle, so the row exists by the time the sidebar selects it.
+  const [newSessionPending, setNewSessionPending] = useState(false);
+  const [newSessionError, setNewSessionError] = useState<string | undefined>(undefined);
+  // Bumped whenever a fresh draft should take composer focus (J-SESSION-draft: "the composer is
+  // focused and ready when prerequisites are satisfied" — a model must be configured).
+  const [composerFocusToken, setComposerFocusToken] = useState(0);
+
+  const startNewSession = useCallback(
+    async (workspaceId: string) => {
+      if (newSessionPending) return;
+      setNewSessionPending(true);
+      setNewSessionError(undefined);
+      // J-SESSION-draft: the + action means "take me to the conversation" — the center surface
+      // switches immediately (from Workbench, Experts & Teams, Plugins or chat), so the composer
+      // is visible the moment the click lands; only the durable identity then arrives async.
+      setExpertsPanelOpen(false);
+      setPluginsPanelOpen(false);
+      setWorkbenchOpen(false);
+      try {
+        const result = (await client.invoke("session.create", { workspaceId, requestId: crypto.randomUUID() } as never)) as { sessionId: string };
+        // No state may leak from a previous session: transcript, review, trace, plan tab and the
+        // explicit focus selection all reset; the task binding is per-session by construction.
+        setActiveSessionId(result.sessionId);
+        setActiveRunId(undefined);
+        setTranscript([]);
+        setOpenReview(undefined);
+        setTraceDetail(undefined);
+        setSessionTab("chat");
+        setFocusSelection(undefined);
+        rememberSession(workspaceId, result.sessionId);
+        setComposerFocusToken((token) => token + 1);
+      } catch (e) {
+        // Visible, actionable failure (never console-only); the + button retries.
+        setNewSessionError(errorText(e));
+      } finally {
+        setNewSessionPending(false);
+      }
+    },
+    [client, newSessionPending, rememberSession],
+  );
+
   const newSession = useCallback(() => {
-    setActiveSessionId(crypto.randomUUID());
-    setActiveRunId(undefined);
-    setTranscript([]);
-    setOpenReview(undefined);
-    setTraceDetail(undefined);
-    setSessionTab("chat");
-  }, []);
+    if (currentWorkspaceId) void startNewSession(currentWorkspaceId);
+  }, [currentWorkspaceId, startNewSession]);
 
   // Usage pass U3 (§12): "New session in <name>" — a workspace row's hover action. Selecting the
   // workspace (an idempotent re-select for a known path) switches the current pointer, then a
-  // fresh session opens in it.
+  // fresh durable session opens in it. The creation names the workspace by stable id explicitly,
+  // so the current pointer and the creation can never race.
   const newSessionIn = useCallback(
     async (ws: WorkspaceRow) => {
       try {
         await client.invoke("workspace.select", { path: ws.root, worldId: ws.executionWorldId ?? "local" } as never);
       } catch (error) {
-        console.error("workspace.select (new session in) failed", error);
+        setNewSessionError(errorText(error));
         return;
       }
-      newSession();
+      await startNewSession(ws.id);
     },
-    [client, newSession],
+    [client, startNewSession],
   );
 
   // Close the sidebar's floating menus on outside click / Escape (same pattern as SettingMenu).
@@ -4733,10 +5046,45 @@ export function App() {
 
   const send = useCallback(
     async (message: string) => {
-      if (!currentWorkspaceId) return;
-      const sessionId = activeSessionId ?? crypto.randomUUID();
-      if (!activeSessionId) setActiveSessionId(sessionId);
-      rememberSession(currentWorkspaceId, sessionId);
+      // J-SESSION-draft / J-RUN-task-attribution: submit into the *session's own* workspace (its
+      // durable row), never the asynchronously-updated global "current" pointer, so a workspace
+      // switch can never land a turn in the wrong workspace.
+      const sendWorkspaceId = currentSession?.workspaceId ?? currentWorkspaceId;
+      if (!sendWorkspaceId) return;
+      let sessionId = activeSessionId ?? "";
+      // The task this turn serves: the active session's durable binding, or — on the session-
+      // creating first send — the parked choice, bound durably below before the run freezes it.
+      let runTaskId = activeTaskId;
+      if (!sessionId) {
+        // The hero composer's first send creates the conversation's durable identity first
+        // (idempotent `session.create`), binds the parked task choice if any, and only then
+        // starts the run — the same session.create the + button uses, so every conversation has
+        // exactly one durable row and never a duplicate.
+        const requestId = crypto.randomUUID();
+        try {
+          const created = (await client.invoke("session.create", { workspaceId: sendWorkspaceId, requestId } as never)) as { sessionId: string };
+          sessionId = created.sessionId;
+        } catch (e) {
+          // The turn still runs (the run itself records the session row); the visible draft-
+          // creation failure surfaces through the sidebar's error path on the next + click.
+          console.error("session.create (first send) failed", e);
+          sessionId = crypto.randomUUID();
+        }
+        setActiveSessionId(sessionId);
+        rememberSession(sendWorkspaceId, sessionId);
+        if (pendingTaskId) {
+          const taskId = pendingTaskId;
+          setPendingTaskId(undefined);
+          setOptimisticBind({ sessionId, taskId });
+          runTaskId = taskId;
+          try {
+            await client.invoke("session.task.bind", { sessionId, taskId } as never);
+          } catch (e) {
+            setOptimisticBind(undefined);
+            console.error("session.task.bind (first send) failed", e);
+          }
+        }
+      }
       // Usage pass U2: the access mode this run runs under — the per-session override, else the
       // pending hero-composer choice (consumed by the session-creating send), else the settings
       // default. `agent.coding` feeds it to `approvalGate`; the `sessions` projection folds it.
@@ -4762,13 +5110,13 @@ export function App() {
       runStartedAtRef.current = Date.now();
       const view = await client.startRun(
         "agent.coding",
-        { sessionId, workspaceId: currentWorkspaceId, message: messageWithFocus(message), mode, preset, ...(activeCaseId ? { caseId: activeCaseId } : {}), ...(activeTaskId ? { taskId: activeTaskId } : {}) } as unknown as Json,
+        { sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message), mode, preset, ...(activeCaseId ? { caseId: activeCaseId } : {}), ...(runTaskId ? { taskId: runTaskId } : {}) } as unknown as Json,
         // The run's shared state is seeded with an empty steering list: "Steer now" appends to it.
         { idempotencyKey: crypto.randomUUID(), correlationId: `session:${sessionId}`, state: { steer: [] } as unknown as Json },
       );
       setActiveRunId(view.runId);
     },
-    [client, currentWorkspaceId, activeSessionId, rememberSession, planState?.on, accessModeOverrides, pendingAccessMode, settings.permission, presetOverrides, settings.preset, activeCaseId, activeTaskId, messageWithFocus],
+    [client, currentWorkspaceId, currentSession, activeSessionId, activeTaskId, rememberSession, pendingTaskId, planState?.on, accessModeOverrides, pendingAccessMode, settings.permission, presetOverrides, settings.preset, activeCaseId, messageWithFocus],
   );
 
   const stop = useCallback(async () => {
@@ -4879,24 +5227,56 @@ export function App() {
               </span>
             )}
           </div>
-          <button type="button" className="icon-btn" aria-label="Collapse sidebar" onClick={() => setCollapsed((c) => !c)}>
+          <button type="button" className="icon-btn" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((c) => !c)}>
             <CollapseIcon />
           </button>
         </div>
 
-        <button type="button" className="new-session-btn" aria-label="New session" onClick={newSession} disabled={!currentWorkspaceId}>
+        <button
+          type="button"
+          className="new-session-btn"
+          aria-label="New session"
+          onClick={newSession}
+          disabled={!currentWorkspaceId || newSessionPending}
+          aria-busy={newSessionPending}
+        >
           <PlusIcon />
-          {!collapsed && "New Session"}
+          {!collapsed && (newSessionPending ? "Creating…" : "New Session")}
         </button>
+        {newSessionError && (
+          <p role="alert" className="new-session-error">
+            {newSessionError}{" "}
+            <button type="button" className="link-btn" onClick={newSession} disabled={!currentWorkspaceId || newSessionPending}>
+              Try again
+            </button>
+          </p>
+        )}
 
         {!collapsed && (
           <nav className="global-panels" aria-label="Global panels">
             <button
               type="button"
+              className={expertsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
+              aria-label="Experts and Teams"
+              aria-pressed={expertsPanelOpen}
+              onClick={() => {
+                setExpertsPanelOpen((open) => !open);
+                setPluginsPanelOpen(false);
+                setWorkbenchOpen(false);
+                if (window.matchMedia("(max-width: 1023px)").matches) setCollapsed(true);
+              }}
+            >
+              Experts &amp; Teams
+            </button>
+            <button
+              type="button"
               className={pluginsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
               aria-label="Plugins"
               aria-pressed={pluginsPanelOpen}
-              onClick={() => (pluginsPanelOpen ? closePluginsPanel() : setPluginsPanelOpen(true))}
+              onClick={() => {
+                if (pluginsPanelOpen) closePluginsPanel();
+                else { setPluginsPanelOpen(true); setExpertsPanelOpen(false); setWorkbenchOpen(false); }
+              }}
             >
               <PluginIcon />
               Plugins
@@ -4907,7 +5287,7 @@ export function App() {
               aria-label="Workbench"
               aria-pressed={workbenchOpen}
               disabled={!currentWorkspaceId}
-              onClick={() => setWorkbenchOpen((v) => !v)}
+              onClick={() => { setWorkbenchOpen((v) => !v); setExpertsPanelOpen(false); setPluginsPanelOpen(false); }}
             >
               <WorkbenchIcon />
               Workbench
@@ -5114,9 +5494,13 @@ export function App() {
                       >
                         <FolderIcon aria-hidden="true" />
                         {group.title}
-                        {group.executionWorldId && group.executionWorldId !== "local" ? (
+                        {group.executionWorldId ? (
                           <span className="workspace-world-badge">
-                            {(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · {worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}
+                            {group.executionWorldId === "local"
+                              ? "LOCAL · UNCONTAINED"
+                              : worlds.get(group.executionWorldId)?.kind === "linux-bubblewrap"
+                                ? `LINUX CHILD CONTAINMENT · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`
+                                : `${(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`}
                           </span>
                         ) : null}
                         <button
@@ -5192,7 +5576,9 @@ export function App() {
       </aside>
 
       <main className="center-column">
-        {pluginsPanelOpen ? (
+        {expertsPanelOpen ? (
+          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onClose={() => setExpertsPanelOpen(false)} onOpenNavigation={() => setCollapsed(false)} onOpenSettings={() => setShowSettings(true)} />
+        ) : pluginsPanelOpen ? (
           <PluginsPanel
             detailId={detailPluginId}
             onClose={closePluginsPanel}
@@ -5203,10 +5589,17 @@ export function App() {
           <WorkbenchView
             workspaceId={currentWorkspaceId}
             workspaceLabel={workspaces.find((w) => w.id === currentWorkspaceId)?.title || currentWorkspaceId}
+            {...(activeSessionId ? { sessionId: activeSessionId } : {})}
             {...(activeTaskId ? { activeTaskId } : {})}
             onWorkOnTask={(taskId) => {
-              setActiveTaskId(taskId);
+              // J-TASK-scope: "Work on this task" is an explicit binding decision — durable when a
+              // conversation is open, a parked choice when the Workbench was opened from the
+              // session-less hero (consumed and made durable by the first send).
+              void bindTask(taskId);
               setWorkbenchOpen(false);
+            }}
+            onTaskCreatedInSession={(taskId) => {
+              void bindTask(taskId);
             }}
             onFocus={setFocusSelection}
             onClose={() => setWorkbenchOpen(false)}
@@ -5215,18 +5608,20 @@ export function App() {
           <WorkspaceChooser />
         ) : showHero ? (
           <>
-            <ComposerBar
-              workspaceId={currentWorkspaceId}
-              {...(activeTaskId ? { taskId: activeTaskId } : {})}
-              onTaskChange={setActiveTaskId}
-              onOpenWorkbench={() => setWorkbenchOpen(true)}
-              state="idle"
-              steps={0}
-              elapsedSeconds={0}
-              approvalsPending={0}
-              {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
-              onClearFocus={() => setFocusSelection(undefined)}
-            />
+          <ComposerBar
+            workspaceId={currentWorkspaceId}
+            {...(activeSessionId ? { sessionId: activeSessionId } : {})}
+            {...(activeTaskId ? { taskId: activeTaskId } : {})}
+            onTaskChange={(taskId) => void bindTask(taskId ?? null)}
+            bindError={taskBindError}
+            onOpenWorkbench={() => setWorkbenchOpen(true)}
+            state="idle"
+            steps={0}
+            elapsedSeconds={0}
+            approvalsPending={0}
+            {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
+            onClearFocus={() => setFocusSelection(undefined)}
+          />
           <HeroLanding
             workspaceLabel={currentWorkspace?.title || currentWorkspace?.id || ""}
             modeLabel={AGENT_PRESET_LABELS[settings.preset]}
@@ -5239,7 +5634,8 @@ export function App() {
             workspaces={workspaces}
             onSwitchWorkspace={(ws) => void newSessionIn(ws)}
             onAddWorkspace={() => setAddWorkspaceOpen(true)}
-            />
+            composerFocusToken={composerFocusToken}
+          />
           </>
         ) : (
           <>
@@ -5332,9 +5728,10 @@ export function App() {
                 workspaceId={currentWorkspaceId}
                 {...(activeSessionId ? { sessionId: activeSessionId } : {})}
                 {...(activeTaskId ? { taskId: activeTaskId } : {})}
-                onTaskChange={setActiveTaskId}
+                onTaskChange={(taskId) => void bindTask(taskId ?? null)}
+                bindError={taskBindError}
                 onOpenWorkbench={() => setWorkbenchOpen(true)}
-                state={pendingApproval || planReviewContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
+                state={pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
                 steps={toolEntries.length + 1}
                 elapsedSeconds={elapsedSeconds}
                 approvalsPending={pendingApproval ? 1 : 0}
@@ -5342,8 +5739,28 @@ export function App() {
                 onClearFocus={() => setFocusSelection(undefined)}
               />
             )}
+            {otherContinuation && (
+              <p role="status" className="continuation-waiting">Waiting on {otherContinuation.type} ({otherContinuation.status.toLowerCase()})</p>
+            )}
+            <SettlementCard operations={settlementOperations} />
             {pendingApproval ? (
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
+            ) : governanceApproval ? (
+              <GovernanceApprovalCard
+                approvalId={governanceApproval.approvalId}
+                capability={governanceApproval.capability}
+                busy={governanceBusy}
+                error={governanceError}
+                onDecide={(resolution) => void decideGovernance(resolution)}
+              />
+            ) : ambiguousContinuation ? (
+              <AmbiguousStepCard
+                capability={interruptedCapability(ambiguousContinuation) ?? "step"}
+                modelCall={isModelGeneration(interruptedCapability(ambiguousContinuation))}
+                busy={reconcileBusy}
+                error={reconcileError}
+                onReconcile={(outcome, reason) => void decideAmbiguous(outcome, reason)}
+              />
             ) : planReviewContinuation ? (
               <PlanReviewCard
                 heading={String((planReviewContinuation.payload as { readonly heading?: string }).heading ?? "")}
@@ -5367,6 +5784,7 @@ export function App() {
                 onBusySubmit={busySubmit}
                 queued={queuedMessage}
                 onCancelQueued={cancelQueued}
+                focusToken={composerFocusToken}
               />
             )}
           </>
@@ -5384,7 +5802,7 @@ export function App() {
       ) : (
         openChildRow ? <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} /> : <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
       )}
-      {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} />}
+      {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} workspaceId={currentWorkspaceId} />}
       {shortcutsOpen && (
         <ShortcutsDialog
           overrides={settings.shortcuts}

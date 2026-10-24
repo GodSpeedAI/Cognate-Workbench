@@ -1,25 +1,23 @@
-import { loadSemanticProjection } from "/home/sprime01/projects/cognate/packages/domainforge/src/index.ts";
-import { readFileSync } from "node:fs";
+// Validate the current Workbench model through its published Cognate semantic adapter.
+import { bindCognitiveCapabilities, bindExpertCapabilities, bindExecutionWorlds, bindRuntimeExecution, bindScheduleCapabilities, loadDomain } from "../../../domain/index.ts";
 
-const path = "/home/sprime01/projects/cognate/validation/reconstructions/deepseek-harness/cognate/.sea/interaction/interaction-model.sea";
-const source = readFileSync(path, "utf8");
-const { projection, errors } = loadSemanticProjection(source, { uri: `file://${path}` });
-
-console.log("errors:", errors?.length ?? 0);
-if (errors && errors.length > 0) {
-  console.log(JSON.stringify(errors, null, 2));
-  process.exit(1);
-}
-
+const domain = await loadDomain();
+const { projection } = domain;
 const byKind: Record<string, number> = {};
-for (const obj of projection.objects) byKind[obj.kind] = (byKind[obj.kind] ?? 0) + 1;
+for (const object of projection.objects) byKind[object.kind] = (byKind[object.kind] ?? 0) + 1;
+const journeyIds = projection.objects.filter(object => object.kind === "EntityInstance").map(object => {
+  const fields = object.fields.fields;
+  return fields && typeof fields === "object" && !Array.isArray(fields) && typeof fields.journey_id === "string"
+    ? fields.journey_id : object.name;
+}).sort();
 
+console.log("errors: 0");
 console.log("Total objects:", projection.objects.length);
-console.log("By kind:", JSON.stringify(byKind, null, 2));
-console.log("Relations (edges):", projection.relations?.length ?? 0);
-
-const journeyIds = projection.objects
-  .filter((o: any) => o.kind === "EntityInstance")
-  .map((o: any) => o.fields?.fields?.journey_id ?? o.name)
-  .sort();
-console.log("Journey ids (20 expected: 10 product + 10 Remote Workspaces):", JSON.stringify(journeyIds, null, 2));
+console.log("By kind:", JSON.stringify(byKind));
+console.log("Relations (edges):", projection.relations.length);
+console.log("Journey ids:", JSON.stringify(journeyIds));
+console.log("Expert bindings:", Object.keys(bindExpertCapabilities(domain)).length);
+console.log("Schedule bindings:", Object.keys(bindScheduleCapabilities(domain)).length);
+console.log("Cognitive bindings:", Object.keys(bindCognitiveCapabilities(domain)).length);
+console.log("Execution-world bindings:", Object.keys(bindExecutionWorlds(domain)).length);
+console.log("Runtime inspection binding:", Boolean(bindRuntimeExecution(domain)));

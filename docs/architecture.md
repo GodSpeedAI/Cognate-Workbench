@@ -135,7 +135,7 @@ The event log. Every domain change appends to it. Event names are namespaced by 
 | `settings.changed` | the ten `settings.change*` capabilities |
 | `onboarding.dismissed` | `onboarding.dismiss` |
 | `subagent.spawned` | `agent.coding` after `subagent.start` returns |
-| `workbench.*` | the 23 workbench capabilities via `agent.config` |
+| `workbench.*` | the 25 workbench capabilities via `agent.config` |
 | `case.*`, `criterion.*`, `world.*`, `verification.*`, `sentinel.*`, `experiment.*`, `method.*` | the cognitive capabilities |
 
 Full enumeration in [Event catalog](reference/event-catalog.md).
@@ -166,7 +166,36 @@ The one inversion worth naming: **writes start runs**. A capability handler vali
 rationale and the consequences are in
 [Why `agent.config` is the write path](explanation/why-agent-config-is-the-write-path.md).
 
+Experts and Teams use another native Cognate write contract: `updateSharedState` appends
+`state.changed` to the versioned `experts:registry` thread. Each capability revalidates the command
+against the latest snapshot and commits with `expectedVersion`; conflicts re-read and revalidate.
+This preserves atomic membership invariants and logical idempotency under concurrent mutations.
+The `experts` projection derives the public roster and work view; scoped memory and private context
+stay outside that projection. PostgreSQL remains the only persistence engine.
+
+`agent.expert` reuses the coding engine with a frozen Assignment, model route and tool ceiling.
+The completion bridge correlates genuine Cognate child runs and resolves native parent waits from
+persisted terminal events. Expert side effects use native commitments, with ambiguous outcomes
+reserved for human reconciliation. [Experts and Teams](experts-and-teams.md) explains these
+contracts and their limits.
+
 ## Trust and security boundaries
+
+Published Cognate 0.6.1 owns bounded run scheduling. Workbench defaults to capacity1; host startup
+`COGNATE_RUN_CAPACITY=2`,4 or8 enables overlapping execution. Admission resolves the registered run
+and frozen Assignment; no cache or prompt grants authority. Model-only solo Experts and Team
+Specialists may overlap freely. All other work is keyed by canonical per-resource identities
+derived from authoritative state — workspace records, execution-world records and configuration —
+never from run-supplied input: runs that share a workspace serialize, runs on different workspaces
+overlap, workspace/world mutators name every record they affect (a world disconnect enumerates its
+workspaces), and unknown, forged or unclassifiable identities fail closed to the unchanged global
+`workbench:workspace-effects` exclusion key. On the local execution world, `tool.bash`/`tool.run_code`
+are not OS-contained, so workspace-keyed overlap relies on the workspace-scoped authority plane,
+not sandbox isolation. Configuration never waits on Expert boot readiness, avoiding seed dependency
+loops. Native continuations and recovery re-enter this admission path. `execution.runtime.inspect`
+reports effective capacity/policy, with no synthetic live-worker telemetry. Admission remains
+process-local by SDK contract; see [measurements](experts-concurrency-benchmark.md) for the
+workspace-effect conflict inventory.
 
 ```mermaid
 flowchart LR
@@ -175,7 +204,8 @@ flowchart LR
     RT --> AG
     AG -->|"user actor required"| HUM["human-only capabilities<br/>settle, review, elevate, accept"]
     AG --> WORLD["execution worlds"]
-    WORLD -->|"best-effort path checks<br/>shell classification, NOT a sandbox"| FS["filesystem and shell"]
+    WORLD -->|"local default: best-effort guards"| FS["filesystem and shell"]
+    WORLD -->|"opt-in Linux child namespaces<br/>host-configured, no local fallback"| CHILD["dedicated workspace<br/>network denied"]
     RT --> SXR["RealityTrace<br/>one-way out"]
 ```
 
@@ -188,9 +218,15 @@ Boundaries that hold:
   loop before `tool.edit` or `tool.bash`.
 - **Lower trust cannot lower approval.** Sentinel compares against a re-run of the chain at or
   above its own tier.
-- **What is *not* here.** No OS-level sandbox. Path containment and shell classification are
-  best-effort. Single-operator development authentication. All recorded in
-  [Known gaps](known-gaps.md).
+- **Contained children are explicit.** A host-configured Linux execution world can isolate child
+  filesystem/process/network access. A direct human selects it through `workspace.contained.select`;
+  typed configuration events persist the root and world identity. Missing or changed host policy
+  leaves the world unavailable after restart, with no local fallback. See
+  [contained workspaces](linux-contained-workspaces.md).
+- **Production trust remains open.** Local default path and shell guards are best-effort. Linux
+  child namespaces do not isolate the host application or enforce aggregate resource quotas.
+  Authentication remains single-operator development mode; tenant/session boundaries and independent
+  security review remain unfulfilled. See [Known gaps](known-gaps.md).
 
 ## Testing and verification
 
@@ -207,6 +243,9 @@ CI runs the same sequence against a `postgres:18` service. See
 - `domain/index.ts` — `tranche5Bindings` … `bindUsage3`, `bindWorkbench`, `bindExecutionWorlds`
 - `src/agents/agentCoding.ts`, `src/agents/agentConfig.ts`, `src/agents/agentCognitive.ts`
 - `src/capabilities/` — one file per capability family
-- `src/projections/` — eleven projection definitions
+- `src/projections/` — event-derived read models, including `experts` and `provider-routes`
+- `src/experts/` — typed identity/Assignment state, CAS mutation boundary, service governance and completion bridge
+- `src/capabilities/expertModel.ts`, `expertEffect.ts` — isolated model routing and native commitment guards
+- `src/agents/agentExpert.ts` — trusted wrapper around the existing coding engine
 - `src/workbench/types.ts`, `src/cognitive/world.ts` — the two type roots
 - `justfile`, `package.json`, `.github/workflows/verify.yml` — the command surface

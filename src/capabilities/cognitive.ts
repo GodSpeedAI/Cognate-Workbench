@@ -1,5 +1,5 @@
 // Cognitive-navigation capabilities (local harness proof; candidates for core promotion are listed
-// in DEVIATIONS.md). They sit on `@godspeedai/cognate-execution` (files/processes in a named world) and the
+// in docs/known-gaps.md). They sit on `@godspeedai/cognate-execution` (files/processes in a named world) and the
 // durable event log (`agent.cognitive` records facts). Nothing here keeps its own store: the Case,
 // Reality and lineage are folds of events, so a restart reconstructs them.
 //
@@ -51,6 +51,9 @@ export interface CognitiveOptions {
   readonly forkRoot?: string;
   /** Extra lower-trust mediators (e.g. a user toy mod in tests). Registered under the host's user tier only. */
   readonly extraMediators?: readonly MediatorSpec[];
+  /** Per-capability IDM bindings; preferred over the legacy component-wide anchor. */
+  readonly semanticRefs?: Readonly<Record<string, SemanticRef>>;
+  /** Legacy single-anchor option retained for external and test callers. */
   readonly semanticRef?: SemanticRef;
 }
 
@@ -74,8 +77,12 @@ async function waitDone(service: RuntimeService, caller: Caller, runId: string):
 }
 
 export function cognitiveComponent(options: CognitiveOptions): Component {
-  const contract = (id: string) => ({ id, version: "1.0.0", semanticRef: options.semanticRef });
   const ids = ["case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard", "verification.run", "case.derive", "world.settle", "risk.assess", "case.observe", "ui.focus.publish", "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review", "method.accept", "method.active"];
+  const contract = (id: string) => ({
+    id,
+    version: "1.0.0",
+    semanticRef: options.semanticRefs?.[id] ?? options.semanticRef,
+  });
   const forkBase = options.forkRoot ?? tmpdir();
   // Ephemeral attention bridge: the page publishes the human's FocusContext; an agent may ask the
   // page to render a Surface. In-memory by design — never an event, lost on restart, never truth.

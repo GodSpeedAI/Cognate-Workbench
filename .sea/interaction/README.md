@@ -1,6 +1,6 @@
-# DeepSeek Harness — Interaction Domain Model (tranche T3)
+# Cognate Workbench — Interaction Domain Model
 
-Canonical location for the DeepSeek Harness Web UI Interaction Domain Model, produced per
+Canonical location for Cognate Workbench's interaction model, including its original Web UI reconstruction and native Experts & Teams, produced per
 `.agents/skills/deriving-interaction-domain-models/SKILL.md` and validated per
 `.agents/skills/domainforge-sea/SKILL.md`.
 
@@ -8,8 +8,8 @@ Canonical location for the DeepSeek Harness Web UI Interaction Domain Model, pro
 
 - `interaction-model.sea` — the canonical `.sea` Interaction Domain Model.
 - `source-translation-map.md` — traces every material source statement to a modeled concept.
-- `canonical-journey-catalog.md` — full journey definitions (purpose, actor, steps, capabilities,
-  settlement, variants) for the 10 canonical journeys.
+- `canonical-journey-catalog.md` — canonical journey definitions. Existing Cognate journeys are
+  preserved, with 12 proposed native Experts & Teams journeys appended.
 - `assumptions-and-unknowns.md` — declared/observed/inferred/proposed/unknown classification of
   material conclusions, and unresolved questions.
 - `handoff.md` — how a downstream agent should project this model into real Cognate constructs
@@ -17,7 +17,7 @@ Canonical location for the DeepSeek Harness Web UI Interaction Domain Model, pro
   without repeating domain discovery.
 - `validation/` — DomainForge CLI and Cognate-adapter validation records.
 
-## Journey IDs (stable, short — name tests/capabilities after these)
+## Journey IDs (stable — name tests/capabilities after these)
 
 `J-A-first-use`, `J-CFG-model-provider`, `J-WS-select`, `J-B-basic-session`,
 `J-C-tool-execution`, `J-D-approval`, `J-E-plan`, `J-F-delegation`, `J-G-persistence`,
@@ -33,6 +33,12 @@ precondition, and settlement) rather than a step folded silently into `J-A-first
 canonicalized as their own journeys and `J-A-first-use` composes them (see
 `canonical-journey-catalog.md`).
 
+Experts & Teams add the proposed IDs `J-EXPERT-CREATE`, `J-EXPERT-SOLO`, `J-TEAM-CREATE`,
+`J-TEAM-ACTIVATE`, `J-TEAM-REPLACE-ORCHESTRATOR`, `J-TEAM-DELEGATE`, `J-TEAM-HANDOFF`,
+`J-TEAM-CONVERSE`, `J-TEAM-RECOVER`, `J-TEAM-REVIEW`, `J-EXPERT-MEMORY`, and
+`J-TEAM-SETTLEMENT`. These are not implemented claims. The proposed bindings live in
+`domain/index.ts`; implementation and journey evidence must be added before changing their status.
+
 ## Representation compromise
 
 DomainForge `.sea` has no native "Journey"/"Affordance"/"Actor" primitive. Canonical journeys are
@@ -44,5 +50,6 @@ silent (see `interaction-model.sea` header comment and `assumptions-and-unknowns
 
 ## Final canonicality conclusion
 
-> The Interaction Domain Model is sufficiently stable to serve as the canonical semantic source
-> for downstream projections.
+> The existing Workbench interaction model remains the canonical semantic source. The Experts
+> and Teams extension is modeled with explicit proposed journeys and bindings, but is not yet
+> canonical as implemented behavior until its capabilities, tests, and evidence are complete.

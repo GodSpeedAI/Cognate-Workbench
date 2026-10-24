@@ -1,0 +1,165 @@
+schema: agent.development_plan
+schema_version: '1.0'
+metadata:
+  id: native-experts-teams
+  title: Native governed Experts and Teams
+  status: complete
+  version: '1.0'
+  created: '2026-10-13'
+source:
+  authority: Operator mission in this session, sections 1–19, including vital UX requirement
+  donor:
+    url: https://github.com/Fei2411/DeepSeek-Bot
+    commit: 20ebc9213cbbde7249d71786765f86be00dc6663
+    version: '0.1.5'
+    license: Apache-2.0
+    translation: docs/experts-donor-translation.md
+decisions:
+  - Operator explicitly approved retaining Cognate's pre-existing SDK-internal transitive Cordis dependency; add no direct Cordis or donor-runtime integration.
+  - Preserve published Cognate 0.2.0 packages and existing semantic IDs.
+  - Native shared thread state uses state.changed events, optimistic version checks, and projections; PostgreSQL remains the only store.
+  - Durable run-completion bridge resolves Cognate continuations, with restart scans and idempotent reconciliation; no browser dependency.
+  - Freeze non-secret model routes and authority on assignment creation. Reuse buildProvider and secret store, never global hot swapping.
+  - Start serialized. Test actual SDK scheduling before claiming parallel execution.
+  - Reuse existing coding tool loop and approval/authority gates; Specialists cannot create coordinating parents.
+  - Integrate roster, configuration, conversations, assignment evidence and recovery into existing Workbench navigation with accessible responsive controls.
+global_gates:
+  - just typecheck
+  - just verify
+  - domainforge validate --format human .sea/interaction/interaction-model.sea
+  - git diff --check
+dependency_graph:
+  edges: [[T0, T1], [T1, T2], [T2, T3], [T3, T4], [T4, T5], [T5, T6]]
+  critical_path: [T0, T1, T2, T3, T4, T5, T6]
+initial_state:
+  current_task: null
+  last_settled_task: T6
+tasks:
+  T0:
+    title: Reconnaissance, baseline, semantic model and explicit bindings
+    settles: [mission-02, mission-03, mission-04, mission-12]
+    depends_on: []
+    proof_level: P1
+    changes: Inspect donor and installed contracts; extend authoritative journeys and validate.
+    proves: Implementation has a native semantic and runtime path.
+    does_not_prove: Experts execute or UI works.
+    steps: [Read mandatory skills, acquire and study donor, baseline checks, model journeys and bindings]
+    gate: [just typecheck, domainforge validate --format human .sea/interaction/interaction-model.sea]
+    teeth: [{attack: Bind an absent semantic ID, expected: Adapter rejects it}]
+    redesign_trigger: Installed SDK cannot durably represent the necessary transition.
+    evidence: docs/experts-donor-translation.md
+  T1:
+    title: Prove persistent identity, distinct routes and durable correlated return
+    settles: [mission-01, mission-07, mission-08, mission-13]
+    depends_on: [T0]
+    proof_level: P2
+    changes: CAS state, real Expert runs, completion bridge and deterministic provider tests.
+    proves: Restart and redelivery preserve logical assignments and handoffs.
+    does_not_prove: Full donor parity or production isolation.
+    steps: [Implement minimum state contracts, execute two routes, delegate, restart and replay]
+    gate: [bun test test/J-TEAM-execution.test.ts]
+    teeth: [{attack: Duplicate return and crash between run start and recording, expected: One logical handoff and stable child run}]
+    redesign_trigger: Durable child return needs an incompatible framework fork.
+    evidence: docs/experts-verification.md
+  T2:
+    title: Editable identity, default seeds, custom Teams and atomic governance
+    settles: [mission-05, mission-06]
+    depends_on: [T1]
+    proof_level: P2
+    changes: CRUD, copies, default Cognate Team and membership guards.
+    proves: Concurrent changes preserve exactly one active Orchestrator.
+    does_not_prove: Specialist competence.
+    steps: [Seed ordinary editable records, implement membership mutations and solo conversations, adversarial tests]
+    gate: [bun test test/J-EXPERT-management.test.ts]
+    teeth: [{attack: Simultaneous orchestrator replacements and removals, expected: CAS preserves invariant}]
+    redesign_trigger: Mutation boundary permits lost updates.
+    evidence: docs/experts-verification.md
+  T3:
+    title: Bounded coordination, addressed delivery, cancellation and human settlement
+    settles: [mission-09, mission-11]
+    depends_on: [T2]
+    proof_level: P3
+    changes: Assignment lifecycle, typed handoffs, durable queueing and reconciliation.
+    proves: No unverified Orchestrator declaration grants human acceptance or authority.
+    does_not_prove: Arbitrary external tools are exactly-once.
+    steps: [Implement role gates, cancellation and retries, review evidence, independent adversarial confirmation]
+    gate: [bun test test/J-TEAM-execution.test.ts test/J-TEAM-security.test.ts]
+    teeth: [{attack: Specialist impersonates human or elevates delegated tools, expected: Denied at invocation}]
+    redesign_trigger: A model can bypass authority through input forgery.
+    evidence: docs/experts-verification.md
+  T4:
+    title: Scoped memory and bounded recoverable context
+    settles: [mission-10]
+    depends_on: [T3]
+    proof_level: P2
+    changes: Provenance-backed memory, isolated contexts, search and checkpoints.
+    proves: Teams and personal conversations do not silently share private content.
+    does_not_prove: Model assertions are independently true.
+    steps: [Scope memory, preserve unresolved commitments, bound retrieved context, access tests]
+    gate: [bun test test/J-EXPERT-memory.test.ts]
+    teeth: [{attack: Cross-Team private retrieval, expected: Denied}]
+    redesign_trigger: Public projection exposes private memory.
+    evidence: docs/experts-verification.md
+  T5:
+    title: Integrated native UX
+    settles: [mission-14, ux-vital]
+    depends_on: [T4]
+    proof_level: P2
+    changes: Expert roster, Team editor, chat scope, route/tool configuration and inspectable work states.
+    proves: Accessible controls call genuine capabilities and survive reload.
+    does_not_prove: A rendered control implies completed work.
+    steps: [Reuse navigation and chat patterns, responsive styles, UI tests, browser walkthrough]
+    gate: [just typecheck, bun test test/ui-experts.test.tsx]
+    teeth: [{attack: Failed provider or draft team, expected: Clear actionable failure without false success}]
+    redesign_trigger: UX requires a parallel chat runtime.
+    evidence: docs/experts-verification.md
+  T6:
+    title: Parity audit, regression, cleanup, review and release
+    settles: [mission-15, mission-16, mission-17, mission-18, mission-19]
+    depends_on: [T5]
+    proof_level: P3
+    changes: Document verified journeys and precise gaps; remove this task's donor, commit and push current branch.
+    proves: Published work satisfies declared evidence gates or reports their blockers.
+    does_not_prove: Deferred schedules or production hardening.
+    steps: [Independent review, full verification, attribution audit, delete acquired donor only, status, commits, non-force push]
+    gate: [just verify, git diff --check]
+    teeth: [{attack: Search for donor imports and leaked secrets, expected: No runtime dependency or credential disclosure}]
+    redesign_trigger: Critical invariant or recovery proof fails.
+    evidence: docs/experts-verification.md
+final_acceptance:
+  native: [Published SDK only, validated semantic bindings, persistent governed identities, real durable handoffs]
+  product: [Custom Experts and Teams, editable Cognate Team, distinct routes, usable native UI, existing coding experience preserved]
+  evidence: [Restart and adversarial tests, independent review, honest known gaps, donor absent, committed and pushed]
+guardrails:
+  - Do not overwrite existing working changes or force push.
+  - No competing scheduler, runtime, event store or model client stack.
+  - Development authentication remains a documented limitation.
+handoff_contract:
+  must_report: [implemented journeys, evidence, failures and recovery, remaining gaps, commits and pushed branch]
+traceability:
+  convention: mission-NN references the exact numbered section of the operator's source mission; ux-vital references the subsequent UX instruction.
+  spec_requirement_count: 20
+  mapped_requirement_count: 20
+  unmapped_requirements: []
+  unknown_plan_requirement_ids: []
+  requirement_to_tasks:
+    mission-01: [T1]
+    mission-02: [T0]
+    mission-03: [T0]
+    mission-04: [T0]
+    mission-05: [T2]
+    mission-06: [T2]
+    mission-07: [T1]
+    mission-08: [T1]
+    mission-09: [T3]
+    mission-10: [T4]
+    mission-11: [T3]
+    mission-12: [T0]
+    mission-13: [T1]
+    mission-14: [T5]
+    mission-15: [T6]
+    mission-16: [T6]
+    mission-17: [T6]
+    mission-18: [T6]
+    mission-19: [T6]
+    ux-vital: [T5]

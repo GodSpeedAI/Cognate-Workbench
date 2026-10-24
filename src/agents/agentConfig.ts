@@ -6,13 +6,54 @@
 import type { AgentDefinition } from "@godspeedai/cognate-runtime-api";
 import type { Json } from "@godspeedai/cognate-events";
 import type { SettingsPatch } from "../settings.ts";
+import {
+  isAgentPreset, isAppearanceMode, isContainmentQuotas, isFontSizePx, isLanguageCode,
+  isPerformanceDetailMode, isPermissionMode, isPluginStatePatch, isSendBehavior, isSpendingCeilings,
+} from "../settings.ts";
+import { isWorkDetailsMode } from "../workDetails.ts";
+import { isShortcutOverrides } from "../shortcuts.ts";
 import { WORKBENCH_EVENTS } from "../workbench/types.ts";
+
+/** Session-surface events a validated capability may record through the `session.recorded`
+ *  command (J-TASK-scope/link). `session.created` and `session.archived` have their own typed
+ *  commands; this list is the recording gate for everything else, mirroring `WORKBENCH_EVENTS`. */
+export const SESSION_EVENTS = ["session.task.bound"] as const;
+export type SessionEventType = (typeof SESSION_EVENTS)[number];
+
+/** The recording run is a second validation gate: a settings event that skipped the
+ *  `settings.change*` capability (a direct service startRun) still cannot make an invalid
+ *  field durable. Every field is optional; present fields must validate exactly as the
+ *  capability writers validate them. */
+function validateSettingsPatch(patch: Partial<Record<keyof SettingsPatch, unknown>>): void {
+  const checks: ReadonlyArray<readonly [string, unknown, (value: unknown) => boolean]> = [
+    ["workDetails", patch.workDetails, isWorkDetailsMode],
+    ["permission", patch.permission, isPermissionMode],
+    ["language", patch.language, isLanguageCode],
+    ["appearance", patch.appearance, isAppearanceMode],
+    ["fontSize", patch.fontSize, isFontSizePx],
+    ["performanceDetail", patch.performanceDetail, isPerformanceDetailMode],
+    ["codingTools", patch.codingTools, (v) => typeof v === "boolean"],
+    ["sendBehavior", patch.sendBehavior, isSendBehavior],
+    ["preset", patch.preset, isAgentPreset],
+    ["plugins", patch.plugins, isPluginStatePatch],
+    ["shortcuts", patch.shortcuts, isShortcutOverrides],
+    ["spending", patch.spending, isSpendingCeilings],
+    ["containment", patch.containment, isContainmentQuotas],
+  ];
+  const unknownFields = Object.keys(patch).filter(key => !checks.some(([name]) => name === key));
+  if (unknownFields.length > 0) throw new Error(`agent.config: unknown settings field(s): ${unknownFields.join(", ")}`);
+  for (const [field, value, check] of checks) {
+    if (value !== undefined && !check(value)) throw new Error(`agent.config: settings field ${field} failed validation`);
+  }
+}
 
 export type AgentConfigInput =
   | { readonly kind: "model.configured"; readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages"; readonly model: string }
   /** `root` is provider-owned and opaque above the execution-world boundary; `executionWorldId`
    *  names where that root lives (see `@godspeedai/cognate-execution`). */
   | { readonly kind: "workspace.added"; readonly workspaceId: string; readonly root: string; readonly title: string; readonly executionWorldId: string }
+  /** One replay-safe typed configuration run records the preflighted world and workspace. */
+  | { readonly kind: "workspace.contained.added"; readonly requestId: string; readonly workspaceId: string; readonly root: string; readonly title: string; readonly executionWorldId: string; readonly worldLabel: string; readonly worldMetadata: Readonly<Record<string, string>>; readonly connection: Json }
   | { readonly kind: "workspace.selected"; readonly workspaceId: string }
   /** Usage pass U3: the sidebar's per-workspace Rename action (reference-behavior-matrix.md §12). */
   | { readonly kind: "workspace.renamed"; readonly workspaceId: string; readonly title: string }
@@ -30,6 +71,14 @@ export type AgentConfigInput =
   /** T11 (J-SESSION-archive): reversible, durable archiving of a conversation. The flag only changes
    *  sidebar visibility; no turn, run or event is ever deleted. */
   | { readonly kind: "session.archived"; readonly sessionId: string; readonly archived: boolean }
+  /** J-SESSION-draft: durable creation of a conversation identity *before* any prompt. The
+   *  capability layer already validated the workspace and derived the deterministic session id;
+   *  this run only records the fact. `title` is the literal pre-turn sidebar label. */
+  | { readonly kind: "session.created"; readonly sessionId: string; readonly workspaceId: string; readonly title: string }
+  /** J-TASK-scope/link: an ordered batch of session-scoped events a validated capability decided to
+   *  record (task bindings and binding invalidations). Same shape as `workbench.recorded`: the
+   *  run body only emits, so it is replay-safe by construction. */
+  | { readonly kind: "session.recorded"; readonly events: readonly { readonly type: string; readonly payload: Json }[] }
   /** A remote execution world (SSH host / WSL distribution) the operator connected. `connection` and
    *  `metadata` carry only safe facts (host, user, auth *kind*, key *path*, pinned host-key fingerprint) —
    *  never a password, passphrase or key material. */
@@ -59,6 +108,19 @@ export const agentConfigAgent: AgentDefinition = {
         await ctx.emit("workspace.selected", { workspaceId: payload.workspaceId });
         return { ok: true };
       }
+      case "workspace.contained.added": {
+        const { kind: _kind, requestId: _requestId, workspaceId, root, title, executionWorldId, worldLabel, worldMetadata, connection } = command;
+        await ctx.emit("execution.world.connected", {
+          worldId: executionWorldId,
+          worldKind: "linux-bubblewrap",
+          label: worldLabel,
+          metadata: worldMetadata,
+          connection,
+        });
+        await ctx.emit("workspace.added", { workspaceId, root, title, executionWorldId });
+        await ctx.emit("workspace.selected", { workspaceId });
+        return { ok: true };
+      }
       case "workspace.selected": {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("workspace.selected", payload);
@@ -81,9 +143,12 @@ export const agentConfigAgent: AgentDefinition = {
         return { ok: true };
       }
       case "workbench.recorded": {
-        // Only workbench events may be minted this way; the capability layer already validated them.
+        // Only workbench (and, for the session-task binding the workbench family owns, session)
+        // events may be minted this way; the capability layer already validated them. One batch
+        // keeps the ordering: `task.create` records the task row before its initial binding.
+        const recordable: readonly string[] = [...WORKBENCH_EVENTS, ...SESSION_EVENTS];
         for (const event of command.events) {
-          if (!(WORKBENCH_EVENTS as readonly string[]).includes(event.type)) throw new Error(`agent.config: ${event.type} is not a workbench event`);
+          if (!recordable.includes(event.type)) throw new Error(`agent.config: ${event.type} is not a recordable workbench or session event`);
           await ctx.emit(event.type, event.payload);
         }
         return { ok: true };
@@ -109,8 +174,25 @@ export const agentConfigAgent: AgentDefinition = {
         await ctx.emit("session.archived", payload);
         return { ok: true };
       }
+      case "session.created": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.created", payload);
+        return { ok: true };
+      }
+      case "session.recorded": {
+        // Only session events may be minted this way; the capability layer already validated them.
+        for (const event of command.events) {
+          if (!(SESSION_EVENTS as readonly string[]).includes(event.type)) throw new Error(`agent.config: ${event.type} is not a session event`);
+          await ctx.emit(event.type, event.payload);
+        }
+        return { ok: true };
+      }
       case "settings.changed": {
         const { kind: _kind, ...payload } = command;
+        // T8 (independent review finding): a settings event records durable operator-tenant
+        // state — containment quotas included — so the recording run validates exactly what the
+        // `settings.change*` capabilities validate. An unvalidated field never becomes durable.
+        validateSettingsPatch(payload);
         await ctx.emit("settings.changed", payload);
         return { ok: true };
       }

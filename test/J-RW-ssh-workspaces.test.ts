@@ -37,7 +37,7 @@ describe("J-RW-ssh-workspaces", () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
       const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
-      let app = await startServer({ port: 0, home });
+      let app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       let client: Client = clientFor(app);
       try {
         const remote = join(home, "remote-root");
@@ -107,7 +107,7 @@ describe("J-RW-ssh-workspaces", () => {
         await app.stop();
         for (let i = 0; i < 80 && fixture.stats.open > 0; i++) await Bun.sleep(25);
         expect(fixture.stats.open).toBe(0); // disposal closed the SSH connection
-        app = await startServer({ port: 0, home });
+        app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
         client = clientFor(app);
         const checked = (await client.invoke("execution.world.check", { worldId: world.worldId })) as { ok: boolean; home?: string };
         expect(checked.ok).toBe(true);
@@ -153,7 +153,7 @@ describe("J-RW-ssh-workspaces", () => {
   test("J-RW-coexist (part): a local world keeps working beside a connected SSH world", async () => {
     await withTempHome(async (home) => {
       const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
-      const app = await startServer({ port: 0, home });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
         await client.invoke("execution.world.connect", sshInput(fixture, fixture.fingerprint));
@@ -174,7 +174,7 @@ describe("J-RW-ssh-workspaces", () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
       const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
-      const app = await startServer({ port: 0, home });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
         await client.invoke("model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
@@ -207,7 +207,7 @@ describe("J-RW-ssh-workspaces", () => {
       const aimock = await bootAimock();
       const hostA = await startSshFixture({ users: { dev: { password: PASSWORD } } });
       const hostB = await startSshFixture({ users: { dev: { password: PASSWORD } } });
-      const app = await startServer({ port: 0, home });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
         await client.invoke("model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });

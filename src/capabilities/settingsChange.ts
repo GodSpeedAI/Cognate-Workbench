@@ -15,12 +15,14 @@ import { isWorkDetailsMode } from "../workDetails.ts";
 import {
   isAgentPreset,
   isAppearanceMode,
+  isContainmentQuotas,
   isFontSizePx,
   isLanguageCode,
   isPerformanceDetailMode,
   isPermissionMode,
   isPluginStatePatch,
   isSendBehavior,
+  isSpendingCeilings,
   type SettingsPatch,
 } from "../settings.ts";
 import { isShortcutOverrides, validateAssignment } from "../shortcuts.ts";
@@ -47,6 +49,12 @@ const SETTING_FIELDS: readonly SettingField[] = [
   // Usage pass U7: the one global plugin with runtime behavior behind it. The value is a per-key
   // patch (`{ plugins: { realitytrace: true } }`), merged per key by the settings projection fold.
   { capability: "settings.changePlugin", field: "plugins", validate: isPluginStatePatch },
+  // J-CONTEXT-BUDGET: the operator's ordinary-session and global spending ceilings. Enforcement is
+  // fail-closed in the billing ledger, never in this writer.
+  { capability: "settings.changeSpending", field: "spending", validate: isSpendingCeilings },
+  // T8 (J-RW-AGGREGATE-CONTAINMENT): the operator's aggregate contained-execution quotas. The
+  // containment ledger enforces them fail-closed across processes, never in this writer.
+  { capability: "settings.changeContainment", field: "containment", validate: isContainmentQuotas },
 ];
 
 export function settingsChangeComponent(options: {

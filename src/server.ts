@@ -1,26 +1,57 @@
 // Single Bun process: runtime + Connect RuntimeService + bundled React UI + CSS.
-// See APP/README.md for why this is a hand-composed `createRuntime` rather than `createHarness`.
+// See docs/explanation/why-single-bun-process.md for why this is a hand-composed
+// `createRuntime` rather than `createHarness`.
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
-import type { RuntimeService } from "@godspeedai/cognate-runtime-api";
+import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRuntime } from "@godspeedai/cognate-runtime-bun";
 import { storeConfigFor } from "./store.ts";
+import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
 import type { ActionPolicy, Runtime } from "@godspeedai/cognate-runtime-bun";
-import { devToken, devTokenAuthenticator } from "@godspeedai/cognate-protocol-connect-bun";
+import { devTokenAuthenticator } from "@godspeedai/cognate-protocol-connect-bun";
 import { registerRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
+import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
+import { ScheduleEvaluator } from "./schedules/evaluator.ts";
+import { SCHEDULES_THREAD } from "./schedules/types.ts";
+import { agentExpert } from "./agents/agentExpert.ts";
+import { expertsComponent, ExpertsService } from "./experts/service.ts";
+import { ExpertCompletionBridge } from "./experts/bridge.ts";
+import { reconcileBilling, runInvocationInspector } from "./experts/billing.ts";
+import { EXPERT_AGENT, EXPERTS_THREAD } from "./experts/types.ts";
+import { expertsProjection } from "./projections/experts.ts";
+import { expertsBillingProjection } from "./projections/expertsBilling.ts";
+import { providerRoutesProjection } from "./projections/providerRoutes.ts";
+import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
+import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
+import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
+import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
+import { expertEffectComponent } from "./capabilities/expertEffect.ts";
+import { ambiguousStepComponent } from "./capabilities/ambiguousStep.ts";
+import { externalAuthorityFromEnv, governanceComponent, type ExternalAuthority } from "./capabilities/governance.ts";
+import { recordWorkbenchEvents, settlementComponent } from "./capabilities/settlement.ts";
+import { createSettlementOrchestrator } from "./settlement/orchestrator.ts";
+import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/realitytrace.ts";
+import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
+import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
+import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
+import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
+import { ageExpiredSessions, createSessionAuthenticator, ensureIdentity, issueSession, OPERATOR_SESSION_TTL_MS, supersedeBootSessions, BOOT_SESSION_CAUSE, IDENTITY_THREAD } from "./auth/identity.ts";
 import { sessionHistoryComponent } from "./capabilities/sessionHistory.ts";
+import { sessionCreateComponent } from "./capabilities/sessionCreate.ts";
+import { sessionTaskBindComponent } from "./capabilities/sessionTaskBind.ts";
+import { sessionTaskBindingsProjection } from "./projections/sessionTaskBindings.ts";
 import { modelConfigureComponent } from "./capabilities/modelConfigure.ts";
 import { EXECUTION_CAPABILITY_IDS, createExecutionWorldRegistry, executionWorldsComponent, localExecutionWorld } from "@godspeedai/cognate-execution";
 import { executionWorldsManageComponent, restoreExecutionWorlds } from "./capabilities/executionWorlds.ts";
@@ -29,6 +60,7 @@ import { cognitiveComponent } from "./capabilities/cognitive.ts";
 import { agentCognitiveAgent } from "./agents/agentCognitive.ts";
 import type { MediatorSpec } from "./cognitive/mediation.ts";
 import { workspaceSelectComponent } from "./capabilities/workspaceSelect.ts";
+import { workspaceDirectorySuggestComponent } from "./capabilities/workspaceDirectorySuggest.ts";
 import { workspacePathComponent } from "./capabilities/workspacePath.ts";
 import { toolCapabilitiesComponent } from "./capabilities/tools.ts";
 import { planStateComponent } from "./capabilities/planState.ts";
@@ -60,20 +92,105 @@ import { secretStore } from "./secrets.ts";
 export const LOCAL_OPERATOR = { actor: { id: "operator", kind: "user" as const }, tenant: "local" };
 const SYSTEM_CALLER = { actor: { id: "system", kind: "system" as const }, tenant: "local" };
 
+export interface RunOwnershipMode {
+  readonly mode: "single-process" | "multi-process";
+}
+
+/** T7 (J-EXPERT-PARALLEL): resolve the multi-process run-ownership configuration. "multi-process"
+ * is exposed only behind this verified configuration, backed by the published fenced run-write
+ * ownership release: every execution pass claims authoritative store-time ownership, a stale
+ * owner's late run-scoped writes are fenced, and a killed process's in-flight effect requires
+ * explicit reconciliation instead of a blind repeat (ambiguousSteps: "wait"). Single-process
+ * restarts also wait for reconciliation of an interrupted effect; they never silently repeat it. */
+export function parseRunOwnershipMode(raw: string | undefined): "single-process" | "multi-process" {
+  if (raw === undefined || raw === "") return "single-process";
+  if (raw === "single-process" || raw === "multi-process") return raw;
+  throw new Error("COGNATE_RUN_OWNERSHIP must be 'single-process' or 'multi-process'");
+}
+
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** The server binds loopback only, but a browser page whose name DNS-rebinds to 127.0.0.1 is
+ *  same-origin with it, and the UI bundle carries the operator session. The Host header (and
+ *  Origin, when a browser sends one) is the only signal of that, so any non-loopback name is
+ *  refused before routing. Ports are not compared, so local port forwards keep working. */
+export function loopbackRefusal(headers: Headers): { status: number; reason: string } | undefined {
+  const hostname = (value: string): string | undefined => {
+    try { return new URL(value).hostname.toLowerCase(); } catch { return undefined; }
+  };
+  const host = headers.get("host");
+  const h = host === null ? undefined : hostname(`http://${host}`);
+  if (h === undefined || !LOOPBACK_HOSTNAMES.has(h)) return { status: 421, reason: "misdirected request: non-loopback Host" };
+  const origin = headers.get("origin");
+  if (origin !== null) {
+    const o = hostname(origin);
+    if (o === undefined || !LOOPBACK_HOSTNAMES.has(o)) return { status: 403, reason: "forbidden: non-loopback Origin" };
+  }
+  return undefined;
+}
+
+/** T8 (J-AUTH-SESSION): the dev authenticator is opt-in and loud. Any value other than an explicit
+ *  "1" keeps the production posture (durable sessions only). */
+export function parseDevAuth(raw: string | undefined): boolean {
+  if (raw === undefined || raw === "") return false;
+  if (raw === "1") return true;
+  throw new Error("COGNATE_DEV_AUTH must be '1' (explicit test/dev arming) or unset");
+}
+
 export interface ServerOptions {
   readonly port: number;
   readonly home: string;
+  /** Host startup capacity; default one. Eligibility never widens captured Expert authority. */
+  readonly runCapacity?: 1 | 2 | 4 | 8;
+  /** T7: verified multi-process run-ownership configuration (defaults to COGNATE_RUN_OWNERSHIP,
+   * then "single-process"). Multi-process semantics: fenced run writes + ambiguous-effect
+   * reconciliation. Both modes wait for reconciliation of an interrupted effect (never a repeat). */
+  readonly runOwnership?: "single-process" | "multi-process";
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
+  /** Deterministic provider seam; normal execution uses the published provider adapters. */
+  readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
+  /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
+  readonly enableScheduleEvaluation?: boolean;
+  /** Trusted host configuration only; browser and agent inputs cannot supply binary provenance. */
+  readonly containmentConfig?: ContainmentConfig;
+  /** T8: the production posture authenticates durable server-issued sessions only. This explicit
+   *  dev/test opt-in re-arms the legacy client-claimed `Bearer <tenant>:<actorId>` format for the
+   *  test harness; a production deployment never sets it (default COGNATE_DEV_AUTH, unset). */
+  readonly devAuth?: boolean;
+  /** Where agent effects may run (default COGNATE_EXECUTION_POSTURE, unset = "contained"). Under
+   *  "contained", commands and writes in uncontained `local` worlds are refused; "uncontained-local"
+   *  is the operator's explicit opt-in to run them on this host as this user (src/executionPosture.ts). */
+  readonly executionPosture?: ExecutionPosture;
+  /** SEA-Forge as the external authority (P02). `undefined` reads COGNATE_GOVERNANCE and friends;
+   *  `null` forces governance off. Requires the contained execution posture. */
+  readonly externalAuthority?: ExternalAuthority | null;
+  /** RealityTrace for governed settlement (readiness P03); default from COGNATE_REALITYTRACE_*.
+   *  `null` forces it off. Requires SEA-Forge governance. */
+  readonly realitytrace?: RealityTraceSettings | null;
+  /** Readiness P05: the SWE_SEED binary and where declared proofs may come from (default
+   *  COGNATE_SWE_SEED_BIN / COGNATE_PROOF_SOURCE; null = no SWE_SEED, any source). */
+  readonly sweSeed?: SweSeedSettings | null;
 }
 
 export interface AppServer {
   readonly url: string;
   readonly runtime: Runtime;
+  readonly executionPosture: ExecutionPosture;
+  /** T8: this boot's operator browser session token (the session-authenticated HTTP test seam). */
+  readonly operatorSessionToken: string;
+  /** P03: the settlement orchestrator, when SEA-Forge governance and RealityTrace are configured. */
+  readonly settlement?: { settleRun(runId: string): Promise<void>; idle(): Promise<void> };
   stop(): Promise<void>;
 }
 
 const GRANTED_CAPABILITIES = [
+  RUNTIME_EXECUTION_INSPECT,
+  ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
+  ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
+  ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
+  ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
+  ...Object.keys(SETTLEMENT_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
   "secret.put",
@@ -84,6 +201,7 @@ const GRANTED_CAPABILITIES = [
   "session.history",
   ...EXECUTION_CAPABILITY_IDS,
   "execution.world.probe", "execution.wsl.list", "execution.world.connect", "execution.world.check", "execution.world.disconnect",
+  "workspace.contained.select", "execution.containment.inspect",
   "case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard", "verification.run", "case.derive", "world.settle", "risk.assess", "case.observe", "ui.focus.publish", "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review", "method.accept", "method.active",
   "tool.read",
   "tool.edit",
@@ -103,7 +221,15 @@ const GRANTED_CAPABILITIES = [
   "settings.changePreset",
   "settings.changePlugin",
   "settings.changeShortcuts",
+  "settings.changeSpending",
+  "settings.changeContainment",
+  "identity.session.issue",
+  "identity.session.revoke",
+  "identity.inspect",
   "session.setArchived",
+  "session.create",
+  "session.task.bind",
+  "workspace.directory.suggest",
   "provider.delete",
   "model.catalog",
   "config.path",
@@ -120,9 +246,18 @@ function buildPolicy(): Policy {
     "deepseek-harness-app",
     [
       (request) => {
-        const isOperatorOrSystem = request.actor.kind === "user" || request.actor.kind === "system";
-        if (isOperatorOrSystem && GRANTED_CAPABILITIES.includes(request.capability.id)) {
-          return { allow: true, policyId: "deepseek-harness-app", reason: `operator/system may invoke ${request.capability.id}` };
+        // T8: kind "user" grants belong to exactly the one durable operator identity this
+        // single-operator application boots with. A server-issued session for any other
+        // provisioned identity authenticates (its own tenant partition) but holds no workbench
+        // capability authority — cross-tenant capability escalation is refused here.
+        if (request.actor.kind === "system" && GRANTED_CAPABILITIES.includes(request.capability.id)) {
+          return { allow: true, policyId: "deepseek-harness-app", reason: `system may invoke ${request.capability.id}` };
+        }
+        if (request.actor.kind === "user"
+          && request.tenant === LOCAL_OPERATOR.tenant
+          && request.actor.id === LOCAL_OPERATOR.actor.id
+          && GRANTED_CAPABILITIES.includes(request.capability.id)) {
+          return { allow: true, policyId: "deepseek-harness-app", reason: `operator may invoke ${request.capability.id}` };
         }
         return undefined;
       },
@@ -132,25 +267,53 @@ function buildPolicy(): Policy {
 
 function buildActionPolicy(): ActionPolicy {
   return {
-    authorize: () => ({ allow: true, reason: "local single-operator app: default deny is enforced at the capability layer" }),
+    authorize: (request) => {
+      if (request.action === "run.start" && request.resource === EXPERT_AGENT && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
+      if (request.action === "thread.state.update" && (request.resource === EXPERTS_THREAD || request.resource.startsWith("experts:partition:") || request.resource === SCHEDULES_THREAD) && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Experts and schedule state mutations require validated capabilities"};
+      // T8: the identity/session ledger and the aggregate containment ledger are system-owned
+      // truth. A session (or any non-system caller) writing them directly could forge an operator
+      // session, revive a revoked one, or free containment slots by hand — refused here; the
+      // identity-admin and settings capabilities are the only validated writers.
+      if (request.action === "thread.state.update" && (request.resource === IDENTITY_THREAD || request.resource === CONTAINMENT_THREAD) && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Identity and containment ledgers are system-owned; use the validated capabilities"};
+      // The identity ledger also carries session token hashes: reads go through the sanitized
+      // identity.inspect capability, never a raw thread read.
+      if (request.action === "thread.state.read" && request.resource === IDENTITY_THREAD && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"The identity ledger is system-owned; use identity.inspect"};
+      return { allow: true, reason: "local single-operator app: default deny is enforced at the capability layer" };
+    },
   };
 }
 
-const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }) => `
+// T8 hardening note: the optional Google Fonts stylesheet must never block the local app's
+// bootstrap (a held font response cannot delay DOMContentLoaded — the browser journeys prove
+// this), and the CSP forbids inline event handlers — so the document only preconnects, and the
+// entry module below appends the stylesheet link dynamically (parser-async by construction).
+const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string) => `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@godspeedai/cognate-client";
 import { CognateProvider } from "@godspeedai/cognate-react";
-import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
+import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { App } from "../src/ui/App.tsx";
 
 const caller = { tenant: ${JSON.stringify(caller.tenant)}, actor: { id: ${JSON.stringify(caller.actorId)}, kind: "user" } };
+// T8: the browser presents the server-issued session token for this boot; the server resolves it
+// against the durable session ledger on every request and never trusts this string as an identity.
+const authToken = ${JSON.stringify(authToken)};
 const transport = connectTransport(window.location.origin);
-const service = createRemoteRuntimeService(transport, () => devToken(caller));
+const service = createRemoteRuntimeService(transport, () => authToken);
 const client = createClient({ service, caller });
 
 const root = document.getElementById("root");
+
+// T8: the optional Google Fonts stylesheet loads from here — dynamically appended, so a slow
+// or held font response never blocks DOMContentLoaded or the local app's bootstrap, and the
+// document itself carries no inline event handler (the CSP forbids it).
+const fonts = document.createElement("link");
+fonts.rel = "stylesheet";
+fonts.href = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap";
+document.head.append(fonts);
+
 if (root) {
   createRoot(root).render(createElement(CognateProvider, { client }, createElement(App)));
 }
@@ -164,7 +327,6 @@ function indexHtml(): string {
 <title>Cognate Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/astryx.css" />
 <link rel="stylesheet" href="/theme.css" />
 <link rel="stylesheet" href="/app.css" />
@@ -179,12 +341,39 @@ function indexHtml(): string {
 
 export async function startServer(options: ServerOptions): Promise<AppServer> {
   const home = options.home;
+  const runCapacity = parseExpertAdmissionCapacity(options.runCapacity === undefined ? process.env.COGNATE_RUN_CAPACITY : String(options.runCapacity));
+  // The mode is still parsed (invalid COGNATE_RUN_OWNERSHIP fails boot); every mode now waits for
+  // operator reconciliation of an interrupted effect, so the value no longer changes runtime options.
+  void (options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP));
+  const executionPosture = options.executionPosture ?? parseExecutionPosture(process.env[EXECUTION_POSTURE_ENV]);
+  const externalAuthority = options.externalAuthority === null ? undefined : options.externalAuthority ?? externalAuthorityFromEnv(process.env);
+  // Any process of this OS user can speak on_behalf_of the operator to SEA-Forge. Only the contained
+  // posture keeps agent processes away from the SEA-Forge socket (readiness S02), so governance
+  // without it would let an agent approve its own escalation.
+  if (externalAuthority && executionPosture !== "contained") {
+    throw new Error("SEA-Forge governance requires COGNATE_EXECUTION_POSTURE=contained: under uncontained-local an agent could reach the SEA-Forge socket and approve its own escalation");
+  }
+  // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
+  const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
+  if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
+  const sweSeed: SweSeedSettings = options.sweSeed === null ? { mode: "any" } : options.sweSeed ?? sweSeedFromEnv(process.env);
+  if (sweSeed.mode === "swe_seed" && !realitytrace) throw new Error("COGNATE_PROOF_SOURCE=swe_seed requires governed settlement (COGNATE_REALITYTRACE_*)");
+  let containmentConfig = options.containmentConfig;
+  const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
+  if (!containmentConfig && containmentConfigPath) {
+    const contents = await readFile(containmentConfigPath, "utf8");
+    try { containmentConfig = JSON.parse(contents) as ContainmentConfig; }
+    catch { throw new Error("Invalid host Linux containment configuration JSON"); }
+  }
+  // Freeze this server's policy by value; caller-owned options cannot reroute an active world.
+  if (containmentConfig) containmentConfig = validateContainmentConfig(structuredClone(containmentConfig));
   await mkdir(home, { recursive: true });
   const store = storeConfigFor(home, "harness");
   const secretsPath = join(home, "secrets.json");
   const secrets = secretStore(secretsPath);
 
   const domain = await loadDomain();
+  const cognitiveRefs = bindCognitiveCapabilities(domain);
   const bindings = bindTranche5(domain);
   const toolBindings = bindTranche7(domain);
   const planBindings = bindTranche9(domain);
@@ -194,44 +383,129 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
+  const expertRefs = bindExpertCapabilities(domain);
+  const ambiguousRefs = bindAmbiguousCapabilities(domain);
+  const governanceRefs = bindGovernanceCapabilities(domain);
+  const settlementRefs = bindSettlementCapabilities(domain);
+  const scheduleRefs = bindScheduleCapabilities(domain);
+  const runtimeExecutionRef = bindRuntimeExecution(domain);
+  // T8: identity-administration capabilities (session issue/revoke/inspect) and the aggregate
+  // containment quota setting. The containment semanticRef sits at SETTING_FIELDS index 11
+  // (`settings.changeContainment`), appended to the usage-2 refs in that component's order.
+  const t8 = bindT8Identity(domain);
+  // RED journeys (J-SESSION-draft / J-WS-directory-discovery / J-TASK-scope / J-TASK-move):
+  // explicit bindings for the new capabilities; see RED_JOURNEY_ANCHORS in domain/index.ts.
+  const redRefs = bindRedJourneys(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
     if (!serviceRef.current) throw new Error("runtime not ready");
     return serviceRef.current;
   };
+  let experts: ExpertsService;
+  let finishExpertsBoot!: (value: ExpertsService) => void;
+  const expertsBoot = new Promise<ExpertsService>(resolve => { finishExpertsBoot = resolve; });
+  // Runtime-service readiness is independent of Expert boot: configuration and coding runs derive
+  // their resource keys from projections and must never wait on the Experts registry seed.
+  let finishServiceBoot!: (value: RuntimeService) => void;
+  const serviceBoot = new Promise<RuntimeService>(resolve => { finishServiceBoot = resolve; });
+  const awaitService = (signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    if (serviceRef.current) return Promise.resolve(serviceRef.current);
+    return new Promise<RuntimeService>((resolve, reject) => {
+      const aborted = () => {
+        signal?.removeEventListener("abort", aborted);
+        reject(signal?.reason ?? new Error("Admission cancelled during runtime boot"));
+      };
+      signal?.addEventListener("abort", aborted, { once: true });
+      void serviceBoot.then(value => {
+        signal?.removeEventListener("abort", aborted);
+        resolve(value);
+      });
+    });
+  };
+  const admissionKeys = createExpertAdmissionResourceKeys({
+    getService: awaitService,
+    ready: signal => {
+      signal?.throwIfAborted();
+      if (experts) return Promise.resolve(experts);
+      return new Promise<ExpertsService>((resolve, reject) => {
+        const aborted = () => {
+          signal?.removeEventListener("abort", aborted);
+          reject(signal?.reason ?? new Error("Expert admission cancelled during boot"));
+        };
+        signal?.addEventListener("abort", aborted, { once: true });
+        void expertsBoot.then(value => {
+          signal?.removeEventListener("abort", aborted);
+          resolve(value);
+        });
+      });
+    },
+  });
+  let schedules: SchedulesService;
+  let scheduleEvaluator: ScheduleEvaluator;
   const knownWorkspaceIds = new Set<string>();
   // Execution worlds: where a workspace's files live and its commands run. Local today; other
   // providers (ssh, wsl, sandbox forks) register here without touching the tools or the agent.
-  const executionWorlds = createExecutionWorldRegistry([localExecutionWorld()]);
+  // T8: the registry is wrapped so every CONTAINED provider's executions pass the aggregate
+  // containment ledger first — one operator-configured ceiling across processes, fail closed.
+  // The execution posture wraps the registry first, so every `local`-kind provider — the base
+  // world and any directory-copy fork registered later — is effect-refused under "contained".
+  const executionWorlds = aggregateContainedRegistry(postureRegistry(createExecutionWorldRegistry([localExecutionWorld()]), executionPosture), { getService, systemCaller: SYSTEM_CALLER });
   // T11: the plugin catalog registry. Constructed here (not inside the component) so the same
   // instance can be handed to any future surface that needs to resolve a catalog entry, and so an
   // additional `PluginSource` can be registered at boot without touching the capability.
   const pluginRegistry = new PluginRegistry();
 
-  const runtime = await createRuntime({
+  let pollApprovals: (() => Promise<number>) | undefined;
+  const runtime: Runtime = await createRuntime({
     store,
+    // P02: with an external authority, every capability invoke and consequential action is decided by
+    // SEA-Forge; escalations wait for the operator's resolution there.
+    ...(externalAuthority ? { governance: externalAuthority.governance } : {}),
+    // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
+    // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
+    // An interrupted external effect is never silently repeated: a recovering owner records
+    // `run.invocation.ambiguous` and waits for operator reconciliation (`run.invocation.reconcile`).
+    // This holds in every run-ownership mode and capacity (ambiguousSteps: "wait").
+    execution: {
+      ...(runCapacity > 1 ? { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } : {}),
+      runOwnership: { ambiguousSteps: "wait" as const },
+    },
     // Usage pass U6 (RealityTrace, Option A): trace-worthy events get an observation intent
     // committed atomically with the event (the runtime's generic hook — no runtime dependency on
     // RealityTrace; the adapter only drains the outbox).
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent],
+    agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent, agentExpert],
     components: [
+      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
+      schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
+      expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
+      expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
+      expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
+      ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
+      governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
+      settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs, sweSeed }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
-      executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings }),
-      cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [] }),
+      executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
+      containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
+      cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
+      identityAdminComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, semanticRefs: t8.identity }),
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
+      sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
+      sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
+      workspaceDirectorySuggestComponent({ registry: executionWorlds, protectedHome: home, semanticRef: redRefs["workspace.directory.suggest"] }),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),
       planStateComponent(getService, planBindings.planState.semanticRef),
       subagentStartComponent({ getService, systemActor: SYSTEM_CALLER.actor, semanticRef: subagentBindings.subagentStart.semanticRef }),
       onboardingDismissComponent({ getService, systemCaller: SYSTEM_CALLER }),
-      settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage2.settingsChange, shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
+      settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: [...usage2.settingsChange, t8.containment], shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
-      workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs }),
+      workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       pluginInstallComponent({
@@ -244,11 +518,15 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }),
     ],
     projections: [
+      { projection: expertsProjection, public: true },
+      { projection: expertsBillingProjection, public: true },
+      { projection: providerRoutesProjection, public: true },
       { projection: modelConfigProjection, public: true },
       { projection: workspacesProjection, public: true },
       { projection: cognitiveProjection, public: true },
       { projection: executionWorldsProjection, public: true },
       { projection: sessionsProjection, public: true },
+      { projection: sessionTaskBindingsProjection, public: true },
       { projection: plansProjection, public: true },
       { projection: subagentsProjection, public: true },
       { projection: onboardingProjection, public: true },
@@ -259,7 +537,29 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ],
     system: SYSTEM_CALLER.actor,
   });
-  serviceRef.current = runtime.service;
+  const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
+  serviceRef.current = governedService;
+  pollApprovals = () => runtime.pollApprovals();
+  finishServiceBoot(governedService);
+  experts = new ExpertsService(governedService,SYSTEM_CALLER);
+  finishExpertsBoot(experts);
+
+  // T8 (J-AUTH-SESSION): the durable identity ledger is the authentication truth. Boot seeds the
+  // operator identity idempotently, ages expired sessions (they were already refused; the ledger's
+  // own status becomes truthful), and issues exactly one fresh session for THIS boot's browser
+  // entry — a restart therefore invalidates the previous browser token, and the operator can
+  // revoke it live. The cleartext token exists in memory and the generated entry only.
+  const operatorIdentity = await ensureIdentity(governedService, SYSTEM_CALLER, { tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id, label: "operator browser session" });
+  await ageExpiredSessions(governedService, SYSTEM_CALLER);
+  await supersedeBootSessions(governedService, SYSTEM_CALLER, operatorIdentity.id);
+  const operatorSession = await issueSession(governedService, SYSTEM_CALLER, { identityId: operatorIdentity.id, ttlMs: OPERATOR_SESSION_TTL_MS, cause: BOOT_SESSION_CAUSE });
+  // T8 (J-RW-AGGREGATE-CONTAINMENT): reap any aggregate slots whose holder died mid-execution so
+  // a crashed process cannot hold the configured ceiling shut.
+  try {
+    await reconcileContainmentAtBoot(governedService, SYSTEM_CALLER);
+  } catch (error) {
+    console.warn(`[cognate-workbench] containment: boot reconciliation failed (${error instanceof Error ? error.message : String(error)}); lapsed slots stay booked until a later admission reaps them`);
+  }
 
   // Seed `knownWorkspaceIds` from the persisted projection (survives restart).
   for (const row of ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" }))).rows) {
@@ -267,14 +567,40 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   }
 
   // Re-register durable SSH/WSL worlds (lazy: nothing connects until a workspace uses one).
-  await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets });
+  await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, containmentConfig });
 
-  const registry = new ProviderRegistry(runtime.kernel, bindings.modelGenerate.semanticRef);
+  // P03: settle each governed agent run when it ends, and at boot any that ended while Workbench was down.
+  let settlement: ReturnType<typeof createSettlementOrchestrator> | undefined;
+  if (externalAuthority && realitytrace) {
+    if (!containmentConfig) throw new Error("governed settlement requires host containment (COGNATE_LINUX_CONTAINMENT_CONFIG): the proof runs contained");
+    const orchestrator = createSettlementOrchestrator({
+      authority: externalAuthority, realitytrace, containment: containmentConfig,
+      getService: () => runtime.service, systemCaller: SYSTEM_CALLER,
+      record: (events, correlationId) => recordWorkbenchEvents(runtime.service, SYSTEM_CALLER, events, correlationId),
+      proofSource: sweSeed.mode,
+    });
+    settlement = orchestrator;
+    runtime.store.onCommitted((events) => orchestrator.onCommitted(events));
+    void orchestrator.sweep();
+  }
+
+  // J-CONTEXT-BUDGET: the billing ledger backs every ordinary-session dispatch with a durable
+  // reservation and enforces the operator's spending ceilings. Prices and protocol resolve from
+  // the registry's current configuration at dispatch time, never from run input.
+  const registry = new ProviderRegistry(runtime.kernel, bindings.modelGenerate.semanticRef, {
+    getService: () => runtime.service,
+    systemCaller: LOCAL_OPERATOR,
+    prices: () => registry.current?.prices ?? null,
+    protocol: () => registry.current?.protocol,
+  });
   await runtime.kernel.mount(
     workspaceSelectComponent({
       getService,
       systemCaller: SYSTEM_CALLER,
       getKnownWorkspaceIds: () => knownWorkspaceIds,
+      noteKnownWorkspace: (workspaceId) => {
+        knownWorkspaceIds.add(workspaceId);
+      },
       registry: executionWorlds,
       semanticRef: bindings.workspaceSelect.semanticRef,
     }),
@@ -301,13 +627,35 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // it can call `model.generate` again.
   const modelConfigRows = ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "model-config" }))).rows;
   const currentModelConfig = modelConfigRows.find((r) => r.key === "current")?.value as
-    | { readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible"; readonly model: string }
+    | { readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible"; readonly model: string; readonly prices?: { inputUsdPerMillion: number; outputUsdPerMillion: number } }
     | undefined;
   if (currentModelConfig) {
     await registry.swap(
-      { providerId: currentModelConfig.providerId, baseURL: currentModelConfig.baseURL, protocol: currentModelConfig.protocol, model: currentModelConfig.model },
+      { providerId: currentModelConfig.providerId, baseURL: currentModelConfig.baseURL, protocol: currentModelConfig.protocol, model: currentModelConfig.model, ...(currentModelConfig.prices ? { prices: currentModelConfig.prices } : {}) },
       secrets,
     );
+  }
+
+  // Restore the legacy model route before feature initialization: recovered ordinary coding
+  // runs must not spend their provider-retry budget waiting for unrelated seed work.
+  await experts.seed(LOCAL_OPERATOR.tenant);
+  schedules=new SchedulesService(experts);
+  scheduleEvaluator=new ScheduleEvaluator(schedules,experts);
+  await scheduleEvaluator.reconcile(LOCAL_OPERATOR.tenant);
+  const expertBridge = new ExpertCompletionBridge(experts,LOCAL_OPERATOR.tenant);
+  await expertBridge.start();
+
+  // J-CONTEXT-BUDGET: reconcile reservations whose owner died between reservation and outcome.
+  // Committed invocation evidence settles them; anything unresolvable books conservatively as
+  // unknown — never zero, never blindly repeated. Reconciliation failure never blocks boot: the
+  // reserved entries themselves fail closed until a later reconciliation resolves them.
+  try {
+    const reconciled = await reconcileBilling(runtime.service, LOCAL_OPERATOR, runInvocationInspector(runtime.service, LOCAL_OPERATOR));
+    if (reconciled.settled + reconciled.released + reconciled.unknown > 0) {
+      console.warn(`[cognate-workbench] billing: reconciled ${reconciled.settled} settled, ${reconciled.released} released, ${reconciled.unknown} unknown reservation(s)`);
+    }
+  } catch (error) {
+    console.warn(`[cognate-workbench] billing: boot reconciliation failed (${error instanceof Error ? error.message : String(error)}); interrupted reservations stay fail-closed`);
   }
 
   // Usage pass U6: the RealityTrace observation adapter — an at-least-once background drain from
@@ -375,17 +723,45 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // the same public `@connectrpc/connect` + `registerRuntimeService` calls `serveRuntime` uses
   // internally keeps this a genuinely single Bun process with no proxy layer to hang.
   const connectRouter = createConnectRouter({});
-  registerRuntimeService(connectRouter, runtime.service, { authenticate: devTokenAuthenticator, maxJsonDepth: 32 });
+  // T8 (J-AUTH-SESSION): the production posture resolves every request against the durable session
+  // ledger — a server-issued, revocable credential bound to one identity and tenant. The legacy
+  // client-claimed dev format is armed only behind the explicit devAuth opt-in (tests); an armed
+  // dev posture ALSO accepts sessions so the browser entry (always session-tokened) keeps working.
+  const devAuthArmed = options.devAuth ?? parseDevAuth(process.env.COGNATE_DEV_AUTH);
+  const sessionAuth = createSessionAuthenticator(governedService, SYSTEM_CALLER);
+  const authenticate: (headers: Headers) => Promise<Caller | undefined> | Caller | undefined = devAuthArmed
+    ? (headers) => {
+        const dev = devTokenAuthenticator(headers);
+        return dev !== undefined ? dev : sessionAuth(/^Bearer (.+)$/.exec(headers.get("authorization") ?? "")?.[1]?.trim() ?? "");
+      }
+    : (headers) => sessionAuth(/^Bearer (.+)$/.exec(headers.get("authorization") ?? "")?.[1]?.trim() ?? "");
+  if (devAuthArmed) {
+    console.warn("[cognate-workbench] dev auth ARMED: client-claimed bearer identities are trusted; never use this posture in production");
+  }
+  registerRuntimeService(connectRouter, governedService, { authenticate, maxJsonDepth: 32 });
   const connectHandlersByPath = new Map<string, (req: Request) => Promise<Response>>();
   for (const uHandler of connectRouter.handlers) {
-    connectHandlersByPath.set(uHandler.requestPath, createFetchHandler(uHandler, { httpVersion: "1.1" }));
+    connectHandlersByPath.set(uHandler.requestPath, (request) => createFetchHandler(uHandler, { httpVersion: "1.1" })(request).then(response => {
+      // T8: the Connect API's own responses carry the hardening headers too — the review found
+      // they were only on the hand-served routes. The body (including server streams) passes
+      // through untouched; only headers are added.
+      const headers = new Headers(response.headers);
+      for (const [name, value] of Object.entries({
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "no-referrer",
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-resource-policy": "same-origin",
+      })) headers.set(name, value);
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    }));
   }
 
   const appDir = fileURLToPath(new URL("..", import.meta.url));
   const generatedDir = join(appDir, ".generated");
   await mkdir(generatedDir, { recursive: true });
   const entryPath = join(generatedDir, "entry.tsx");
-  await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }));
+  await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token));
   const build = await Bun.build({ entrypoints: [entryPath], target: "browser", format: "esm" });
   if (!build.success) throw new Error(`server: failed to bundle the UI: ${build.logs.map((log) => String(log)).join("; ")}`);
   const bundleJs = await build.outputs[0]!.text();
@@ -395,40 +771,71 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // component's layout-only sheet (the server concatenates; components never import CSS).
   const WORKBENCH_CSS = ["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"];
   const cssParts: string[] = [];
-  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => fileURLToPath(new URL(`./ui/workbench/${n}.css`, import.meta.url)))]) {
+  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => fileURLToPath(new URL(`./ui/workbench/${n}.css`, import.meta.url))), fileURLToPath(new URL("./ui/experts/experts.css",import.meta.url))]) {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");
 
+  if(options.enableScheduleEvaluation!==false)await scheduleEvaluator.start(LOCAL_OPERATOR.tenant);
+  // T8 deployment hardening: every response carries the browser hardening headers (the Connect
+  // API replies with application/json content-type, which is not CORS-safelisted, so a hostile page
+  // cannot make the browser send a credentialed preflightable request that would execute; no CORS
+  // headers are ever emitted). The body ceiling bounds request sizes at the socket layer; the
+  // Connect protocol's own 32-level JSON depth limit bounds structure.
+  const hardened = (headers: Record<string, string> = {}): Record<string, string> => ({
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
+    ...headers,
+  });
   const server = Bun.serve({
     port: options.port,
     hostname: "127.0.0.1",
     idleTimeout: 0,
+    maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(request) {
+      const refusal = loopbackRefusal(request.headers);
+      if (refusal) return new Response(refusal.reason, { status: refusal.status, headers: hardened() });
       const url = new URL(request.url);
       if (url.pathname === "/health") {
-        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest } });
+        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest }, execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined } }, { headers: hardened() });
       }
       if (url.pathname.startsWith("/cognate.v1.RuntimeService/")) {
         const handler = connectHandlersByPath.get(url.pathname);
-        return handler ? handler(request) : new Response("not found", { status: 404 });
+        return handler ? handler(request) : new Response("not found", { status: 404, headers: hardened() });
       }
       // The bundle is rebuilt at every boot, so the browser must never hold one across restarts —
       // no-store keeps a stale UI (with stale handlers) from surviving a harness restart.
-      if (url.pathname === "/app.js") return new Response(bundleJs, { headers: { "content-type": "text/javascript", "cache-control": "no-store" } });
-      if (url.pathname === "/astryx.css" && cssPaths[0]) return new Response(Bun.file(cssPaths[0]));
-      if (url.pathname === "/theme.css" && cssPaths[1]) return new Response(Bun.file(cssPaths[1]));
-      if (url.pathname === "/app.css") return new Response(appCss, { headers: { "content-type": "text/css", "cache-control": "no-store" } });
-      if (url.pathname === "/") return new Response(indexHtml(), { headers: { "content-type": "text/html" } });
-      return new Response("not found", { status: 404 });
+      if (url.pathname === "/app.js") return new Response(bundleJs, { headers: hardened({ "content-type": "text/javascript", "cache-control": "no-store" }) });
+      if (url.pathname === "/astryx.css" && cssPaths[0]) return new Response(Bun.file(cssPaths[0]), { headers: hardened() });
+      if (url.pathname === "/theme.css" && cssPaths[1]) return new Response(Bun.file(cssPaths[1]), { headers: hardened() });
+      if (url.pathname === "/app.css") return new Response(appCss, { headers: hardened({ "content-type": "text/css", "cache-control": "no-store" }) });
+      if (url.pathname === "/") return new Response(indexHtml(), { headers: hardened({
+        "content-type": "text/html",
+        "cache-control": "no-store",
+        // The document never needs anything beyond its own origin, the two Google Fonts hosts and
+        // inline styles (theme + component CSS-in-JS conventions); the boot-token-bearing bundle is
+        // same-origin script and nothing else may execute.
+        "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      }) });
+      return new Response("not found", { status: 404, headers: hardened() });
     },
   });
 
   return {
     url: `http://127.0.0.1:${server.port}`,
-    runtime,
+    runtime: {...runtime,service:governedService},
+    executionPosture,
+    /** T8: this boot's browser session token — the test seam for session-authenticated HTTP.
+     *  In the real browser it never leaves the generated entry; production never logs it. */
+    operatorSessionToken: operatorSession.token,
+    ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       eventsController.abort();
+      await scheduleEvaluator.stop();
+      await expertBridge.stop();
       observations?.stop();
       server.stop(true);
       await runtime.close();
@@ -443,5 +850,10 @@ if (import.meta.main) {
   const home = process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? join(dirname(fileURLToPath(new URL(".", import.meta.url))), "..", ".data");
   const app = await startServer({ port, home });
   console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
-  console.log(`[cognate-workbench] dev auth: Authorization: Bearer ${devToken(LOCAL_OPERATOR)}`);
+  console.log(`[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is ${parseDevAuth(process.env.COGNATE_DEV_AUTH) ? "ARMED (test/dev only)" : "off"}`);
+  if (app.executionPosture === "contained") {
+    console.log(`[cognate-workbench] execution: contained — agent commands and writes run only in Linux-contained or explicitly connected remote workspaces; local workspaces are read-only to agents (${EXECUTION_POSTURE_ENV}=uncontained-local to opt out)`);
+  } else {
+    console.warn(`[cognate-workbench] execution: UNCONTAINED LOCAL — agents run commands and write files on this host as this user; path checks are not a sandbox (${EXECUTION_POSTURE_ENV}=uncontained-local)`);
+  }
 }

@@ -8,7 +8,7 @@
 // reference/observations/aria/04-workspace-selected.desktop.txt). The reference's `all-prompts`
 // LLM re-titling cadence (a separate model request; see reference-behavior-matrix.md §0/§4) was not
 // observed to visibly replace this literal-text title within the pinned pass's timeframe, so this
-// reconstruction does not implement a second titling call — see APP/README.md "Known gaps".
+// reconstruction does not implement a second titling call — see docs/known-gaps.md.
 import type { Json } from "@godspeedai/cognate-events";
 import type { Projection } from "@godspeedai/cognate-projections";
 
@@ -48,6 +48,27 @@ export const sessionsProjection: Projection = {
     // correlated `subagent:<parentRunId>:<id>`, not `session:<id>`. Excluding anything not
     // "session:"-correlated is what keeps children out of the sidebar's session tree (they are
     // tracked instead by the `subagents` projection — see `src/projections/subagents.ts`).
+    //
+    // J-SESSION-draft: the durable draft identity `session.create` recorded before any prompt.
+    // The fold is a no-op for a row that already exists (the idempotency key guarantees one
+    // `session.created` event; the guard keeps a replayed or legacy row's progress intact).
+    if (event.eventType === "session.created") {
+      const payload = event.payload as { readonly sessionId: string; readonly workspaceId: string; readonly title?: string };
+      const key = `${event.tenant}/${payload.sessionId}`;
+      if (state.get(key) !== undefined) return [];
+      return [
+        {
+          key,
+          value: {
+            id: payload.sessionId,
+            workspaceId: payload.workspaceId,
+            title: typeof payload.title === "string" && payload.title.trim() ? payload.title : "New Session",
+            lastStatus: "draft",
+            updatedAt: event.recordedAt,
+          },
+        },
+      ];
+    }
     if (event.eventType === "session.turn.started") {
       const payload = event.payload as { readonly sessionId: string; readonly workspaceId: string; readonly message: string; readonly mode?: string; readonly preset?: string };
       const key = `${event.tenant}/${payload.sessionId}`;
@@ -123,7 +144,10 @@ export const sessionsProjection: Projection = {
       const key = `${event.tenant}/${sessionId}`;
       const existing = state.get(key) as Record<string, Json> | undefined;
       if (!existing) return [];
-      return [{ key, value: { ...existing, lastStatus: "waiting", runId: event.runId } }];
+      // The waiting continuation type (`run.waiting` payload.type) lets the sidebar name what the run
+      // needs; "ambiguous-invocation" is an operator reconciliation, not an approval.
+      const waitingType = typeof (event.payload as { readonly type?: unknown } | null)?.type === "string" ? (event.payload as { readonly type: string }).type : null;
+      return [{ key, value: { ...existing, lastStatus: "waiting", runId: event.runId, waitingType } }];
     }
     // Header mode badge ("Standard mode" / "PTC mode" — reference-behavior-matrix.md, round-2 critic
     // batch B P1): the reference's badge reads "PTC mode" for sessions that have ever needed a

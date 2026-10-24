@@ -1,0 +1,98 @@
+schema: agent.development_plan
+schema_version: '1.0'
+metadata:
+  id: experts-debt-closure
+  title: Governed durable dispatch and Experts debt closure
+  status: settled
+  version: '1.0'
+  created: '2026-10-14'
+source:
+  authority: Operator debt-closure mission Parts A–D in this session
+  inventory: docs/experts-debt-closure.md
+decisions:
+  - Preserve feature/expert-teams and published SDK contracts until verified release integration.
+  - One native outbox/continuation execution architecture; schedules define due intent, never execute agents themselves.
+  - Outbox claim ownership does not fence run writes or establish exactly-once external effects.
+  - Preserve sibling Cognate dirty status files; upstream work uses an isolated task worktree.
+  - Baseline and each settlement require actual store/runtime evidence, not mock-only proofs.
+  - Formatting must prove semantic equivalence, comment retention and idempotence before canonical application.
+  - Real 0.2.0 restart tests support single-process schedules/inbox before distributed run ownership; T2 remains required for multi-process exposure. Single-process parallel integration requires T1 and authoritative resource eligibility.
+global_gates:
+  - just typecheck
+  - just verify
+  - domainforge validate --format human .sea/interaction/interaction-model.sea
+  - domainforge fmt --check .sea/interaction/interaction-model.sea
+  - git diff --check
+dependency_graph:
+  edges: [[T0,T1],[T1,T2],[T0,T3],[T0,T4],[T2,T5],[T0,T6],[T3,T7],[T4,T7],[T5,T7],[T6,T7],[T7,T8]]
+  critical_path: [T0,T1,T2,T5,T7,T8]
+initial_state:
+  current_task: T1
+  last_settled_task: T0
+progress:
+  T0: Baseline settled at 1064 passing tests; dependency and disposition map committed.
+  T1: SDK 0.4.0 baseline consumed and committed at 1104 tests. PR44 merged as e90f511 after exact-head CI/packaging and RED/GREEN review repairs; linked release merged as dd13c842 published all 45 packages as 0.5.0 with complete registry audit and fresh-consumer proof. Workbench consumes published 0.5.0 only.
+  T2: Outbox fencing verified; durable run ownership remains open.
+  T3: Single-process schedules and shared Team safe-boundary inbox verified in native PostgreSQL and browser journeys; generalized/distributed contracts remain open.
+  T4: Partition migration, erasure, pagination, Expert budgets and benchmarks verified; indexed retrieval, tokenization and global budgets remain open.
+  T5: Human-selected host-configured Linux child containment is modelled/bound and passes actual OS/PostgreSQL/browser journeys, including lost-acknowledgment receipt recovery and launcher guards; the full gate passes 1153 tests. Production identity, tenant boundaries, aggregate resource quotas and independent security review remain open. This local child-world slice does not require or claim distributed ownership.
+  T6: Formatter closure and twenty cognitive bindings verified; semantic IDs preserved.
+  T7: Native schedule/inbox/accounting UI committed and browser verified; remaining historical product gaps retained.
+  T8: Published SDK 0.5.0 integration passes the full gate (typecheck, 1153 tests / 0 fail including attested containment, DomainForge validation/format, diff check); evidence recorded and committed. Mission incomplete pending general workspace concurrency, Team admission/batching, distributed run ownership, production trust and remaining product debts.
+tasks:
+  T0:
+    title: Inventory, baseline, architectural dependency and debt disposition map
+    depends_on: []
+    changes: Inspect source, upstream ownership and published releases; record every existing gap.
+    gate: [just verify]
+    evidence: docs/experts-debt-closure.md
+  T1:
+    title: Fenced native outbox and bounded runtime dispatch upstream
+    depends_on: [T0]
+    changes: Preserve default serial compatibility; add owner-safe claim renewal/settlement and bounded independent execution.
+    gate: [Cognate events/store conformance, runtime concurrency/cancellation/replay tests]
+    teeth: [{attack: Expired owner settles reclaimed work, expected: Stale settlement refused}]
+    evidence: docs/experts-debt-closure.md
+  T2:
+    title: Run ownership, version compatibility and recoverable commitments
+    depends_on: [T1]
+    changes: Fence run writes and effects; crash recovery must block ambiguous effects and reject stale owners.
+    gate: [Two-process PostgreSQL crash and stale writer journeys, supported SDK publication]
+    teeth: [{attack: Owner killed after external effect before receipt, expected: Reconciliation required without blind repeat}]
+    evidence: docs/experts-debt-closure.md
+  T3:
+    title: Durable schedules and governed live inbox on supported dispatch
+    depends_on: [T0]
+    changes: Model/bind single-process due occurrences and safe-boundary inbox on supported0.2.0 dispatch; distributed integration remains gated by T2.
+    gate: [Schedule restart/cancellation/DST tests, inbox restart/steering journeys, browser tests]
+    evidence: docs/experts-debt-closure.md
+  T4:
+    title: Measured memory partitioning, pagination and enforced economics
+    depends_on: [T0]
+    changes: Benchmark aggregate and retrieval; migrate by ownership; token/usage budgets include all measurable request sections.
+    gate: [Migration/recovery/scoped-load tests, context and economics journeys]
+    evidence: docs/experts-debt-closure.md
+  T5:
+    title: Separate identity, authorization and contained execution
+    depends_on: [T2]
+    changes: Supported auth/session and execution-world containment with platform capability detection; fail closed.
+    gate: [Tenant isolation, revocation, OS escape/egress/cancellation tests, security review]
+    evidence: docs/experts-debt-closure.md
+  T6:
+    title: Formatter fidelity and cognitive semantic binding
+    depends_on: [T0]
+    changes: Prove existing upstream formatter fix and canonicalize model; model and explicitly bind cognitive capabilities.
+    gate: [AST/comment/idempotence verification, semantic binding tests, cognitive journey regressions]
+    evidence: .sea/interaction/validation/formatter-fidelity.md
+  T7:
+    title: Related workflow and honest native UI integration
+    depends_on: [T3,T4,T5,T6]
+    changes: Reconcile all historical gaps; implement supported controls and actual statistics; retain explicit unavailable prerequisites.
+    gate: [Browser desktop/mobile journeys, existing coding/Experts regressions]
+    evidence: docs/experts-debt-closure.md
+  T8:
+    title: Adversarial review, full verification, evidence and publication
+    depends_on: [T7]
+    changes: Reconcile all debt statuses and dependencies; verify released integration, commit and push without force.
+    gate: [just verify, upstream conformance/release verification, git diff --check]
+    evidence: docs/experts-debt-closure.md

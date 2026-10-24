@@ -39,7 +39,7 @@ describe("E2E cognitive console", () => {
   test("destination/present/deviation/next move; focus -> 'why did this fail?'; agent-requested timeline; mutation needs the human; settlement reachable != settled", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const app = await startServer({ port: 0, home });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       const browser = await chromium.launch();
       try {
@@ -148,7 +148,7 @@ describe("E2E cognitive console", () => {
   test("preflight is semantic on the approval card; the lower-trust waiver is overruled; allow executes", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const app = await startServer({ port: 0, home, extraMediators: [userToyMod()] });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, extraMediators: [userToyMod()] });
       const client = clientFor(app);
       const browser = await chromium.launch();
       try {
@@ -195,7 +195,7 @@ describe("E2E cognitive console", () => {
   test("method recommendation is visibly a candidate; the active method stays unchanged until accepted", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const app = await startServer({ port: 0, home });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       const browser = await chromium.launch();
       try {

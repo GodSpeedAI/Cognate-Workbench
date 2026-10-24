@@ -857,14 +857,18 @@ input:focus-visible {
   background: var(--cg-surface, #fff);
   color: inherit;
 }
-.workspace-new-session-btn,
-.workspace-actions-btn {
-  display: none;
+/* J-SESSION-draft UX gate: the per-workspace "+" is always visible — a hover-only affordance is
+   not "seamless and obvious" for the most common action (the E2E journey drives it directly);
+   only the overflow "..." actions menu button stays hover-revealed. */
+.workspace-new-session-btn {
   margin-left: auto;
 }
-.workspace-row:hover .workspace-new-session-btn,
+
+.workspace-actions-btn {
+  display: none;
+}
+
 .workspace-row:hover .workspace-actions-btn,
-.workspace-row:focus-within .workspace-new-session-btn,
 .workspace-row:focus-within .workspace-actions-btn {
   display: inline-flex;
 }
@@ -962,6 +966,35 @@ input:focus-visible {
   border-radius: 8px;
   background: var(--cg-surface, #fff);
   color: inherit;
+}
+.workspace-execution-choice {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-execution-choice > legend {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.workspace-dialog .workspace-execution-choice label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workspace-dialog .workspace-execution-choice input[type="radio"] {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+.workspace-execution-choice .settings-description {
+  line-height: 1.45;
 }
 .workspace-dialog .btn-primary {
   background: var(--cg-accent, #1b1d22);
@@ -2315,6 +2348,10 @@ input:focus-visible {
    desktop layout floor inherited from the settled reconstruction's own product-characterization
    geometry; it must not apply once the viewport itself is narrower than that. */
 @media (max-width: 640px) {
+  .app-shell {
+    min-width: 0;
+  }
+
   .center-column {
     min-width: 0;
   }
@@ -3117,4 +3154,154 @@ input:focus-visible {
   background: var(--cg-surface-sunken, #f6f8fa);
   border-bottom: 1px solid var(--cg-border, #d7dbe0);
   word-break: break-all;
+}
+
+/* ===== J-WS-directory-discovery: the shared folder type-ahead (DirectoryField) ============ */
+/* One picker serves the first-run chooser, the Add-workspace local tab and the SSH/WSL folder
+   step. The field wrapper is position:relative so the suggestion listbox anchors to the input. */
+.dir-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.dir-field input {
+  width: 100%;
+}
+
+.dir-field-hint,
+.dir-field-status {
+  font-size: 12px;
+  color: var(--cg-muted, #8a9099);
+  min-height: 14px;
+}
+
+.dir-field-status:empty {
+  display: none;
+}
+
+.dir-suggest-list {
+  position: absolute;
+  top: calc(100% - 20px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--cg-panel, #1d2126);
+  border: 1px solid var(--cg-border, #33393f);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.dir-suggest-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dir-suggest-option.active,
+.dir-suggest-option:hover {
+  background: var(--cg-accent-soft, rgba(96, 165, 250, 0.18));
+}
+
+.dir-suggest-name {
+  font-weight: 500;
+}
+
+.dir-suggest-path {
+  font-size: 11px;
+  color: var(--cg-muted, #8a9099);
+  font-family: var(--cg-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dir-suggest-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--cg-muted, #8a9099);
+}
+
+/* J-SESSION-draft: the + button's visible failure path (retry in place, never console-only). */
+.new-session-error {
+  margin: 4px 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #f2b8b5;
+  background: rgba(198, 40, 40, 0.18);
+  border: 1px solid rgba(198, 40, 40, 0.4);
+}
+
+/* J-TASK-scope: the New-task visibility choice and the move control's consequence preview. */
+.wb-task-scope legend {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.wb-task-scope label,
+.wb-move-control label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 16px;
+}
+.wb-scope-hint {
+  margin-top: 6px;
+}
+.wb-move-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--cg-border, #33393f);
+  border-radius: 8px;
+  background: rgba(125, 125, 125, 0.06);
+  width: 100%;
+}
+
+/* Settings → Governance & evidence */
+.governance-card h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.governance-card .settings-description {
+  margin: 0;
+}
+
+.governance-world-ref {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.governance-world-ref code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.governance-copy {
+  flex: none;
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface);
+  border-radius: var(--cg-radius-xs);
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
 }

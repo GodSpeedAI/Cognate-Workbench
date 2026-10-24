@@ -116,7 +116,7 @@ terminal, not consumer AI chat products. Build to that bar of earned familiarity
    at a glance what they are allowing, why it is being asked, and what would happen if they said no.
    This is also where "done" and "settled" claims are either earned or absent.
 
-3. **No control renders that does something.** A dead affordance is worse than no affordance. Every
+3. **Every control has a real purpose.** A dead affordance is worse than no affordance. Every
    enabled control performs a real action; every disabled one states its specific reason in visible
    text next to it; every blocked affordance names the condition blocking it and the move that would
    unblock it.

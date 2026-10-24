@@ -11,10 +11,10 @@
 // store; events, projections and metadata carry safe facts. Providers are rebuilt from the durable
 // records at boot, connecting lazily on first use; nothing ever falls back to local execution.
 import { createHash, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExecutionWorldProvider, ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
+import { bubblewrapExecutionWorld, type BubblewrapExecutionWorldOptions, type ExecutionWorldProvider, type ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { probeHostKey, sshExecutionWorld } from "@godspeedai/cognate-execution-ssh";
 import { wslExecutionWorld } from "@godspeedai/cognate-execution-wsl";
 import type { Json } from "@godspeedai/cognate-events";
@@ -23,10 +23,12 @@ import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import type { WorldRecord } from "../projections/executionWorlds.ts";
 import type { SecretStore } from "../secrets.ts";
+import type { ContainmentConfig } from "./containedWorkspace.ts";
 
 export type WorldConnection =
   | { readonly kind: "ssh"; readonly host: string; readonly port: number; readonly username: string; readonly auth: { readonly kind: "password" } | { readonly kind: "key"; readonly privateKeyPath: string; readonly passphrase?: true } | { readonly kind: "agent" }; readonly hostKeyFingerprint: string }
-  | { readonly kind: "wsl"; readonly distro: string; readonly user?: string };
+  | { readonly kind: "wsl"; readonly distro: string; readonly user?: string }
+  | { readonly kind: "linux-bubblewrap"; readonly workspaceRoot: string };
 
 export interface ConnectInput {
   readonly kind: "ssh" | "wsl";
@@ -39,18 +41,34 @@ export interface ConnectInput {
   };
   readonly wsl?: { readonly distro: string; readonly user?: string };
 }
+type RemoteWorldConnection = Extract<WorldConnection, { readonly kind: "ssh" | "wsl" }>;
 
 const secretKey = (worldId: string, name: "password" | "passphrase") => `execution-world:${worldId}:${name}`;
 const FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
 const HOST = /^[A-Za-z0-9._:-]+$/;
 const SAFE_NAME = /^[A-Za-z0-9._ -]{1,64}$/;
 
+function stableConfig(value: unknown): string {
+  const sort = (entry: unknown): unknown => {
+    if (Array.isArray(entry)) return entry.map(sort);
+    if (!entry || typeof entry !== "object") return entry;
+    return Object.fromEntries(Object.entries(entry as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, sort(item)]));
+  };
+  return JSON.stringify(sort(value));
+}
+
+/** Stable identity binds one canonical workspace root to one exact host-owned provider config. */
+export function containedWorldId(config: ContainmentConfig, canonicalRoot: string): string {
+  const configHash = createHash("sha256").update(stableConfig(config)).digest("hex");
+  return `contained-${createHash("sha256").update(`${configHash}\0${canonicalRoot}`).digest("hex").slice(0, 16)}`;
+}
+
 function need(cond: unknown, message: string): asserts cond {
   if (!cond) throw new Error(`execution.world: ${message}`);
 }
 
 /** Validate untrusted capability input into a connection descriptor + the secrets to store. */
-export function parseConnect(input: ConnectInput): { readonly connection: WorldConnection; readonly secrets: Partial<Record<"password" | "passphrase", string>>; readonly label: string } {
+export function parseConnect(input: ConnectInput): { readonly connection: RemoteWorldConnection; readonly secrets: Partial<Record<"password" | "passphrase", string>>; readonly label: string } {
   if (input.kind === "wsl") {
     const w = input.wsl;
     need(w && typeof w.distro === "string" && SAFE_NAME.test(w.distro), "a WSL distribution name is required");
@@ -86,8 +104,16 @@ export class CredentialsMissingError extends Error {
 }
 
 /** Build a live provider from a durable descriptor + the secret store. Never reads anything else. */
-export async function buildProvider(worldId: string, connection: WorldConnection, secrets: SecretStore): Promise<ExecutionWorldProvider> {
+export async function buildProvider(worldId: string, connection: WorldConnection, secrets?: SecretStore, containmentConfig?: ContainmentConfig): Promise<ExecutionWorldProvider> {
   if (connection.kind === "wsl") return wslExecutionWorld({ worldId, distro: connection.distro, ...(connection.user ? { user: connection.user } : {}) });
+  if (connection.kind === "linux-bubblewrap") {
+    if (!containmentConfig) throw new Error(`host containment configuration is unavailable for ${worldId}`);
+    const canonicalRoot = await realpath(connection.workspaceRoot);
+    if (canonicalRoot !== connection.workspaceRoot) throw new Error(`contained workspace root for ${worldId} is no longer canonical`);
+    if (containedWorldId(containmentConfig, canonicalRoot) !== worldId) throw new Error(`host containment configuration no longer matches saved world ${worldId}`);
+    return bubblewrapExecutionWorld({ ...containmentConfig, worldId, workspaceRoot: canonicalRoot } satisfies BubblewrapExecutionWorldOptions);
+  }
+  if (!secrets) throw new Error(`the secret store is unavailable for remote world ${worldId}`);
   const auth = connection.auth;
   const base = { worldId, host: connection.host, port: connection.port, username: connection.username, hostKeys: { fingerprints: [connection.hostKeyFingerprint] } };
   if (auth.kind === "password") {
@@ -118,6 +144,8 @@ export interface ExecutionWorldsOptions {
   readonly secrets: SecretStore;
   readonly knownHostsPath?: string;
   readonly wslBin?: string;
+  /** Host-owned configuration. It is never copied to durable world records or events. */
+  readonly containmentConfig?: ContainmentConfig;
   readonly semanticRefs?: { readonly connect?: SemanticRef; readonly disconnect?: SemanticRef; readonly probe?: SemanticRef; readonly check?: SemanticRef };
 }
 
@@ -127,14 +155,14 @@ const MAX_WORLD_FAIL = new Map<string, string>();
 export const unavailableReason = (worldId: string): string | undefined => MAX_WORLD_FAIL.get(worldId);
 
 /** Re-register every durable world at boot (lazy: no connection is opened here). */
-export async function restoreExecutionWorlds(options: Pick<ExecutionWorldsOptions, "getService" | "systemCaller" | "registry" | "secrets">): Promise<void> {
+export async function restoreExecutionWorlds(options: Pick<ExecutionWorldsOptions, "getService" | "systemCaller" | "registry" | "secrets" | "containmentConfig">): Promise<void> {
   const rows = (await options.getService().readProjection(options.systemCaller, { name: "execution-worlds" })).rows;
   for (const row of rows) {
     if (!row.key.startsWith("record/")) continue;
     const record = row.value as unknown as WorldRecord;
     if (options.registry.has(record.worldId)) continue;
     try {
-      options.registry.register(await buildProvider(record.worldId, record.connection as unknown as WorldConnection, options.secrets));
+      options.registry.register(await buildProvider(record.worldId, record.connection as unknown as WorldConnection, options.secrets, options.containmentConfig));
       MAX_WORLD_FAIL.delete(record.worldId);
     } catch (e) {
       MAX_WORLD_FAIL.set(record.worldId, e instanceof Error ? e.message : String(e));
@@ -160,9 +188,11 @@ export function executionWorldsManageComponent(options: ExecutionWorldsOptions):
   }
 
   const home = async (provider: ExecutionWorldProvider): Promise<string> => {
-    const r = await provider.process.exec({ argv: ["sh", "-c", 'printf %s "$HOME"'], cwd: "/", timeoutMs: 20_000 });
+    const contained = provider.kind === "linux-bubblewrap";
+    const cwd = contained ? "/workspace" : "/";
+    const r = await provider.process.exec({ argv: ["sh", "-c", 'printf %s "$HOME"'], cwd, timeoutMs: 20_000 });
     if (r.exitCode !== 0) throw new Error(r.stderr.trim() || `the world did not run a command (exit ${r.exitCode})`);
-    return r.stdout.trim() || "/";
+    return contained ? "/workspace" : r.stdout.trim() || "/";
   };
 
   const probe = contract("execution.world.probe", "probe");

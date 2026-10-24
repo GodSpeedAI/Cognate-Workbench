@@ -167,7 +167,7 @@ describe("J-H-provider-error", () => {
         }
 
         // Reopen the same SQLite file; the runtime resumes non-terminal runs on boot.
-        const reopened = await startServer({ port: 0, home });
+        const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
         try {
           const finalRun = await waitForCompletion(reopened, runId);
           expect(finalRun.status).toBe("failed");

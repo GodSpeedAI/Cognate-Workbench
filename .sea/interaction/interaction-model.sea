@@ -27,6 +27,11 @@ Entity "Goal"
 
 Entity "Subagent"
 
+// J-SESSION-draft / J-RUN-task-attribution: `AgentRun` is the durable agent invocation a
+// conversational turn produces — one inference or many model/tool steps. A Run is not a Task,
+// not a tool call and not a plan step; it may serve at most one Task, frozen at its start.
+Entity "AgentRun"
+
 Entity "Composer"
 
 Entity "UserPreferences"
@@ -67,17 +72,78 @@ Entity "GroundedFeedback"
 
 Entity "ParallelPlan"
 
+// Native process-level bound for admitting concurrent runs. This is distinct from
+// ParallelPlan, which only advises whether planned work units are independent.
+Entity "NativeExecutionSlots"
+
 Entity "UsageLedger"
+
+// T8 production trust: a durable human/operator identity and its server-issued sessions. The
+// session record — never the bearer token — is the durable truth; tokens are stored only as
+// verified hashes and revocation is enforced at every request boundary.
+Entity "DurableIdentity"
+
+Entity "DurableSession"
+
+// T8: operator-configured aggregate resource containment for contained executions. Like
+// UserPreferences this is an operator-owned preference, but the quota is its own concept: an
+// aggregate ceiling across processes that new work fails closed against, never widened by
+// agent or browser input.
+Entity "ContainmentQuota"
 
 // Focus (adapted from the operator's gs-term): what "this" means is resolved by a fixed precedence and
 // frozen when a message is sent, so a referent never silently changes while an agent works.
 Entity "AttentionFocus"
+
+// Cognitive navigation: a Case preserves the desired difference and its settlement boundary;
+// observed criteria, immutable snapshots, checks and bounded search remain separate concepts.
+Entity "Case"
+
+Entity "SuccessCriterion"
+
+Entity "WorldSnapshot"
+
+Entity "Verification"
+
+Entity "RiskAssessment"
+
+Entity "Experiment"
+
+Entity "MethodRecommendation"
 
 // Plugins (T11). A plugin is a catalogued extension the operator can install, enable and inspect.
 // Installation registers the plugin and activates whatever implementation the catalog entry declares;
 // a catalog entry with no executable implementation installs as inert and says so, rather than
 // pretending to work. Trust is an explicit boundary: this app never executes downloaded plugin code.
 Entity "Plugin"
+
+// Experts and Teams (proposed native Workbench subsystem). ExpertDefinition is reusable
+// configuration; Expert is the persistent identity that survives individual Cognate runs.
+Entity "ExpertDefinition"
+
+Entity "Expert"
+
+Entity "Team"
+
+Entity "TeamMembership"
+
+Entity "Conversation"
+
+Entity "Assignment"
+
+Entity "ExpertRun"
+
+// Consequential Expert tool calls use Cognate commitments. A lost outcome remains unknown;
+// a restart never repeats an ambiguous shell/edit effect without human reconciliation.
+Entity "ExpertEffectCommitment"
+
+// J-TEAM-RECOVER extension: an ambiguous commitment can only be reconciled by a human with
+// an attributable reason and observed outcome. Orchestrators and Specialists cannot resolve it.
+Entity "Handoff"
+
+Entity "ExpertMessage"
+
+Entity "ExpertMemory"
 
 Resource "ModelConfig" units
 
@@ -140,6 +206,58 @@ Resource "UsageProvenance" units
 
 Resource "FocusSnapshot" units
 
+Resource "CaseRecord" units
+
+Resource "FrozenCriterion" units
+
+Resource "WorldSnapshotRecord" units
+
+Resource "VerificationObservation" units
+
+Resource "RiskAssessmentRecord" units
+
+Resource "ExperimentRoundRecord" units
+
+Resource "MethodRecommendationRecord" units
+
+// Session / Workspace / Task RED journeys. One Task entity carries a scope
+// (workspace | session); binding a Task to a Session is a durable explicit choice, never an
+// inherited side effect. Directory discovery is a read-only query into the selected execution
+// world's filesystem — it creates nothing and never falls back to another world.
+Resource "SessionDraft" units
+
+Resource "DirectorySuggestion" units
+
+Resource "TaskBindingRecord" units
+
+Resource "TaskMoveRecord" units
+
+Resource "RunTaskAttribution" units
+
+Resource "AssignmentTaskRecord" units
+
+// Experts and Teams resources. These represent durable event-backed state and artifacts, not a
+// second event store or a promise that the proposed capabilities have already been implemented.
+Resource "ExpertDefinitionRecord" units
+
+Resource "ExpertIdentityRecord" units
+
+Resource "TeamRecord" units
+
+Resource "MembershipRecord" units
+
+Resource "ConversationRecord" units
+
+Resource "AssignmentRecord" units
+
+Resource "ExpertRunReceipt" units
+
+Resource "HandoffRecord" units
+
+Resource "ExpertMessageRecord" units
+
+Resource "ExpertMemoryRecord" units
+
 Role "Approver"
 
 Role "Operator"
@@ -150,6 +268,14 @@ Role "HostAuthority"
 
 // The human who decides a ReviewGate. Distinct from the Operator (agent) and from approval of a single tool call.
 Role "Reviewer"
+
+Role "Orchestrator"
+
+Role "Specialist"
+
+Role "MemoryContributor"
+
+Role "HumanSettlementAuthority"
 
 Relation "ApprovalAuthorization"
     subject: "Approver"
@@ -167,6 +293,24 @@ Relation "ReviewAuthorization"
     subject: "Reviewer"
     predicate: "authorizes"
     object: "Operator"
+    via: flow "ReviewDecision"
+
+Relation "TeamCoordination"
+    subject: "Orchestrator"
+    predicate: "coordinates"
+    object: "Specialist"
+    via: flow "AssignmentRecord"
+
+Relation "ExpertMemoryAttribution"
+    subject: "MemoryContributor"
+    predicate: "attributes"
+    object: "Reviewer"
+    via: flow "ExpertMemoryRecord"
+
+Relation "HumanTeamSettlement"
+    subject: "HumanSettlementAuthority"
+    predicate: "settles"
+    object: "Orchestrator"
     via: flow "ReviewDecision"
 
 Flow "ModelConfig" from "User" to "ModelProvider" quantity 1
@@ -231,6 +375,59 @@ Flow "ParallelismVerdict" from "Workflow" to "ParallelPlan" quantity 1
 Flow "UsageProvenance" from "OperatorAgent" to "UsageLedger" quantity 1
 
 Flow "FocusSnapshot" from "User" to "AttentionFocus" quantity 1
+
+Flow "CaseRecord" from "User" to "Case" quantity 1
+
+Flow "FrozenCriterion" from "User" to "SuccessCriterion" quantity 1
+
+Flow "WorldSnapshotRecord" from "ExecutionWorld" to "WorldSnapshot" quantity 1
+
+Flow "VerificationObservation" from "WorldSnapshot" to "Verification" quantity 1
+
+Flow "RiskAssessmentRecord" from "OperatorAgent" to "RiskAssessment" quantity 1
+
+Flow "ExperimentRoundRecord" from "Case" to "Experiment" quantity 1
+
+Flow "MethodRecommendationRecord" from "Experiment" to "MethodRecommendation" quantity 1
+
+// Session / Workspace / Task RED journey flows. SessionDraft is the durable pre-inference
+// conversation identity the + action creates; DirectorySuggestion is read-only completion from
+// the selected execution world; TaskBindingRecord is the governed Task-to-Session association;
+// TaskMoveRecord is the governed move mutation; RunTaskAttribution freezes a Run's Task at
+// start; AssignmentTaskRecord carries a Task's identity into its delegated Expert Assignments.
+Flow "SessionDraft" from "User" to "Session" quantity 1
+
+Flow "DirectorySuggestion" from "ExecutionWorld" to "User" quantity 1
+
+Flow "TaskBindingRecord" from "Task" to "Session" quantity 1
+
+Flow "TaskMoveRecord" from "User" to "Task" quantity 1
+
+Flow "RunTaskAttribution" from "AgentRun" to "Task" quantity 1
+
+Flow "AssignmentTaskRecord" from "Assignment" to "Task" quantity 1
+
+// Experts and Teams flows preserve authorship and routing at the semantic boundary. Active-Team
+// cardinality is enforced atomically by the mutation capability over Cognate shared thread state.
+Flow "ExpertDefinitionRecord" from "User" to "ExpertDefinition" quantity 1
+
+Flow "ExpertIdentityRecord" from "ExpertDefinition" to "Expert" quantity 1
+
+Flow "TeamRecord" from "User" to "Team" quantity 1
+
+Flow "MembershipRecord" from "Expert" to "TeamMembership" quantity 1
+
+Flow "ConversationRecord" from "User" to "Conversation" quantity 1
+
+Flow "AssignmentRecord" from "Team" to "Assignment" quantity 1
+
+Flow "ExpertRunReceipt" from "Expert" to "ExpertRun" quantity 1
+
+Flow "HandoffRecord" from "ExpertRun" to "Handoff" quantity 1
+
+Flow "ExpertMessageRecord" from "Expert" to "ExpertMessage" quantity 1
+
+Flow "ExpertMemoryRecord" from "Expert" to "ExpertMemory" quantity 1
 
 Instance j_a_first_use of "CanonicalJourney" {
     actor: "User",
@@ -367,7 +564,6 @@ Instance j_h_cancellation of "CanonicalJourney" {
 // framework-level journeys (they apply to any Cognate app with workspaces), modeled here because
 // this reconstruction is where the workspace journeys live. They do NOT change J-A..J-H: those
 // keep their meaning, and now settle against whichever world the selected workspace references.
-
 Instance j_rw_select_world of "CanonicalJourney" {
     actor: "User",
     capabilities: "world.register, world.list, world.select",
@@ -379,6 +575,19 @@ Instance j_rw_select_world of "CanonicalJourney" {
     settlement: "The world is registered, listed with a stable id and kind, and selectable; no workspace has been added yet",
     steps: "user declares a world (kind + provider configuration, including a secret reference rather than a secret) -> the provider validates what it can without performing work -> the world is registered and listed -> the user can select it when adding a workspace",
     variants: "local world (always available, no configuration); ssh world (host, user, auth reference, host-key policy, optional jump chain); a world whose provider is missing fails closed and is listed as unavailable rather than silently falling back to local"
+}
+
+Instance j_rw_contained_workspace of "CanonicalJourney" {
+    actor: "Human operator",
+    capabilities: "execution.containment.inspect, workspace.contained.select, workspace.path, filesystem.readText, filesystem.writeText, process.exec",
+    evidence_class: "observed",
+    initiating_condition: "The human wants a new workspace whose tool processes and filesystem operations use Linux namespace containment",
+    journey_id: "J-RW-contained-workspace",
+    precondition: "Host-owned configuration attests a patched Bubblewrap binary, exact SHA-256 and approved runtime directories; Linux namespaces and a dedicated canonical workspace root pass real provider preflight",
+    purpose: "Create an explicitly contained workspace through Cognate execution-world ports without changing existing sessions or accepting binary trust assertions from an agent or browser",
+    settlement: "A durable workspace references its own contained execution world; ordinary read/edit/Bash/run_code route through that provider; host sibling paths and network access are denied; restart restores the same boundary or marks it unavailable without local fallback",
+    steps: "human inspects host containment configuration and limits -> explicitly selects a dedicated root for a new contained workspace -> mutation rejects agent invocation and canonicalizes the root -> native provider verifies binary and launches real namespace preflight -> typed configuration events record world and workspace -> existing tools use provider-owned root -> visible status and actual receipts establish the selected boundary",
+    variants: "missing configuration, unsupported platform, changed binary or failed namespaces leave no new selectable workspace; restart without approved configuration preserves unavailable identity and denies work; a local uncontained twin remains distinct; Linux child containment does not authenticate users or isolate the host application — aggregate CPU/process ceilings and kernel per-execution caps over contained work are their own journey (J-RW-AGGREGATE-CONTAINMENT); failed or ambiguous external effects still require native reconciliation"
 }
 
 Instance j_rw_add_workspace of "CanonicalJourney" {
@@ -720,9 +929,503 @@ Instance j_plg_install of "CanonicalJourney" {
     variants: "entry with an executable implementation becomes toggleable; entry without one installs inert with a stated reason; installing an already-installed plugin is refused; arbitrary downloaded code is never executed"
 }
 
-Policy every_canonical_flow_recorded as:
-    forall f in flows: (f.quantity > 0)
+// Cognitive navigation journeys are grounded in the executable J-COG runtime tests. They describe
+// observed paths and deliberately keep human settlement distinct from reachable settlement.
+Instance j_cog_cleanup of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "case.open, criterion.freeze, world.freeze, world.fork, risk.assess, verification.run, case.derive, world.settle",
+    evidence_class: "observed",
+    initiating_condition: "The operator wants a desired repository change while preserving a known settled world",
+    journey_id: "J-COG-cleanup",
+    precondition: "A workspace and execution world are available; the operator can state an outcome and required checks",
+    purpose: "Make a bounded candidate change, compare it with a frozen baseline, and decide from recorded verification evidence",
+    settlement: "The candidate reaches a human-reviewable state; only an attributable human decision may move the settled head",
+    steps: "open Case and declare checks -> freeze criterion and baseline -> fork a candidate world -> request and authorize consequential operations -> freeze candidate and run checks -> inspect deviations and repair -> human explicitly settles a verified candidate",
+    variants: "restart reconstructs Case and world lineage from events; failed verification blocks settlement; denied or unresolved approval leaves the protected operation unapplied"
+}
+
+Instance j_cog_liveverify of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "case.observe, world.freeze, verification.run, case.derive",
+    evidence_class: "observed",
+    initiating_condition: "A coding run makes a consequential change inside a Case with a frozen criterion and declared checks",
+    journey_id: "J-COG-liveverify",
+    precondition: "The Case has a settled baseline, a frozen criterion and checks declared before the change",
+    purpose: "Observe the changed candidate and run its declared checks without relying on an unrecorded manual verification step",
+    settlement: "Candidate identity and check results are recorded; failure exposes a repair affordance, while passing only makes human settlement reachable",
+    steps: "coding run changes the workspace -> case observer hashes the candidate -> declared checks execute -> verification facts are recorded -> Case derivation exposes deviation or reachable settlement",
+    variants: "unchanged work produces no new verification; failed checks keep settlement unreachable; a repair creates a distinct candidate and repeats verification"
+}
+
+Instance j_cog_attention of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "ui.focus.publish, ui.context, ui.request, ui.pending",
+    evidence_class: "observed",
+    initiating_condition: "The operator focuses a recorded failure or world fact and asks a context-dependent question",
+    journey_id: "J-COG-attention",
+    precondition: "The focused reference resolves to recorded semantic evidence",
+    purpose: "Use explicit human attention to select a small evidence neighborhood for an agent without treating focus as authority or truth",
+    settlement: "The answer and requested representation follow the selected recorded fact; inspection changes no authoritative Case, criterion, verification or lineage fact",
+    steps: "publish a semantic focus reference -> agent requests context -> context is derived from recorded facts -> agent explains or requests a read-only surface -> operator may change focus and obtain a different grounded answer",
+    variants: "without a valid focus the agent reports that context is missing; a focus change changes the answer; requests to mutate or settle through the attention path are refused"
+}
+
+Instance j_cog_search of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "experiment.round, experiment.status, method.review, method.accept, method.active",
+    evidence_class: "observed",
+    initiating_condition: "A settled parent, frozen criterion and bounded round budget are available for comparing candidate approaches",
+    journey_id: "J-COG-search",
+    precondition: "Each round can be isolated from the parent and scored against the frozen criterion and declared invariants",
+    purpose: "Compare bounded candidate experiments and surface a method recommendation without silently promoting a candidate or changing the active method",
+    settlement: "Rejected candidates remain rejected; the best candidate remains unsettled; the active method changes only after explicit human acceptance of a recommendation",
+    steps: "freeze parent and criterion -> run candidate rounds within the budget -> score each candidate and preserve lineage -> review repeated residuals -> record a candidate-only method recommendation -> human accepts or leaves the active method unchanged",
+    variants: "budget exhaustion blocks another round; invariant failure rejects a candidate; no recurring residual yields no recommendation; human rejection preserves the active method"
+}
+
+Instance j_cog_realitytrace of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "world.freeze, verification.run",
+    evidence_class: "observed",
+    initiating_condition: "RealityTrace observation delivery is enabled and a Case emits verification or world-lineage facts",
+    precondition: "The runtime observation outbox is configured and the event has a durable identity",
+    purpose: "Deliver consequential verification and lineage evidence to RealityTrace with correlation and delivery status",
+    settlement: "Each event is accepted or identified as a duplicate by the observer; the record remains correlated to the original durable event",
+    steps: "Case capability records a fact -> runtime commits the observation intent with the event -> outbox delivers it -> operator checks status and retrieves the correlated record",
+    variants: "delivery may retry without creating a second logical observation; a missing observer leaves delivery pending or failed without changing the Case fact"
+}
+
+// Experts and Teams journeys are proposed semantics until their runtime capabilities and tests
+// exist. Their settlement fields deliberately describe evidence requirements, not implementation.
+Instance j_expert_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "expert.save, expert.copy, expert.archive",
+    evidence_class: "proposed",
+    initiating_condition: "The operator needs a reusable specialist identity or a variation of an existing Expert",
+    journey_id: "J-EXPERT-CREATE",
+    precondition: "The operator can inspect available Expert definitions and permitted capabilities",
+    purpose: "Create an editable Expert identity from a reusable definition without inheriting another instance's private memory or authority",
+    settlement: "The Expert identity and definition are durable, configuration is inspectable, and a copied Expert has distinct identity, memory scope, and least-privilege capability allowlist",
+    steps: "operator creates or copies a definition -> configures specialization, instructions, model route, tools, context policy and behavior -> saves an Expert identity -> verifies it appears in the roster",
+    variants: "invalid tool or model configuration is rejected with a reason; copy never duplicates identity or private memory; archive preserves history and blocks new work"
+}
+
+Instance j_expert_solo of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "expert.converse, expert.context, expert.model.generate",
+    evidence_class: "proposed",
+    initiating_condition: "The operator wants to work directly with one Expert without creating or joining a Team",
+    journey_id: "J-EXPERT-SOLO",
+    precondition: "The Expert is active and has a permitted model route and conversation capability",
+    purpose: "Run a durable solo conversation under persistent Expert identity and scoped authority",
+    settlement: "A Cognate run is attributable to the Expert and solo Conversation; history survives restart and cannot read Team or other Expert private context",
+    steps: "operator opens or creates a solo Conversation -> sends a message -> Expert execution uses its captured model route and allowlist -> result and run receipt are projected into that Conversation",
+    variants: "provider failure is visible and retryable; archived Expert refuses new conversation; cancellation preserves partial run evidence"
+}
+
+Instance j_team_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.save, team.copy, team.member",
+    evidence_class: "proposed",
+    initiating_condition: "The operator needs a governed collaboration space for a recurring class of work",
+    journey_id: "J-TEAM-CREATE",
+    precondition: "At least one active Expert can be added to a Team",
+    purpose: "Create a draft Team with explicit membership, role, permissions, context scope, workspace and coordination policy",
+    settlement: "The draft Team and memberships are durable and inspectable; it cannot execute until exactly one active membership is Orchestrator",
+    steps: "operator creates or copies Team -> selects Experts and Specialist roles -> chooses one Orchestrator -> scopes shared context and policy -> saves draft",
+    variants: "zero Orchestrators remains draft; copied Team receives new identity and no inherited private conversations; default Cognate Team seed is idempotent"
+}
+
+Instance j_team_activate of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.activate",
+    evidence_class: "proposed",
+    initiating_condition: "A draft Team is ready to accept work",
+    journey_id: "J-TEAM-ACTIVATE",
+    precondition: "The Team has exactly one active Orchestrator and every membership resolves to an active Expert",
+    purpose: "Make a Team runnable only after its governance structure is valid",
+    settlement: "An atomic state transition marks the Team active with exactly one Orchestrator; invalid concurrent membership changes cannot produce an active invalid Team",
+    steps: "operator requests activation -> mutation boundary validates membership, role count, Expert lifecycle and policy -> Team state is committed atomically -> projection reports active status and designated Orchestrator",
+    variants: "zero or multiple Orchestrators refuses with actionable reason; concurrent invalid updates serialize or fail without violating the invariant; provider absence blocks execution but not valid activation"
+}
+
+Instance j_team_replace_orchestrator of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.replaceOrchestrator",
+    evidence_class: "proposed",
+    initiating_condition: "The current Team Orchestrator must be replaced or removed",
+    journey_id: "J-TEAM-REPLACE-ORCHESTRATOR",
+    precondition: "The Team exists and the replacement Expert is an eligible member or is atomically added",
+    purpose: "Transfer coordination responsibility without a moment in which an active Team has zero or two Orchestrators",
+    settlement: "One atomic transition records the old and new role assignments and the active Team retains exactly one Orchestrator; otherwise the Team is atomically deactivated",
+    steps: "operator selects replacement or deactivation -> mutation validates authority and current version -> old role is demoted and replacement promoted in one compare-and-swap -> resulting membership is projected",
+    variants: "stale concurrent replacement retries against fresh state; removal without replacement is refused unless deactivating Team in same transition; failed write leaves prior valid state"
+}
+
+Instance j_team_delegate of "CanonicalJourney" {
+    actor: "Orchestrator",
+    capabilities: "team.delegate, expert.context, expert.model.generate",
+    evidence_class: "proposed",
+    initiating_condition: "An Orchestrator determines a bounded unit of work needs one Specialist",
+    journey_id: "J-TEAM-DELEGATE",
+    precondition: "Team is active, requester is its sole Orchestrator, recipient is an active Specialist, and human-authorized scope permits the work",
+    purpose: "Authorize one bounded Assignment without allowing an Orchestrator or Specialist to elevate authority or create a second parent hierarchy",
+    settlement: "Assignment has durable identity, purpose, selected input context, authority limits, acceptance criteria, return contract and queued/running state tied to a genuine Cognate run",
+    steps: "Orchestrator specifies assignment and recipient -> boundary validates Team membership and allowlist intersection -> assignment is persisted before execution -> serialized dispatcher starts the Specialist run with captured route and correlation",
+    variants: "typed abstention/decline leaves a reasoned terminal assignment; duplicate request reuses same logical assignment; concurrency waits in durable queue; provider failure is recoverable"
+}
+
+Instance j_team_handoff of "CanonicalJourney" {
+    actor: "Specialist",
+    capabilities: "team.handoff",
+    evidence_class: "proposed",
+    initiating_condition: "A Specialist run completes, fails, abstains or is cancelled",
+    journey_id: "J-TEAM-HANDOFF",
+    precondition: "An Assignment and correlated ExpertRun exist and the return contract identifies the Orchestrator",
+    purpose: "Deliver an attributable structured outcome to the Orchestrator exactly once logically, despite at-least-once physical delivery",
+    settlement: "Durable Handoff includes output, artifacts, evidence, uncertainty, failures and follow-up; idempotent processing records one logical return and makes it available to Orchestrator reconciliation without browser activity",
+    steps: "run terminal event resolves durable completion continuation -> handoff is committed with run and assignment correlation -> Orchestrator inbox/projection receives it -> reconciliation decision is recorded",
+    variants: "redelivery is deduplicated; worker crash recovers from run terminal state; missing output or evidence is reconciliation-required; late result after cancellation is retained but cannot authorize further work"
+}
+
+Instance j_team_converse of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.converse, team.message, team.delegate, team.handoff, team.review",
+    evidence_class: "proposed",
+    initiating_condition: "The operator addresses work to an active Team",
+    journey_id: "J-TEAM-CONVERSE",
+    precondition: "Team is active with exactly one Orchestrator and a durable Team Conversation",
+    purpose: "Coordinate bounded expert contributions through one parent while preserving private and shared context boundaries",
+    settlement: "Conversation shows attributable messages and assignments; routing, unread-work, handoff-depth and speaking-round limits are enforced; Orchestrator reconciles evidence and cannot self-accept protected results",
+    steps: "user sends to Team -> Orchestrator interprets objective and chooses necessary Specialists -> addressed messages or assignments are persisted -> returns are correlated and reconciled -> next decision is presented",
+    variants: "mention queues only authorized work; duplicate message is suppressed; limit reached yields explicit waiting/escalation; typed abstention is visible; no uncontrolled Expert-to-Expert loop"
+}
+
+Instance j_team_recover of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.handoff, team.retry, team.cancel, expert.context, expert.tool.invoke, expert.effect.resolve",
+    evidence_class: "proposed",
+    initiating_condition: "Workbench restarts while Team messages or assignments are unfinished",
+    journey_id: "J-TEAM-RECOVER",
+    precondition: "Durable Team state and Cognate run/event history are available",
+    purpose: "Resume pending communication and work from persisted facts without duplicating committed logical effects",
+    settlement: "Every recovered assignment is in a consistent queued/running/waiting/completed/failed/cancelled/reconciliation-required state; terminal completions are delivered idempotently and unresolved commitments remain visible",
+    steps: "startup reads shared thread state and run completion events -> reconciler compares assignments, messages and handoff receipts -> resumes or marks recoverable work -> projection exposes recovery decision and evidence",
+    variants: "missing run is marked failed or reconciliation-required; duplicate completion does not duplicate handoff; cancelled assignment retains late result as non-authorizing evidence"
+}
+
+Instance j_team_review of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "team.review",
+    evidence_class: "proposed",
+    initiating_condition: "Implementation, critique and verification results are ready for reconciliation",
+    journey_id: "J-TEAM-REVIEW",
+    precondition: "Attributable Builder output, Critic findings and Verifier receipts are available or explicitly marked missing",
+    purpose: "Assess whether evidence supports each acceptance criterion and surface unresolved contradiction",
+    settlement: "Reviewer returns accept/revise/escalate recommendation with rationale and gaps; contradiction or absent independent verification remains open; only the human can settle protected acceptance",
+    steps: "Reviewer receives implementation artifacts, critique and verification receipts -> checks claims against observable evidence -> records findings and unresolved differences -> recommends next action",
+    variants: "Verifier failure prompts repair; Critic disagreement is preserved; missing evidence blocks recommendation; Orchestrator cannot approve its own protected effect"
+}
+
+Instance j_expert_memory of "CanonicalJourney" {
+    actor: "Expert",
+    capabilities: "expert.memory.write, expert.memory.read, expert.context",
+    evidence_class: "proposed",
+    initiating_condition: "An Expert needs to preserve or retrieve useful context across runs",
+    journey_id: "J-EXPERT-MEMORY",
+    precondition: "The caller has access to the explicitly scoped personal or Team memory namespace",
+    purpose: "Retain attributable knowledge without treating every model statement as trusted fact or merging private scopes",
+    settlement: "Memory records source/provenance, scope and epistemic kind (observation, assertion, inference, accepted knowledge); retrieval respects scope and marks retrieved text as untrusted context",
+    steps: "Expert proposes memory with provenance and classification -> policy validates promotion and scope -> durable event records memory -> retrieval selects relevant bounded entries and unresolved commitments for the matching context",
+    variants: "unverified assertion is not promoted as accepted knowledge; cross-Team/private read is denied; malicious retrieved instruction is treated as data; older history is retrieved without loading full transcript"
+}
+
+Instance j_team_settlement of "CanonicalJourney" {
+    actor: "HumanSettlementAuthority",
+    capabilities: "team.settle",
+    evidence_class: "proposed",
+    initiating_condition: "A Team proposes that its assignment or overall work meets acceptance criteria",
+    journey_id: "J-TEAM-SETTLEMENT",
+    precondition: "Required handoffs and independent evidence are inspectable and all unresolved blockers are stated",
+    purpose: "Present a reviewable evidence package to the authorized human without delegating final acceptance to the Orchestrator",
+    settlement: "Human decision is separately attributed and durable; missing/failed evidence or unresolved contradiction prevents a supported acceptance recommendation; the Team cannot impersonate human settlement",
+    steps: "Orchestrator assembles criteria, artifacts, run receipts, critique, verification and uncertainty -> boundary checks human-only authority -> operator accepts, requests revision or escalates -> decision and provenance are projected",
+    variants: "human requests rework; protected effect awaits approval; Orchestrator proposes completion without sufficient evidence and is refused; provider or verifier failure leaves settlement open"
+}
+
+// Autonomous schedules are durable domain intent evaluated into existing native Expert runs.
+// This does not grant parallel or multi-process execution authority.
+Instance j_schedule_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "schedule.save, schedule.manage, schedule.list",
+    evidence_class: "observed",
+    initiating_condition: "The operator wants an Expert or Team to perform a bounded objective later or repeatedly",
+    journey_id: "J-SCHEDULE-CREATE",
+    precondition: "The selected Expert or active Team, workspace and permitted access mode exist; the human can authorize the objective",
+    purpose: "Persist versioned one-time or timezone-aware recurring intent with explicit misfire and backpressure policy",
+    settlement: "Configuration, creator, revision and next due time are durable; edit, pause, resume, cancel and delete take effect through authorized mutations; execution history remains attributable",
+    steps: "human selects target and workspace -> supplies objective, due rule and limits -> validates timezone and authority -> saves schedule -> inspects next occurrence or manages lifecycle",
+    variants: "invalid timezone/time rejected; draft Team refused; paused schedule does not fire; deletion tombstones configuration but retains receipts; edits do not rewrite an existing occurrence"
+}
+
+Instance j_schedule_fire of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "schedule.dispatch, expert.converse, team.converse",
+    evidence_class: "observed",
+    initiating_condition: "A persisted active schedule has become due and capacity is available",
+    journey_id: "J-SCHEDULE-FIRE",
+    precondition: "Current target, membership, workspace and schedule authority remain valid; the occurrence has a stable identity",
+    purpose: "Translate a due occurrence into an attributable bounded native Cognate Expert or Team run",
+    settlement: "One logical occurrence references its Assignment and Cognate run; actual terminal evidence distinguishes result, failure and waiting for human approval; run creation is not completion",
+    steps: "read due schedule -> apply bounded misfire policy -> atomically reserve occurrence identity -> revalidate authority -> invoke native conversation capability idempotently -> inspect correlated Assignment/run evidence -> retain receipt and advance due state",
+    variants: "provider failure remains inspectable; invalid target blocks dispatch; cancellation suppresses unstarted work and cancels an already issued Assignment; no unbounded outage catch-up"
+}
+
+Instance j_schedule_recover of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "schedule.dispatch, schedule.list, schedule.manage",
+    evidence_class: "observed",
+    initiating_condition: "Workbench restarts before or after an occurrence was reserved or a native run was started",
+    journey_id: "J-SCHEDULE-RECOVER",
+    precondition: "Schedule state, command receipts and run events remain available in the existing PostgreSQL store",
+    purpose: "Recover due intent and interrupted delivery without duplicate logical work or blind repetition of ambiguous effects",
+    settlement: "Redelivery resolves the same occurrence and Assignment; restart after the due time produces one logical run or a visible cancellation/failure; ambiguous tools keep their native human reconciliation gate",
+    steps: "restart evaluator -> read persisted due state and unfinished occurrences -> revalidate intent -> repeat stable native command identity -> recover existing run -> expose receipt, failure or waiting condition",
+    variants: "duplicate evaluator pass; process dies after native start before occurrence acknowledgment; DST gap skipped and repeated local times follow documented one-occurrence policy; clock rollback never recreates a committed identity"
+}
+
+// Storage representation may evolve; Expert identities, scopes and one-Orchestrator authority do not.
+Instance j_memory_migrate of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "expert.memory.write, expert.context",
+    evidence_class: "observed",
+    initiating_condition: "The native Expert aggregate approaches the event envelope limit or repeated full-snapshot writes create contention",
+    journey_id: "J-MEMORY-MIGRATE",
+    precondition: "Existing state and event history are intact; every retained item has immutable identity and scope",
+    purpose: "Migrate storage representation into bounded native state partitions while preserving an atomic governed view and rebuildable public projection",
+    settlement: "A substantial registry can exceed the former single-event limit; identities, receipts, private scopes and Team invariants survive migration and restart; interrupted preparation cannot publish partial state; old event history remains readable",
+    steps: "measure current state -> prepare bounded immutable partitions through native state events -> compare-and-swap the registry manifest -> rebuild projections -> restart and verify all source identities, scopes and pending work",
+    variants: "failure before manifest commit leaves old state current; competing writers revalidate against latest manifest; missing or hash-mismatched partition fails closed; rollback or recovery never rewrites source events"
+}
+
+Instance j_memory_paginate of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "expert.context, expert.memory.read",
+    evidence_class: "observed",
+    initiating_condition: "A conversation or scoped memory contains more history than one bounded view can show",
+    journey_id: "J-MEMORY-PAGINATE",
+    precondition: "The caller is authorized for the Expert and conversation or Team scope",
+    purpose: "Retrieve older attributable material in stable bounded pages without adding full history to each prompt",
+    settlement: "Page cursors bind query and scope, preserve ordering and duplicate suppression, and reveal no private cross-Expert or cross-Team data; concurrent appends do not repeat or silently skip the snapshot's retained records",
+    steps: "choose authorized scope and query -> receive first bounded page and cursor -> request older pages -> inspect source evidence -> explicitly select relevant context or memory",
+    variants: "forged cursor rejected; changed query or scope invalidates cursor; inaccessible private record never leaks; malformed or excessive page limits fail with a reason"
+}
+
+Instance j_context_budget of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "expert.save, expert.model.generate, settings.changeSpending",
+    evidence_class: "observed",
+    initiating_condition: "The operator needs to constrain an Expert's context, token consumption and model spend",
+    journey_id: "J-CONTEXT-BUDGET",
+    precondition: "The model route and optional declared token prices are inspectable; the complete visible request is available before provider invocation",
+    purpose: "Freeze per-Assignment attempt limits and enforce conservative reservations before each model call while preserving observed usage separately",
+    settlement: "Instructions, messages, tool schemas and reserved output are accounted for with the route's model-specific tokenizer named by its method label; an over-budget or over-ceiling call never reaches the provider; every dispatch holds a durable billing reservation that crash reconciliation settles, releases or books as unknown without blind repetition; provider-reported usage is retained as observed, unsupported tokenization as a labeled estimate, and unknown prices remain unknown everywhere including the global and ordinary-session spending ceilings",
+    steps: "human configures optional context and attempt budgets and spending ceilings -> Assignment freezes limits -> tokenize the complete request with the route's tokenizer and reserve bounded output -> account prior successes and ambiguous failures -> enforce limits and ceilings -> reserve durably on the billing ledger before dispatch -> invoke provider -> record reported usage and settle the reservation -> reconcile interrupted reservations on restart -> inspect budget, reservation and ceiling status",
+    variants: "unknown prices block a configured cost or spending ceiling; absent provider usage keeps a conservative reservation; provider failure still consumes a pessimistic reservation; an owner interrupted between reservation and dispatch requires reconciliation and never blindly repeats; replay does not charge a second logical invocation; pinned unresolved context cannot silently disappear"
+}
+
+Policy every_canonical_flow_recorded
+    as: forall f in flows: (f.quantity > 0.0)
 
 Metric "canonical_journey_count" as:
-    count(instances)
+    COUNT(instances)
     @unit "count"
+
+Instance j_expert_steer of "CanonicalJourney" {
+    actor: "Human or authorized same-Team Expert",
+    capabilities: "team.inbox.send, team.message, team.inbox.consume, team.inbox.cancel, expert.model.generate",
+    evidence_class: "observed",
+    initiating_condition: "An authorized sender addresses new information to a currently running same-Team Expert",
+    journey_id: "J-EXPERT-STEER",
+    precondition: "Recipient is an active member of the same Team and the target Assignment/run remains authorized; conversation is Team-scoped",
+    purpose: "Make an addressed message available to the recipient's next model decision without interrupting an active provider call or widening Assignment authority",
+    settlement: "Message has ordered sequence, correlation, sender, recipient and target Assignment; one run-boundary receipt atomically records the eligible batch and acknowledgements; replay returns the same batch",
+    steps: "sender submits bounded addressed message -> mutation boundary revalidates sender, recipient, Team and Assignment -> CAS appends message -> running recipient reaches its next model decision -> recorded consume command CAS-commits boundary receipt and acknowledgements -> agent incorporates the batch as untrusted user content",
+    variants: "cancelled or superseded messages are excluded; stale/duplicate consume returns recorded result; messages arriving during model generation wait for the next decision; no tool or authority set changes"
+}
+
+Instance j_expert_inbox_recover of "CanonicalJourney" {
+    actor: "User or authorized same-Team Expert",
+    capabilities: "team.inbox.send, team.message, team.inbox.consume, team.inbox.cancel, expert.context",
+    evidence_class: "observed",
+    initiating_condition: "Workbench restarts after an addressed message is sent but before its recipient records incorporation",
+    journey_id: "J-EXPERT-INBOX-RECOVER",
+    precondition: "The Expert registry shared state and Cognate run invocation history are available; the same Assignment/run is still authorized",
+    purpose: "Recover the same pending or already-consumed message batch without losing or logically duplicating delivery",
+    settlement: "A stable run-and-boundary command receipt returns the identical batch after a crash between registry CAS and invocation recording; acknowledged messages do not reappear at later boundaries",
+    steps: "restart restores native shared thread state -> Cognate replays recorded run steps -> consume command revalidates current recipient Team and Assignment -> matching receipt returns same ordered batch or new boundary commits next eligible batch -> agent continues at a safe model decision",
+    variants: "stale Team membership, cancelled Assignment and private scope mismatch deny incorporation; retry cannot widen captured tools or mode; provider call is never interrupted"
+}
+
+// Team-level admission policy: a Team's authoritative limits bound how many of its own runs may
+// overlap, independently of process capacity. Established by T2. The orthogonal process-capacity and
+// workspace-disjointness policy is J-EXPERT-PARALLEL.
+Instance j_team_admission of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "team.converse, expert.converse, team.retry, team.handoff, execution.runtime.inspect",
+    evidence_class: "observed",
+    initiating_condition: "An active Team admits new Expert work while other runs of the same Team are unfinished",
+    journey_id: "J-TEAM-ADMISSION",
+    precondition: "The Team is active with an authoritative limits policy (maximum concurrent runs and admission batch); each admitted root resolves to a canonical workspace identity",
+    purpose: "Bound how many of a Team's own runs may overlap from the Team's authoritative policy, independently of process capacity, and dispatch queued roots in the Team's configured batch",
+    settlement: "Admission lane count derives only from authoritative Team metadata; a Team exceeding its maxConcurrentRuns waits even when process capacity is free; disjoint roots overlap only up to the policy; queued roots dispatch in the configured batch; client-supplied policy is refused before any effect; unknown or inactive Teams and invalid policy fail closed to full Team serialization; a recovered run may re-enter a different lane, which can only serialize more and never admits beyond the policy",
+    steps: "operator saves authoritative Team limits -> a Team turn admits work through the native admission boundary -> per-Team lane keys serialize the Team's runs beyond its policy -> queued roots dispatch in the Team's batch -> operator inspects run and admission evidence",
+    variants: "forged or stale client-supplied maxConcurrentRuns or admissionBatch is refused before any effect; raising the authoritative policy permits genuine overlap without changing process capacity; process restart preserves the policy and never widens it; solo model-only work keeps its overlap semantics"
+}
+
+Instance j_expert_parallel of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "execution.runtime.inspect, expert.converse, team.converse, subagent.start, team.retry, team.handoff",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants independent coding or Expert work to overlap without allowing shared or uncertain workspace mutations to race",
+    journey_id: "J-EXPERT-PARALLEL",
+    precondition: "The native runtime exposes a configured maxConcurrentRuns value (default 1; opt-in values 2, 4, or 8); each admitted mutating run resolves to a canonical execution-world and workspace-root identity; unresolved identity blocks admission without effects until safely resolved; multi-process operation is exposed only behind a verified ownership configuration backed by a published fenced run-write ownership release",
+    purpose: "Bound process-level run admission while permitting overlap only for work with disjoint canonical workspace roots; under the verified multi-process configuration, one store serves several Workbench processes with authoritative per-run ownership",
+    settlement: "execution.runtime.inspect reports the effective configured capacity and admission policy without claiming active-worker counts; two Experts on distinct workspaces demonstrably overlap when capacity permits, while same, aliased, or nested roots serialize; unresolved root identity blocks admission without effects; restart, mutation ownership, Team invariants, authorization, and each run's captured model route remain intact; under the verified multi-process configuration a killed process's in-flight effect is never blindly repeated by the recovering process — the recovery records the ambiguity and completes only from explicit reconciliation, and a stale owner's late run-scoped write is fenced at the store with nothing appended",
+    steps: "operator inspects native execution capacity -> direct coding, Expert, Team, delegated, resumed, and recovered run entries pass through the same nativeExecutionSlots admission boundary -> runtime resolves execution-world and canonical root identities -> unresolved identity blocks admission before effects -> only runs with non-overlapping known roots may occupy distinct slots -> operator inspects run evidence and the configured capacity -> under multi-process operation a crashed owner's run is recovered by the surviving process, whose ambiguous prior-generation effect requires reconciliation and whose store fences the killed owner's late writes",
+    variants: "default capacity one is serial; configured capacity accepts only 1, 2, 4, or 8; same-root, alias-root, and ancestor/descendant-root cases serialize; unresolved root identity blocks admission without effects until safely resolved; read-only work does not bypass human approval for protected effects; existing ParallelPlan recommendations remain advisory; Team-level maximum concurrency and batch delegation policy are established separately by J-TEAM-ADMISSION, not by this journey; single-process deployments keep the historical restart semantics — multi-process semantics apply only when the verified ownership configuration is enabled"
+}
+
+Instance j_expert_model_parallel of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "execution.runtime.inspect, expert.converse, team.converse, team.handoff, team.retry",
+    evidence_class: "observed",
+    initiating_condition: "The operator enables bounded native capacity for independent Expert model decisions while retaining conservative exclusion of workspace effects",
+    journey_id: "J-EXPERT-MODEL-PARALLEL",
+    precondition: "A supported native runtime accepts authoritative asynchronous admission; capacity defaults to one with opt-in two, four or eight; a genuine system-started Expert run resolves its registered unfinished Assignment and matching attempt before eligibility is granted",
+    purpose: "Overlap only Expert decisions whose frozen tools contain the intrinsic expert_return and no workspace, delegation, messaging or memory tools",
+    settlement: "Two independently routed model-only Expert runs overlap at capacity two and return attributable durable results; forged tool calls cannot widen the frozen allowlist; all tool-bearing and ordinary coding runs share one exclusion key; no active-worker count or general workspace parallelism is claimed",
+    steps: "operator configures host capacity and inspects effective policy -> native admission resolves the registered Assignment after application readiness -> only intrinsic-return assignments receive independent slots -> all other work retains conservative shared exclusion -> native runs return correlated handoffs -> operator inspects evidence",
+    variants: "unknown or stale Assignment, attempt, sender or Team membership blocks admission before model effects; event-only agent.config bypasses application-readiness lookup to preserve seed boot; cancellation and recovery use the same native admission path; current frozen tools and model route survive profile edits; capacity remains a startup setting; Team-specific capacities are established by J-TEAM-ADMISSION, and disjoint workspace effect parallelism is established by J-EXPERT-PARALLEL"
+}
+
+Instance j_auth_session of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "identity.session.issue, identity.session.revoke, identity.inspect",
+    evidence_class: "proposed",
+    initiating_condition: "The operator replaces client-claimed identities with server-issued durable sessions",
+    journey_id: "J-AUTH-SESSION",
+    precondition: "A durable identity ledger exists; the browser entry and every remote request must present a session the server itself issued",
+    purpose: "Make the effective caller a durable, revocable server-side fact instead of a client-supplied string",
+    settlement: "Every admitted request resolves to a live unexpired unrevoked session bound to one identity; a revoked or expired session is refused with no durable effect; a captured token replayed after revocation produces no durable write anywhere in the store",
+    steps: "boot seeds the operator identity and issues one session for this browser entry -> every request authenticates against the durable session ledger -> operator may issue further sessions for provisioned identities -> operator revokes a session -> the revoked session's replayed request is refused before any capability or service mutation -> boot reconciles expired sessions",
+    variants: "the raw development bearer format is refused in the production posture unless an explicit dev opt-in is armed; revocation takes effect without restart; session tokens exist in cleartext only in the issued entry and the holder's memory, the ledger stores verified hashes; an unknown token, an altered token or a session for a missing identity is refused"
+}
+
+Instance j_auth_tenant_isolation of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "identity.session.issue",
+    evidence_class: "proposed",
+    initiating_condition: "The operator provisions an identity in a second tenant on one shared store",
+    journey_id: "J-AUTH-TENANT-ISOLATION",
+    precondition: "Sessions bind each caller to the tenant of its durable identity; public projections and run, artifact and stream reads are tenant-partitioned by the framework",
+    purpose: "Prove one tenant's session cannot observe or mutate another tenant's work on a shared store",
+    settlement: "Each authenticated caller sees only its own tenant's partition: its projections, runs, artifacts and streams; a cross-tenant replay or a forged tenant claim is refused with no durable effect; an empty foreign partition is indistinguishable from an absent one",
+    steps: "operator issues a session for a second-tenant identity -> both sessions drive the same shared store -> each caller's projection reads stay inside its tenant prefix -> cross-tenant run, artifact and event reads are refused as not found -> a client-claimed tenant string without a session is refused -> operator inspects both partitions",
+    variants: "a session token from one tenant cannot be replayed into another tenant's context; the framework's tenant partitioning is observed end to end, not assumed; multi-tenant application seeding (per-tenant Experts and schedules) is out of scope and not claimed"
+}
+
+Instance j_rw_aggregate_containment of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "settings.changeContainment, workspace.contained.select, process.exec",
+    evidence_class: "proposed",
+    initiating_condition: "The operator configures aggregate resource ceilings for contained executions",
+    journey_id: "J-RW-AGGREGATE-CONTAINMENT",
+    precondition: "A contained workspace is selected and its provider owns the OS boundary; the aggregate containment ledger is the durable admission truth across processes",
+    purpose: "Bound aggregate contained resource consumption across processes so exhaustion of a configured quota refuses new work instead of silently widening it",
+    settlement: "New contained work that would exceed the aggregate concurrent-execution ceiling or the aggregate CPU-second window budget is refused before any child process is launched, from any process sharing the store; each admitted execution runs under its kernel CPU and address-space caps; a cancelled or completed execution releases its aggregate slot; a crashed holder's stale slot is reaped after its lease and accounted conservatively",
+    steps: "operator configures aggregate containment quotas -> every contained execution acquires a durable aggregate slot under the quota before launch -> admitted executions run under kernel per-execution CPU and address-space limits -> completion, cancellation and crash release or reap the slot durably -> exhausted quota fails closed for new work across processes -> operator inspects the aggregate ledger",
+    variants: "an unconfigured quota keeps historical uncontained-aggregate behavior; a configured quota with kernel limit tooling unavailable inside the world refuses the execution rather than running uncapped; a CPU-capped execution is recorded as capped and booked conservatively; per-process memory accounting is bounded by the kernel address-space cap and the aggregate concurrency ceiling, not measured; local uncontained workspaces are not aggregate-contained and never were"
+}
+
+// Session / Workspace / Task / Run RED journeys (docs/specs/session-workspace-task-red-journeys.md).
+// Added before implementation per the model-first rule; capabilities below are bound explicitly
+// in domain/index.ts (RED_BINDINGS) and realized by the Cognate runtime, capabilities,
+// projections and UI surfaces.
+Instance j_session_draft of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.create, workspace.select, session.history",
+    evidence_class: "proposed",
+    initiating_condition: "The operator presses + to start a fresh conversation in a workspace",
+    journey_id: "J-SESSION-draft",
+    precondition: "A workspace exists and is identified by its stable workspace id; no inference, model or credential is needed to create a draft",
+    purpose: "Create a durable draft Session with a stable identity before any prompt, without inheriting any state from a previous Session",
+    settlement: "The draft appears in the sessions projection with title New Session and status draft before any turn; reload and restart preserve it; repeating the same creation request identity returns the same Session and emits exactly one session.created event; the first turn fills the same identity instead of duplicating it; an unknown workspace cannot own a session; the creation binds to the explicitly named workspace even when another workspace is current",
+    steps: "operator names the target workspace by stable id -> session.create derives a deterministic identity from the idempotency request -> a deterministic recording run emits session.created correlated to the session -> the sidebar selects the new draft and the composer becomes ready -> the first submitted turn reuses the draft identity",
+    variants: "double-click or repeated create with the same request identity yields one Session; a draft survives full app restart; a new draft carries no previous Session's active Task, approval, focus or conversation; legacy sessions without session.created remain readable"
+}
+
+Instance j_ws_directory_discovery of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.directory.suggest, workspace.select",
+    evidence_class: "proposed",
+    initiating_condition: "The operator begins typing a project folder path while adding or choosing a workspace",
+    journey_id: "J-WS-directory-discovery",
+    precondition: "An execution world is selected and connected; browsing is read-only and pre-workspace",
+    purpose: "Suggest matching directories in the chosen execution world as the operator types, so a full absolute path never has to be known or typed",
+    settlement: "Suggestions list only directories from the selected world's filesystem, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
+    steps: "operator types a partial path -> the picker debounces and queries workspace.directory.suggest for the selected world -> the world provider lists its own parent directory and the capability filters, orders and bounds directory matches -> keyboard and pointer complete the field -> an explicit Open confirms the exact destination through workspace.select",
+    variants: "slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
+}
+
+Instance j_task_scope of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.create, task.list, session.task.bind",
+    evidence_class: "proposed",
+    initiating_condition: "The operator creates a Task or chooses which Task a conversation serves",
+    journey_id: "J-TASK-scope",
+    precondition: "One Task entity with scope workspace or session exists in a known workspace; session scope requires an existing Session of that workspace",
+    purpose: "Make a Task's visibility and its Session binding explicit, understandable and durable without exposing internal Run ids",
+    settlement: "A workspace Task is listed as available from every Session of its workspace yet no Session inherits it as active; a session Task is listed only within its owning Session until promoted or moved; binding and detaching write durable session-task binding rows that survive reload; a fresh Session starts unbound; binding across workspaces or against a session-scoped Task of another Session is refused with a readable reason; a conversation with no Task remains valid",
+    steps: "operator creates the Task with an apparent scope choice -> task.create validates the scope and owning session -> the Task row records scope and session -> the composer shows the bound Task with an accessible change or detach control -> session.task.bind records or clears the durable binding",
+    variants: "creating a session Task inside a Session binds that Session; binding an unavailable Task is refused; detaching preserves the Task, its evidence and its history; no scope is silently widened for convenience"
+}
+
+Instance j_task_move of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.move, task.list",
+    evidence_class: "proposed",
+    initiating_condition: "The operator promotes, moves or re-homes an existing Task",
+    journey_id: "J-TASK-move",
+    precondition: "The Task exists and is not in flight; the destination workspace or session is named and authorized",
+    purpose: "Move or promote a governed Task without destroying its identity, evidence or provenance",
+    settlement: "The move preserves the Task id, its evidence ledger rows and its original source-workspace provenance, and never reparents historical Runs; the contract's workspace context and scope are revalidated for the destination; stale Session bindings in the old scope are invalidated rather than silently kept; nonexistent destinations are rejected; in-flight work is not moved",
+    steps: "operator names a destination workspace or session -> task.move validates the destination and the Task's state -> one governed mutation rewrites the Task's scope and destination and records its origin -> invalidated bindings fall back to no active Task -> the Task appears only in the destination inventory",
+    variants: "cross-workspace moves recalculate resource and authority scope instead of renaming; session-scope Tasks moved to a new workspace promote to workspace scope; accepted or historical Tasks keep their evidence; a moved Task is never silently accepted"
+}
+
+Instance j_run_task_attribution of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.history, session.task.bind, plan.state",
+    evidence_class: "proposed",
+    initiating_condition: "The operator submits a conversational turn",
+    journey_id: "J-RUN-task-attribution",
+    precondition: "A Session exists or is created by the turn; a Task may or may not be bound to it",
+    purpose: "Attribute every submitted turn to exactly one durable Run, with an optional frozen Task association, never creating a Task for conversation alone",
+    settlement: "Each submitted turn starts a Cognate Run with no Task unless one is explicitly in scope; the Run's initial task association is frozen into its turn evidence and later binding changes do not rewrite history; an invalid taskId is refused against the Session and workspace context; Runs, Tasks, plan steps and Expert Assignments remain distinct vocabularies",
+    steps: "composer submits the turn -> agent run validates the optional taskId against the Session's available Tasks -> the turn-start event records the frozen association -> inference and tool steps execute -> completion and usage record under the same association",
+    variants: "a plain question completes a Run with no Task and creates nothing in the Task ledger; a bound turn and a later delegation correlate independently inspectable identities; a successful Run never establishes human acceptance"
+}
+
+Instance j_task_expert_provenance of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.create, team.converse, team.delegate, expert.converse",
+    evidence_class: "proposed",
+    initiating_condition: "The operator delegates Team work that serves an accountable Task",
+    journey_id: "J-TASK-expert-provenance",
+    precondition: "The Task exists in the Team's workspace; the Team is active with one Orchestrator",
+    purpose: "Keep delegated Expert Assignments in service of the Task that authorized them, with causal lineage and distinct run attempts",
+    settlement: "The Orchestrator's Assignment and every Specialist child retain the explicitly authorized Task identity while keeping their own distinct Runs and causal parent ids; multiple attempts never duplicate the Task; the Task's acceptance remains a separate human and criterion gate that no model output, handoff or commit automatically settles",
+    steps: "operator converses with the Team naming the Task -> team.converse validates the Task and stamps it on the root Assignment -> delegation inherits the Task identity on child Assignments -> each Assignment's Run keeps its own identity -> the human reviews settlement separately",
+    variants: "an unknown or cross-workspace Task is refused before any Assignment; retries keep the same Assignment lineage; handoffs record evidence but not acceptance"
+}

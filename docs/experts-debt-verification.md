@@ -1,0 +1,463 @@
+# Experts debt tranche — verification and publication report
+
+Recorded 2026-10-15. **The full mission is incomplete.** This report settles the verified slices below;
+it does not close all seven mandatory debts or advertise production/multiprocess operation.
+
+## Architecture and dependency outcome
+
+Cognate-Workbench remains the same application on `feature/expert-teams`, using published Cognate
+**0.5.0**, PostgreSQL/pg0, native events, shared-state CAS, continuations, commitments and projections.
+No local SDK link, vendored runtime, broker, second event store or new Workbench dependency was added.
+The default five Experts and sole Product Manager Orchestrator remain ordinary editable seed records.
+
+Schedules define due intent; the existing native Assignment bridge and Cognate run outbox execute
+it. Live inbox incorporation is a recorded capability at a deterministic decision boundary. Both
+reuse frozen assignment identity/authority, cancellation and handoff evidence. Immutable bounded
+partitions prepare before the registry manifest CAS; public projections are sanitized and internal
+cache/metadata rows are not exposed. Budget checks run before the isolated per-Expert provider call.
+
+The dependency graph and exhaustive historical inventory are in
+[experts-debt-closure.md](experts-debt-closure.md). Single-process schedule/inbox slices could use
+the already-supported SDK contracts without waiting for distributed ownership. Parallel and
+distributed integration remain separately gated; the plan records that narrower dependency.
+
+## Every primary debt
+
+| Debt | Disposition | Observed change and exact remaining limitation |
+| --- | --- | --- |
+| A1 Autonomous schedules | **Partially closed — specific remaining limitation** | Native Expert/Team one-time/daily/weekly schedules execute after restart, with IANA/DST rules, stable occurrence/Assignment IDs, bounded skip/coalesce, cancellation, failure and approval receipts, and real UI. Legacy accepted-workflow automation records are not automatically migrated. One process only; schedule history remains an aggregate. |
+| A2 Parallel Experts | **Partially closed — specific remaining limitation** | Published SDK0.5.0 is consumed after all45 registry receipts and fresh-consumer proof. Actual Workbench model-only peaks1/2/4/8, browser overlap, frozen-route/authority, configuration ordering and same-run restart pass. Conflict-aware admission (T1) replaces the single workspace-effects exclusion key with canonical per-resource keys derived from authoritative state: tool-bearing Experts and coding sessions key by their canonical workspace (disjoint workspaces overlap at capacity; shared workspaces serialize; aliased spellings collide on one key), workspace/world mutators name every record they affect, and forged or unknown identities fail closed to the global exclusion key. PostgreSQL overlap/exclusion/denial/restart journeys and a real Chromium two-workspace overlap journey pass. Team admission/batching policy (T2) resolves from authoritative Team metadata only: per-Team admission lanes bound concurrent runs (a Team exceeding its limit waits with host capacity free), queued roots dispatch in the Team's admission batch, the Team editor and runtime inspection state the effective policy and serialized reasons, and client-supplied policy fields are refused. Admission is process-local by SDK contract; a key-waiting run occupies one bounded dispatch slot. |
+| A3 Live steering | **Partially closed — specific remaining limitation** | Shared Team messages are durably accepted and incorporated at safe model-decision boundaries, with sequence, ownership, supersession/cancellation, bounds and SIGKILL replay. Idle delivery retains the existing queue. Generalized SDK inbox and standalone live steering remain open. No arbitrary inference interruption. |
+| A4 Memory and economics | **Partially closed — specific remaining limitation** | Bounded immutable partitions, interrupted migration, erasure invalidation, scoped cursor pages, measured write reduction and frozen Expert attempt budgets work. Global root CAS, complete materialization, indexed SQL retrieval, model tokenization, pre-dispatch crash/billing reservations and ordinary-session/global budget ceilings remain open. |
+| A5 Multiple processes | **Still open — not implemented** | Fenced native outbox claims are an upstream prerequisite only. Run-write fencing, authoritative store-time ownership, worker compatibility, two-process fault injection and ambiguous-effect recovery are not implemented. No multiprocess mode is exposed. |
+| A6 Production trust | **Partially closed — specific remaining limitation** | Native opt-in Linux child worlds are integrated through host-only configuration, human-only selection, real preflight, typed events and fail-closed restart. PostgreSQL/OS/browser journeys pass. Production identity/session/tenant integration, aggregate resource containment, supported deployment and independent security review remain open. Development bearer authentication is unchanged. |
+| A7 Formatter fidelity | **Closed — verified** | Installed DomainForge 0.19.0 already contains the upstream fix. Canonical formatting preserves normalized AST and comments, validates, is idempotent, and passes `fmt --check`. No duplicate upstream patch or CLI version change was needed. |
+
+All adjacent findings remain in the exhaustive disposition matrix. Closed items include explicit
+cognitive semantic bindings and fabricated child-usage zeros. Historical `NOT_IMPLEMENTED` findings
+are reconciled against already-working T11 controls and their tests. Generic subagent returns,
+executor routing, capability substitution, ordinary tool recovery, global Board/evidence navigation,
+artifact fidelity and other unimplemented product journeys remain explicit; hiding a control did
+not close them.
+
+## Canonical journeys and key files
+
+- J-EXPERT-MODEL-PARALLEL: `src/experts/admission.ts`, `src/server.ts`, native runtime slots and
+  `runtimeExecution.ts`/`RuntimeExecutionStatus.tsx`; actual capacities1/2/4/8, inspection, browser,
+  conservative tool serialization, forged-tool denial and same-run restart. Broader
+  J-EXPERT-PARALLEL workspace isolation remains declared.
+- J-RW-contained-workspace: `containedWorkspace.ts`, existing world/config events and workspace
+  picker; real published-SDK tool execution, boundary denial, launcher refusal, receipt recovery
+  and configured restart. See [operator guide](linux-contained-workspaces.md).
+
+- J-SCHEDULE-CREATE/FIRE/RECOVER: `src/schedules/{types,service,evaluator}.ts`, native server lifecycle
+  and four explicit bindings; schedule create/manage/history/inspection UI.
+- J-EXPERT-STEER/INBOX-RECOVER: `src/experts/service.ts`, `src/agents/agentCoding.ts`, ordered inbox
+  receipts and native safe boundaries; pending/incorporated/cancelled/superseded/late UX.
+- J-MEMORY-MIGRATE/PAGINATE: `src/experts/{persistence,pagination,state}.ts`,
+  `src/projections/experts.ts`, governed public read filtering, bounded history/memory controls.
+- J-CONTEXT-BUDGET: `src/experts/economics.ts`, `src/capabilities/expertModel.ts`, frozen assignment
+  limits, Expert editor and `AssignmentUsage.tsx`.
+- Existing J-COG journeys: validated model concepts, twenty bindings in `domain/index.ts`, native
+  invocation SemanticRef evidence and existing human-only cognitive gates.
+
+The authoritative model, canonical catalog, source translation and handoff are updated in
+`.sea/interaction/`. The adapter loads **224 semantic objects**; all **27 Expert**, **four schedule**
+and **twenty cognitive** contracts resolve. Existing semantic IDs and the inherited namespace remain.
+
+## Measurements
+
+Environment: Bun 1.4.0, PostgreSQL 18.1/pg0, WSL2 Linux 6.18.54.1 x64, Intel Core Ultra 5 226V,
+six reported CPUs and 8.33 GB reported RAM. These are small local measurements, not capacity promises.
+
+| Workload | Before | After |
+| --- | --- | --- |
+| 917,487-byte logical registry; four single-writer operations | 3.62/s; p50/p95 231/453 ms; about 3.68 MB persisted payload | 4.07/s; 219/293 ms; 172,772 bytes |
+| Same registry, configured writer concurrency four | 0.81/s; 2,858/4,958 ms; six CAS conflicts | 2.72/s; 942/1,470 ms; six conflicts; 43,974 committed payload bytes |
+| 8.49 MB partitioned registry; four single-writer operations | Exceeds the former 1 MiB event envelope | 2.08/s; 490/593 ms; 200,392 payload bytes; peak RSS about 606 MB; restart/rebuild 906 ms |
+| Upstream eight independent 40 ms native steps, capacity 1/2/4/8 | Default serial | Observed maxima 1/2/4/8; about 331/166/86/45 ms |
+| Published Cognate 0.4.0 runtime, four independent timer-step runs, capacity 1/2/4 | 4 focused tests; 33 assertions | Observed overlap peaks match configured capacities 1/2/4; substrate contract only, not Workbench Team dispatch |
+
+Datasets, commands, writer-count caveats and scope/quality checks are in
+[experts-scale-baseline.md](experts-scale-baseline.md). Four mutations cannot establish a universal
+latency distribution. Root contention and full materialization remain measured limitations.
+
+## Failure, recovery and security evidence
+
+- A real scheduled read-only Bash write initially succeeded unexpectedly. The tool loop now opens
+  Cognate's protected approval continuation before edit/Bash/run_code; the regression verifies the
+  waiting event and absence of the file. This permission fix is not OS containment.
+- Schedule tests terminate a server subprocess before due, start a fresh process after due, and
+  observe one logical occurrence, Assignment, run and correlated result. Recurrence, duplicate
+  ticks, revision/cancellation races, restart cancellation, provider failure and bounded retries
+  are tested. Current revision/status is checked at acknowledgment; late native acceptance is
+  cancelled rather than resurrecting cancelled intent.
+- Inbox recovery kills the process after its registry receipt commits but before the invocation
+  outcome is persisted. Restart incorporates that ordered batch once logically. Second-user
+  supersession/cancellation attempts are rejected. Final-boundary arrivals remain late evidence.
+- Migration prepares a >5 MiB schema-1 fixture, injects failure before root publication, then
+  migrates/restarts and verifies identities, scope, history and Team invariants. Missing/hash-invalid
+  source fails closed. Native erasure invalidates accepted public state after projection catch-up;
+  there is no private-payload cache that hides erasure.
+- Six concurrent membership updates exposed a real SDK PostgreSQL pool deadlock. The owner held
+  the position-counter transaction lock while trying to obtain an extra pooled connection for a
+  duplicate receipt. Upstream now reads that receipt through its transaction executor. A saturated
+  two-connection/twenty-same-key test fails before the fix and passes afterward. Workbench also
+  coalesces identical immutable preparation traffic without replacing native durability. Its
+  original membership test passes five repetitions with unchanged assertions and timeout.
+- Upstream fenced claim tests reject stale generations and mixed legacy-API settlement. Old
+  binaries issuing older SQL are not magically fenced; supported worker-version admission is
+  still required. Fencing does not revoke an external request already delivered.
+- Real Linux tests prove workspace filesystem access, symlink/host-secret refusal, denial of an
+  otherwise reachable host TCP listener, nested user-namespace refusal, nested Bun containment,
+  timeout/abort descendant cleanup, output limits and changed-binary refusal. The earlier claim
+  that Ubuntu 0.11.1-1ubuntu0.3 includes the cited fix is withdrawn: USN-8779-2 reverted it. The
+  current tests use a separately built upstream 0.12.0 fixture with recorded source and SHA;
+  see [fixture provenance](bubblewrap-fixture-provenance.md). No aggregate CPU/memory/process/disk quota is claimed. Binding
+  sensitive data as a workspace grants that data; host application code remains trusted.
+- Existing frozen authority, private/cross-Team memory, independent verification, human-only
+  acceptance, durable handoff and ambiguous Expert effect regressions pass in the full suite.
+
+There is no exactly-once physical external-effect claim. Ambiguity requires native receipts,
+idempotent reconciliation or a human decision. No production-ready or authenticated multi-tenant
+deployment has been established.
+
+## Commands and results
+
+| Command | Observed result |
+| --- | --- |
+| Initial `just verify` | 1,064 pass, zero fail, 6,536 assertions/85 files; 407.91 s |
+| Prior integrated tranche `just verify` | 1,101 pass, zero fail, 6,860 assertions/96 files; 381.67 s, including typecheck (before published-SDK migration) |
+| Published SDK migration plus capacity coverage `just verify` | **1,104 pass, zero fail, 6,884 assertions/96 files; 408.21 s**, including typecheck, actual browser and PostgreSQL journeys |
+| `just typecheck` | Pass |
+| Focused native debt suite (eleven files) | 41 pass, zero fail, 303 assertions |
+| Inbox ownership/schedule race suites | 18 pass, zero fail, 96 assertions |
+| `bun test --rerun-each 5 test/J-EXPERT-management.test.ts` | 15 pass, zero fail, 75 assertions |
+| Economics/SEA/binding/schedule render narrow gate | 11 pass, zero fail, 87 assertions |
+| UI narrow gate | 13 pass, zero fail, 69 assertions |
+| New Chromium schedule/usage and live-inbox journeys | Pass on real native capabilities; desktop/mobile screenshots retained |
+| `domainforge fmt --check .sea/interaction/interaction-model.sea` | Already formatted |
+| `domainforge validate --format human .sea/interaction/interaction-model.sea` | Zero violations |
+| DomainForge upstream formatter fidelity tests | Four pass |
+| Upstream Cognate `just verify` | Final isolated run 81/81 gates pass, exit zero, about 49 seconds |
+| Upstream events/memory/SQLite; PostgreSQL conformance | 73 pass; 29 pass |
+| Upstream complete PostgreSQL adapter suite | 42 pass, zero fail, 193 assertions |
+| Upstream saturated-pool regression, three repetitions | Three pass, zero fail, twelve assertions |
+| Upstream runtime/service/continuations | 96 pass, zero fail, 373 assertions after final startup compatibility guard |
+| Upstream events/continuations/runtime after CodeRabbit fixes | 225 pass, zero fail, 772 assertions; seventeen optional external CEP tests skipped |
+| Mixed run/resume claims at capacities one/two | Before: two/four outstanding claims; after: bounded at one/two with all deliveries settled once |
+| AG-UI shared-state stress regression | Before: two failures in 100 repetitions; after awaiting settled SSE streams: 100 tests / 160 assertions pass |
+| `COGNATE_BWRAP_TESTS=1 bun test --timeout 15000 packages/execution/test/bubblewrap.test.ts` | Ten pass, zero fail, 29 assertions; actual OS namespaces |
+| Upstream documentation gate | Five pass, zero fail, 26 assertions |
+| `git diff --check` | Pass |
+
+The earlier full-suite failure was retained and diagnosed, not hidden by a larger timeout.
+Initial browser locator failures and a font-load wait were corrected; reruns and the final full
+suite pass. Unprivileged fixture failures were sandbox access denials; authorized real-store/OS
+tests supplied the observed evidence. Optional skipped OS tests are not counted as containment proof.
+
+Final scope review also bound cached transcript/history/memory pages to their selected conversation,
+Expert and Team/query, so late reads cannot display previous-scope content under a new selection.
+The new native browser sentinel test verifies Expert and Team memory switching. A deliberately held
+Google Fonts response reproduces the former bootstrap timeout; nonblocking optional stylesheet
+preloading makes that same test pass in about four seconds without extending timeouts. All 1,101
+tests pass after these fixes. The shorter full-suite time is one local run, not a general latency claim.
+
+## Commits, branches and release boundary
+
+Workbench implementation commits:
+
+- `42f4819` — formatter fidelity and canonical formatting.
+- `07df49e` — dependency/debt disposition plan.
+- `a4d6201` — native schedules, live inbox, partition migration/pagination, budgets and journey tests.
+- `8169975` — native UX, observed usage, responsive evidence and browser journeys.
+- `e88bdf4` — debt evidence, benchmarks and documentation reconciliation.
+- `7ecc4a0` — scoped cached-view guards and nonblocking optional font bootstrap.
+
+The authorized Workbench branch is `feature/expert-teams`; final documentation/status publication
+is recorded in its Git history. Upstream branch `feature/durable-dispatch-debt` is pushed with:
+
+- `ab4dd2a` — fenced native dispatch, bounded run admission and PostgreSQL replay fix.
+- `920c4c9` — opt-in Linux execution world and regression gates.
+- `06a520b` — fail-fast secret and actually reachable network-denial evidence.
+- `48ad057` — precise old-writer and workspace-content compatibility limits.
+- `a0b462a` — complete upstream verification/publication checkpoint.
+- `a59a7da` — reject unfenced injected stores before opening a parallel runtime; 96 tests/373 assertions.
+- `7221260` — release only uncommitted duplicate position reservations; following fact retains position two.
+- `7d9b80f` — PostgreSQL replay and release checkpoint.
+- `52a8eaf` — shared run/resume admission, worker settlement/error regression and actual file-existence check.
+- `ff505ae` — remove independent GitHub reviewer gate per operator instruction; repair evidence documentation map.
+- `033029d` — await settled AG-UI streams, retain failed gate diagnostics; all 81 local gates and exact-head CI/packaging pass.
+
+[Cognate PR #42](https://github.com/GodSpeedAI/Cognate/pull/42) is ready for final operator
+authorization at exact head `033029d2be29fc3982dc4ac9de963a93ab266f90`:
+
+- [CI verification](https://github.com/GodSpeedAI/Cognate/actions/runs/38636836131/job/116102034362)
+  succeeded at 2026-10-14 21:02:27 UTC.
+- [Pack and clean-room installation](https://github.com/GodSpeedAI/Cognate/actions/runs/38636835958/job/116102033155)
+  succeeded at 21:01:21 UTC.
+- CodeRabbit status succeeded; the known actionable findings are corrected and regression-tested.
+  No new review was submitted on this exact head; a successful bot status is not a fresh review.
+- Read-only registry checks find all 45 linked names at latest 0.3.0. Release run `38300385888`
+  reports successful publication for every name and readiness variable is true. The historical
+  nine-package gap is resolved; no current missing publication was found.
+
+Future linked npm publication remains non-atomic. Revalidate the approved release version and all
+package publications, and use documented exact-version recovery for any failure. No atomic external
+publication or exactly-once physical effect guarantee is claimed. Outbox fencing remains distinct
+from distributed run-write fencing; Linux child containment remains distinct from production trust.
+SDK 0.4.0 is now published and consumed by Workbench; all 45 package versions and gitHeads match
+release commit 467a5f. The [release evidence](sdk-0.4.0-release.md) records all publication jobs and
+clean-room installation. No local SDK links are used. No DomainForge source release was required.
+
+The original sibling Cognate status modifications remain untouched. Temporary source is never a
+production dependency; provenance survives in upstream commits/PR and this report. Cleanup and
+push receipts are recorded in the latest development status.
+
+Workbench through documentation commit `e88bdf4` was pushed successfully without force. The clean
+SDK task worktree was removed at checkpoint `a0b462a`, then reopened for the admission guard,
+PostgreSQL ordering regression and CodeRabbit corrections. It currently remains at the pushed
+upstream branch for review and CI follow-up. The prior DeepSeek donor is absent and no donor files
+are indexed. Other donor directories and sibling working changes were preserved. Unsupported
+legacy/custom stores now fail at parallel startup rather than leaving accepted work queued.
+
+The operator explicitly removed the independent GitHub reviewer requirement. Remaining release
+gates are verified actionable CodeRabbit fixes, green latest-head CI and clean-room packaging,
+linked-package release readiness, documented limits and final operator authorization before merge
+or publication. No reviewer-access change is needed. These gates do not imply the still
+unimplemented ownership, authentication or retrieval work is already done.
+
+## Remaining prerequisites and smallest next actions
+
+The operator gave final authorization to proceed. PR #42 merged at
+`c6e32079844dd36dd6c20d3516f8c6ac2f2c67f0` on 2026-10-14 21:08:54 UTC. Release workflow
+`38637959538` generated [linked release PR #43](https://github.com/GodSpeedAI/Cognate/pull/43),
+head `f1a49147cdbd558ab328184fdc8884088a6a49ca`. Its 91 changed files are exactly 45 package
+manifests, 45 changelogs and the release manifest; configuration checks confirm aligned 0.4.0.
+Release-head verification and packaging passed. PR43 merged at 467a5f and all 45 publication jobs
+completed successfully. Registry and clean-room audits verify every package at 0.4.0 from that
+commit. Workbench's 23 direct/35 resolved SDK pins are 0.4.0, with no non-SDK lockfile drift. The
+published-runtime capacity 1/2/4 characterization passes four focused tests and 33 assertions; it
+demonstrates only native SDK overlap, not Workbench eligibility or Team dispatch. The post-migration
+full `just verify` result is 1,101 tests, zero failures, 6,860 assertions, 96 files, 403.64 seconds.
+Native app parallel admission is still declared pending supported eligibility/UI. Any future
+admission readiness barrier must allow trusted boot-time `agent.config` seed work to complete before
+waiting on Expert/provider readiness, avoiding a seed-to-config deadlock.
+
+1. Integrate authoritative native eligibility and real concurrency UI after its supported SDK
+   extension passes review/release. Requested Luna workers resumed and completed the
+   CodeRabbit and release audit after an earlier service usage limit; unperformed security work
+   remains unclaimed.
+2. Preserve published 0.4.0 compatibility and complete Workbench eligibility, concurrency and
+   containment journeys. Do not substitute an unpublished SDK checkout.
+3. Implement native run ownership and transactional fencing using authoritative store time,
+   worker-version admission and commitment ambiguity handling; pass actual two-process crash tests
+   before exposing multiprocess operation.
+4. Implement authenticated durable identities, session revocation and end-to-end tenant/workspace
+   authorization; complete enforceable resource containment and independent security review.
+5. Close indexed retrieval/model-tokenization/global-budget and remaining workflow/product gaps
+   against the exhaustive matrix, with the same model/binding/journey/evidence discipline.
+
+These are unfulfilled acceptance conditions, not a successful mission declaration. The plan remains
+in progress and the debt entries remain present.
+
+## Historical PR #44 pre-approval checkpoint — 2026-10-15
+
+[Cognate PR #44](https://github.com/GodSpeedAI/Cognate/pull/44), branch
+`feature/async-run-admission`, is pushed at **`d0e491105d7f76ecebed04302701c3f911b69926`**.
+It contains the additive awaitable resource-eligibility contract and native lifecycle repairs.
+Workbench still consumes published 0.4.0. No source checkout is a production dependency.
+
+| Gate | Exact observed evidence |
+| --- | --- |
+| Native admission bound | CodeRabbit's sole actionable finding is repaired: an ignored cancelled callback retains its permit until it settles. PostgreSQL regression fails before the fix (two callbacks at capacity one), then passes. |
+| Cooperative shutdown | Provider abort regression fails before signal forwarding, then passes. Same-run recovery retains a committed checkpoint and an open native continuation. |
+| Acknowledged resume recovery | Independent review found a stranded RESUMED wait. Fault injection confirms its outbox was delivered before the run resume event; the regression fails before recovery scans RESUMED waits, then passes. |
+| Targeted tests | `bun test packages/runtime-bun/test/concurrency.test.ts packages/runtime-bun/test/async-admission.test.ts packages/runtime-bun/test/shutdown-recovery.test.ts`: **19 pass, zero fail, 121 assertions**, actual PostgreSQL. |
+| Full upstream gate | `just verify`: **81/81 gates pass** after all repairs. Typecheck and `git diff --check` pass. |
+| Latest-head package gate | [Run 38665283847](https://github.com/GodSpeedAI/Cognate/actions/runs/38665283847/job/116195713751), exact `d0e4911`, passed 01:23:17 UTC. |
+| Latest-head verify | [Run 38665283850](https://github.com/GodSpeedAI/Cognate/actions/runs/38665283850/job/116195714099), exact `d0e4911`, passed 01:24:05 UTC, including interoperability and PostgreSQL suites. Cached DomainForge/RealityTrace installation step was skipped; no new installation proof is claimed. |
+| Review | Requested Luna source reviews checked cancellation, late-controller registration, listener cleanup, permit ownership, replay and recovery. No remaining scoped blocker. CodeRabbit's latest pass context reflects its review quota: **no fresh automated review of `d0e4911` occurred**. Its previous finding is addressed by source and regression evidence. |
+| Release prerequisites | Head matches local/remote, mergeable, three commits ahead and zero behind release base `467a5f`. Unified release check passes for 45 packages at 0.4.0; trusted publishing flag is enabled. Prior 0.4.0 workflow published all 45 successfully. No release PR/workflow is pending. Expected 0.5.0 is a forecast until Release Please generates the linked version. |
+
+The operator subsequently approved PR #44 and its linked release. Neither PR #44 nor a new SDK
+release has merged or published as of this record. Address fresh actionable review findings before
+merge, then inspect the generated linked release diff,
+run exact-head verification/packaging, require all package publications to complete, then audit
+registry gitHeads and a fresh consumer before changing Workbench dependencies.
+
+Limits remain explicit: signal-ignoring callbacks can exhaust lookup capacity; signal-ignoring
+execution handlers can delay shutdown. External requests may have occurred before a durable result
+and can repeat on recovery; native commitments and reconciliation remain necessary. Outbox fencing
+does not establish distributed run-write fencing, and Linux child containment is not a complete
+production security boundary. Workbench Team parallelism, distributed deployment and production
+trust are not settled by this PR.
+
+Workbench's latest committed test slice is **`069a9d8`**, pushed to `feature/expert-teams`:
+`just verify` passes **1,104 tests, zero failures, 6,884 assertions/96 files in 408.21 seconds**.
+All seven debt entries remain reconciled above; the overall mission remains incomplete.
+
+## PR44 final review repairs — 2026-10-15
+
+The operator approved PR44 and its linked SDK release. Final review repairs are committed as
+`6963620`: native cancellation spans eligibility, slot wait and the executor's first store read;
+every acquired permit is released even if close wins. Recovered runs use durable outbox retries.
+A monotonic250ms/100-candidate reconciliation policy bounds scan frequency; full query
+materialization remains an explicit A4 limitation. The250-run regression checks both the scan
+bound and eventual completion. The tests for lost cancellation, stale initial snapshot and
+late-grant cleanup fail before repair and pass afterward.
+
+Final real PostgreSQL/Linux targeted command (the four SDK test files previously listed, with an
+explicit reviewed attestation): **38 pass, zero fail,189 assertions/8.94s**. Full upstream
+`just verify` with the same OS fixture: **81/81 gates pass**. Typecheck/diff check and fresh requested
+Luna review pass. Exact pushed-head CI/packaging/review still gate the already-authorized merge;
+no new SDK is consumed before the complete linked publication and fresh-consumer audit.
+
+The approved PR44 merged at `e90f511731cbe01cf204f7ec7675e1b03532c5c7` on2026-10-15
+13:14:33UTC. Exact-head gates for`696362090fb5bae0627dad0a37d7b508eaa63f8a` passed:
+[verify](https://github.com/GodSpeedAI/Cognate/actions/runs/38740565172) and
+[clean-room package](https://github.com/GodSpeedAI/Cognate/actions/runs/38740565394).
+CodeRabbit reported success but its review quota prevented a fresh full automated review; the
+actionable comments were resolved with RED/GREEN regressions and requested Luna source reviews.
+The [linked release workflow](https://github.com/GodSpeedAI/Cognate/actions/runs/38741037685)
+has started. A merge is not a publication receipt; Workbench remains on0.4.0 until every linked
+package and a fresh consumer are verified.
+
+## Contained-workspace slice — 2026-10-15, integration gates in progress
+
+J-RW-contained-workspace extends the existing ExecutionWorld and WorkspaceRecord model. The current
+model has 225 semantic objects; formatting and validation pass. Seven execution-world bindings
+resolve through the published-package adapter. The legacy validation helper's absolute monorepo
+import was removed in `daa1fae`; it now checks the actual application model and contracts.
+
+The host supplies the Bubblewrap policy; a direct human supplies only the workspace path. Native
+preflight precedes typed `agent.config` events. The root/configuration determine the world identity.
+Changed or missing host policy leaves saved worlds unavailable after restart, with no local fallback.
+The workspace picker exposes the local default and explicit Linux child choice, availability,
+preflight failure and current-world status. Desktop/mobile browser evidence is in
+`screenshots/containment/`; setup and limits are in [the operator guide](linux-contained-workspaces.md).
+
+Configuration writes are sequential typed events, not an atomic multi-event transaction. A timeout
+cancels the queued native run and rereads its terminal state. Partial or unknown commits retain the
+provider for reconciliation. Stable world-specific receipts recover lost acceptance acknowledgments
+across repeated selection attempts. A bounded deterministic retry chain advances only after a
+previously observed terminal attempt has a verified empty effect history. A newly failed attempt
+stops rather than silently retrying; known workspaces record selection without duplicate creation.
+
+| Command/fixture | Observed result |
+| --- | --- |
+| `COGNATE_BWRAP_TESTS=1 COGNATE_BWRAP_TEST_ATTESTATION=<reviewed-file> just verify` | 1,127 pass, zero fail, 7,027 assertions/100 files; 586.06 seconds. This run precedes the final receipt-chain correction. |
+| Same host environment; `bun test --timeout 20000 test/containedWorkspace.test.ts test/executionWorlds.test.ts test/ui-contained-workspace.test.tsx test/J-RW-contained-workspace.test.ts test/E2E-contained-workspace.test.ts` | After receipt correction: 31 pass, zero fail, 177 assertions; 23.13 seconds. Actual PostgreSQL, namespaces and Chromium. |
+| OS denial/recovery | Workspace edits/commands work; sibling host files and reachable host loopback are denied. Configured restart works; missing configuration and wrong binary hash fail closed. Queued configuration is cancelled without late workspace/world events while an unrelated Expert remains active. |
+| Browser | Explicit containment choice, unavailable-host reason, native coding flow and workspace badge; no page errors. Four screenshots include desktop and 360px mobile layouts. |
+
+Test host: Bun 1.4.0, DomainForge 0.19.0, Linux 6.18.54.1-microsoft-standard-WSL2, six visible logical
+processors, controlled PostgreSQL 18.1/pg0. This is fixture-specific evidence, not a portable
+performance or security guarantee. The upstream 0.12.0 Bubblewrap source/build/hash is recorded in
+[provenance](bubblewrap-fixture-provenance.md). The old distro patch assertion is withdrawn.
+
+Published SDK 0.4.0 remains the dependency at this checkpoint. The writable-launcher guard in PR44
+must be legitimately published and consumed before its protection is claimed for Workbench. Final
+full integration, commit and publication remain pending. Production authentication, tenant/session
+authorization, host isolation, aggregate resource quotas and formal security review remain open.
+
+## Production identity, tenant isolation and aggregate containment (T8) — 2026-10-17
+
+Model first: three journeys added to the authoritative interaction model and re-validated
+(`domainforge validate` 0 violations; `fmt --check` clean) — J-AUTH-SESSION (durable identities,
+server-issued revocable sessions, restart supersession), J-AUTH-TENANT-ISOLATION (a second tenant's
+session sees only its own partition on one shared store), J-RW-AGGREGATE-CONTAINMENT (operator
+ceilings over all contained executions, fail closed across processes), with the semantic anchors
+`DurableIdentity`, `DurableSession`, `ContainmentQuota` bound in `domain/index.ts`.
+
+- **Identity and sessions**: `src/auth/identity.ts` is the durable truth (thread `auth:identity:v1`):
+  256-bit random tokens stored only as SHA-256 hashes, timing-safe comparison, idempotent identity
+  provisioning, revocation and expiry, boot-time supersession of the previous boot's browser token,
+  and a read-through resolution cache invalidated by every in-process ledger write (revocation is
+  immediate in the process that revoked; a cross-process revocation lags ≤ 2 s — a documented
+  read-lag boundary). The production posture (`src/server.ts`) authenticates sessions only; the
+  legacy client-claimed dev format is armed solely behind an explicit `devAuth` opt-in
+  (`COGNATE_DEV_AUTH=1` or `ServerOptions.devAuth`) that prints a loud warning. The capability
+  policy now grants user-kind capabilities to exactly the one durable operator identity.
+- **Tenant isolation**: observed end to end on one PostgreSQL store with two server-issued sessions
+  (operator in `local`, a provisioned identity in `acme`): per-tenant projection partitions,
+  tenant-filtered runs, per-tenant event streams and thread streams, empty-partition
+  indistinguishability, server-derived tenants (a client-claimed tenant never changes the caller),
+  forged dev-format refusal in the production posture — and the system-only guard on both T8
+  ledgers so no session can forge the identity ledger or hand-free containment slots.
+- **Aggregate containment**: `src/capabilities/aggregateContainment.ts` (thread
+  `containment:aggregate:v1`) wraps every contained provider's process port: a durable admission
+  slot per execution, operator quotas via `settings.changeContainment`
+  (`maxConcurrent`, `cpuSecondsPerWindow` with `cpuSecondsPerExecution`, `cpuWindowHours`,
+  `maxAddressSpaceBytes`), kernel per-execution caps applied inside the namespace with
+  `prlimit --as/--cpu` (fail closed when the tooling is unavailable in the world), a 300 s hard
+  execution clamp whose lease provably covers the child, conservative CPU booking at the full
+  kernel cap (never a guessed smaller number), lease-lapse reaping of crashed holders, and boot
+  reconciliation. Local/ssh/wsl worlds are not aggregate-contained and never were.
+- **Deployment hardening**: hardening headers on every response including successful Connect API
+  replies; a strict CSP on the console document (`script-src 'self'`; the review's CSP caught and
+  fixed a pre-existing inline font handler without breaking the "slow fonts never block bootstrap"
+  journey); `maxRequestBodySize` 64 MiB; loopback bind retained; the generated browser entry is
+  untracked (`.generated/` ignored) so no token ever enters version control.
+- **Independent security review**: [security-review-2026-10-17-t8.md](security-review-2026-10-17-t8.md)
+  — a fresh-context adversarial review of the full change set. Its findings (one HIGH: the two new
+  ledgers initially outside the system-only thread guard; four MEDIUM; several LOW/INFO) and the
+  complete remediation record are in the artifact. All MUST-fix items are remediated and re-gated;
+  the accepted residual boundaries (cross-process session semantics in the two-process worker
+  posture, the ≤ 2 s cross-process revocation read lag, fail-closed prlimit probe caching, the
+  fail-closed malformed-ledger brick) are documented in the artifact and above.
+
+| Gate | Result |
+|---|---|
+| `bun run verify` (typecheck + full suite) | 1,188 tests / 1,179 pass / 9 skip / **0 fail** across 117 files; 7,722 assertions. |
+| `COGNATE_BWRAP_TESTS=1` + host attestation: `test/J-RW-AGGREGATE-CONTAINMENT.test.ts test/J-RW-contained-workspace.test.ts test/E2E-contained-workspace.test.ts` | 9 pass / 0 fail (164 assertions): real kernel SIGXCPU cap kills a burner and the exhausted CPU window refuses new work; the aggregate concurrency ceiling fails closed from a second Workbench process on the same store; provider-killed and crashed-holder slots release/reap; the pre-existing escape/egress/cancellation journeys stay green. |
+| `test/J-AUTH-SESSION.test.ts`, `test/J-AUTH-TENANT-ISOLATION.test.ts`, `test/aggregateContainment.test.ts` | 12 pass / 0 fail against actual PostgreSQL (97 assertions): revocation replay with zero durable events, restart token supersession, expiry aging, same-tenant issuance refusal, ledger write/read refusals for sessions, invalid settings never durable, tenant partition isolation, quota ceiling/window/cancellation/reap/clamp/clear semantics. |
+| `domainforge validate --format human .sea/interaction/interaction-model.sea` | 0 violations; `fmt --check` clean. |
+
+Known boundaries carried forward: multi-tenant application seeding (per-tenant Experts/schedules) is
+not claimed; aggregate memory is bounded per-execution (kernel RLIMIT_AS × the concurrency ceiling)
+rather than measured as a live sum; actual per-child CPU accounting is unobservable from the
+Workbench layer, so the window books the kernel cap conservatively; external effects remain
+at-least-once (commitments plus reconciliation); the single-operator development authenticator's
+replacement is now fact, but this is still not a production-hardened multi-user deployment.
+
+## Adversarial reconciliation and final verification (T9) — 2026-10-18
+
+Adversarial reconciliation of every disposition claim in the debt matrix against recorded proof,
+then the final gates. Two claims did not match the evidence and were corrected:
+
+- **Model divergence.** The authoritative model still described Team-specific limits, capacities and
+  admission/batching as "established separately"/"not established by this journey", while the T2
+  Team admission/batching implementation is live and journey-tested. Added the `J-TEAM-ADMISSION`
+  canonical journey (`evidence_class: observed`; capabilities `team.converse, expert.converse,
+  team.retry, team.handoff, execution.runtime.inspect`) and rewrote the J-EXPERT-PARALLEL and
+  J-EXPERT-MODEL-PARALLEL variant text so Team capacities point at J-TEAM-ADMISSION and only
+  disjoint-workspace effect parallelism stays with J-EXPERT-PARALLEL. Re-validated: 0 violations,
+  `fmt --check` clean, 233 semantic objects.
+- **Stale dispositions.** `docs/experts-debt-closure.md`, `.agents/DEBT.md` and `docs/known-gaps.md`
+  carried statements that T4–T8 had already overtaken (retrieval/CAS, economics and ceilings,
+  multi-process ownership, production trust, the consumption version). Reconciled each row to the
+  observed evidence and kept the genuinely-open items (live aggregate memory accounting,
+  multi-tenant application seeding, distributed schedule-evaluator ownership, the review's residual
+  boundaries).
+
+One genuine product-journey race was found and fixed: `test/E2E-experts.test.ts` waited on a heading
+that already existed after "Save Expert", then reopened the editor before the `experts` projection
+folded the new instructions (the editor snapshots `initial` at mount). It now waits for the
+projection row to carry the saved instructions before reopening; verified 3/3 under synthetic load
+and absent from the final runs.
+
+| Gate | Result |
+|---|---|
+| `bun test --max-concurrency 1 --timeout 60000 test` (full suite, serialized) | **1,179 pass / 9 skip / 0 fail** across 1,188 tests (117 files) — the whole suite green. |
+| `just verify` (parallel, default concurrency) | 1,177–1,178 pass / 9 skip / 1–8 fail; the failing set rotates run to run (E2E Experts and Teams, E2E remote-workspaces SSH, E2E cognitive console, E2E workbench cockpit, J-CFG-model-provider, J-CFG-model-catalog, J-PREFS-shortcuts, J-E-plan, J-H-provider-error, J-MEMORY-migrate, experts-runtime-scheduling capacity 1/2/4) and every one passes in isolation and in the concurrency-1 run. |
+| Gated real-bwrap OS journeys (T8 evidence, unchanged) | 9 pass / 0 fail — kernel SIGXCPU cap + window exhaustion, cross-process ceiling, cancellation/reap. |
+| `domainforge validate --format human .sea/interaction/interaction-model.sea` / `fmt --check` | 0 violations / already formatted. |
+| `git diff --check` | clean. |
+
+Known boundary carried forward for the gate itself: the default parallel `just test`/`just verify`
+is contention-sensitive. On a co-tenanted host (other agent processes saturating the cores) it
+intermittently fails one or more E2E/browser or shared-store journeys at their deadlines, while the
+identical suite at `--max-concurrency 1` is green and each failing file passes standalone. This is a
+test-infrastructure property, not product behavior; it is recorded in `.agents/DEBT.md`. All
+retained-open debts from the matrix are unchanged and still not claimed as closed.

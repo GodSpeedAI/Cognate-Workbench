@@ -18,7 +18,7 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
 }
 
 export async function bootApp(home: string): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
-  const app = await startServer({ port: 0, home });
+  const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
   const transport = connectTransport(app.url);
   const service = createRemoteRuntimeService(transport, () => devToken(LOCAL_OPERATOR));
   const client = createClient({ service, caller: LOCAL_OPERATOR });

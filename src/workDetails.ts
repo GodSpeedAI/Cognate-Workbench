@@ -28,7 +28,7 @@ export function isWorkDetailsMode(value: unknown): value is WorkDetailsMode {
  * false for "compact"/"verbose". This is the one field of that table with a direct analogue in this
  * app's much simpler single-running-tool-button UI (src/ui/App.tsx's `toolActionLabel`); the
  * reference's other fields (foldCompletedTurns, stepGrouping, settledReasoningPreview) govern
- * completed-turn history grouping this app does not reproduce (see APP/DEVIATIONS.md).
+ * completed-turn history grouping this app does not reproduce (see docs/known-gaps.md).
  */
 export function showsLiveProcessDetail(mode: WorkDetailsMode): boolean {
   return mode === "standard" || mode === "detailed";

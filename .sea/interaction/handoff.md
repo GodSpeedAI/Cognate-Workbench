@@ -1,5 +1,46 @@
 # Handoff — Projecting This IDM into Cognate
 
+## Current native Experts & Teams handoff (2026-10-15)
+
+Published Cognate 0.4.0 is the runtime dependency; DomainForge 0.19.0 validates/formats the current
+model with zero violations. The current published-package adapter check resolves **225 objects**,
+27 Expert, four schedule, twenty cognitive and seven execution-world bindings, plus native runtime
+inspection. J-RW-contained-workspace adds a human-only, host-configured Linux child containment
+selection; its PostgreSQL/OS/browser slice is under final regression. J-EXPERT-PARALLEL remains
+declared pending supported authoritative admission and application integration.
+
+See [current debt evidence](../../docs/experts-debt-verification.md). Child containment is not
+production identity, host isolation or aggregate resource containment. One process remains supported;
+outbox fencing is not distributed run-write ownership.
+
+## Historical native Experts & Teams handoff (2026-10-13)
+
+The installed DomainForge adapter/CLI is 0.19.0. The complete model validates with zero violations,
+projects 188 semantic objects, and resolves all 24 explicit Expert contracts in
+`EXPERT_CAPABILITY_ANCHORS` / `bindExpertCapabilities` (`domain/index.ts`). The inherited
+`deepseek-harness.interaction` namespace is preserved for existing evidence compatibility.
+
+`expertsComponent` publishes typed identity, Team, conversation, Assignment, memory and human
+decision capabilities. `expert.model.generate` routes the registered Assignment's frozen model
+through existing published adapters. `expert.tool.invoke` and human-only `expert.effect.resolve`
+use native Cognate commitments. The authoritative registry is a native shared thread state stream
+with optimistic version checks and logical command receipts; `expertsProjection` is its redacted
+read model. These are deliberate bindings, not automatic `.sea` policy execution.
+
+`agent.expert` reuses `agent.coding`; the completion bridge supplies the missing 0.2.0
+run-completion-condition evaluator through native continuations and persisted terminal runs.
+The genuine subprocess interruption test preserves the child identity and delivers one handoff
+without browser participation. Human review/settlement requires independent observable evidence;
+the five-Expert disagreement scenario rejects unresolved acceptance.
+
+Use [implementation evidence](../../docs/experts-verification.md) for current test results,
+[user/runtime contracts](../../docs/experts-and-teams.md) for supported scope, and
+[donor translation](../../docs/experts-donor-translation.md) for source provenance. Earlier
+sections below are historical tranche records; their older package versions/object counts do not
+describe the current adapter.
+
+The Interaction Domain Model is sufficiently stable to serve as the canonical semantic source for downstream projections.
+
 This model is consumed the way `.agents/skills/building-with-cognate/references/idm-to-cognate.md`
 describes: `loadSemanticProjection(source, { uri })` (from `packages/domainforge/src/index.ts`,
 pinned `@godspeedai/domainforge@0.18.1`) turns `interaction-model.sea` into a flat list of
@@ -186,11 +227,175 @@ One test file per canonical journey, named after the journey id: `J-A-first-use.
 per the spec's "second branch" instruction), `J-E-plan.test.ts`, `J-F-delegation.test.ts`,
 `J-G-persistence.test.ts`, `J-H-cancellation.test.ts` (cancel + injected-error branches).
 
+## Experts and Teams extension (proposed; implementation handoff)
+
+The authoritative model now declares `ExpertDefinition`, persistent `Expert`, `Team`,
+`TeamMembership`, scoped `Conversation`, `Assignment`, Cognate `ExpertRun`, `Handoff`,
+`ExpertMessage`, and attributable `ExpertMemory`. `domain/index.ts` explicitly maps the proposed
+capability IDs in `EXPERT_CAPABILITY_ANCHORS`; `bindExpertCapabilities()` verifies every anchor
+through the installed Cognate DomainForge adapter. These bindings are semantic contracts only and
+must not be described as runtime implementations until capabilities are registered and journey
+tests pass.
+
+### Proposed state and execution boundary
+
+- Use Cognate durable shared thread state and compare-and-swap updates for Experts, Teams,
+  memberships, assignments, messages, and logical handoff receipts. Do not add a second event store.
+- Enforce exactly one active Orchestrator on activation, membership edits, removal, and replacement
+  at the mutation boundary. Replacement is atomic; invalid concurrent writes fail/retry against
+  current state. A draft may have zero Orchestrators and cannot execute.
+- A Team request enters through its sole Orchestrator. Persist a bounded Assignment before starting
+  a real Cognate Expert run. Intersect human scope, Team policy, member allowlist, and assignment
+  authority. Capture provider/model/tools/context at run start.
+- Resolve durable Specialist returns from Cognate run-completion continuations. Persist a structured
+  Handoff keyed by Assignment/run identity and idempotency key before notifying the parent. Redelivery
+  is deduplicated logically; the UI must not be required for reconciliation.
+- Begin serialized. Existing `subagent.start` is fire-and-forget and is not a sufficient return
+  contract. Do not infer safe parallelism from the Workbench planner.
+- Conversations and memory retain Solo, Team-shared, and private Expert-in-Team scopes. Retrieved
+  memory is untrusted input with source provenance; indexes/summaries are derived from durable facts.
+- Human-only protected acceptance and approval remain outside Orchestrator authority.
+
+### Live Expert inbox slice (`J-EXPERT-STEER`, `J-EXPERT-INBOX-RECOVER`)
+
+Implemented in the native shared Experts thread, without a separate inbox engine. A human sends to
+an explicitly running/waiting Team Assignment; an Expert sender must already have `team_message`
+authority and address an active same-Team member. The CAS message record carries sequence,
+correlation, sender, target Assignment/run, queued/pending/incorporated/cancelled/superseded/late
+state and boundary acknowledgement. `team.inbox.consume` records one receipt per run and deterministic
+decision boundary in the same shared-state mutation that acknowledges its ordered batch. If a message
+arrives after the last allowed decision, it is marked `late` rather than falsely acknowledged as
+incorporated. The agent
+invokes it through Cognate before the next model request; messages are untrusted user context and do
+not alter tools, mode, or settlement authority. The active provider call is never interrupted.
+Private Expert-in-Team conversations do not opt into this inbox. `test/J-EXPERT-inbox.test.ts`
+exercises a live mid-call send, incorporation before the next model decision, restart persistence,
+stale target refusal, forged human Expert-message refusal, cancellation, sender permission, and late
+terminal delivery. `test/J-EXPERT-inbox-replay.test.ts` SIGKILLs the Workbench subprocess after the
+CAS receipt is committed but before the consume invocation returns; after restart the same run
+replays that ordered message batch into a provider request exactly once. No claim is made about an
+unpublished Cognate inbox API: this composes the installed 0.2 runtime's recorded invocations and
+native shared-state CAS.
+
+### Required implementation evidence
+
+Implement and test the 12 catalog journeys before changing them from `proposed`: `J-EXPERT-CREATE`,
+`J-EXPERT-SOLO`, `J-TEAM-CREATE`, `J-TEAM-ACTIVATE`, `J-TEAM-REPLACE-ORCHESTRATOR`,
+`J-TEAM-DELEGATE`, `J-TEAM-HANDOFF`, `J-TEAM-CONVERSE`, `J-TEAM-RECOVER`, `J-TEAM-REVIEW`,
+`J-EXPERT-MEMORY`, and `J-TEAM-SETTLEMENT`. Include restart, duplicate delivery, provider failure,
+cancellation/late return, concurrent invariant updates, and authority-denial evidence.
+
 ## Workbench layer (unified harness experience model v2)
 
 Source: `.agents/plans/unified_harness_experience_model_v2.md`. Tranche plan: `WORKBENCH-PLAN.md`; honest
 status per validation trace: `WORKBENCH-DEVIATIONS.md`. The IDM gained 14 Entities, 12 Resources/Flows, the
 `Reviewer` role, a `ReviewAuthorization` relation and 11 journeys (`J-WB-*`). Bindings are explicit and live
-in `domain/index.ts` (`WORKBENCH_ANCHORS`): 23 capabilities anchored on 13 entities. `AttentionFocus` has no
-capability on purpose (client state). Test files follow the journey ids: `test/J-WB-<journey>.test.ts` plus
+in `domain/index.ts` (`WORKBENCH_ANCHORS`): 23 capabilities anchored on 13 entities. `AttentionFocus`
+remains ephemeral client state, while its publish/context/request capabilities have explicit semantic
+contracts in the cognitive tranche. Test files follow the journey ids: `test/J-WB-<journey>.test.ts` plus
 `test/E2E-workbench.test.ts` for the browser.
+
+## Cognitive navigation binding
+
+The observed cognitive journeys are `J-COG-cleanup`, `J-COG-liveverify`, `J-COG-attention`,
+`J-COG-search`, and `J-COG-realitytrace`. The model separates `Case`, `SuccessCriterion`,
+`WorldSnapshot`, `Verification`, `RiskAssessment`, `Experiment`, `MethodRecommendation`, and the
+existing `AttentionFocus`. These names describe the current runtime contracts and event-backed
+facts; they make no claim that a Case contains a filesystem world or that any `.sea` policy is
+automatically enforced.
+
+`domain/index.ts` exports `COGNITIVE_CAPABILITY_ANCHORS` and binds all 20 executable
+`cognitiveComponent` contracts to those concepts. `src/server.ts` passes the resulting per-capability
+SemanticRefs to the component. `CognitiveOptions.semanticRef` remains a fallback for existing
+callers; the server uses `semanticRefs`. `test/cognitive-bindings.test.ts` checks the full binding
+table and observes a `run.invocation.semanticRef` during the existing attention journey. Human-only
+`world.settle` and `method.accept` remain runtime-enforced acts; binding a contract grants no
+authority.
+
+| IDM concept | Bound capabilities |
+|---|---|
+| `Case` | `case.open`, `case.derive`, `case.observe` |
+| `SuccessCriterion` | `criterion.freeze` |
+| `WorldSnapshot` | `world.freeze`, `world.fork`, `world.attach`, `world.discard`, `world.settle` |
+| `Verification` | `verification.run` |
+| `RiskAssessment` | `risk.assess` |
+| `AttentionFocus` | `ui.focus.publish`, `ui.context`, `ui.request`, `ui.pending` |
+| `Experiment` | `experiment.round`, `experiment.status` |
+| `MethodRecommendation` | `method.review`, `method.accept`, `method.active` |
+
+Validation evidence: DomainForge 0.19.0 reports zero violations and clean formatting; all 222
+projected semantic objects load through the Cognate adapter. `bun run typecheck` and
+`bun test test/cognitive-bindings.test.ts test/sea-format.test.ts` pass. The binding test confirms
+the 20 published contracts each carry the expected SemanticRef, including one actual recorded
+`ui.context` invocation. Existing entity, role, resource, relation, instance, policy and metric
+name-to-ID pairs remain unchanged.
+
+## Debt-closure native bindings and settlement evidence (2026-10-14)
+
+`bindExpertCapabilities` resolves 27 Expert contracts, including the three safe-boundary inbox
+contracts. `bindScheduleCapabilities` resolves `schedule.save`, `schedule.manage`, `schedule.list`
+and internal-only `schedule.dispatch` against the existing Automation semantic anchor. Model budget
+checks extend the existing `expert.save` / `expert.model.generate` contracts; paginated reads extend
+`expert.context` / `expert.memory.read` without changing legacy response shapes.
+
+The new canonical journeys are observed in real PostgreSQL/native runtime tests: schedule create,
+fire and SIGKILL recovery; live inbox steering and crash replay; immutable partition migration and
+source erasure; scoped cursor pagination; frozen context/economic budgets. UI tests inspect actual
+schedule, handoff, usage and live-delivery receipts. See the canonical catalog and
+`docs/experts-debt-closure.md` for exact boundaries and commands.
+
+These bindings do not establish distributed run ownership, parallel workers on the installed SDK,
+or production trust. Upstream PR https://github.com/GodSpeedAI/Cognate/pull/42 contains separately
+tested native dispatch/concurrency/containment contracts; Workbench remains on published 0.2.0.
+
+## Session / Workspace / Task RED journeys — bindings and settlement evidence (2026-10-20)
+
+Six canonical journeys were added to the model first (instances `j_session_draft`,
+`j_ws_directory_discovery`, `j_task_scope`, `j_task_move`, `j_run_task_attribution`,
+`j_task_expert_provenance`; catalog section "Session / Workspace / Task / Run journeys"), together
+with the `AgentRun` entity and the `SessionDraft`, `DirectorySuggestion`, `TaskBindingRecord`,
+`TaskMoveRecord`, `RunTaskAttribution`, `AssignmentTaskRecord` resources and their flows.
+
+`RED_JOURNEY_ANCHORS` in `domain/index.ts` binds the new capabilities explicitly:
+
+| Semantic entity | Capabilities |
+|---|---|
+| `Session` | `session.create`, `session.task.bind` |
+| `ExecutionWorld` | `workspace.directory.suggest` |
+| `Task` (workbench family) | `task.list`, `task.move` (via `WORKBENCH_ANCHORS`) |
+
+`task.create` gains `scope`/`sessionId` and `team.converse` gains a validated `taskId` on their
+existing `Task`/`Conversation` anchors — no new bindings were minted for them. Projections: the
+`sessions` projection folds `session.created` draft rows; the new public
+`session-task-bindings` projection folds `session.task.bound`. Recording runs go through the
+deterministic `agent.config` (`session.created`, `session.recorded`, and `workbench.recorded` now
+accepting the `session.task.bound` family for task.create's ordered batch).
+
+Settlement evidence (all formerly red, now observed):
+
+- `test/J-SESSION-draft-contract.red.test.ts` (5) — durable drafts, explicit-workspace binding,
+  idempotent identity with exactly one event, unknown-workspace refusal, first-turn reuse.
+- `test/J-WS-directory-discovery.red.test.ts` (3) — directory-only prefix completion, fail-closed
+  unknown worlds, bounded deterministic results with no file content.
+- `test/J-TASK-session-scope.red.test.ts` (5) — workspace availability without auto-binding,
+  session-scope visibility and durable bind/detach, identity/evidence-preserving move with
+  destination revalidation, nonexistent-destination refusal, and J-RUN-task-attribution
+  (unbound turns carry no taskId; bound turns freeze it into `session.turn.started`).
+- `test/J-TASK-expert-provenance.red.test.ts` (1) — orchestrator and specialist Assignments retain
+  the Task with distinct Runs; no automatic acceptance.
+- `test/E2E-workspace-session-ux.red.test.ts` (4) — real-pointer journeys: + from Experts & Teams
+  produces a selected, focused, reload-surviving draft; per-workspace + switches the current
+  selection with no stale task; keyboard-driven directory completion opens the exact destination;
+  task visibility is understandable at creation and a new session starts unbound.
+
+Two test selectors were refined with the assertions preserved and strengthened (documented
+in-file): the active-row button is matched by an anchored name (the row's archive control also
+contains the title), and two reads tolerate the durable projection settle while asserting strictly
+more (the session task is not even offered in the new session's combobox).
+
+`just verify` (typecheck + full suite) passes: 1197 pass / 0 fail / 9 pre-existing skips.
+DomainForge 0.19.0: `validate` zero violations, `fmt --check` clean. UX evidence screenshots are in
+`screenshots/red-journeys/` (produced by `test/E2E-red-journeys-evidence.test.ts`).
+
+Known limits are recorded in `docs/known-gaps.md`; the client's per-event projection re-read
+amplification is the one item that needs an upstream framework change rather than app mitigation.

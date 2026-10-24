@@ -1,3 +1,18 @@
+== Current published-package adapter check (2026-10-15 UTC) ==
+$ bun .sea/interaction/validation/check-cognate-adapter.ts
+errors: 0
+Total objects: 225
+By kind: {"Entity":51,"Resource":47,"Role":8,"Flow":47,"Relation":6,"Policy":1,"Metric":1,"EntityInstance":64}
+Relations (edges): 153
+Expert bindings: 27
+Schedule bindings: 4
+Cognitive bindings: 20
+Execution-world bindings: 7
+Runtime inspection binding: true
+Journey catalog includes J-RW-contained-workspace; J-EXPERT-PARALLEL remains declared.
+No monorepo-source import or removed reconstruction path is required.
+
+== Historical adapter evidence follows ==
 == bun .sea/interaction/validation/check-cognate-adapter.ts ==
 errors: 0
 Total objects: 80
