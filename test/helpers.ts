@@ -6,14 +6,47 @@ import { join } from "node:path";
 import { createClient } from "@godspeedai/cognate-client";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
+import { resolvePg0Url } from "@godspeedai/cognate-store-postgres";
 import { startServer, LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
+import { schemaFor, storeConfigFor } from "../src/store.ts";
+
+/** Every app name a store is opened under for a temp home (`src/server.ts` uses "harness"; the
+ *  migration tests use "migration"). Keep in sync with the `storeConfigFor`/`schemaFor` call sites. */
+const STORE_APPS = ["harness", "migration"] as const;
+
+/** Drops the Postgres schema(s) a temp home's store created. Each home maps to its own schema
+ *  (see `schemaFor`), so without this every test leaves one behind. Idempotent (`IF EXISTS`); a
+ *  pg0 instance that is not running holds nothing to drop, so it is skipped rather than started. */
+async function dropHomeSchemas(home: string): Promise<void> {
+  for (const app of STORE_APPS) {
+    const config = storeConfigFor(home, app);
+    let url: string | undefined;
+    if (typeof config === "object" && "postgres" in config) url = config.postgres.url;
+    else if (typeof config === "object" && "postgresPg0" in config) {
+      url = await resolvePg0Url({ ...config.postgresPg0, noStart: true }).catch(() => undefined);
+    }
+    if (!url) continue;
+    const schema = schemaFor(home, app);
+    if (!/^[a-z0-9_]+$/.test(schema)) throw new Error(`refusing to drop unexpected schema name: ${schema}`);
+    const sql = new Bun.SQL(url, { max: 1 });
+    try {
+      await sql.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    } finally {
+      await sql.close();
+    }
+  }
+}
 
 export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "deepseek-harness-t5-"));
   try {
     return await fn(home);
   } finally {
-    await rm(home, { recursive: true, force: true });
+    try {
+      await dropHomeSchemas(home);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   }
 }
 
