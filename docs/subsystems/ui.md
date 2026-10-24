@@ -24,7 +24,7 @@ allowed. It does not compute anything durable.
 ```
 built from a generated entry: .generated/entry.tsx  (written at boot, bundled by Bun.build)
    └── src/ui/App.tsx        shell: sidebar, transcript, composer, settings, right panel
-         ├── src/ui/workbench/*   cockpit (14 components + data.ts + 8 CSS sheets)
+         ├── src/ui/workbench/*   cockpit (15 components + data.ts + 9 CSS sheets)
          ├── src/ui/CognitiveFrame.tsx
          ├── src/ui/webmcp.ts
          └── src/ui/{markdown,icons,RemoteWorkspaceForm}.ts(x)
@@ -32,7 +32,7 @@ built from a generated entry: .generated/entry.tsx  (written at boot, bundled by
 
 ## Core abstractions
 
-`App.tsx` is a single large component file (~4,000 lines). It is not decomposed, and that is the
+`App.tsx` is a single large component file (~5,700 lines). It is not decomposed, and that is the
 current state rather than an endorsed structure. The cockpit under `src/ui/workbench/` *is*
 decomposed, into pure presentational components that take data and callbacks as props and hold no
 runtime hooks of their own.
@@ -84,7 +84,7 @@ never executed by the agent.
 
 ## State
 
-Subscribes to all eleven projections as needed. Holds ephemeral view state only: open panels, active
+Subscribes to all sixteen projections as needed. Holds ephemeral view state only: open panels, active
 tab, focus context, diff view mode.
 
 ## Failure modes
