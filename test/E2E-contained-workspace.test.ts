@@ -68,7 +68,7 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
     await unavailable.waitFor();
     expect(await unavailable.isDisabled()).toBe(true);
     expect(await dialog.getByRole("status").innerText()).toMatch(/not configured|unavailable/i);
-    expect(await dialog.getByLabel("Local · uncontained (default)").isChecked()).toBe(true);
+    expect(await dialog.getByLabel("Local · read-only to agents — commands and writes need a contained workspace").isChecked()).toBe(true);
     await dialog.screenshot({ path: join(screenshotDir, "no-config-desktop.png") });
     await dialog.getByRole("button", { name: "Close" }).click();
     await stop(appWithoutConfig);
@@ -102,11 +102,17 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
     expect(status).toContain("network access is denied");
     expect(status).toContain("Workbench host application is not isolated");
 
-    // Tab enters the radio group at its default option; arrow navigation reaches containment.
+    // Contained posture (the default): containment is preselected once the host reports it. Tab
+    // enters the radio group at the checked option; arrow keys still move between both options.
+    for (let i = 0; i < 50 && !(await contained.isChecked()); i++) await page.waitForTimeout(50);
+    expect(await contained.isChecked()).toBe(true);
     await path.focus();
     await page.keyboard.press("Tab");
-    const localChoice = dialog.getByLabel("Local · uncontained (default)");
+    expect(await contained.evaluate((element) => element === document.activeElement)).toBe(true);
+    const localChoice = dialog.getByLabel("Local · read-only to agents — commands and writes need a contained workspace");
+    await page.keyboard.press("ArrowLeft");
     expect(await localChoice.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(await localChoice.isChecked()).toBe(true);
     await page.keyboard.press("ArrowRight");
     expect(await contained.evaluate((element) => element === document.activeElement)).toBe(true);
     expect(await contained.isChecked()).toBe(true);

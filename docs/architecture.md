@@ -135,7 +135,7 @@ The event log. Every domain change appends to it. Event names are namespaced by 
 | `settings.changed` | the ten `settings.change*` capabilities |
 | `onboarding.dismissed` | `onboarding.dismiss` |
 | `subagent.spawned` | `agent.coding` after `subagent.start` returns |
-| `workbench.*` | the 23 workbench capabilities via `agent.config` |
+| `workbench.*` | the 25 workbench capabilities via `agent.config` |
 | `case.*`, `criterion.*`, `world.*`, `verification.*`, `sentinel.*`, `experiment.*`, `method.*` | the cognitive capabilities |
 
 Full enumeration in [Event catalog](reference/event-catalog.md).
@@ -181,7 +181,7 @@ contracts and their limits.
 
 ## Trust and security boundaries
 
-Published Cognate0.5.0 owns bounded run scheduling. Workbench defaults to capacity1; host startup
+Published Cognate 0.6.1 owns bounded run scheduling. Workbench defaults to capacity1; host startup
 `COGNATE_RUN_CAPACITY=2`,4 or8 enables overlapping execution. Admission resolves the registered run
 and frozen Assignment; no cache or prompt grants authority. Model-only solo Experts and Team
 Specialists may overlap freely. All other work is keyed by canonical per-resource identities

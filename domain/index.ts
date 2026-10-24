@@ -276,6 +276,10 @@ export const WORKBENCH_ANCHORS: Readonly<Record<string, string>> = {
   "steer.enqueue": "SteeringInbox",
   "steer.pending": "SteeringInbox",
   "feedback.record": "GroundedFeedback",
+  // RED journeys (J-TASK-scope / J-TASK-move): the Task family's visibility read and the
+  // governed move mutation, anchored on the same `Task` entity as `task.create`.
+  "task.list": "Task",
+  "task.move": "Task",
 };
 
 export function workbenchBindings(domain: Domain): readonly CapabilityBinding[] {
@@ -385,6 +389,84 @@ export function bindScheduleCapabilities(domain:Domain):Readonly<Record<string,C
   const contracts=bindCapabilities(domain.projection,bindings);
   if(contracts.length!==4)throw new Error("domain: expected four native schedule bindings");
   return Object.fromEntries(contracts.map(contract=>[contract.id,contract.semanticRef]));
+}
+
+/** SEA-Forge as the external authority (P02): status, pending approvals, operator resolution. */
+export const GOVERNANCE_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "governance.status": "ApprovalAuthority",
+  "governance.approvals.list": "ApprovalAuthority",
+  "governance.approval.resolve": "ApprovalAuthority",
+};
+export function bindGovernanceCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(GOVERNANCE_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} governance bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
+/** Governed settlement (readiness P03): the declared proof and the settlement status. */
+export const SETTLEMENT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "workspace.proof.declare": "Verification",
+  "workspace.proof.declare_contract": "Verification",
+  "workspace.proof.current": "Verification",
+  "settlement.status": "Verification",
+};
+export function bindSettlementCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(SETTLEMENT_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} settlement bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
+/** Operator reconciliation of an interrupted agent capability call (`ambiguous-invocation`). */
+export const AMBIGUOUS_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "run.invocation.reconcile": "AgentRun",
+};
+export function bindAmbiguousCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(AMBIGUOUS_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} ambiguous-invocation bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
+/**
+ * RED journeys (J-SESSION-draft, J-WS-directory-discovery, J-TASK-scope, J-TASK-move,
+ * J-RUN-task-attribution, J-TASK-expert-provenance — see
+ * `docs/specs/session-workspace-task-red-journeys.md` and the journey catalog). `task.create`
+ * gains scope fields and `team.converse` gains a validated `taskId` without new bindings — those
+ * capabilities were already anchored on `Task`/`Conversation`; `task.list`/`task.move` join the
+ * workbench Task family in `WORKBENCH_ANCHORS`. These are the remaining *new* capabilities, each
+ * anchored on the entity the model already declares for it:
+ *
+ * - `session.create` on `Session` — the durable pre-inference draft identity (J-SESSION-draft).
+ * - `session.task.bind` on `Session` — the governed Task↔Session binding mutation (J-TASK-scope).
+ * - `workspace.directory.suggest` on `ExecutionWorld` — read-only directory completion in the
+ *   selected execution world (J-WS-directory-discovery).
+ */
+export const RED_JOURNEY_ANCHORS: Readonly<Record<string, string>> = {
+  "session.create": "Session",
+  "session.task.bind": "Session",
+  "workspace.directory.suggest": "ExecutionWorld",
+};
+
+export function redJourneyBindings(domain: Domain): readonly CapabilityBinding[] {
+  return Object.entries(RED_JOURNEY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+}
+
+export function bindRedJourneys(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = redJourneyBindings(domain);
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) {
+    throw new Error(`domain: expected ${bindings.length} RED journey contracts, got ${contracts.length}`);
+  }
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: RED journey capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
 }
 
 /** Effective native capacity is inspection data, distinct from advisory parallelism plans. */

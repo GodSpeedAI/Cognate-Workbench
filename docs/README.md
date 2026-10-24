@@ -87,6 +87,15 @@ This directory is the map of that system. Start wherever the index below sends y
 | [Source map](source-map.md) | Which files and symbols implement each concept? |
 | [Documentation map](documentation-map.md) | Which page owns which concept? |
 
+## See it move
+
+Single-file interactive explainers. Open them from disk; they make no network requests.
+
+| Page | Shows |
+|---|---|
+| [Authority decision explorer](visuals/authority-decision-explorer.html) | Every input to `decideWrite` and `decideShell`, and the order of checks that produces the outcome |
+| [Done level ladder](visuals/done-level-ladder.html) | Why `doneLevel` cannot skip an unmet level, shown over all seven |
+
 ## Pages kept outside this directory
 
 Three files are canonical in their current location and are linked, not duplicated:

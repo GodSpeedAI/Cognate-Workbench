@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en" data-register="blueprint">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authority decision explorer - Cognate Workbench</title>
+<meta name="description" content="Interactive model of decideWrite and decideShell: protected evidence first, strictest outcome wins.">
+<style>
+:root{
+--paper:oklch(98.5% 0.004 250);--paper-2:oklch(96.5% 0.006 250);
+--ink:oklch(24% 0.02 258);--ink-2:oklch(34% 0.018 257);--muted:oklch(52% 0.014 257);
+--rule:oklch(88% 0.008 255);--rule-2:oklch(80% 0.01 255);
+--accent:oklch(52% 0.19 256);--accent-ink:oklch(99% 0.006 256);
+--graphite:oklch(22% 0.016 260);--graphite-ink:oklch(94% 0.01 258);
+--danger:oklch(52% 0.19 25);--danger-bg:oklch(96% 0.03 25);
+--success:oklch(55% 0.14 152);--success-bg:oklch(96% 0.03 152);
+--warn:oklch(55% 0.12 75);--warn-bg:oklch(96% 0.035 80);
+--focus:oklch(52% 0.19 256);
+--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;
+--r1:6px;--r2:10px;
+--font-display:"Space Grotesk","Avenir Next",ui-sans-serif,system-ui,sans-serif;
+--font-body:"Inter",ui-sans-serif,system-ui,sans-serif;
+--font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+body{margin:0;padding:var(--s7) var(--s5) var(--s8);background-image:linear-gradient(color-mix(in oklch,var(--rule) 45%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in oklch,var(--rule) 45%,transparent) 1px,transparent 1px);background-size:24px 24px;background-position:-1px -1px}
+.wrap{max-width:1120px;margin:0 auto}
+h1,h2,h3{font-family:var(--font-display);font-weight:600;letter-spacing:-0.02em;line-height:1.2;margin:0}
+h1{font-size:30px;margin-bottom:var(--s2)}
+h2{font-size:19px;margin-bottom:var(--s2)}
+h3{font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);font-family:var(--font-mono);font-weight:500;margin:0 0 var(--s3)}
+p{margin:0 0 var(--s3);max-width:68ch;color:var(--ink-2)}
+.lede{font-size:17px;color:var(--ink);max-width:62ch}
+.eyebrow{font-family:var(--font-mono);font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:var(--s3)}
+code{font-family:var(--font-mono);font-size:0.9em;background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--r1);padding:1px 5px;overflow-wrap:anywhere}
+header{border-bottom:1px solid var(--rule-2);padding-bottom:var(--s5);margin-bottom:var(--s6)}
+.pipeline{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s3);margin:var(--s5) 0 0}
+.gate{border:1px solid var(--rule-2);border-radius:var(--r2);padding:var(--s3) var(--s4);background:var(--paper)}
+.gate h4{margin:0 0 var(--s1);font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.gate p{margin:0;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.gate[data-on="1"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.gate[data-on="1"] h4{color:var(--accent)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:var(--s6);align-items:start}
+@media (max-width:900px){.grid2{grid-template-columns:minmax(0,1fr)}.pipeline{grid-template-columns:repeat(2,1fr)}}
+fieldset{border:1px solid var(--rule);border-radius:var(--r2);padding:var(--s4);margin:0 0 var(--s4);background:var(--paper)}
+legend{font-family:var(--font-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);padding:0 var(--s2)}
+.row{display:grid;grid-template-columns:1fr auto;gap:var(--s3);align-items:center;padding:6px 0;border-bottom:1px solid var(--rule)}
+.row:last-child{border-bottom:0}
+.row .lbl{font-family:var(--font-mono);font-size:12px;color:var(--ink)}
+select,input[type=text]{font-family:var(--font-mono);font-size:12.5px;color:var(--ink);background:var(--paper);border:1px solid var(--rule-2);border-radius:var(--r1);padding:5px 8px;width:100%;min-width:0}
+select{width:auto;min-width:104px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s2)}
+.chip{font-family:var(--font-mono);font-size:11.5px;border:1px solid var(--rule-2);border-radius:var(--r1);padding:5px 9px;background:var(--paper);color:var(--ink-2);cursor:pointer;letter-spacing:0.02em}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+button.primary{font-family:var(--font-mono);font-size:12.5px;border-radius:var(--r1);padding:8px 14px;background:var(--accent);border:1px solid var(--accent);color:var(--accent-ink);cursor:pointer}
+.verdict{border:1px solid var(--rule-2);border-radius:var(--r2);overflow:hidden;background:var(--paper)}
+.verdict-head{padding:var(--s4) var(--s5);border-bottom:1px solid var(--rule);display:grid;grid-template-columns:auto 1fr;gap:var(--s4);align-items:center}
+.outcome{font-family:var(--font-mono);font-size:14px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase;padding:6px 12px;border-radius:var(--r1);border:1px solid;text-align:center}
+.outcome[data-o="allow"]{color:var(--success);border-color:var(--success);background:var(--success-bg)}
+.outcome[data-o="approval"]{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.outcome[data-o="deny"]{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+.rule-name{font-family:var(--font-mono);font-size:13px;color:var(--ink)}
+.rule-name span{display:block;font-size:11px;color:var(--muted);margin-bottom:2px}
+.reason{padding:var(--s4) var(--s5);background:var(--graphite);color:var(--graphite-ink);font-family:var(--font-mono);font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.trace{border-top:1px solid var(--rule);padding:var(--s4) var(--s5)}
+.trace ol{list-style:none;margin:0;padding:0;counter-reset:t}
+.trace li{counter-increment:t;display:grid;grid-template-columns:18px minmax(0,0.62fr) minmax(0,1fr) auto;gap:var(--s3);align-items:baseline;padding:6px 0;border-bottom:1px solid var(--rule);font-size:12.5px}
+.trace li:last-child{border-bottom:0}
+.trace li::before{content:counter(t);font-family:var(--font-mono);font-size:10.5px;color:var(--muted);text-align:right}
+.trace .rt{font-family:var(--font-mono);font-size:11.5px;color:var(--ink);overflow-wrap:anywhere}
+.trace .rd{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.trace .ro{font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap}
+.trace li[data-skipped="1"]{opacity:.4}
+.ro[data-o="allow"]{color:var(--success)}
+.ro[data-o="approval"]{color:var(--warn)}
+.ro[data-o="deny"]{color:var(--danger)}
+.ro[data-o="skipped"]{color:var(--muted)}
+figure{margin:var(--s6) 0 0}
+figcaption{font-size:12.5px;color:var(--muted);margin-top:var(--s2);max-width:76ch}
+details{margin-top:var(--s5);border:1px solid var(--rule);border-radius:var(--r2);background:var(--paper)}
+summary{cursor:pointer;padding:var(--s3) var(--s4);font-family:var(--font-mono);font-size:11.5px;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-2)}
+details pre{margin:0;padding:var(--s4);border-top:1px solid var(--rule);overflow:auto;background:var(--graphite);color:var(--graphite-ink);font-family:var(--font-mono);font-size:11.5px;line-height:1.6}
+.note{font-size:12.5px;color:var(--muted);max-width:76ch}
+footer{margin-top:var(--s8);border-top:1px solid var(--rule);padding-top:var(--s5);font-size:12.5px;color:var(--muted)}
+footer ul{margin:var(--s2) 0 0;padding-left:var(--s5)}
+footer li{margin-bottom:var(--s1);overflow-wrap:anywhere}
+@media (prefers-reduced-motion:no-preference){.outcome,.trace li{transition:opacity .18s ease}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <p class="eyebrow">docs/visuals &middot; authority and approval</p>
+  <h1>Two functions decide whether an agent may act</h1>
+  <p class="lede">The model asks to write a file or run a command. <code>decideWrite</code> and <code>decideShell</code> answer with one of three outcomes. Both are pure, both live in <code>src/workbench/authority.ts</code>, and the order of their checks is the security property.</p>
+</header>
+
+<div class="pipeline" id="pipeline" aria-hidden="true">
+  <div class="gate" data-gate="escape"><h4>1 &middot; escape</h4><p>Does the path leave the workspace?</p></div>
+  <div class="gate" data-gate="protected"><h4>2 &middot; protected evidence</h4><p>Does a pattern cover the target?</p></div>
+  <div class="gate" data-gate="strictest"><h4>3 &middot; strictest wins</h4><p>Each concern votes; the worst carries.</p></div>
+  <div class="gate" data-gate="grant"><h4>4 &middot; the grant</h4><p>The axis grant supplies the answer.</p></div>
+</div>
+
+<figure>
+  <svg viewBox="0 0 1040 150" width="100%" role="img" aria-labelledby="flowcap" style="display:block;margin-top:var(--s5);max-height:190px">
+    <title id="flowcap">decideShell checks protected evidence first, then collects a vote from every axis and keeps the strictest</title>
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="oklch(52% 0.014 257)"/></marker>
+      <marker id="arx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="oklch(52% 0.19 25)"/></marker>
+    </defs>
+    <g font-family="JetBrains Mono, ui-monospace, monospace" font-size="12" fill="oklch(24% 0.02 258)">
+      <rect x="8" y="46" width="146" height="58" rx="6" fill="oklch(98.5% 0.004 250)" stroke="oklch(80% 0.01 255)"/>
+      <text x="22" y="70">tool call</text>
+      <text x="22" y="88" font-size="11" fill="oklch(52% 0.014 257)">edit or bash only</text>
+      <path d="M154 75 H192" stroke="oklch(52% 0.014 257)" stroke-width="1.3" marker-end="url(#ar)"/>
+      <rect x="194" y="46" width="164" height="58" rx="6" fill="oklch(98.5% 0.004 250)" stroke="oklch(52% 0.19 256)" stroke-width="1.6"/>
+      <text x="208" y="70">mutationTargets</text>
+      <text x="208" y="88" font-size="11" fill="oklch(52% 0.014 257)">then protected</text>
+      <path d="M358 75 H396" stroke="oklch(52% 0.014 257)" stroke-width="1.3" marker-end="url(#ar)"/>
+      <path d="M276 104 V128 H462" stroke="oklch(52% 0.19 25)" stroke-width="1.3" stroke-dasharray="4 3" fill="none" marker-end="url(#arx)"/>
+      <text x="286" y="122" font-size="11" fill="oklch(52% 0.19 25)">pattern covers it: return</text>
+      <rect x="398" y="34" width="192" height="82" rx="6" fill="oklch(98.5% 0.004 250)" stroke="oklch(80% 0.01 255)"/>
+      <text x="412" y="54" font-size="10.5" fill="oklch(52% 0.014 257)">EVERY CONCERN VOTES</text>
+      <text x="412" y="74">shell.run</text>
+      <text x="412" y="90" fill="oklch(52% 0.014 257)">shell.destructive</text>
+      <text x="412" y="106" fill="oklch(52% 0.014 257)">network &middot; packages</text>
+      <path d="M590 75 H628" stroke="oklch(52% 0.014 257)" stroke-width="1.3" marker-end="url(#ar)"/>
+      <rect x="630" y="34" width="148" height="82" rx="6" fill="oklch(98.5% 0.004 250)" stroke="oklch(80% 0.01 255)"/>
+      <text x="644" y="60">strictest</text>
+      <text x="644" y="80" font-size="11" fill="oklch(52% 0.014 257)">deny &gt; approval</text>
+      <text x="644" y="96" font-size="11" fill="oklch(52% 0.014 257)">&gt; allow</text>
+      <path d="M778 75 H816" stroke="oklch(52% 0.014 257)" stroke-width="1.3" marker-end="url(#ar)"/>
+      <rect x="818" y="46" width="210" height="58" rx="6" fill="oklch(98.5% 0.004 250)" stroke="oklch(80% 0.01 255)"/>
+      <text x="832" y="70">Decision</text>
+      <text x="832" y="88" font-size="11" fill="oklch(52% 0.014 257)">outcome, rule, reason</text>
+    </g>
+  </svg>
+  <figcaption>The protected-evidence check runs before any axis vote and short-circuits. Everything after it is a vote, and <code>strictest()</code> keeps the worst.</figcaption>
+</figure>
+
+<h2 style="margin-top:var(--s7)">Try a decision</h2>
+<p class="note" style="margin-bottom:var(--s4)">Every input is editable. The trace shows the real order of checks, including the branches the code skips.</p>
+
+<div class="grid2">
+  <div>
+    <fieldset>
+      <legend>Operation</legend>
+      <div class="chips" role="group" aria-label="Operation kind">
+        <button class="chip" data-kind="write" aria-pressed="true">decideWrite (edit)</button>
+        <button class="chip" data-kind="shell" aria-pressed="false">decideShell (bash)</button>
+      </div>
+    </fieldset>
+    <fieldset id="targetFs">
+      <legend>Target path</legend>
+      <input type="text" id="path" value="src/workbench/ledger.ts" spellcheck="false" aria-label="Workspace-relative path">
+      <p class="note" style="margin:var(--s2) 0 0">Workspace-relative. <code>../x</code> or an absolute path escapes.</p>
+    </fieldset>
+    <fieldset id="targetShell" hidden>
+      <legend>Shell command</legend>
+      <input type="text" id="cmd" value="rm -rf build" spellcheck="false" aria-label="Shell command">
+      <p class="note" style="margin:var(--s2) 0 0">Split per sub-command, then classified by <code>shellSafety.ts</code>.</p>
+    </fieldset>
+    <fieldset>
+      <legend>AuthorityScopes</legend>
+      <div class="row"><span class="lbl">filesystem.read</span><select data-axis="filesystem.read"></select></div>
+      <div class="row"><span class="lbl">filesystem.write</span><select data-axis="filesystem.write"></select></div>
+      <div class="row"><span class="lbl">filesystem.outsideWorkspace</span><select data-axis="filesystem.outsideWorkspace"></select></div>
+      <div class="row"><span class="lbl">shell.run</span><select data-axis="shell.run"></select></div>
+      <div class="row"><span class="lbl">shell.destructive</span><select data-axis="shell.destructive"></select></div>
+      <div class="row"><span class="lbl">network.outbound</span><select data-axis="network.outbound"></select></div>
+      <div class="row"><span class="lbl">packages.install</span><select data-axis="packages.install"></select></div>
+    </fieldset>
+    <fieldset>
+      <legend>protectedPaths</legend>
+      <div class="chips" role="group" aria-label="Protected path patterns">
+        <button class="chip" data-p="tests/" aria-pressed="false">tests/</button>
+        <button class="chip" data-p="*.csv" aria-pressed="false">*.csv</button>
+        <button class="chip" data-p="LICENSE" aria-pressed="false">LICENSE</button>
+        <button class="chip" data-p="docs/specs/" aria-pressed="false">docs/specs/</button>
+        <button class="chip" data-p="src/workbench/" aria-pressed="false">src/workbench/</button>
+      </div>
+      <div class="chips" style="border-top:1px solid var(--rule);padding-top:var(--s3)">
+        <button class="chip" data-el="1" aria-pressed="false">elevate this exact path</button>
+      </div>
+      <p class="note" style="margin:var(--s2) 0 0">Elevation downgrades a protected hit from <b>deny</b> to <b>approval</b>, for that path only.</p>
+    </fieldset>
+    <button class="primary" id="reset">Reset to a cautious profile</button>
+  </div>
+  <div>
+    <h3>Decision</h3>
+    <div class="verdict">
+      <div class="verdict-head">
+        <span class="outcome" id="outcome" data-o="deny">deny</span>
+        <span class="rule-name"><span id="ruleLabel">rule</span><b id="rule">-</b></span>
+      </div>
+      <div class="reason" id="reason">&nbsp;</div>
+      <div class="trace">
+        <h3>Order of checks</h3>
+        <ol id="trace"></ol>
+      </div>
+    </div>
+    <details>
+      <summary>The shape of the source</summary>
+      <pre id="src"></pre>
+    </details>
+  </div>
+</div>
+<script>
+(function () {
+"use strict";
+
+// Literal port of src/workbench/authority.ts and the classifiers it imports from
+// src/workbench/shellSafety.ts. Not an import: if the app changes, this is stale.
+var STRICTNESS = { allow: 0, approval: 1, deny: 2 };
+function fromGrant(g) { return g === "yes" ? "allow" : g === "approval" ? "approval" : "deny"; }
+function strictest(outs) { return outs.reduce(function (a, b) { return STRICTNESS[b] > STRICTNESS[a] ? b : a; }, "allow"); }
+
+function posixNormalize(p) {
+  var abs = p.charAt(0) === "/", out = [];
+  p.split("/").forEach(function (seg) {
+    if (!seg || seg === ".") return;
+    if (seg === "..") {
+      if (out.length && out[out.length - 1] !== "..") out.pop();
+      else if (!abs) out.push("..");
+      return;
+    }
+    out.push(seg);
+  });
+  return (abs ? "/" : "") + out.join("/");
+}
+
+function normalizeRelative(relPath) {
+  var unified = String(relPath).replace(/\\/g, "/");
+  if (unified.charAt(0) === "/") return { path: unified, escapes: true };
+  var path = posixNormalize(unified.replace(/^\.\//, ""));
+  return { path: path, escapes: path === ".." || path.indexOf("../") === 0 };
+}
+
+function globMatch(pattern, str) {
+  var re = "";
+  for (var i = 0; i < pattern.length; i++) {
+    var c = pattern.charAt(i);
+    if (c === "*") { if (pattern.charAt(i + 1) === "*") { re += ".*"; i++; } else re += "[^/]*"; }
+    else if (c === "?") re += "[^/]";
+    else if ("\\^$.|+()[]{}".indexOf(c) !== -1) re += "\\" + c;
+    else re += c;
+  }
+  try { return new RegExp("^" + re + "$").test(str); } catch (e) { return false; }
+}
+
+function matchesProtected(patterns, relPath) {
+  var path = normalizeRelative(relPath).path;
+  if (!path || path === "." || path === "..") return null;
+  var base = path.split("/").pop() || "";
+  for (var i = 0; i < patterns.length; i++) {
+    var pattern = patterns[i];
+    if (pattern.slice(-1) === "/") {
+      var dir = pattern.slice(0, -1);
+      if (path === dir || path.indexOf(dir + "/") === 0) return pattern;
+    } else if (pattern.indexOf("/") !== -1) {
+      if (globMatch(pattern, path)) return pattern;
+    } else if (globMatch(pattern, base) || globMatch(pattern, path)) return pattern;
+  }
+  return null;
+}
+
+function splitCommands(cmd) {
+  return String(cmd).split(/(?:\|\||&&|[;|])/).map(function (s) { return s.trim(); }).filter(Boolean)
+    .map(function (s) { return s.split(/\s+/).filter(Boolean); });
+}
+
+function isDestructiveCommand(cmd) {
+  if (/\bdrop\s+(?:table|database|schema)\b/i.test(cmd)) return true;
+  if (/>\s*\/dev\/(?!null\b|stdout\b|stderr\b|tty\b)/.test(cmd)) return true;
+  return splitCommands(cmd).some(function (t) {
+    if (!t.length) return false;
+    var c = t[0].toLowerCase();
+    if (c === "rm" || c.slice(-3) === "/rm") {
+      var flags = " " + t.slice(1).join(" ");
+      if (/\s-[rfR]*[rfR]/.test(flags) || /\s--force/.test(flags) || /\s--recursive/.test(flags)) return true;
+    }
+    if (c === "git" && t.length >= 2) {
+      var s = t[1], rest = t.slice(2);
+      if (s === "reset" && rest.indexOf("--hard") !== -1) return true;
+      if (s === "clean" && (rest.indexOf("-f") !== -1 || rest.indexOf("--force") !== -1)) return true;
+      if (s === "push" && rest.some(function (x) { return x === "--force" || x === "-f" || x === "--force-with-lease"; })) return true;
+      if (s === "checkout" && t.indexOf("--") !== -1 && t.indexOf(".") !== -1) return true;
+      if (s === "restore") return true;
+      if (s === "branch" && rest.indexOf("-D") !== -1) return true;
+    }
+    if (c.indexOf("mkfs") === 0) return true;
+    if (c === "dd" && t.some(function (x) { return x.indexOf("of=") === 0; })) return true;
+    if ((c === "chmod" || c === "chown") && (t.indexOf("-R") !== -1 || t.indexOf("-r") !== -1)) return true;
+    if (c === "shred" || c === "truncate") return true;
+    if (c === "find") {
+      if (t.indexOf("-delete") !== -1) return true;
+      var ei = t.indexOf("-exec");
+      if (ei !== -1 && t.length > ei + 1) {
+        var ec = t[ei + 1];
+        if (ec === "rm" || ec.slice(-3) === "/rm") return true;
+      }
+    }
+    if (["psql", "mysql", "sqlite3"].some(function (x) { return c.slice(-x.length) === x; })) {
+      if (/DROP\s+(TABLE|DATABASE)/i.test(t.slice(1).join(" "))) return true;
+    }
+    if (c === "kill" && t.indexOf("-9") !== -1 && t.indexOf("-1") !== -1) return true;
+    return false;
+  });
+}
+
+function usesNetwork(cmd) {
+  var nets = ["curl", "wget", "nc", "ncat", "ssh", "scp", "ftp", "telnet"];
+  return splitCommands(cmd).some(function (t) {
+    if (!t.length) return false;
+    var c = t[0].toLowerCase();
+    return nets.some(function (n) { return c === n || c.slice(-(n.length + 1)) === "/" + n; });
+  });
+}
+
+function installsPackages(cmd) {
+  return splitCommands(cmd).some(function (t) {
+    if (!t.length) return false;
+    var c = t[0].toLowerCase();
+    if (["npm", "pnpm", "yarn", "bun"].some(function (x) { return c.slice(-x.length) === x; })) {
+      if (t.length >= 2) {
+        var sub = t[1];
+        if (["install", "add", "i", "ci", "init", "create"].indexOf(sub) !== -1) return true;
+        if (sub.indexOf("create-") === 0) return true;
+      }
+    }
+    if (c === "pip" || c === "pip3" || c.slice(-4) === "/pip") return t.length >= 2 && t[1] === "install";
+    return false;
+  });
+}
+
+function mutationTargets(cmd) {
+  var out = [];
+  splitCommands(cmd).forEach(function (t) {
+    if (!t.length) return;
+    var c = t[0].toLowerCase();
+    if (c === "rm" || c.slice(-3) === "/rm") {
+      t.slice(1).forEach(function (tok) { if (tok.charAt(0) !== "-") out.push({ verb: "rm", target: tok }); });
+    } else if (c === "mv" || c.slice(-3) === "/mv" || c === "cp" || c.slice(-3) === "/cp") {
+      if (t.length > 2) out.push({ verb: c.replace(/^.*\//, ""), target: t[t.length - 1] });
+    } else if (c === "tee") {
+      var f = t.slice(1).filter(function (x) { return x.charAt(0) !== "-"; });
+      if (f.length) out.push({ verb: "tee", target: f[0] });
+    }
+  });
+  return out;
+}
+
+function decideWrite(scopes, relPath, elevated) {
+  var steps = [];
+  var nr = normalizeRelative(relPath);
+  steps.push({ rule: "normalizeRelative", detail: nr.path + (nr.escapes ? "  (escapes workspace)" : ""), outcome: "skip" });
+
+  if (nr.escapes) {
+    var esc = fromGrant(scopes.filesystem.outsideWorkspace);
+    steps.push({ rule: "fs.outside", detail: "filesystem.outsideWorkspace = " + scopes.filesystem.outsideWorkspace, outcome: esc });
+    if (esc !== "allow") {
+      steps.push({ rule: "fs.write", detail: "not reached: the escape check returned", outcome: "skip", skipped: true });
+      return { outcome: esc, rule: "fs.outside", gate: "escape", steps: steps,
+        reason: "Path escaping the workspace is not covered by workspace-relative protection, so the outsideWorkspace grant decides. " + (esc === "approval" ? "It requires approval." : "It is denied.") };
+    }
+    steps.push({ rule: "protected-evidence", detail: "not reached: outside paths are never workspace-relative", outcome: "skip", skipped: true });
+  } else {
+    steps.push({ rule: "fs.outside", detail: "escapes = false in normalizeRelative", outcome: "skip", skipped: true });
+    var pattern = matchesProtected(scopes.protectedPaths, nr.path);
+    if (pattern) {
+      var isEl = elevated === true;
+      var po = isEl ? "approval" : "deny";
+      steps.push({ rule: "protected-evidence", detail: "pattern '" + pattern + "' covers '" + nr.path + "'" + (isEl ? ", and this path is elevated" : ""), outcome: po });
+      return { outcome: po, rule: "protected-evidence", gate: "protected", steps: steps,
+        reason: isEl
+          ? "Write touches elevated protected path '" + nr.path + "' (pattern '" + pattern + "'): approval required"
+          : "Write is blocked: '" + nr.path + "' is protected evidence (pattern '" + pattern + "')" };
+    }
+    steps.push({ rule: "protected-evidence", detail: "no pattern in protectedPaths covers '" + nr.path + "'", outcome: "skip", skipped: true });
+  }
+
+  var w = fromGrant(scopes.filesystem.write);
+  steps.push({ rule: "fs.write", detail: "filesystem.write = " + scopes.filesystem.write, outcome: w });
+  return { outcome: w, rule: "fs.write", gate: "grant", steps: steps,
+    reason: w === "allow" ? "Filesystem write permitted" : w === "approval" ? "Filesystem write requires approval" : "Filesystem write denied" };
+}
+
+function decideShell(scopes, cmd, elevated) {
+  var steps = [];
+  var targets = mutationTargets(cmd);
+  steps.push({ rule: "mutationTargets", detail: targets.length ? targets.map(function (t) { return t.verb + " " + t.target; }).join(", ") : "no write or delete target found", outcome: "skip", skipped: targets.length === 0 });
+  for (var i = 0; i < targets.length; i++) {
+    var nr = normalizeRelative(targets[i].target);
+    if (nr.escapes) {
+      steps.push({ rule: "protected-evidence", detail: "not checked: '" + targets[i].target + "' escapes the workspace", outcome: "skip", skipped: true });
+      continue;
+    }
+    var pattern = matchesProtected(scopes.protectedPaths, nr.path);
+    if (pattern) {
+      var isEl = elevated === true;
+      var po = isEl ? "approval" : "deny";
+      steps.push({ rule: "protected-evidence", detail: "pattern '" + pattern + "' covers '" + nr.path + "' (" + targets[i].verb + ")", outcome: po });
+      return { outcome: po, rule: "protected-evidence", gate: "protected", steps: steps,
+        reason: isEl
+          ? "Shell command (" + targets[i].verb + ") touches elevated protected path '" + nr.path + "' (pattern '" + pattern + "'): approval required"
+          : "Shell command (" + targets[i].verb + ") is blocked: '" + nr.path + "' is protected evidence (pattern '" + pattern + "')" };
+    }
+    steps.push({ rule: "protected-evidence", detail: "no pattern covers '" + nr.path + "'", outcome: "skip", skipped: true });
+  }
+
+  var parts = [];
+  var run = fromGrant(scopes.shell.run);
+  parts.push({ outcome: run, rule: "shell.run", reason: run === "allow" ? "Shell command permitted" : run === "approval" ? "Shell command requires approval" : "Shell command denied" });
+  steps.push({ rule: "shell.run", detail: "shell.run = " + scopes.shell.run, outcome: run });
+
+  if (isDestructiveCommand(cmd)) {
+    var o = fromGrant(scopes.shell.destructive);
+    parts.push({ outcome: o, rule: "shell.destructive", reason: o === "allow" ? "Destructive shell command permitted" : o === "approval" ? "Destructive shell command requires approval" : "Destructive shell command denied" });
+    steps.push({ rule: "shell.destructive", detail: "classified destructive; shell.destructive = " + scopes.shell.destructive, outcome: o });
+  } else {
+    steps.push({ rule: "shell.destructive", detail: "not classified destructive, so this axis does not vote", outcome: "skip", skipped: true });
+  }
+
+  if (usesNetwork(cmd)) {
+    var n = fromGrant(scopes.network.outbound);
+    parts.push({ outcome: n, rule: "network.outbound", reason: n === "allow" ? "Network command permitted" : n === "approval" ? "Network command requires approval" : "Network command denied" });
+    steps.push({ rule: "network.outbound", detail: "classified network use; network.outbound = " + scopes.network.outbound, outcome: n });
+  } else {
+    steps.push({ rule: "network.outbound", detail: "no network use detected, so this axis does not vote", outcome: "skip", skipped: true });
+  }
+
+  if (installsPackages(cmd)) {
+    var p = fromGrant(scopes.packages.install);
+    parts.push({ outcome: p, rule: "packages.install", reason: p === "allow" ? "Package install permitted" : p === "approval" ? "Package install requires approval" : "Package install denied" });
+    steps.push({ rule: "packages.install", detail: "classified package install; packages.install = " + scopes.packages.install, outcome: p });
+  } else {
+    steps.push({ rule: "packages.install", detail: "no package install detected, so this axis does not vote", outcome: "skip", skipped: true });
+  }
+
+  var worst = strictest(parts.map(function (x) { return x.outcome; }));
+  var winner = parts.slice().reverse().filter(function (x) { return x.outcome === worst; })[0] || parts[0];
+  steps.push({ rule: "strictest", outcome: worst, detail: parts.map(function (x) { return x.rule + "=" + x.outcome; }).join(", ") + "  ->  " + worst });
+  return { outcome: worst, rule: winner.rule, reason: winner.reason, steps: steps, gate: "strictest" };
+}
+
+var GRANTS = ["yes", "approval", "no"];
+var state = {
+  kind: "write",
+  path: "src/workbench/ledger.ts",
+  cmd: "rm -rf build",
+  scopes: { "filesystem.read": "yes", "filesystem.write": "yes", "filesystem.outsideWorkspace": "no",
+    "shell.run": "yes", "shell.destructive": "no", "network.outbound": "no", "packages.install": "no" },
+  protectedPaths: [],
+  elevated: false
+};
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+function buildScopes() {
+  var s = state.scopes;
+  return {
+    filesystem: { read: s["filesystem.read"], write: s["filesystem.write"], outsideWorkspace: s["filesystem.outsideWorkspace"] },
+    shell: { run: s["shell.run"], destructive: s["shell.destructive"] },
+    network: { outbound: s["network.outbound"] },
+    packages: { install: s["packages.install"] },
+    extensions: { install: "no", enable: "no" },
+    protectedPaths: state.protectedPaths.slice()
+  };
+}
+
+function render() {
+  var sc = buildScopes();
+  var result = state.kind === "write" ? decideWrite(sc, state.path, state.elevated) : decideShell(sc, state.cmd, state.elevated);
+
+  $("outcome").textContent = result.outcome;
+  $("outcome").setAttribute("data-o", result.outcome);
+  $("rule").textContent = result.rule;
+  $("ruleLabel").textContent = (state.kind === "write" ? "decideWrite" : "decideShell") + " returns";
+  $("reason").textContent = result.reason;
+
+  var trace = $("trace");
+  trace.innerHTML = "";
+  result.steps.forEach(function (s) {
+    var li = document.createElement("li");
+    if (s.skipped) li.setAttribute("data-skipped", "1");
+    var label = s.outcome === "skip" ? "skipped" : s.outcome;
+    li.innerHTML = '<span class="rt">' + esc(s.rule) + '</span><span class="rd">' + esc(s.detail) + '</span><span class="ro" data-o="' + esc(label) + '">' + esc(label) + '</span>';
+    trace.appendChild(li);
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll(".gate"), function (g) {
+    g.setAttribute("data-on", g.getAttribute("data-gate") === result.gate ? "1" : "0");
+  });
+  $("targetFs").hidden = state.kind !== "write";
+  $("targetShell").hidden = state.kind !== "shell";
+}
+
+Array.prototype.forEach.call(document.querySelectorAll("[data-axis]"), function (sel) {
+  var key = sel.getAttribute("data-axis");
+  GRANTS.forEach(function (g) {
+    var o = document.createElement("option");
+    o.value = g; o.textContent = g;
+    sel.appendChild(o);
+  });
+  sel.value = state.scopes[key];
+  sel.addEventListener("change", function () { state.scopes[key] = sel.value; render(); });
+});
+
+Array.prototype.forEach.call(document.querySelectorAll("[data-kind]"), function (b) {
+  b.addEventListener("click", function () {
+    state.kind = b.getAttribute("data-kind");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-kind]"), function (o) {
+      o.setAttribute("aria-pressed", o === b ? "true" : "false");
+    });
+    render();
+  });
+});
+
+Array.prototype.forEach.call(document.querySelectorAll("[data-p]"), function (b) {
+  b.addEventListener("click", function () {
+    var p = b.getAttribute("data-p");
+    var on = b.getAttribute("aria-pressed") === "true";
+    b.setAttribute("aria-pressed", on ? "false" : "true");
+    var i = state.protectedPaths.indexOf(p);
+    if (on) { if (i !== -1) state.protectedPaths.splice(i, 1); }
+    else if (i === -1) state.protectedPaths.push(p);
+    render();
+  });
+});
+
+Array.prototype.forEach.call(document.querySelectorAll("[data-el]"), function (b) {
+  b.addEventListener("click", function () {
+    state.elevated = b.getAttribute("aria-pressed") !== "true";
+    b.setAttribute("aria-pressed", state.elevated ? "true" : "false");
+    render();
+  });
+});
+
+$("path").addEventListener("input", function () { state.path = this.value; render(); });
+$("cmd").addEventListener("input", function () { state.cmd = this.value; render(); });
+
+$("reset").addEventListener("click", function () {
+  state.scopes = { "filesystem.read": "yes", "filesystem.write": "approval", "filesystem.outsideWorkspace": "no",
+    "shell.run": "approval", "shell.destructive": "no", "network.outbound": "no", "packages.install": "no" };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-axis]"), function (sel) {
+    sel.value = state.scopes[sel.getAttribute("data-axis")];
+  });
+  render();
+});
+
+$("src").textContent = [
+  "// src/workbench/authority.ts",
+  "const STRICTNESS = { allow: 0, approval: 1, deny: 2 };",
+  "const fromGrant = (g) => g === \"yes\" ? \"allow\" : g === \"approval\" ? \"approval\" : \"deny\";",
+  "const strictest = (...o) => o.reduce((a, b) => STRICTNESS[b] > STRICTNESS[a] ? b : a, \"allow\");",
+  "",
+  "export function decideShell(scopes, cmd, opts) {",
+  "  // 1. Protected evidence first: any path the command may write or delete.",
+  "  for (const target of mutationTargets(cmd)) {",
+  "    const { path, escapes } = normalizeRelative(target.target);",
+  "    if (escapes) continue;",
+  "    const pattern = matchesProtected(scopes.protectedPaths, path);",
+  "    if (pattern) return protectedDecision(pattern, path, elevated, `Shell (${target.verb})`);",
+  "  }",
+  "  // 2. Every other concern contributes an outcome; the strictest wins.",
+  "  const worst = strictest(...parts.map((p) => p.outcome));",
+  "  const winner = [...parts].reverse().find((p) => p.outcome === worst) ?? parts[0];",
+  "  return { outcome: worst, rule: winner.rule, reason: winner.reason };",
+  "}"
+].join("\n");
+
+render();
+})();
+</script>
+</div>
+
+<footer class="wrap">
+  <p style="margin-bottom:var(--s3)"><b>Source trail.</b> This page restates named functions. It does not replace reading them.</p>
+  <ul>
+    <li><code>src/workbench/authority.ts</code> - <code>decideWrite</code>, <code>decideShell</code>, <code>matchesProtected</code>, <code>normalizeRelative</code>, <code>STRICTNESS</code>, <code>strictest</code>, <code>protectedDecision</code></li>
+    <li><code>src/workbench/shellSafety.ts</code> - <code>isDestructiveCommand</code>, <code>usesNetwork</code>, <code>installsPackages</code>, <code>mutationTargets</code>, <code>splitCommands</code></li>
+    <li><code>src/workbench/glob.ts</code> - <code>globMatch</code></li>
+    <li><code>src/workbench/types.ts</code> - <code>AuthorityScopes</code>, <code>Grant</code></li>
+    <li><code>src/agents/agentCoding.ts</code> - the caller. <code>authority.check</code> runs before <code>tool.edit</code> and <code>tool.bash</code>, and a deny returns to the model as a tool result rather than throwing.</li>
+    <li><a href="../concepts/authority-and-approval.md">Concept: authority and approval</a> - where this decision sits among the four gates.</li>
+  </ul>
+  <p style="margin-top:var(--s4)">The script is a literal port, not an import. If it and the source disagree, the source wins and this page is stale.</p>
+</footer>
+</body>
+</html>

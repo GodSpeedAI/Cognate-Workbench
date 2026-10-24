@@ -115,7 +115,7 @@ describe("J-T-trajectory", () => {
           await aimock.stop();
         }
       }
-      const reopened = await startServer({ port: 0, home });
+      const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
       try {
         const trace = await readTrace(reopened, sessionId);
         expect(trace).toBeDefined();

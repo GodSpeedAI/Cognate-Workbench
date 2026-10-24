@@ -374,7 +374,7 @@ describe("J-SCHEDULE-CREATE / J-SCHEDULE-FIRE / J-SCHEDULE-RECOVER", () => {
         import { SchedulesService } from "./src/schedules/service.ts";
         const home = ${JSON.stringify(app.home)};
         const system = { actor: { id: "system", kind: "system" }, tenant: "local" };
-        const app = await startServer({ port: 0, home, expertProviderFactory: (route) => ({
+        const app = await startServer({ executionPosture: "uncontained-local", port: 0, home, expertProviderFactory: (route) => ({
           id: route.providerId, model: route.model,
           features: { generate: true, stream: false, tool_use: true, structured_output: false, multimodal_input: false, context_limit: 32000 },
           async generate() { return { message: { role: "assistant", content: "Recovered" }, toolCalls: [], finishReason: "stop", model: route.model }; },

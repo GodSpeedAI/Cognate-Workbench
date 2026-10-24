@@ -132,7 +132,7 @@ describe("J-CFG-model-provider", () => {
       }
 
       // Reload: a fresh server on the same home loads the saved protocol as itself.
-      const reopened = await startServer({ port: 0, home });
+      const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
       try {
         const reloaded = await readModelConfig(reopened);
         expect(reloaded?.protocol).toBe("anthropic-messages");

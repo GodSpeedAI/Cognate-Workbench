@@ -78,6 +78,9 @@ export interface AgentCodingInput {
     readonly tools: readonly string[];
     readonly maxSteps: number;
     readonly context: readonly ModelMessage[];
+    /** J-TASK-expert-provenance: the Task the Assignment serves, already validated by the
+     * mutation boundary (never trusted from raw run input). */
+    readonly taskId?: string | null;
   };
 }
 
@@ -406,6 +409,19 @@ export const agentCodingAgent: AgentDefinition = {
     const turnTools = expertExecution
       ? [...toolsForExpert(expertExecution)]
       : [...toolsForPreset(preset, TOOL_DEFS), ...(caseId ? UI_TOOL_DEFS : [])];
+    // J-RUN-task-attribution: the effective task association is resolved once, here — the run
+    // input's explicit `taskId`, else the task the (server-validated) Expert Assignment serves.
+    // It is validated against the session's available tasks and frozen into the turn's evidence;
+    // binding changes after this point never rewrite this run's provenance. An ordinary turn with
+    // no task stays a valid unbound conversation execution.
+    let effectiveTaskId = typeof taskId === "string" && taskId.trim() ? taskId : undefined;
+    if (!effectiveTaskId && expertExecution && typeof expertExecution.taskId === "string" && expertExecution.taskId) effectiveTaskId = expertExecution.taskId;
+    if (effectiveTaskId && !expertExecution) {
+      const available = (await ctx.invoke("task.list", { workspaceId, sessionId })) as { readonly tasks?: readonly { readonly id: string }[] };
+      if (!available?.tasks?.some((t) => t.id === effectiveTaskId)) {
+        throw new Error(`this turn names task ${effectiveTaskId}, which is not available in this session's workspace — bind an available task or send without one`);
+      }
+    }
     // `mode` rides the turn event so the `sessions` projection can fold the session's CURRENT
     // access mode from run inputs (usage pass U2 — the composer's per-session access-mode dropdown
     // becomes this input's source); absent (direct API runs) keeps whatever the projection already
@@ -413,6 +429,9 @@ export const agentCodingAgent: AgentDefinition = {
     const turnPayload: Record<string, string> = { sessionId, workspaceId, message };
     if (typeof mode === "string") turnPayload.mode = mode;
     if (isAgentPreset(preset)) turnPayload.preset = preset;
+    // The frozen association itself: present only when a task is genuinely in scope, so an
+    // unbound turn's evidence carries no taskId at all (J-RUN-task-attribution).
+    if (effectiveTaskId) turnPayload.taskId = effectiveTaskId;
     await ctx.emit("session.turn.started", turnPayload as unknown as Json);
 
     // Plan mode (J-E-plan): session state folded from this agent's own `plan.mode.changed`/
@@ -499,7 +518,7 @@ export const agentCodingAgent: AgentDefinition = {
       if (response.usage) {
         await ctx.emit("workbench.usage.recorded", {
           sessionId,
-          record: { taskId: taskId ?? "", kind: "model", executor: `model:${response.model}`, ...(expertExecution ? {provider:expertExecution.route.providerId}:{}), inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens },
+          record: { taskId: effectiveTaskId ?? "", kind: "model", executor: `model:${response.model}`, ...(expertExecution ? {provider:expertExecution.route.providerId}:{}), inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens },
         } as unknown as Json);
       }
       if (response.toolCalls.length === 0) {
@@ -509,7 +528,9 @@ export const agentCodingAgent: AgentDefinition = {
         if (await drainSteering()) continue;
         if (inboxArrived) continue;
         messages.pop();
-        if (taskId) await ctx.emit("workbench.task.status.changed", { taskId, finished: true } as unknown as Json);
+        // J-TASK-expert-provenance: an Expert Assignment's completion is its own settlement path
+        // (handoff + human review) — it must not flip the served task's §24 "finished" flag.
+        if (effectiveTaskId && !expertExecution) await ctx.emit("workbench.task.status.changed", { taskId: effectiveTaskId, finished: true } as unknown as Json);
         await ctx.emit("message.completed", { sessionId, workspaceId, text: response.message.content });
         return { text: response.message.content };
       }
@@ -539,7 +560,7 @@ export const agentCodingAgent: AgentDefinition = {
         // can run, not left to prompt prose. `authority.check` is a recorded invocation.
         let taskApproval = false;
         if (call.name === "edit" || call.name === "bash") {
-          const verdict = (await ctx.invoke("authority.check", { workspaceId, ...(taskId ? { taskId } : {}), tool: call.name, args } as unknown as Json)) as unknown as AuthorityVerdict;
+          const verdict = (await ctx.invoke("authority.check", { workspaceId, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}), tool: call.name, args } as unknown as Json)) as unknown as AuthorityVerdict;
           if (verdict.outcome === "deny") {
             if (verdict.rule.startsWith("protected-evidence")) {
               await ctx.emit("workbench.protection.blocked", { workspaceId, tool: call.name, path: verdict.path ?? "", pattern: verdict.pattern ?? "", reason: verdict.reason, sessionId, ...(verdict.taskId ? { taskId: verdict.taskId } : {}) } as unknown as Json);
@@ -698,10 +719,10 @@ export const agentCodingAgent: AgentDefinition = {
             resultText = approvalDeniedToolResult(permission);
             await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
           } else {
-            resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, taskId, expertExecution, effectToolCallId);
+            resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, effectiveTaskId, expertExecution, effectToolCallId);
           }
         } else {
-          resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, taskId, expertExecution, effectToolCallId);
+          resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, effectiveTaskId, expertExecution, effectToolCallId);
         }
         messages.push({ role: "tool", content: resultText, toolCallId: call.id });
         if (caseId && ["edit", "bash", "run_code"].includes(call.name) && !resultText.startsWith("Error:")) changedThisStep = true;

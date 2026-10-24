@@ -1,37 +1,48 @@
-# Current status — revision 31
+# Current status — revision 32
 
-The remaining-debt tranche plan is fully settled (**T0 through T9**). T9 closed the adversarial
-reconciliation, final verification, evidence and publication.
+The RED-journeys mission is settled: the five intentionally red Session/Workspace/Task/Run suites
+and the E2E UX suite on `test/red-session-workspace-task-contracts-20261020` (PR #2) are green
+against real Cognate execution.
 
-**T9 (adversarial review, full verification, evidence and publication) is settled.** Reconciliation
-checked every disposition in the debt matrix against recorded proof and corrected two stale claims:
-the authoritative model still described Team-specific limits, capacity and admission/batching as
-established elsewhere while the T2 Team admission/batching is live, so a new `J-TEAM-ADMISSION`
-canonical journey (`evidence_class: observed`) was added and the J-EXPERT-PARALLEL /
-J-EXPERT-MODEL-PARALLEL variant text rewritten to point Team capacities at J-TEAM-ADMISSION and
-leave only disjoint-workspace effect parallelism with J-EXPERT-PARALLEL (re-validated: 0 violations,
-`fmt --check` clean, 233 semantic objects); and `docs/experts-debt-closure.md`, `.agents/DEBT.md`
-and `docs/known-gaps.md` carried statements T4–T8 had overtaken, reconciled to the observed evidence
-while genuinely-open items stayed open.
+**Model first.** The IDM gained the `AgentRun` entity, the SessionDraft / DirectorySuggestion /
+TaskBindingRecord / TaskMoveRecord / RunTaskAttribution / AssignmentTaskRecord resources and flows,
+and six canonical journeys (J-SESSION-draft, J-WS-directory-discovery, J-TASK-scope, J-TASK-move,
+J-RUN-task-attribution, J-TASK-expert-provenance) with catalog entries — validated before any
+implementation (`domainforge validate` 0 violations, `fmt --check` clean, 252 objects). New
+capabilities are bound explicitly in `domain/index.ts` (`RED_JOURNEY_ANCHORS`; `task.list`/`task.move`
+joined the workbench Task family).
 
-One genuine product-journey race was found and fixed: `test/E2E-experts.test.ts` waited on a heading
-that already existed after "Save Expert" and reopened the editor before the `experts` projection
-folded the new instructions (the editor snapshots its initial value at mount); it now waits for the
-projection row to carry the saved instructions.
+**Implemented.** Durable idempotent session drafts (deterministic identity, one `session.created`
+event, draft rows survive reload/restart, explicit-workspace binding, first-turn reuse). Read-only
+execution-world directory suggestions with one shared accessible picker across the Add-workspace
+dialog, SSH/WSL folder step and first-run chooser. One Task entity with workspace/session scope,
+`task.list` visibility semantics, governed `task.move` (identity/evidence/provenance preserved,
+stale bindings invalidated, in-flight refused), and the durable per-session `session.task.bind`
+binding surfaced as the composer's Task control. `agent.coding` freezes the validated taskId into
+`session.turn.started`; `team.converse` validates and stamps the Task on orchestrator and specialist
+assignments. The + action creates a selected draft from every screen, focuses the composer, and
+shows retryable errors; New-task presents the This workspace / This session choice; TaskDetail
+gains Move-or-promote with consequence previews.
 
-Gates: the full suite is green serialized — `bun test --max-concurrency 1 --timeout 60000 test`
-passed **1,179 pass / 9 skip / 0 fail** across 1,188 tests (117 files); the E2E-experts race fix was
-also verified 3/3 under a synthetic CPU load. The default parallel `just verify` intermittently
-fails one or more E2E/browser or shared-store journeys at their deadlines on this co-tenanted host
-(rotating identity; every one passes standalone and in the serialized run) — a test-infrastructure
-property recorded in `.agents/DEBT.md`. `domainforge validate` 0 violations, `fmt --check` clean,
-`bun run typecheck` clean, `git diff --check` clean.
+**Races found by existing expert E2E suites, fixed in the product:** the session-task-bindings store
+no longer mounts with no session open (per-event projection re-read amplification exhausted
+Chromium's request pool on long logs); `startNewSession` closes panels at click time instead of
+after its async invoke. The amplification itself is a known limitation needing an upstream framework
+change (docs/known-gaps.md).
 
-Remaining open (unchanged, none claimed closed): live aggregate memory accounting; multi-tenant
-application seeding (per-tenant Experts/schedules); distributed schedule-evaluator ownership;
-generalized SDK inbox / standalone live steering; and the security review's residual boundaries.
-This remains a single-operator Workbench — the development authenticator survives only as an
-explicit, loud test/dev opt-in, not a production-hardened multi-user deployment.
+**Gates.** All five red suites green (18 tests, real runtime + real Chromium); `just verify` green
+(1,197 pass / 9 pre-existing skips / 0 fail, 1,206 tests); expert regression suites green in
+isolation; DomainForge validation and the Cognate adapter check clean. UX evidence captured in
+`screenshots/red-journeys/` by `test/E2E-red-journeys-evidence.test.ts`. Two red-test selectors were
+refined with assertions preserved/strengthened (documented in-file and in the handoff).
 
-Next: no tranche remains in this plan. Optionally cap suite/E2E concurrency for constrained hosts to
-make `just verify` deterministic there (see `.agents/DEBT.md`).
+**Remaining open:** the client's per-event projection re-read amplification (framework change to
+propose upstream); strict-prefix directory suggestions with symlinked directories never offered;
+no retroactive draft rows for pre-existing sessions; the move preview is descriptive, not a
+destination-config diff; plus the pre-existing open debts from revision 31 (co-tenancy E2E flakiness
+under parallel verify, live aggregate memory accounting, multi-tenant seeding, distributed
+schedule-evaluator ownership, generalized SDK inbox). Still a single-operator Workbench, not
+production-hardened multi-user.
+
+Next: mark PR #2 ready for review with the final report; propose the projection-sync batching/delta
+change upstream.

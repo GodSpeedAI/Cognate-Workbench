@@ -37,6 +37,20 @@ export interface TaskRecord {
   readonly createdAt: string;
 }
 
+/**
+ * J-TASK-scope: a Task's visibility. One Task entity — `scope` is where the task is *available
+ * for binding*, never an automatic active association. A workspace task is available from every
+ * session of its workspace; a session task (the `sessionId` of its owning session) is available
+ * only there until promoted or moved. `originWorkspaceId` preserves the source-workspace
+ * provenance a move must never erase (J-TASK-move).
+ */
+export type TaskScope = "workspace" | "session";
+export interface ScopedTaskRecord extends TaskRecord {
+  readonly scope: TaskScope;
+  readonly sessionId?: string;
+  readonly originWorkspaceId?: string;
+}
+
 export interface WorkflowInstanceRecord {
   readonly id: string;
   readonly workflowId: string;

@@ -25,7 +25,7 @@ test("J-AUTH-TENANT-ISOLATION: a second tenant's session sees only its own parti
   const home = await mkdtemp(join(tmpdir(), "wb-auth-tenants-"));
   let app: AppServer | undefined;
   try {
-    app = await startServer({ port: 0, home });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     const operatorService = tokenService(app, app.operatorSessionToken);
     const operator = createClient({ service: operatorService, caller: LOCAL_OPERATOR });
 
