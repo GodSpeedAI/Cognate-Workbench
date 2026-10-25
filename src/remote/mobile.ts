@@ -374,6 +374,7 @@ export class MobileRemote {
       sessionId: runSession.get(c.runId) ?? null,
       type: c.type,
       summary: summaryOf(c.type, c.payload),
+      detail: detailOf(c.type, c.payload),
       actionable: PHONE_DECISIONS.has(c.type),
     }));
     return { device: { label: device.label }, sessions, decisions, generation: this.pairing.generation };
@@ -414,7 +415,13 @@ export class MobileRemote {
           try {
             // Every committed event is a change signal: the phone refetches what it shows, so no
             // change reaches the screen only through a reload. Payloads are never forwarded.
-            for await (const event of this.host.service.events(caller, { afterPosition, follow: true, signal: abort.signal })) {
+            // A fresh stream (no Last-Event-ID) starts at the current head: the phone refetches on open,
+            // so replaying history as change signals would only flood it.
+            let from = afterPosition;
+            if (!request.headers.has("last-event-id")) {
+              for await (const event of this.host.service.events(caller, { afterPosition: 0, signal: abort.signal })) from = Math.max(from, event.position);
+            }
+            for await (const event of this.host.service.events(caller, { afterPosition: from, follow: true, signal: abort.signal })) {
               send(`id: ${event.position}\nevent: changed\ndata: {}\n\n`);
             }
           } catch { /* aborted or store closed */ } finally {
@@ -526,6 +533,18 @@ function summaryOf(type: string, payload: Json): string {
   if (type === "governance-approval") return "SEA-Forge approval requested";
   if (type === "ambiguous-invocation") return "A previous step may have run; reconcile it on the desktop";
   return `Decision: ${type}`;
+}
+
+/** What the decision would do, bounded for a phone: the agent's justification and the tool's arguments,
+ *  truncated. The desktop shows the same payload in full. */
+function detailOf(type: string, payload: Json): string | null {
+  if (type !== "tool-approval") return null;
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  const lines: string[] = [];
+  if (typeof p.justification === "string" && p.justification.trim() !== "") lines.push(clip(p.justification.trim(), 200));
+  if (p.args !== undefined) lines.push(clip(JSON.stringify(p.args), 280));
+  return lines.length === 0 ? null : lines.join("\n");
 }
 
 /** Strict CSP for the phone: same-origin script only (the shell's module script carries the nonce),

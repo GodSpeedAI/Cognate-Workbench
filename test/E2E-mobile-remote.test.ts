@@ -116,6 +116,8 @@ describe("E2E mobile remote control", () => {
             await phone1.page.getByRole("button", { name: "Back to sessions" }).click();
             await phone1.page.getByRole("button", { name: /Decisions \(1\)/ }).waitFor({ timeout: 30_000 });
             await phone1.page.getByRole("button", { name: /Decisions/ }).click();
+            // The card says what would run (bounded arguments), not just the decision type.
+            expect((await phone1.page.locator(".m-detail").first().innerText()).length).toBeGreaterThan(2);
             await phone1.page.getByRole("button", { name: "Approve" }).click();
             await phone1.page.getByText(/^Approved: /).waitFor({ timeout: 10_000 });
             // The tool result arrives on the session timeline (the desktop approved the same continuation).

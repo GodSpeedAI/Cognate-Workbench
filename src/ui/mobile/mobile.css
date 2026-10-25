@@ -17,6 +17,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .m-notice:empty { display: none; }
 .m-error { color: var(--cg-danger); }
 .m-muted { color: var(--cg-text-muted); font-size: 14px; }
+.m-detail { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 "JetBrains Mono", ui-monospace, monospace; background: var(--cg-surface-sunken, rgba(127,127,127,.08)); padding: 8px 10px; border-radius: 6px; margin: 8px 0; max-height: 12em; overflow: auto; }
 .m-card { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; box-sizing: border-box; margin: 8px 0; padding: 12px 14px; background: var(--cg-surface); border: 1px solid var(--cg-border); border-radius: var(--cg-radius-panel); text-align: left; }
 .m-session { flex-direction: row; justify-content: space-between; align-items: center; }
 .m-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

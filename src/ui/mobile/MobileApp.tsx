@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type Snapshot = {
   device: { label: string };
   sessions: { sessionId: string; title: string; workspaceId: string | null; archived: boolean; status: string; runId: string | null }[];
-  decisions: { id: string; runId: string; sessionId: string | null; type: string; summary: string; actionable: boolean }[];
+  decisions: { id: string; runId: string; sessionId: string | null; type: string; summary: string; detail: string | null; actionable: boolean }[];
   generation: number;
 };
 type Trace = {
@@ -408,7 +408,8 @@ function Decisions({ decisions, refresh, setNotice }: { decisions: Snapshot["dec
       {decisions.map((d) => (
         <article key={d.id} className="m-card m-decision">
           <h2>{d.summary}</h2>
-          <p className="m-muted">Decision type: {d.type}. Never approved automatically.</p>
+          {d.detail ? <pre className="m-detail">{d.detail}</pre> : null}
+          <p className="m-muted">Never approved automatically.</p>
           {d.actionable ? (
             <div className="m-composer-actions">
               <button className="m-danger" onClick={() => void decide(d.id, false, d.summary)}>Deny</button>
