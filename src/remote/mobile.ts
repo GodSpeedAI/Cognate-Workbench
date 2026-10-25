@@ -131,10 +131,19 @@ export class MobileRemote {
     return hosts;
   }
 
-  /** Turn remote on (idempotent while on): listener up, a fresh pairing link. */
+  /**
+   * Turn remote on. Idempotent while on: a repeated call changes nothing, so a connected phone is not
+   * stranded. A start after a restart reads the stored devices, revokes whatever the previous process
+   * left active (device credentials and their identity sessions), and opens a generation strictly above
+   * every stored one, so nothing the old process issued can be honoured.
+   */
   async start(): Promise<RemoteStatus> {
+    if (this.server !== undefined && this.pairing.isEnabled) return this.status();
+    const { state } = await readRemoteState(this.host.service, this.host.system);
+    const floor = Math.max(0, ...Object.values(state.devices).map((device) => device.generation));
+    await this.revokeDevices("remote: restarted");
     if (!this.server) this.listen();
-    this.pairing.start(Date.now());
+    this.pairing.start(Date.now(), floor);
     return this.status();
   }
 
