@@ -154,6 +154,7 @@ To let SEA-Forge, not Workbench, decide which agent actions may run, see [SEA-Fo
 - [Mental model](docs/mental-model.md) and [architecture](docs/architecture.md)
 - [Glossary](docs/glossary.md)
 - [Known gaps](docs/known-gaps.md)
+- [Mobile remote control](docs/REMOTE.md): pairing with a passkey, the trust model, and tunnel setup
 - [Troubleshooting](docs/troubleshooting.md)
 - [Source map](docs/source-map.md)
 

@@ -374,6 +374,7 @@ export class MobileRemote {
       sessionId: runSession.get(c.runId) ?? null,
       type: c.type,
       summary: summaryOf(c.type, c.payload),
+      actionable: PHONE_DECISIONS.has(c.type),
     }));
     return { device: { label: device.label }, sessions, decisions, generation: this.pairing.generation };
   }
@@ -482,6 +483,8 @@ export class MobileRemote {
       if (typeof approved !== "boolean") return json({ error: "invalid" }, 400);
       const open = (await service.listContinuations(caller, { status: "OPEN" })).find((c) => c.id === parts[1]);
       if (!open) return json({ error: "not-open" }, 409);
+      // Reconciling an interrupted effect is a desktop-only decision: never resumed from a phone.
+      if (!PHONE_DECISIONS.has(open.type)) return json({ error: "desktop-only" }, 409);
       if (open.type === "governance-approval") {
         const approvalId = (open.condition as { approvalId?: string } | null)?.approvalId;
         if (typeof approvalId !== "string") return json({ error: "invalid" }, 409);
@@ -510,6 +513,9 @@ function sessionIdOf(row: { readonly key: string; readonly value: Json }): strin
   if (typeof value.sessionId === "string") return value.sessionId;
   return row.key.split("/").slice(1).join("/");
 }
+
+/** Decision types the phone may answer; the rest are shown but decided on the desktop. */
+const PHONE_DECISIONS = new Set(["tool-approval", "plan-review", "governance-approval"]);
 
 /** Short, bounded text for a decision card: what will run, never a file's contents. */
 function summaryOf(type: string, payload: Json): string {
