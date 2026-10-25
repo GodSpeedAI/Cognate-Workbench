@@ -297,6 +297,7 @@ import { CognateProvider } from "@godspeedai/cognate-react";
 import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { App } from "../src/ui/App.tsx";
+import { setRemoteFetch } from "../src/ui/remoteFetch.ts";
 
 const caller = { tenant: ${JSON.stringify(caller.tenant)}, actor: { id: ${JSON.stringify(caller.actorId)}, kind: "user" } };
 // T8: the browser presents the server-issued session token for this boot; the server resolves it
@@ -305,6 +306,8 @@ const authToken = ${JSON.stringify(authToken)};
 const transport = connectTransport(window.location.origin);
 const service = createRemoteRuntimeService(transport, () => authToken);
 const client = createClient({ service, caller });
+// Mobile remote control: the desktop's own loopback calls to /remote/* carry this boot session bearer.
+setRemoteFetch((path, init) => fetch(path, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), authorization: "Bearer " + authToken } }));
 
 const root = document.getElementById("root");
 

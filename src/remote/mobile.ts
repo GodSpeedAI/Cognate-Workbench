@@ -13,6 +13,7 @@ import { assertionOptions, newChallenge, registrationOptions, verifyAssertion, v
 import { mutateRemoteState, readRemoteState, type RemoteDevice } from "./state.ts";
 import { qrSvg } from "./qr.ts";
 import { phoneShell } from "./shell.ts";
+import { DEFAULT_AGENT_PRESET, DEFAULT_PERMISSION_MODE } from "../settings.ts";
 
 export const REMOTE_COOKIE = "__Host-wb_remote";
 export const REMOTE_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -192,10 +193,14 @@ export class MobileRemote {
 
   /** Revoke every active device: its identity session first, then the ledger record. */
   private async revokeDevices(cause: string): Promise<void> {
+    // Live change streams belong to the sessions being revoked; close them so no stale phone keeps listening.
+    for (const controller of this.streams) controller.abort();
+    this.streams.clear();
     const { state } = await readRemoteState(this.host.service, this.host.system);
     for (const device of Object.values(state.devices)) {
       if (device.sid) await revokeSession(this.host.service, this.host.system, device.sid, cause).catch(() => undefined);
     }
+    if (!Object.values(state.devices).some((d) => d.revokedAt === null)) return;
     const now = new Date().toISOString();
     await mutateRemoteState(this.host.service, this.host.system, (draft) => {
       for (const device of Object.values(draft.devices)) {
@@ -230,14 +235,15 @@ export class MobileRemote {
       if (request.method === "POST" && route === "pair/finish") return await this.finishPairing(request);
       if (request.method === "POST" && route === "auth/options") return await this.authOptions();
       if (request.method === "POST" && route === "auth/finish") return await this.finishAuth(request);
-      const device = await this.deviceOf(request);
-      if (!device) return json({ error: "unauthenticated" }, 401, { "set-cookie": clearedCookie() });
-      if (request.method === "GET" && route === "snapshot") return json(await this.snapshot(device));
-      if (request.method === "GET" && route === "events") return this.events(request);
+      const resolved = await this.sessionOf(request);
+      if (!resolved) return json({ error: "unauthenticated" }, 401, { "set-cookie": clearedCookie() });
+      const { device, caller } = resolved;
+      if (request.method === "GET" && route === "snapshot") return json(await this.snapshot(device, caller));
+      if (request.method === "GET" && route === "events") return this.events(request, caller);
       if (request.method === "GET" && route === "device") return json({ label: device.label, pairedAt: device.pairedAt, lastSeenAt: device.lastSeenAt });
-      if (request.method === "GET" && route.startsWith("sessions/")) return json(await this.trace(route.slice("sessions/".length)));
+      if (request.method === "GET" && route.startsWith("sessions/")) return json(await this.trace(decodeURIComponent(route.slice("sessions/".length)), caller));
       if (request.method === "POST" && route === "sign-out") return await this.signOut(device);
-      if (request.method === "POST") return await this.command(request, device, route);
+      if (request.method === "POST") return await this.command(request, device, caller, route);
       return json({ error: "not found" }, 404);
     } catch (error) {
       if (error instanceof WebAuthnError) return json({ error: "passkey" }, 400);
@@ -315,14 +321,16 @@ export class MobileRemote {
     return json({ ok: true }, 200, { "set-cookie": sessionCookie(issued.token) });
   }
 
-  /** The device whose identity session the cookie resolves to, if still live. */
-  private async deviceOf(request: Request): Promise<RemoteDevice | undefined> {
+  /** The device and the operator caller the cookie resolves to, if the session is still live. Service
+   *  calls made for the phone use this caller, so the governance boundary sees the paired human. */
+  private async sessionOf(request: Request): Promise<{ device: RemoteDevice; caller: Caller } | undefined> {
     const token = cookieOf(request);
     if (!token) return undefined;
     const resolved = await authenticateSessionToken(this.host.service, this.host.system, token);
     if (!resolved) return undefined;
     const { state } = await readRemoteState(this.host.service, this.host.system);
-    return Object.values(state.devices).find((d) => d.sid === resolved.session.sid && d.revokedAt === null && d.generation === this.pairing.generation);
+    const device = Object.values(state.devices).find((d) => d.sid === resolved.session.sid && d.revokedAt === null && d.generation === this.pairing.generation);
+    return device ? { device, caller: resolved.caller } : undefined;
   }
 
   private async signOut(device: RemoteDevice): Promise<Response> {
@@ -336,14 +344,14 @@ export class MobileRemote {
 
   // ---- reads ------------------------------------------------------------------------------------
 
-  private async rows(name: string): Promise<{ key: string; value: Json }[]> {
-    return [...(await this.host.service.readProjection(this.host.system, { name })).rows];
+  private async rows(name: string, caller: Caller): Promise<{ key: string; value: Json }[]> {
+    return [...(await this.host.service.readProjection(caller, { name })).rows];
   }
 
   /** Session list plus the decisions waiting on the human. Only what the phone shows is copied. */
-  private async snapshot(device: RemoteDevice) {
-    const { service, system } = this.host;
-    const runs = await service.listRuns(system, { agent: "agent.coding" });
+  private async snapshot(device: RemoteDevice, caller: Caller) {
+    const service = this.host.service;
+    const runs = await service.listRuns(caller, { agent: "agent.coding" });
     // Runs come oldest first: the last one per session is its latest; a live one wins for status.
     const latest = new Map<string, { runId: string; status: string }>();
     for (const run of runs) {
@@ -351,16 +359,16 @@ export class MobileRemote {
       latest.set(run.correlationId.slice("session:".length), { runId: run.runId, status: run.status });
     }
     const active = new Map([...latest].filter(([, run]) => run.status === "running" || run.status === "waiting"));
-    const sessions = (await this.rows("sessions")).map((row) => {
+    const sessions = (await this.rows("sessions", caller)).map((row) => {
       const value = row.value as Record<string, Json>;
-      const sessionId = row.key.split("/").slice(1).join("/");
+      const sessionId = sessionIdOf(row);
       const live = active.get(sessionId);
       const last = latest.get(sessionId);
       const status = live?.status ?? (last ? { completed: "completed", failed: "failed", cancelled: "cancelled" }[last.status] ?? "idle" : "idle");
       return { sessionId, title: typeof value.title === "string" ? value.title : "Session", workspaceId: typeof value.workspaceId === "string" ? value.workspaceId : null, archived: value.archived === true, status, runId: live?.runId ?? null };
     });
     const runSession = new Map(runs.map((run) => [run.runId, run.correlationId.startsWith("session:") ? run.correlationId.slice(8) : null]));
-    const decisions = (await service.listContinuations(system, { status: "OPEN" })).map((c) => ({
+    const decisions = (await service.listContinuations(caller, { status: "OPEN" })).map((c) => ({
       id: c.id,
       runId: c.runId,
       sessionId: runSession.get(c.runId) ?? null,
@@ -370,8 +378,8 @@ export class MobileRemote {
     return { device: { label: device.label }, sessions, decisions, generation: this.pairing.generation };
   }
 
-  private async trace(sessionId: string) {
-    const row = (await this.rows("session-trace")).find((r) => r.key.endsWith(`/${sessionId}`) || r.key === sessionId);
+  private async trace(sessionId: string, caller: Caller) {
+    const row = (await this.rows("session-trace", caller)).find((r) => sessionIdOf(r) === sessionId);
     const turns = ((row?.value as { turns?: unknown[] } | undefined)?.turns ?? []) as Array<Record<string, unknown>>;
     // Tool steps keep name, status and a bounded result; the phone collapses them by default.
     return {
@@ -386,7 +394,7 @@ export class MobileRemote {
     };
   }
 
-  private events(request: Request): Response {
+  private events(request: Request, caller: Caller): Response {
     const last = Number(request.headers.get("last-event-id") ?? "0");
     const afterPosition = Number.isSafeInteger(last) && last >= 0 ? last : 0;
     const encoder = new TextEncoder();
@@ -405,7 +413,7 @@ export class MobileRemote {
           try {
             // Every committed event is a change signal: the phone refetches what it shows, so no
             // change reaches the screen only through a reload. Payloads are never forwarded.
-            for await (const event of this.host.service.events(this.host.system, { afterPosition, follow: true, signal: abort.signal })) {
+            for await (const event of this.host.service.events(caller, { afterPosition, follow: true, signal: abort.signal })) {
               send(`id: ${event.position}\nevent: changed\ndata: {}\n\n`);
             }
           } catch { /* aborted or store closed */ } finally {
@@ -428,7 +436,7 @@ export class MobileRemote {
 
   /** Commands are deduplicated by (device, commandId): a replay returns the first answer. Acks keep the
    *  claims apart: `accepted` means the service call returned; the outcome arrives as events. */
-  private async command(request: Request, device: RemoteDevice, route: string): Promise<Response> {
+  private async command(request: Request, device: RemoteDevice, caller: Caller, route: string): Promise<Response> {
     const body = await this.body(request);
     const commandId = typeof body?.commandId === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.commandId) ? body.commandId : undefined;
     if (!commandId) return json({ error: "invalid" }, 400);
@@ -436,8 +444,8 @@ export class MobileRemote {
     const replay = this.replies.get(key);
     if (replay) return replay.clone();
     if (!this.limiter.allow(`cmd:${device.id}`, 60)) return json({ error: "rate" }, 429);
-    const { service, system } = this.host;
-    const parts = route.split("/");
+    const service = this.host.service;
+    const parts = route.split("/").map((part) => decodeURIComponent(part));
     let name = "";
     let outcome: Record<string, unknown>;
     if (parts.length === 3 && parts[0] === "sessions" && parts[2] === "turns") {
@@ -445,19 +453,19 @@ export class MobileRemote {
       if (!text || text.length > MAX_TEXT) return json({ error: "invalid" }, 400);
       name = "turn";
       const sessionId = parts[1] as string;
-      const live = (await service.listRuns(system, { agent: "agent.coding" })).find((r) => r.correlationId === `session:${sessionId}` && (r.status === "running" || r.status === "waiting"));
+      const live = (await service.listRuns(caller, { agent: "agent.coding" })).find((r) => r.correlationId === `session:${sessionId}` && (r.status === "running" || r.status === "waiting"));
       if (live) {
-        await service.updateState(system, { runId: live.runId, update: { patch: [{ op: "add", path: "/steer/-", value: { id: commandId, text } }] } as never, idempotencyKey: commandId });
+        await service.updateState(caller, { runId: live.runId, update: { patch: [{ op: "add", path: "/steer/-", value: { id: commandId, text } }] } as never, idempotencyKey: commandId });
         outcome = { kind: "steer", runId: live.runId };
       } else {
-        const rows = await this.rows("sessions");
-        const row = rows.find((r) => r.key.endsWith(`/${sessionId}`));
+        const rows = await this.rows("sessions", caller);
+        const row = rows.find((r) => sessionIdOf(r) === sessionId);
         if (!row) return json({ error: "not-found" }, 404);
         const workspaceId = (row.value as { workspaceId?: string }).workspaceId;
-        const settings = ((await this.rows("settings"))[0]?.value ?? {}) as Record<string, Json>;
-        const run = await service.startRun(system, {
+        const settings = ((await this.rows("settings", caller))[0]?.value ?? {}) as Record<string, Json>;
+        const run = await service.startRun(caller, {
           agent: "agent.coding",
-          input: { sessionId, workspaceId, message: text, mode: settings.permission ?? "local", preset: settings.preset ?? "default" } as Json,
+          input: { sessionId, workspaceId, message: text, mode: settings.permission ?? DEFAULT_PERMISSION_MODE, preset: settings.preset ?? DEFAULT_AGENT_PRESET } as Json,
           idempotencyKey: commandId,
           correlationId: `session:${sessionId}`,
           state: { steer: [] } as Json,
@@ -466,33 +474,41 @@ export class MobileRemote {
       }
     } else if (parts.length === 3 && parts[0] === "runs" && parts[2] === "stop") {
       name = "stop";
-      const run = await service.cancelRun(system, { runId: parts[1] as string, reason: "user-cancelled", idempotencyKey: commandId });
+      const run = await service.cancelRun(caller, { runId: parts[1] as string, reason: "user-cancelled", idempotencyKey: commandId });
       outcome = { kind: "cancel", runId: run.runId, status: run.status };
     } else if (parts.length === 3 && parts[0] === "continuations" && parts[2] === "resolve") {
       name = "decision";
       const approved = body?.approved;
       if (typeof approved !== "boolean") return json({ error: "invalid" }, 400);
-      const open = (await service.listContinuations(system, { status: "OPEN" })).find((c) => c.id === parts[1]);
+      const open = (await service.listContinuations(caller, { status: "OPEN" })).find((c) => c.id === parts[1]);
       if (!open) return json({ error: "not-open" }, 409);
       if (open.type === "governance-approval") {
         const approvalId = (open.condition as { approvalId?: string } | null)?.approvalId;
         if (typeof approvalId !== "string") return json({ error: "invalid" }, 409);
-        await service.invoke(system, { capability: "governance.approval.resolve", input: { approvalId, resolution: approved ? "approved" : "rejected" } as Json, idempotencyKey: commandId });
+        await service.invoke(caller, { capability: "governance.approval.resolve", input: { approvalId, resolution: approved ? "approved" : "rejected" } as Json, idempotencyKey: commandId });
         outcome = { kind: "governance", approved };
       } else {
-        const resolved = await service.resolveContinuation(system, { continuationId: open.id, action: "resume", input: { approved } as Json, idempotencyKey: commandId });
+        const resolved = await service.resolveContinuation(caller, { continuationId: open.id, action: "resume", input: { approved } as Json, idempotencyKey: commandId });
         outcome = { kind: "continuation", outcome: resolved.outcome };
       }
     } else {
       return json({ error: "not found" }, 404);
     }
-    await mutateRemoteState(service, system, (draft) => {
+    await mutateRemoteState(service, this.host.system, (draft) => {
       draft.audit.push({ at: new Date().toISOString(), deviceId: device.id, command: name, commandId, outcome: String(outcome.kind) });
     });
     const reply = json({ received: true, accepted: true, ...outcome });
     this.replies.set(key, reply.clone());
     return reply;
   }
+}
+
+/** A session row's id: the projection's own `id` (or `sessionId`), else the key's tail after the tenant. */
+function sessionIdOf(row: { readonly key: string; readonly value: Json }): string {
+  const value = row.value as { readonly id?: unknown; readonly sessionId?: unknown };
+  if (typeof value.id === "string") return value.id;
+  if (typeof value.sessionId === "string") return value.sessionId;
+  return row.key.split("/").slice(1).join("/");
 }
 
 /** Short, bounded text for a decision card: what will run, never a file's contents. */

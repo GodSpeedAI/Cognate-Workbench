@@ -6,9 +6,6 @@ import { describe, expect, test } from "bun:test";
 import { PAIRING_TTL_MS, Pairing } from "../src/remote/pairing.ts";
 import { newChallenge } from "../src/remote/webauthn.ts";
 import { remoteSettingsFromEnv } from "../src/remote/mobile.ts";
-import { clearedCookie, COOKIE_NAME, sessionCookie, Sessions, SESSION_TTL_MS } from "../src/remote/sessions.ts";
-import { newChallenge } from "../src/remote/webauthn.ts";
-import { publicOriginOf, remoteSettings } from "../src/remote/settings.ts";
 
 const T0 = 1_700_000_000_000;
 
