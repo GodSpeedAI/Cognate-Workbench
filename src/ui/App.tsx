@@ -105,6 +105,7 @@ import type { PluginCatalogResult } from "../capabilities/pluginInstall.ts";
 import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView } from "../plugins.ts";
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
+import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
 
 interface WorkspaceRow {
   readonly id: string;
@@ -4638,6 +4639,7 @@ export function App() {
   // column for the plugin manager (the reference's panel replaces the session surface, per the
   // 25b checkpoint's aria tree).
   const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
+  const [remoteOpen, setRemoteOpen] = useState(false);
   const [expertsPanelOpen, setExpertsPanelOpen] = useState(false);
   // T11: `#plugins/<id>` is the panel's only route. The hash is the source of truth, so Back,
   // Forward and a reload all restore the same view; opening pushes one history entry and closing
@@ -5252,6 +5254,7 @@ export function App() {
           </p>
         )}
 
+        {remoteOpen && <RemoteDialog onClose={() => setRemoteOpen(false)} />}
         {!collapsed && (
           <nav className="global-panels" aria-label="Global panels">
             <button
@@ -5281,6 +5284,8 @@ export function App() {
               <PluginIcon />
               Plugins
             </button>
+            <RemoteIndicator />
+            <RemoteButton onOpen={() => setRemoteOpen(true)} />
             <button
               type="button"
               className={workbenchOpen ? "global-panel-btn active" : "global-panel-btn"}

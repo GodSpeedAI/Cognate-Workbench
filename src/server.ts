@@ -47,6 +47,8 @@ import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
 import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
 import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
+import { MobileRemote, remoteSettingsFromEnv, hardened as remoteHardened } from "./remote/mobile.ts";
+import { buildPhoneAssets } from "./remote/assets.ts";
 import { ageExpiredSessions, createSessionAuthenticator, ensureIdentity, issueSession, OPERATOR_SESSION_TTL_MS, supersedeBootSessions, BOOT_SESSION_CAUSE, IDENTITY_THREAD } from "./auth/identity.ts";
 import { sessionHistoryComponent } from "./capabilities/sessionHistory.ts";
 import { sessionCreateComponent } from "./capabilities/sessionCreate.ts";
@@ -295,6 +297,7 @@ import { CognateProvider } from "@godspeedai/cognate-react";
 import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { App } from "../src/ui/App.tsx";
+import { setRemoteFetch } from "../src/ui/remoteFetch.ts";
 
 const caller = { tenant: ${JSON.stringify(caller.tenant)}, actor: { id: ${JSON.stringify(caller.actorId)}, kind: "user" } };
 // T8: the browser presents the server-issued session token for this boot; the server resolves it
@@ -303,6 +306,8 @@ const authToken = ${JSON.stringify(authToken)};
 const transport = connectTransport(window.location.origin);
 const service = createRemoteRuntimeService(transport, () => authToken);
 const client = createClient({ service, caller });
+// Mobile remote control: the desktop's own loopback calls to /remote/* carry this boot session bearer.
+setRemoteFetch((path, init) => fetch(path, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), authorization: "Bearer " + authToken } }));
 
 const root = document.getElementById("root");
 
@@ -775,6 +780,35 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");
+  // Mobile remote control: off until the desktop enables it (`/remote/start`). Its phone bundle is built
+  // from its own entry on first use, so the desktop bundle never reaches a phone.
+  // A failed build is not cached: the rejection clears the cache, so the next request retries.
+  let phoneAssets: ReturnType<typeof buildPhoneAssets> | undefined;
+  const remote = new MobileRemote({
+    service: governedService,
+    system: SYSTEM_CALLER,
+    operatorIdentityId: operatorIdentity.id,
+    assets: () => {
+      if (!phoneAssets) {
+        const building = buildPhoneAssets(appCss);
+        phoneAssets = building;
+        building.catch(() => { if (phoneAssets === building) phoneAssets = undefined; });
+      }
+      return phoneAssets;
+    },
+  }, remoteSettingsFromEnv(process.env));
+  // Desktop control: the boot session bearer only (never the phone's cookie, never loopback trust alone).
+  const remoteControl = async (request: Request, path: string): Promise<Response> => {
+    const caller = await authenticate(request.headers);
+    if (!caller) return Response.json({ error: "unauthenticated" }, { status: 401, headers: remoteHardened() });
+    const post = request.method === "POST";
+    const status = path === "/remote/status" && !post ? await remote.status()
+      : path === "/remote/start" && post ? await remote.start()
+      : path === "/remote/refresh" && post ? await remote.refresh()
+      : path === "/remote/stop" && post ? await remote.stop()
+      : undefined;
+    return status ? Response.json(status, { headers: remoteHardened() }) : new Response("not found", { status: 404, headers: remoteHardened() });
+  };
 
   if(options.enableScheduleEvaluation!==false)await scheduleEvaluator.start(LOCAL_OPERATOR.tenant);
   // T8 deployment hardening: every response carries the browser hardening headers (the Connect
@@ -808,6 +842,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }
       // The bundle is rebuilt at every boot, so the browser must never hold one across restarts —
       // no-store keeps a stale UI (with stale handlers) from surviving a harness restart.
+      if (url.pathname.startsWith("/remote/")) return remoteControl(request, url.pathname);
       if (url.pathname === "/app.js") return new Response(bundleJs, { headers: hardened({ "content-type": "text/javascript", "cache-control": "no-store" }) });
       if (url.pathname === "/astryx.css" && cssPaths[0]) return new Response(Bun.file(cssPaths[0]), { headers: hardened() });
       if (url.pathname === "/theme.css" && cssPaths[1]) return new Response(Bun.file(cssPaths[1]), { headers: hardened() });
@@ -834,6 +869,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       eventsController.abort();
+      await remote.close();
       await scheduleEvaluator.stop();
       await expertBridge.stop();
       observations?.stop();

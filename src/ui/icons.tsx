@@ -249,3 +249,12 @@ export const MoreIcon = (props: IconProps) =>
     </>,
     props,
   );
+
+export const PhoneIcon = (props: IconProps) =>
+  base(
+    <>
+      <rect x="4.5" y="1.5" width="7" height="13" rx="1.5" />
+      <path d="M7 12.5h2" />
+    </>,
+    props,
+  );
