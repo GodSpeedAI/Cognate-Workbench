@@ -159,17 +159,22 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
 }
 
 /** Focus trap and Escape for this dialog (same contract as the app's modals). */
+/** The latest onClose is read through a ref, so a parent's new inline callback never re-runs the focus effect. */
 function useModal(ref: RefObject<HTMLElement | null>, onClose: () => void): void {
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     ref.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [ref, onClose]);
+  }, [ref]);
 }
