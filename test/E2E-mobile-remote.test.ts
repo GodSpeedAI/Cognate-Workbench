@@ -36,6 +36,36 @@ async function until<T>(what: string, probe: () => Promise<T | false | undefined
 
 const phoneTitle = (page: Page, text: string) => page.locator(".m-top-title", { hasText: text });
 
+/**
+ * On a session view: scrolled to the end, the last message ends above the composer (no overlap), and
+ * "Jump to latest" is hittable when the timeline is long enough to need it. Hit-tested, not just measured:
+ * a trial click fails if anything else sits on top of the button.
+ */
+async function expectClearOfComposer(page: Page): Promise<void> {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const geometry = await until("the timeline at its end", async () => {
+    const value = await page.evaluate(() => {
+      const bubbles = document.querySelectorAll(".m-session-view .m-bubble");
+      const last = bubbles[bubbles.length - 1];
+      const composer = document.querySelector(".m-composer");
+      if (!last || !composer) return null;
+      const atEnd = document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 2;
+      return { bubbleBottom: last.getBoundingClientRect().bottom, composerTop: composer.getBoundingClientRect().top, atEnd };
+    });
+    return value?.atEnd ? value : false;
+  });
+  expect(geometry.bubbleBottom).toBeLessThanOrEqual(geometry.composerTop + 1);
+  const scrollable = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 100);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const jump = page.getByRole("button", { name: "Jump to latest" });
+  if (scrollable) {
+    await jump.waitFor({ timeout: 5_000 });
+    await jump.click({ trial: true });
+    await jump.click();
+    await until("the jump lands at the end", async () => (await page.evaluate(() => document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 2)) || false);
+  }
+}
+
 describe("E2E mobile remote control", () => {
   (HAVE_BROWSER ? test : test.skip)(
     `pair from the desktop, see and steer sessions from the phone, approve from the phone, re-authenticate, replace and stop (${HAVE_BROWSER ? "chromium" : SKIP_REASON})`,
@@ -124,6 +154,8 @@ describe("E2E mobile remote control", () => {
             await phone1.page.getByRole("button", { name: "Sessions", exact: true }).click();
             await phone1.page.locator(".m-session").first().click();
             await phone1.page.getByText("run_code completed with no output").waitFor({ timeout: 30_000 });
+            // Phone 1 at 390x844: the last message clears the composer, and "Jump to latest" is hittable.
+            await expectClearOfComposer(phone1.page);
 
             // ---- Reload and re-authenticate with the passkey (cookie removed) ----
             await phone1.context.clearCookies();
@@ -131,23 +163,37 @@ describe("E2E mobile remote control", () => {
             await phoneTitle(phone1.page, "Sessions").waitFor({ timeout: 20_000 });
 
             // ---- Replace the phone: phone 1 is revoked; phone 2 pairs with the new link ----
+            // Revocation is itself a change signal, so phone 1 would re-check on its own right away. To prove the
+            // tap path, phone 1 is offline while the phone is replaced (it hears nothing), and its stream
+            // reconnect is held once it is back online. The first request that finds the revocation is the Send tap.
+            await phone1.page.locator(".m-session").first().click();
+            await phone1.page.getByLabel("Message").fill("sent after the replacement");
+            await phone1.page.route("**/m/api/events", () => undefined);
+            await phone1.context.setOffline(true);
             await desktopDialog.getByRole("button", { name: "Replace phone" }).click();
             const replacement = await until("the replacement link", async () => {
               const value = await desktopDialog.getByLabel("Pairing link", { exact: true }).inputValue().catch(() => "");
               return /#p=/.test(value) && value;
             });
-            expect(await phone1.page.evaluate(() => fetch("/m/api/snapshot").then((r) => r.status))).toBe(401);
             const phone2 = await phoneContext(browser);
             await phone2.page.goto(replacement);
             await phoneTitle(phone2.page, "Sessions").waitFor({ timeout: 20_000 });
             await desktopDialog.getByText("Phone connected").waitFor({ timeout: 10_000 });
+            await phone1.context.setOffline(false);
+            expect(await phone1.page.evaluate(() => fetch("/m/api/snapshot").then((r) => r.status))).toBe(401);
+            // The tap on Send is refused as a revoked session, and the phone lands on the passkey screen.
+            await phone1.page.getByRole("button", { name: "Send" }).click();
+            await phone1.page.getByText(/no longer accepted/).waitFor({ timeout: 20_000 });
             await phone1.page.reload();
             await phone1.page.getByText(/no longer accepted/).waitFor({ timeout: 20_000 });
 
-            // ---- Phone 2 at 320px: no horizontal overflow, the fragment never persisted ----
+            // ---- Phone 2 at 320px: no horizontal overflow, the composer clears the messages, the fragment never persisted ----
             await phone2.page.setViewportSize({ width: 320, height: 640 });
             const overflow = await phone2.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
             expect(overflow).toBeLessThanOrEqual(0);
+            await phone2.page.locator(".m-session").first().click();
+            await phone2.page.locator(".m-session-view .m-composer").waitFor({ timeout: 10_000 });
+            await expectClearOfComposer(phone2.page);
 
             // ---- Stop: immediate revocation, listener closed ----
             await desktopDialog.getByRole("button", { name: "Stop" }).click();

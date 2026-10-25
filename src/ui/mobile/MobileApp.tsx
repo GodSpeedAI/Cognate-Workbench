@@ -1,7 +1,7 @@
 // The phone remote (320-430px). Pairing and passkey sign-in run first; then Home (sessions and the
 // decisions waiting on the operator), a session timeline with a composer, decisions, and settings. Every
 // change is re-read from the server on a change signal; the page never invents an outcome.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 type Snapshot = {
   device: { label: string };
@@ -51,8 +51,10 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (response.status === 401) throw new SignedOut(path);
+  // The body is read first: the passkey step's 401 carries its own reason (`passkey`), which the pairing
+  // screen names. Every other 401 means the session or device is gone and the phone must sign in again.
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (response.status === 401 && !path.startsWith("/m/api/auth/")) throw new SignedOut(path);
   if (!response.ok) throw Object.assign(new Error(String(data.error ?? response.status)), { status: response.status, code: data.error });
   return data as T;
 }
@@ -152,29 +154,44 @@ export function MobileApp() {
     }
   }, [refresh]);
 
+  /** A signed-out phone goes back through the passkey screen (one attempt at a time). */
+  const reauthing = useRef(false);
+  const onSignedOut = useCallback(() => {
+    if (reauthing.current) return;
+    reauthing.current = true;
+    void establish().finally(() => {
+      reauthing.current = false;
+    });
+  }, [establish]);
+
   useEffect(() => {
     pendingSecret.current = takePairingSecret();
     void establish();
   }, [establish]);
 
   // Change signal: every committed event re-reads what the phone shows (debounced). A dropped stream
-  // reconnects with EventSource's own backoff, and the snapshot is re-read on every (re)open.
+  // reconnects with EventSource's own backoff, and the snapshot is re-read on every (re)open. A stream that
+  // errors may be a revoked session (the server answers 401, so no open ever fires): probe an authenticated
+  // route, and a 401 there sends the phone to the passkey screen.
   useEffect(() => {
     if (phase !== "ready") return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const source = new EventSource("/m/api/events");
     const changed = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => void refresh().catch(() => void establish()), 250);
+      timer = setTimeout(() => void refresh().catch((error) => { if (error instanceof SignedOut) onSignedOut(); else setOffline(true); }), 250);
     };
     source.addEventListener("changed", changed);
     source.onopen = changed;
-    source.onerror = () => setOffline(true);
+    source.onerror = () => {
+      setOffline(true);
+      call("/m/api/device").catch((error) => { if (error instanceof SignedOut) onSignedOut(); });
+    };
     return () => {
       clearTimeout(timer);
       source.close();
     };
-  }, [phase, refresh, establish]);
+  }, [phase, refresh, onSignedOut]);
 
   // Keyboard-aware composer: the visual viewport shrinks when the on-screen keyboard opens.
   useEffect(() => {
@@ -215,7 +232,7 @@ export function MobileApp() {
 
   const decisions = snapshot?.decisions ?? [];
   return (
-    <main className="m-shell" role="main">
+    <main className={view.name === "session" ? "m-shell m-shell-session" : "m-shell"} role="main">
       <header className="m-top">
         {view.name === "session" ? (
           <button className="m-icon" aria-label="Back to sessions" onClick={() => setView({ name: "home" })}>‹</button>
@@ -227,8 +244,8 @@ export function MobileApp() {
       {offline && <p className="m-banner" role="status">Reconnecting… showing the last update.</p>}
       <p className="m-notice" role="status" aria-live="polite">{notice}</p>
       {view.name === "home" && <Home snapshot={snapshot} onOpen={(sessionId) => setView({ name: "session", sessionId })} onDecisions={() => setView({ name: "decisions" })} />}
-      {view.name === "session" && <SessionView sessionId={view.sessionId} snapshot={snapshot} refresh={refresh} setNotice={setNotice} />}
-      {view.name === "decisions" && <Decisions decisions={decisions} refresh={refresh} setNotice={setNotice} />}
+      {view.name === "session" && <SessionView sessionId={view.sessionId} snapshot={snapshot} refresh={refresh} setNotice={setNotice} onSignedOut={onSignedOut} />}
+      {view.name === "decisions" && <Decisions decisions={decisions} refresh={refresh} setNotice={setNotice} onSignedOut={onSignedOut} />}
       {view.name === "settings" && <Settings device={device} onSignOut={signOut} />}
       {view.name !== "session" && (
         <nav className="m-tabs" aria-label="Sections">
@@ -292,12 +309,14 @@ function SessionRow({ s, onOpen }: { s: Snapshot["sessions"][number]; onOpen: (i
   );
 }
 
-function SessionView({ sessionId, snapshot, refresh, setNotice }: { sessionId: string; snapshot?: Snapshot; refresh: () => Promise<void>; setNotice: (text: string) => void }) {
+function SessionView({ sessionId, snapshot, refresh, setNotice, onSignedOut }: { sessionId: string; snapshot?: Snapshot; refresh: () => Promise<void>; setNotice: (text: string) => void; onSignedOut: () => void }) {
   const [trace, setTrace] = useState<Trace>();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  const [composerHeight, setComposerHeight] = useState(120);
   const endRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
   const session = snapshot?.sessions.find((s) => s.sessionId === sessionId);
   const running = session?.runId && (session.status === "running" || session.status === "waiting");
 
@@ -305,13 +324,32 @@ function SessionView({ sessionId, snapshot, refresh, setNotice }: { sessionId: s
     try {
       setTrace(await call<Trace>(`/m/api/sessions/${encodeURIComponent(sessionId)}`));
     } catch (error) {
-      if (error instanceof SignedOut) throw error;
+      if (error instanceof SignedOut) onSignedOut();
     }
-  }, [sessionId]);
+  }, [sessionId, onSignedOut]);
 
   useEffect(() => {
     void load();
   }, [load, snapshot]);
+
+  // The page scrolls (not the timeline), so "at the end" is the document's position.
+  useEffect(() => {
+    const onScroll = () => setAtBottom(document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 48);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // The composer is fixed to the bottom, so the timeline reserves its measured height (see .m-reserve).
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const measure = () => setComposerHeight(el.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (atBottom) endRef.current?.scrollIntoView({ block: "end" });
@@ -328,8 +366,8 @@ function SessionView({ sessionId, snapshot, refresh, setNotice }: { sessionId: s
       setNotice(reply.kind === "steer" ? "Steer sent. It applies at the agent's next step." : "Turn sent.");
       await refresh();
     } catch (error) {
-      if (error instanceof SignedOut) throw error;
-      setNotice("The turn was not sent. Try again.");
+      if (error instanceof SignedOut) onSignedOut();
+      else setNotice("The turn was not sent. Try again.");
     } finally {
       setBusy(false);
     }
@@ -341,17 +379,14 @@ function SessionView({ sessionId, snapshot, refresh, setNotice }: { sessionId: s
       await call(`/m/api/runs/${encodeURIComponent(session.runId)}/stop`, { commandId: crypto.randomUUID() });
       setNotice("Stop sent. Waiting for the run to end.");
     } catch (error) {
-      if (error instanceof SignedOut) throw error;
-      setNotice("Stop was not sent. Try again.");
+      if (error instanceof SignedOut) onSignedOut();
+      else setNotice("Stop was not sent. Try again.");
     }
   };
 
   return (
-    <section className="m-session-view" aria-label="Session timeline">
-      <div className="m-timeline" onScroll={(e) => {
-        const el = e.currentTarget;
-        setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
-      }}>
+    <section className="m-session-view" aria-label="Session timeline" style={{ "--composer-h": `${composerHeight}px` } as CSSProperties}>
+      <div className="m-timeline">
         {(trace?.turns ?? []).map((turn) => (
           <div key={turn.index} className="m-turn">
             <div className="m-bubble m-user">{turn.userText}</div>
@@ -369,12 +404,13 @@ function SessionView({ sessionId, snapshot, refresh, setNotice }: { sessionId: s
             {turn.replies.map((text, i) => <div key={i} className="m-bubble m-agent">{text}</div>)}
           </div>
         ))}
+        <div className="m-reserve" aria-hidden="true" />
         <div ref={endRef} />
       </div>
       {!atBottom && (
         <button className="m-jump" onClick={() => endRef.current?.scrollIntoView({ block: "end" })}>Jump to latest</button>
       )}
-      <form className="m-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}>
+      <form ref={composerRef} className="m-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}>
         <textarea
           aria-label={running ? "Steer the running agent" : "Message"}
           placeholder={running ? "Steer the running agent" : "Message"}
@@ -391,16 +427,19 @@ function SessionView({ sessionId, snapshot, refresh, setNotice }: { sessionId: s
   );
 }
 
-function Decisions({ decisions, refresh, setNotice }: { decisions: Snapshot["decisions"]; refresh: () => Promise<void>; setNotice: (text: string) => void }) {
+function Decisions({ decisions, refresh, setNotice, onSignedOut }: { decisions: Snapshot["decisions"]; refresh: () => Promise<void>; setNotice: (text: string) => void; onSignedOut: () => void }) {
   const decide = async (id: string, approved: boolean, summary: string) => {
     try {
       await call(`/m/api/continuations/${encodeURIComponent(id)}/resolve`, { commandId: crypto.randomUUID(), approved });
       setNotice(`${approved ? "Approved" : "Denied"}: ${summary}.`);
     } catch (error) {
-      if (error instanceof SignedOut) throw error;
+      if (error instanceof SignedOut) {
+        onSignedOut();
+        return;
+      }
       setNotice((error as { status?: number }).status === 409 ? "Already decided on the desktop." : "The decision was not sent. Try again.");
     }
-    await refresh();
+    await refresh().catch((error) => { if (error instanceof SignedOut) onSignedOut(); });
   };
   if (decisions.length === 0) return <p className="m-muted">Nothing is waiting for you.</p>;
   return (

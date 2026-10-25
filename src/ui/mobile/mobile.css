@@ -39,8 +39,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .m-steps { font-size: 14px; color: var(--cg-text-muted); }
 .m-steps summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
 .m-steps pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--cg-code-bg); padding: 8px; border-radius: var(--cg-radius-sm); font: 13px/1.4 var(--cg-font-mono); max-height: 180px; overflow: auto; }
-.m-jump { position: sticky; bottom: 0; margin: 0 auto; display: block; }
-.m-composer { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 56px + var(--kb)); max-width: 430px; margin: 0 auto; padding: 8px 16px; box-sizing: border-box; background: var(--cg-bg); border-top: 1px solid var(--cg-border); }
+/* Session view has no tab bar: the composer sits on the bottom safe area, lifted by the keyboard offset. */
+.m-composer { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--kb)); max-width: 430px; margin: 0 auto; padding: 8px 16px; box-sizing: border-box; background: var(--cg-bg); border-top: 1px solid var(--cg-border); z-index: 1; }
+/* The timeline ends where the composer begins: the spacer is the composer's height plus its bottom offset. */
+.m-reserve { height: calc(var(--composer-h, 120px) + env(safe-area-inset-bottom) + var(--kb)); }
+.m-jump { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + var(--kb) + var(--composer-h, 120px) + 8px); z-index: 2; }
+.m-shell-session { padding-bottom: 0; }
 .m-composer textarea { width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 12px; border-radius: var(--cg-radius-md); border: 1px solid var(--cg-border); background: var(--cg-surface); resize: vertical; }
 .m-composer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .m-tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; max-width: 430px; margin: 0 auto; background: var(--cg-surface-raised); border-top: 1px solid var(--cg-border); padding-bottom: env(safe-area-inset-bottom); }
