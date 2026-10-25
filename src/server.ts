@@ -782,12 +782,20 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const appCss = cssParts.join("\n");
   // Mobile remote control: off until the desktop enables it (`/remote/start`). Its phone bundle is built
   // from its own entry on first use, so the desktop bundle never reaches a phone.
+  // A failed build is not cached: the rejection clears the cache, so the next request retries.
   let phoneAssets: ReturnType<typeof buildPhoneAssets> | undefined;
   const remote = new MobileRemote({
     service: governedService,
     system: SYSTEM_CALLER,
     operatorIdentityId: operatorIdentity.id,
-    assets: () => (phoneAssets ??= buildPhoneAssets(appCss)),
+    assets: () => {
+      if (!phoneAssets) {
+        const building = buildPhoneAssets(appCss);
+        phoneAssets = building;
+        building.catch(() => { if (phoneAssets === building) phoneAssets = undefined; });
+      }
+      return phoneAssets;
+    },
   }, remoteSettingsFromEnv(process.env));
   // Desktop control: the boot session bearer only (never the phone's cookie, never loopback trust alone).
   const remoteControl = async (request: Request, path: string): Promise<Response> => {
