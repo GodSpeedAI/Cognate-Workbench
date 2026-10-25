@@ -54,17 +54,41 @@ machine for testing.
 To reach the phone from another network, run a tunnel you control and point the remote at its public HTTPS origin:
 
 ```bash
-export COGNATE_REMOTE_PUBLIC_URL=https://workbench.example.com   # an origin only: no path, query or fragment
+export COGNATE_REMOTE_PUBLIC_URL=https://remote.example.com   # an origin only: no path, query or fragment
 bun run start
 ```
 
-With `cloudflared`, a named tunnel forwards the public hostname to the remote port:
+With `cloudflared`, a named tunnel forwards a hostname you control to the remote port. Set it up once:
 
 ```bash
-cloudflared tunnel --url http://127.0.0.1:3181 --hostname workbench.example.com
+cloudflared tunnel login                                        # authorize cloudflared for your Cloudflare zone
+cloudflared tunnel create workbench-remote                      # writes a credentials file under ~/.cloudflared
+cloudflared tunnel route dns workbench-remote remote.example.com
 ```
 
-Use a hostname you control. The public URL must match what the tunnel serves: the passkey is bound to its host.
+Then describe the ingress in `~/.cloudflared/config.yml`. The hostname goes to the phone listener, and a final
+catch-all answers everything else with 404:
+
+```yaml
+tunnel: workbench-remote
+credentials-file: /home/you/.cloudflared/<tunnel-id>.json   # the file `tunnel create` wrote
+ingress:
+  - hostname: remote.example.com
+    service: http://127.0.0.1:3181
+  - service: http_status:404
+```
+
+Run the tunnel while the remote is on:
+
+```bash
+cloudflared tunnel run workbench-remote
+```
+
+A quick tunnel (`cloudflared tunnel --url http://127.0.0.1:3181`) gets a random hostname each time it starts. The
+passkey is bound to the host, so every quick-tunnel start means pairing the phone again. Use a named tunnel for an
+address that stays put.
+
+The public URL must match what the tunnel serves: the passkey is bound to its host. Use a hostname you control.
 Do not expose the cockpit port (default `3180`) through the same tunnel. Only the phone listener is meant for
 remote access.
 
@@ -79,5 +103,5 @@ remote access.
 
 - The phone cannot answer reconciliation of an interrupted effect; decide it on the desktop.
 - The change signal is one event per committed event, so a busy workspace refetches often (debounced to 250 ms).
-- Pairing secrets and sessions do not survive a restart. Restart the remote from the desktop, then pair or sign in
-  again. The phone shows "Restoring connection".
+- Pairing secrets and sessions do not survive a restart. Turning remote on after a restart revokes every phone that
+  was paired before it, so pair the phone again from the desktop's new link. The phone shows "Restoring connection".
