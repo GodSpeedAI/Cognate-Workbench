@@ -14,12 +14,20 @@ import { schemaFor, storeConfigFor } from "../src/store.ts";
  *  migration tests use "migration"). Keep in sync with the `storeConfigFor`/`schemaFor` call sites. */
 const STORE_APPS = ["harness", "migration"] as const;
 
+type StoreTargets = readonly (readonly [app: (typeof STORE_APPS)[number], config: ReturnType<typeof storeConfigFor>])[];
+
+/** The store configs a temp home will use, resolved when the home is created — the same moment the
+ *  store resolves its own config at boot. A test may change `COGNATE_POSTGRES_URL` afterwards (to
+ *  exercise redaction, say); teardown must still reach the database the store really used. */
+function storeTargetsFor(home: string): StoreTargets {
+  return STORE_APPS.map((app) => [app, storeConfigFor(home, app)] as const);
+}
+
 /** Drops the Postgres schema(s) a temp home's store created. Each home maps to its own schema
  *  (see `schemaFor`), so without this every test leaves one behind. Idempotent (`IF EXISTS`); a
  *  pg0 instance that is not running holds nothing to drop, so it is skipped rather than started. */
-async function dropHomeSchemas(home: string): Promise<void> {
-  for (const app of STORE_APPS) {
-    const config = storeConfigFor(home, app);
+async function dropHomeSchemas(home: string, targets: StoreTargets): Promise<void> {
+  for (const [app, config] of targets) {
     let url: string | undefined;
     if (typeof config === "object" && "postgres" in config) url = config.postgres.url;
     else if (typeof config === "object" && "postgresPg0" in config) {
@@ -39,11 +47,12 @@ async function dropHomeSchemas(home: string): Promise<void> {
 
 export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "deepseek-harness-t5-"));
+  const targets = storeTargetsFor(home);
   try {
     return await fn(home);
   } finally {
     try {
-      await dropHomeSchemas(home);
+      await dropHomeSchemas(home, targets);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
