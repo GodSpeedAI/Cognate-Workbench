@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { ClipboardEvent, RefObject } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
@@ -18,6 +18,35 @@ import { DirectoryField } from "./DirectoryField.tsx";
 import { errorText } from "./workbench/data.ts";
 import type { TraceRow, TraceRequest, TraceTool, TraceTurn } from "../projections/sessionTrace.ts";
 import { TOOL_DEFS } from "../agents/agentCoding.ts";
+import {
+  DEFAULT_TOOL_RUN_CAP,
+  groupToolRuns,
+  summarizeToolRuns,
+  toolActionLabelFor,
+  toolStepKey,
+  toolStepLabelFor,
+  type ToolStepLike,
+} from "../toolGroups.ts";
+import {
+  attachmentLimitNotice,
+  attachmentsBlockSend,
+  reducePaste,
+  removeAttachment,
+  revokeAll,
+  type PastedImage,
+} from "../attachments.ts";
+import { approvalNeedsDisclosure, summarizeApproval } from "../approvalSummary.ts";
+import {
+  enqueue,
+  markConsumed,
+  queueNotice,
+  remove,
+  settleRun,
+  shift,
+  steerStatusLine,
+  type QueuedMessage,
+  type SteerAttempt,
+} from "../steerQueue.ts";
 import {
   DEFAULT_WORK_DETAILS_MODE,
   WORK_DETAILS_LABELS,
@@ -155,9 +184,13 @@ interface ChatMessage {
    *  `stepCount`, not per-step detail — see docs/known-gaps.md); a reloaded historical turn falls
    *  back to the folded view even under Verbose. */
   readonly steps?: readonly ToolEntry[];
+  /** T04: for a steering status row, the `/steer` id it describes. Promotion to "applied" matches
+   *  this id against `workbench.steer.consumed`'s `ids` — the row is never located by its text,
+   *  which two identical pending steers would collide on. */
+  readonly steerId?: string;
 }
 
-interface ToolEntry {
+export interface ToolEntry {
   readonly toolCallId: string;
   readonly tool: string;
   readonly args: Readonly<Record<string, unknown>>;
@@ -2345,23 +2378,12 @@ function useToolTimeline(runId: string | undefined): readonly ToolEntry[] {
  *  button (`08-tool-running`: `button "Reading files · src/greet.ts"` / `"Running code · ..."`).
  *  The "· <detail>" suffix is gated on `showsLiveProcessDetail(mode)` (Settings -> General -> "Work
  *  details" — reference-behavior-matrix.md §10a): shown for "standard"/"detailed" (the default),
- *  hidden for "compact"/"verbose", exactly the reference's own `liveProcessDetail` table. */
+ *  hidden for "compact"/"verbose", exactly the reference's own `liveProcessDetail` table.
+ *
+ *  The wording itself now lives in `TOOL_KINDS` (`src/toolGroups.ts`) so this and `verboseStepLabel`
+ *  cannot drift apart; `toolActionLabelFor` is the table-driven implementation. */
 function toolActionLabel(entry: ToolEntry, mode: WorkDetailsMode = DEFAULT_WORK_DETAILS_MODE): string {
-  const args = entry.args;
-  const detail = showsLiveProcessDetail(mode);
-  if (entry.tool === "read") return detail ? `Reading files · ${String(args.file_path ?? "")}` : "Reading files";
-  if (entry.tool === "edit") return detail ? `Editing files · ${String(args.file_path ?? "")}` : "Editing files";
-  if (entry.tool === "bash") return detail ? `Running commands · ${String(args.description ?? args.command ?? "")}` : "Running commands";
-  if (entry.tool === "run_code") return detail ? `Running code · ${String(args.description ?? "")}` : "Running code";
-  // reference-behavior-matrix.md §6.3: `13-plan-active` shows "Updating the plan · todo_write",
-  // `13b-plan-review-prompt` shows "Calling tools · exit_plan_mode". These carry no variable detail
-  // (the tool name itself is the detail), so the work-details mode does not change them.
-  if (entry.tool === "todo_write") return "Updating the plan · todo_write";
-  if (entry.tool === "exit_plan_mode") return "Calling tools · exit_plan_mode";
-  // reference-behavior-matrix.md §6.4: `14-subagent-active` shows "Coordinating subagents ·
-  // <description>".
-  if (entry.tool === "subagent") return detail ? `Coordinating subagents · ${String(args.description ?? "")}` : "Coordinating subagents";
-  return `Running ${entry.tool}`;
+  return toolActionLabelFor(entry.tool, entry.args, showsLiveProcessDetail(mode));
 }
 
 /** During a run: the "Deep diving..." status plus a plain-text current-tool-action line, matching
@@ -2438,11 +2460,34 @@ function FailureBlock({ code, message }: { readonly code: string; readonly messa
  *  approval card sits at the bottom of the chat pane, composer hidden underneath it) — exact
  *  strings/buttons/keyboard behavior: Enter = allow once, Escape = reject (characterization's
  *  stated keyboard behavior). */
-function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; readonly onDecide: (approved: boolean) => void }) {
+export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; readonly onDecide: (approved: boolean) => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Plan T03 step 3: an in-flight guard covering the `resolveContinuation` await. Without it a fast
+  // double-activation (or Enter followed by a click) can resolve the same continuation twice. State
+  // lives here, in the bar, which is safe because this component mounts once per pending approval and
+  // is not remounted while the request is in flight — see the plan's redesign_trigger.
+  const [deciding, setDeciding] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     ref.current?.focus();
   }, []);
+  const decide = useCallback(
+    (approved: boolean) => {
+      if (deciding) return;
+      setDeciding(true);
+      // No `finally` reset: the bar unmounts once the continuation resolves (a new `entry` replaces
+      // it), and resetting on completion would briefly re-enable the buttons in the window between
+      // resolution and unmount — exactly the double-submit window this guard exists to close. If the
+      // decision fails the bar stays disabled, which is the safe direction: the user can still reload.
+      onDecide(approved);
+    },
+    [deciding, onDecide],
+  );
+  // Long plain-text justifications get a one-line summary plus a disclosure; a structured `surface`
+  // is exempt because `SurfaceView` renders diff content that must never be clipped or collapsed.
+  const structured = entry.approval?.surface !== undefined;
+  const summary = summarizeApproval(`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`);
+  const showDisclosure = approvalNeedsDisclosure(summary, structured);
   return (
     <div
       className="approval-card surface-consequential"
@@ -2450,31 +2495,52 @@ function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; readonly 
       tabIndex={-1}
       ref={ref}
       onKeyDown={(e) => {
+        // Keyboard stays available, but must respect the same guard as the buttons — otherwise Enter
+        // is a second way in to the double-submit the buttons already refuse.
+        if (deciding) return;
         if (e.key === "Enter") {
           e.preventDefault();
-          onDecide(true);
+          decide(true);
         } else if (e.key === "Escape") {
           e.preventDefault();
-          onDecide(false);
+          decide(false);
         }
       }}
     >
       <div className="approval-header">
         <span className="approval-dot" aria-hidden="true" />
-        <span className="approval-waiting">Waiting for approval</span>
+        <span className="approval-waiting">{deciding ? "Sending your decision…" : "Waiting for approval"}</span>
       </div>
       <div role="group" aria-label="Approval details" className="approval-details">
         {entry.approval?.surface ? (
           <SurfaceView surface={entry.approval.surface} />
+        ) : showDisclosure ? (
+          <>
+            {expanded ? (
+              <pre className="approval-full-text">{`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`}</pre>
+            ) : (
+              <span className="approval-summary-line" title={`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`}>
+                {summary.line}
+              </span>
+            )}
+            <button
+              type="button"
+              className="approval-disclosure"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? "Show less" : "Show full request"}
+            </button>
+          </>
         ) : (
           <>Allow this operation with {entry.approval?.permission} permissions: {entry.approval?.justification}.</>
         )}
       </div>
       <div className="approval-actions">
-        <button type="button" className="approval-btn approval-reject" onClick={() => onDecide(false)}>
+        <button type="button" className="approval-btn approval-reject" disabled={deciding} onClick={() => decide(false)}>
           Reject
         </button>
-        <button type="button" className="approval-btn approval-allow" onClick={() => onDecide(true)}>
+        <button type="button" className="approval-btn approval-allow" disabled={deciding} onClick={() => decide(true)}>
           Allow once
         </button>
       </div>
@@ -3053,7 +3119,7 @@ function CodeBlocks({ containerRef }: { readonly containerRef: React.RefObject<H
   return null;
 }
 
-function Composer({
+export function Composer({
   disabled,
   sending,
   modelLabel,
@@ -3069,6 +3135,7 @@ function Composer({
   onBusySubmit,
   queued,
   onCancelQueued,
+  onSteerQueued,
   focusToken,
 }: {
   readonly disabled: boolean;
@@ -3094,34 +3161,83 @@ function Composer({
    *  Enter performs this behavior (Queue: park the message; Steer: cancel + send). */
   readonly sendBehavior: SendBehavior;
   readonly onBusySubmit: (message: string, behavior: SendBehavior) => void;
-  /** A message parked by the Queue behavior, waiting for the active run to settle. Absent on
-   *  surfaces that never queue (the hero composer). */
-  readonly queued?: string;
-  readonly onCancelQueued?: () => void;
+  /** T04: messages parked by the Queue behavior, oldest first, each individually cancellable and
+   *  steerable. Absent on surfaces that never queue (the hero composer). */
+  readonly queued?: readonly QueuedMessage[];
+  readonly onCancelQueued?: (id: string) => void;
+  /** Send one parked message into the running turn now. Absent when no run is live. */
+  readonly onSteerQueued?: (message: QueuedMessage) => void;
   /** J-SESSION-draft: bumped when this composer should take focus (a fresh draft, a reopened
    *  session) — focusing only when the field is actually usable (not `disabled`). */
   readonly focusToken?: number;
 }) {
   const [message, setMessage] = useState("");
+  const [attachments, setAttachments] = useState<readonly PastedImage[]>([]);
+  const [pasteNotice, setPasteNotice] = useState<string | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusToken === undefined || focusToken === 0 || disabled) return;
     textareaRef.current?.focus();
   }, [focusToken, disabled]);
+  // A leaked object URL is invisible in the UI but pins the image bytes for the document's life, so
+  // revoke on unmount as well as on removal (plan T02 step 2).
+  useEffect(() => {
+    return () => {
+      setAttachments((current) => {
+        revokeAll(current, (url) => URL.revokeObjectURL(url));
+        return [];
+      });
+    };
+  }, []);
+  const removePasted = useCallback((id: string) => {
+    setAttachments((current) => removeAttachment(current, id, (url) => URL.revokeObjectURL(url)));
+    setPasteNotice(undefined);
+  }, []);
+  /** Preview-only paste handler (plan T02 step 3). Declines to `preventDefault` when the clipboard
+   *  holds no image, so an ordinary text paste is never swallowed. */
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const files = [...(e.clipboardData?.items ?? [])]
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => f !== null);
+      if (files.length === 0) return;
+      const result = reducePaste(attachments, files, (f) => URL.createObjectURL(f as unknown as Blob));
+      if (result.accepted.length === 0 && result.rejected.length === 0) return;
+      // Only claim the paste when something actually happened; otherwise the browser's default text
+      // handling should proceed.
+      e.preventDefault();
+      if (result.accepted.length > 0) setAttachments((current) => [...current, ...result.accepted]);
+      const rejection = result.rejected[0];
+      setPasteNotice(rejection?.message);
+    },
+    [attachments, disabled],
+  );
   const submit = useCallback(() => {
+    // Slice 2's teeth: the send path is `string`-only, so sending with an attachment present would
+    // silently drop the image. Refuse, and say why rather than no-opping.
+    if (attachmentsBlockSend(attachments)) {
+      setPasteNotice("Remove the attached images before sending — they cannot be included in a message.");
+      return;
+    }
     const trimmed = message.trim();
     if (!trimmed) return;
     onSend(trimmed);
     setMessage("");
-  }, [message, onSend]);
+  }, [attachments, message, onSend]);
   const busySubmit = useCallback(
     (behavior: SendBehavior) => {
+      if (attachmentsBlockSend(attachments)) {
+        setPasteNotice("Remove the attached images before sending — they cannot be included in a message.");
+        return;
+      }
       const trimmed = message.trim();
       if (!trimmed) return;
       onBusySubmit(trimmed, behavior);
       setMessage("");
     },
-    [message, onBusySubmit],
+    [attachments, message, onBusySubmit],
   );
   return (
     <div className="composer-card">
@@ -3138,6 +3254,7 @@ function Composer({
         }
         value={message}
         onChange={(e) => setMessage(e.currentTarget.value)}
+        onPaste={handlePaste}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -3150,14 +3267,67 @@ function Composer({
           }
         }}
       />
-      {queued !== undefined && (
+      {attachments.length > 0 && (
+        <div className="composer-attachments">
+          {/* The limit notice is a limitation, not a promise: these images do not reach the model. */}
+          <p className="composer-attachment-notice" role="status">
+            {attachmentLimitNotice(attachments.length)}
+          </p>
+          <ul className="composer-attachment-strip" role="list" aria-label="Attached images">
+            {attachments.map((attachment, index) => (
+              <li key={attachment.id} className="composer-attachment">
+                <img className="composer-attachment-thumb" src={attachment.previewUrl} alt="" />
+                <span className="composer-attachment-name" title={attachment.name}>
+                  {attachment.name}
+                </span>
+                <button
+                  type="button"
+                  className="icon-btn composer-attachment-remove"
+                  aria-label={`Remove ${attachment.name}`}
+                  onClick={() => removePasted(attachment.id)}
+                >
+                  ×
+                </button>
+                <span className="sr-only">{`attachment ${index + 1} of ${attachments.length}`}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {pasteNotice !== undefined && (
+        <p className="composer-paste-notice" role="alert">
+          {pasteNotice}
+        </p>
+      )}
+      {queued !== undefined && queued.length > 0 && (
         <div className="composer-queued" role="status">
-          <span className="composer-queued-text" title={queued}>
-            Queued — sends when the current run finishes: {queued}
-          </span>
-          <button type="button" className="icon-btn" aria-label="Cancel queued message" onClick={onCancelQueued}>
-            ×
-          </button>
+          <span className="composer-queued-text">{queueNotice(queued.length)}</span>
+          <ul className="composer-queue-list" role="list" aria-label="Queued messages">
+            {queued.map((entry, index) => (
+              <li key={entry.id} className="composer-queue-row">
+                <span className="composer-queue-index" aria-hidden="true">{index + 1}</span>
+                <span className="composer-queue-text" title={entry.text}>{entry.text.split("\n")[0] || "(empty)"}</span>
+                {onSteerQueued !== undefined && (
+                  <button
+                    type="button"
+                    className="composer-queue-action"
+                    aria-label={`Steer queued message ${index + 1} into the running turn`}
+                    onClick={() => onSteerQueued(entry)}
+                  >
+                    Steer
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Remove queued message ${index + 1}`}
+                  onClick={() => onCancelQueued?.(entry.id)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       <div className="composer-toolbar">
@@ -3202,19 +3372,63 @@ function Composer({
   );
 }
 
+/** One collapsed group of consecutive tool calls (plan T01, ported from PandaCode's folded header).
+ *
+ *  Collapsed by default so a multi-step turn reads as one line. The header is a `<button>` with
+ *  `aria-expanded`, matching this codebase's disclosure convention (`TodoWidget` above) rather than
+ *  `<details>`, so keyboard and screen-reader behaviour stays consistent with the rest of the app.
+ *
+ *  The summary is always visible and always states failures, so collapsing can never hide a problem:
+ *  a refused `edit` is still surfaced separately by `AuthorityNotice`, which stays outside this
+ *  component and always visible.
+ */
+export function ToolGroup({
+  steps,
+  defaultOpen = false,
+}: {
+  readonly steps: readonly ToolStepLike[];
+  readonly defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const summary = summarizeToolRuns(steps);
+  if (steps.length === 0) return null;
+  const failed = summary.failedCount > 0;
+  return (
+    <div className={`tool-group${failed ? " tool-group-failed" : ""}`}>
+      <button
+        type="button"
+        className="tool-group-header"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {summary.running && <span className="tool-group-spinner" aria-hidden="true" />}
+        <span className="tool-group-summary">{summary.text}</span>
+        {failed && (
+          <span className="tool-group-failed-mark" aria-hidden="true">
+            !
+          </span>
+        )}
+      </button>
+      {open && (
+        <ul className="verbose-step-list tool-group-steps" aria-label="Tool call steps">
+          {steps.map((entry) => (
+            <li key={entry.toolCallId} className={entry.status === "failed" ? "verbose-step-failed" : undefined}>
+              {toolStepLabelFor(entry.tool, entry.args)}
+              {entry.status === "failed" && entry.error && <span className="verbose-step-error"> · Error: {entry.error}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** A settled turn's individual-step line for "Verbose" Work details (reference-behavior-matrix.md
  *  §10a) — short noun label + "· <detail>", matching the reference's own ungrouped verbose list
- *  (`21-work-details-verbose`: "Read · <path>", "Bash · <description>", "Edit · <path>"). */
+ *  (`21-work-details-verbose`: "Read · <path>", "Bash · <description>", "Edit · <path>").
+ *  Table-driven via `toolStepLabelFor` (`src/toolGroups.ts`). */
 function verboseStepLabel(entry: ToolEntry): string {
-  const args = entry.args;
-  if (entry.tool === "read") return `Read · ${String(args.file_path ?? "")}`;
-  if (entry.tool === "edit") return `Edit · ${String(args.file_path ?? "")}`;
-  if (entry.tool === "bash") return `Bash · ${String(args.description ?? args.command ?? "")}`;
-  if (entry.tool === "run_code") return `Run code · ${String(args.description ?? "")}`;
-  if (entry.tool === "todo_write") return "To-dos · todo_write";
-  if (entry.tool === "exit_plan_mode") return "Plan review · exit_plan_mode";
-  if (entry.tool === "subagent") return `Subagent · ${String(args.description ?? "")}`;
-  return entry.tool;
+  return toolStepLabelFor(entry.tool, entry.args);
 }
 
 /** Reality over narrative: a call the task's authority refused is always shown, whatever the
@@ -3311,20 +3525,28 @@ function MessageBubble({
         />
       )}
       <div className="message-divider" />
-      {/* "Verbose" Work details (reference-behavior-matrix.md §10a): every step stays visible
-       *  individually instead of folding behind the "Took Ns" line above (foldCompletedTurns: false
-       *  — see `21-work-details-verbose` vs. `21-work-details-{compact,standard,detailed}`, which all
-       *  fold identically at this default single-turn depth). Only available for the turn that just
-       *  finished in this browser session (`message.steps`) — see the ChatMessage.steps doc comment. */}
-      {workDetails === "verbose" && message.steps && message.steps.length > 0 && (
-        <ul className="verbose-step-list" aria-label="Tool call steps">
-          {message.steps.map((entry) => (
-            <li key={entry.toolCallId} className={entry.status === "failed" ? "verbose-step-failed" : undefined}>
-              {verboseStepLabel(entry)}
-              {entry.status === "failed" && entry.error && <span className="verbose-step-error"> · Error: {entry.error}</span>}
-            </li>
-          ))}
-        </ul>
+      {/* Collapsed tool activity (plan T01). Consecutive calls fold into one group whose summary
+       *  names the work; "Verbose" Work details means "groups start open", not "no grouping".
+       *  Grouping is per-turn and per-run: a narration boundary breaks a run, so a group can never
+       *  span an intervening assistant message. */}
+      {message.steps && message.steps.length > 0 && (
+        <div className="tool-groups">
+          {groupToolRuns<ToolStepLike>(message.steps, toolStepKey, DEFAULT_TOOL_RUN_CAP).map((run) =>
+            run.kind === "tools" ? (
+              <ToolGroup key={run.key} steps={run.items} defaultOpen={workDetails === "verbose"} />
+            ) : (
+              // A narration boundary renders as its own plain row, never as a group child.
+              // NOTE: unreachable for `message.steps` today — every `ToolEntry` carries a
+              // `toolCallId`, so `toolStepKey` never returns `undefined` for a settled turn. The
+              // branch exists because `groupToolRuns` supports heterogeneous entries (the donor's
+              // live activity stream interleaves narration with calls); it is exercised by the
+              // unit tests, not by this call site.
+              <div key={`narration-${run.item.toolCallId}`} className="tool-group-narration">
+                {toolStepLabelFor(run.item.tool, run.item.args)}
+              </div>
+            ),
+          )}
+        </div>
       )}
       <div className="message-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
       <CodeBlocks containerRef={bodyRef} />
@@ -4614,8 +4836,12 @@ export function App() {
   const [pendingAccessMode, setPendingAccessMode] = useState<PermissionMode | undefined>(undefined);
   // Send behavior while busy (§11): a Queue-parked message waits (ref-mirrored so the settle
   // effect reads it without a dependency loop); Steer cancels + sends immediately.
-  const [queuedMessage, setQueuedMessage] = useState<string | undefined>(undefined);
-  const queuedRef = useRef<string | undefined>(undefined);
+  const [queuedMessages, setQueuedMessages] = useState<readonly QueuedMessage[]>([]);
+  const queuedRef = useRef<readonly QueuedMessage[]>([]);
+  // Steering messages written into a live run, tracked until the durable log settles them. See
+  // `src/steerQueue.ts` — a message is only "applied" once `workbench.steer.consumed` names its id.
+  const [steerAttempts, setSteerAttempts] = useState<readonly SteerAttempt[]>([]);
+  const steerAttemptsRef = useRef<readonly SteerAttempt[]>([]);
   // Usage pass U3 (reference-behavior-matrix.md §12): the sidebar's Workspaces header controls and
   // multi-workspace tree — search, view options (grouping/ordering), per-workspace collapse state,
   // the per-workspace actions menu, and the Add-workspace / Rename dialogs.
@@ -5139,32 +5365,133 @@ export function App() {
         if (activeRunId && activeSessionId) {
           // Steer now (V-004): the message joins the ACTIVE trajectory at the agent's next step
           // boundary through the run's shared state. It does not cancel and restart the run.
+          //
+          // T04 honesty: the transcript states only what is known at this instant. The pre-T04 line
+          // asserted "it applies at the next step" before anything had confirmed it; now the row is
+          // appended as pending and promoted by `workbench.steer.consumed` (see the settle effect).
+          const id = crypto.randomUUID();
           const at = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-          setTranscript((prev) => [...prev, { role: "user", content: message, at }, { role: "system" as const, content: "steering · sent to the running agent; it applies at the next step." }]);
-          void client.updateState(activeRunId, { patch: [{ op: "add", path: "/steer/-", value: { id: crypto.randomUUID(), text: messageWithFocus(message) } }] } as never, { idempotencyKey: crypto.randomUUID() });
+          const attempt: SteerAttempt = { id, text: message, runId: activeRunId, status: "pending" };
+          steerAttemptsRef.current = [...steerAttemptsRef.current, attempt];
+          setSteerAttempts(steerAttemptsRef.current);
+          setTranscript((prev) => [...prev, { role: "user", content: message, at }, { role: "system" as const, content: steerStatusLine("pending"), steerId: id }]);
+          void client
+            .updateState(activeRunId, { patch: [{ op: "add", path: "/steer/-", value: { id, text: messageWithFocus(message) } }] } as never, { idempotencyKey: crypto.randomUUID() })
+            .catch(() => {
+              // The write did not land, so the message was never handed to the run. Mark it rejected and
+              // give the text back rather than leaving a row that looks like it is on its way.
+              steerAttemptsRef.current = steerAttemptsRef.current.map((a) =>
+                a.id === id ? { ...a, status: "rejected" as const } : a,
+              );
+              setSteerAttempts(steerAttemptsRef.current);
+              queuedRef.current = enqueue(queuedRef.current, { id: crypto.randomUUID(), text: message, createdAt: Date.now() });
+              setQueuedMessages(queuedRef.current);
+            });
         } else void send(message);
       } else {
-        queuedRef.current = message;
-        setQueuedMessage(message);
+        queuedRef.current = enqueue(queuedRef.current, { id: crypto.randomUUID(), text: message, createdAt: Date.now() });
+        setQueuedMessages(queuedRef.current);
       }
     },
     [activeRunId, activeSessionId, client, send, messageWithFocus],
   );
-  const cancelQueued = useCallback(() => {
-    queuedRef.current = undefined;
-    setQueuedMessage(undefined);
+  const cancelQueued = useCallback((id: string) => {
+    queuedRef.current = remove(queuedRef.current, id);
+    setQueuedMessages(queuedRef.current);
   }, []);
 
-  // Dispatch a Queue-parked message once the run settles (status returns to idle after the settle
-  // effect above has appended the finished turn and cleared activeRunId).
+  // T04: steer one parked message into the running turn. It leaves the queue first, so a successful
+  // steer cannot also be sent again when the run settles — the text is in exactly one place.
+  const steerQueued = useCallback(
+    (message: QueuedMessage) => {
+      queuedRef.current = remove(queuedRef.current, message.id);
+      setQueuedMessages(queuedRef.current);
+      busySubmit(message.text, "steer");
+    },
+    [busySubmit],
+  );
+
+  // Dispatch one Queue-parked message once the run settles (status returns to idle after the settle
+  // effect above has appended the finished turn and cleared activeRunId). Exactly one per idle
+  // transition: the next dispatch happens on the next settle, so messages go out in order and never
+  // two at a time.
+  //
+  // The guard is a ref, not just the status check: this effect also depends on `send`, whose identity
+  // changes when its own dependencies do. Without the guard, a `send` identity change arriving while
+  // still idle would dispatch a second message into the same idle window — two concurrent turns from
+  // a queue that promises one at a time.
+  const dispatchedForIdleRef = useRef(false);
   useEffect(() => {
-    if (streaming.status !== "idle") return;
-    const queued = queuedRef.current;
-    if (queued === undefined) return;
-    queuedRef.current = undefined;
-    setQueuedMessage(undefined);
-    void send(queued);
-  }, [streaming.status, send]);
+    if (streaming.status !== "idle") {
+      dispatchedForIdleRef.current = false;
+      return;
+    }
+    if (dispatchedForIdleRef.current) return;
+    const { next, rest } = shift(queuedRef.current);
+    if (next === undefined) return;
+    dispatchedForIdleRef.current = true;
+    queuedRef.current = rest;
+    setQueuedMessages(rest);
+    void send(next.text);
+    // `queuedMessages.length` is a dependency so text *returned* to the queue by the steering settle
+    // effect below is picked up: that can happen while already idle (the run it was steered into has
+    // ended), so a status transition alone would never fire again and the text would sit parked with
+    // no way to send it. The ref guard keeps this to one dispatch per idle window, so the remaining
+    // entries still wait for the next settle.
+  }, [streaming.status, send, queuedMessages.length]);
+
+  // T04: promote steering rows only when the durable log says so. `workbench.steer.consumed` carries
+  // the ids it actually took up; matching is by id (`ChatMessage.steerId`), so one message's
+  // consumption can never be credited to another — even two steers with identical text.
+  useEffect(() => {
+    if (!activeRunId) return;
+    const unsubscribe = client.subscribe({ runId: activeRunId }, (event) => {
+      if (event.eventType !== "workbench.steer.consumed") return;
+      const ids = (event.payload as { readonly ids?: readonly string[] }).ids ?? [];
+      const after = markConsumed(steerAttemptsRef.current, ids);
+      if (after === steerAttemptsRef.current) return;
+      const before = steerAttemptsRef.current;
+      const wasApplied = new Set(before.filter((a) => a.status === "applied").map((a) => a.id));
+      const promoted = after.filter((a) => a.status === "applied" && !wasApplied.has(a.id)).map((a) => a.id);
+      steerAttemptsRef.current = after;
+      setSteerAttempts(after);
+      if (promoted.length === 0) return;
+      const promotedIds = new Set(promoted);
+      setTranscript((prev) => prev.map((m) => (
+        m.steerId !== undefined && promotedIds.has(m.steerId) ? { ...m, content: steerStatusLine("applied") } : m
+      )));
+    });
+    return unsubscribe;
+  }, [client, activeRunId]);
+
+  // T04: when a run ends with steering messages still pending, say so and hand the text back. The log
+  // never consumed them, so the transcript must not keep implying they are on their way.
+  useEffect(() => {
+    if (streaming.status !== "idle" || activeRunId !== undefined) return;
+    const pending = steerAttemptsRef.current.filter((a) => a.status === "pending");
+    if (pending.length === 0) return;
+    // Settle every pending attempt: the run they were written into is over.
+    let settled = steerAttemptsRef.current;
+    const returned: string[] = [];
+    for (const attempt of pending) {
+      const result = settleRun(settled, attempt.runId);
+      settled = result.attempts;
+      returned.push(...result.unapplied.map((a) => a.text));
+    }
+    steerAttemptsRef.current = settled;
+    setSteerAttempts(settled);
+    const settledIds = new Set(pending.map((a) => a.id));
+    setTranscript((prev) => prev.map((m) => (
+      m.steerId !== undefined && settledIds.has(m.steerId) ? { ...m, content: steerStatusLine("not-applied") } : m
+    )));
+    // Return the text to the queue so it can be sent as a normal turn rather than vanishing.
+    if (returned.length > 0) {
+      let next = queuedRef.current;
+      for (const text of returned) next = enqueue(next, { id: crypto.randomUUID(), text, createdAt: Date.now() });
+      queuedRef.current = next;
+      setQueuedMessages(next);
+    }
+  }, [streaming.status, activeRunId]);
 
   useEffect(() => {
     if (streaming.status === "completed" && streaming.text) {
@@ -5782,8 +6109,9 @@ export function App() {
                 onAccessModeChange={changeAccessMode}
                 sendBehavior={settings.sendBehavior}
                 onBusySubmit={busySubmit}
-                queued={queuedMessage}
+                queued={queuedMessages}
                 onCancelQueued={cancelQueued}
+                onSteerQueued={steerQueued}
                 focusToken={composerFocusToken}
               />
             )}

@@ -44,3 +44,48 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Fix: wait until the `experts` projection row contains the saved instructions (`waitUntil` + `app.runtime.service.readProjection`) before reopening the editor.
 - Evidence: 3/3 passes under a synthetic 3-hog CPU load (previously failed repeatedly at the reopen step); absent from two subsequent full runs.
 - Confidence: high
+
+### `ChatMessage.steps` doc comment points at a `known-gaps.md` entry that does not exist
+
+- Date: 2026-10-26
+- Location: src/ui/App.tsx:151-157 (doc comment on `ChatMessage.steps`).
+- Debt: The comment states the per-step snapshot is not persisted across reload/session-switch and cites `docs/known-gaps.md` for it, but `docs/known-gaps.md` contains no entry about per-step detail, `message.steps`, or the Verbose fallback. A reader chasing the behavior finds nothing, and the limitation is therefore undocumented in the file that is supposed to hold known limitations. The underlying behavior is real: `src/capabilities/sessionHistory.ts:53` returns only `stepCount`, so a reloaded turn always folds even under Workbench "Verbose".
+- Evidence: `grep -n 'reload\|session.history\|Verbose\|per-step\|folded' docs/known-gaps.md` returns only an unrelated projection-amplification row at :195; `grep -n 'stepCount' src/capabilities/sessionHistory.ts` returns :40 and :53 (message built with `stepCount: toolCallCount + 1`, no per-step array).
+- Confidence: medium
+- Closure: Either add the missing `docs/known-gaps.md` row (per-step tool detail is not persisted; Verbose folds after reload) or drop the citation from the comment; files likely touched: docs/known-gaps.md, src/ui/App.tsx; size S.
+
+### `steer.enqueue({mode:"queue-next"})` writes a channel nothing drains
+
+- Date: 2026-10-26
+- Location: src/workbench/steering.ts:47-52,71 (`enqueue` nextTurn branch, `drainTurn`); src/capabilities/workbench.ts:528-540; src/workbench/reducer.ts:178-188.
+- Debt: The durable next-turn queue is write-only. `steer.enqueue` with `mode:"queue-next"` appends to `inbox.nextTurn`, the reducer folds `workbench.steer.enqueued` into the `inbox/` projection, and `steer.pending` returns it as `queued` — but no production code reads `nextTurn` for delivery. The agent's boundary hook reads only `pending.steer` (`inbox.nextStep`, src/agents/agentCoding.ts:480), and `drainTurn`, the function that would hand a queued message to the run, is called from nowhere outside `test/workbench-steering.test.ts`. Consequence: a caller that queues this way persists a message that is acked, displayed as queued, and never delivered, and the unit tests pass because they test the function rather than the wiring. This blocks the "durable composer queue" affordance: repointing the UI at it uncritically would regress against today's in-memory ref, which does send once the run goes idle (src/ui/App.tsx:5160-5167).
+- Evidence: `grep -rn 'drainTurn' src/` returns only its definition at src/workbench/steering.ts:71; `grep -rn 'drainStep' src/` likewise returns only src/workbench/steering.ts:57 (both are referenced solely by test/workbench-steering.test.ts). `grep -rn 'nextTurn' src/` outside src/workbench/steering.ts returns only src/workbench/reducer.ts:188 (prune-by-consumed-id), src/capabilities/workbench.ts:539 (`steer.pending` return value) and src/capabilities/workbench.ts:538 (the read). The agent's only injection site is src/agents/agentCoding.ts:480, which reads `pending.steer` only. The gap is also asserted as intended by test/J-WB-steering.test.ts:55 ("Queue-next was not consumed; it still waits for the next turn").
+- Confidence: high
+- Closure: Give `nextTurn` the same consumption path `nextStep` already has — read it from `steer.pending().queued` and, when injected as the next user turn, emit `workbench.steer.consumed` for its id (the reducer already prunes both queues by consumed id, src/workbench/reducer.ts:188) — then repoint the composer queue at the capability and derive the rendered queue from the `inbox/` projection. Do not adopt `drainTurn`/`drainStep` for this; they have no production callers and would fork a second consumption mechanism. This changes agent execution behaviour (an extra turn can appear mid-session), so it needs its own replay/idempotency analysis. Files likely touched: src/agents/agentCoding.ts, src/ui/App.tsx (plus a decision on the now-dead drain helpers); size M.
+
+### `E2E-remote-workspaces` waits for only two of the WSL form's three states
+
+- Date: 2026-10-26
+- Location: test/E2E-remote-workspaces.test.ts:135 vs. src/ui/RemoteWorkspaceForm.tsx:250-262.
+- Debt: The WSL step of the Add-workspace dialog has three terminal states, but the E2E test waits for only two. `RemoteWorkspaceForm` renders: "Looking for WSL distributions…" while the probe is pending; "WSL did not respond…" plus a Try again button when `reason === "not-responding"`; "WSL isn't available on this machine…" otherwise; and a `<select aria-label="WSL distribution">` when distros exist. The test's locator is `select[aria-label="WSL distribution"], :text("isn't available")`, which matches the last two but not the "did not respond" state. On a host where the WSL probe returns no usable list the test burns its full 15s and fails. This is a test-fidelity gap rather than a product bug — the UI does explain the not-responding case — but it makes the suite red for environmental reasons and can mask real regressions.
+- Evidence: `cd /tmp/baseline-wb && bun test test/E2E-remote-workspaces.test.ts` on unmodified `6fc51ab` fails with `TimeoutError: waitFor: Timeout 15000ms exceeded` on exactly that locator, so the failure predates this branch. The host does expose WSL (`/mnt/c/WINDOWS/system32/wsl.exe` is present and `wsl.exe -l -q` exits 0, listing Ubuntu-26.04 and Ubuntu-24.04), which is why the not-responding state is reachable here at all.
+- Confidence: high
+- Closure: Include the not-responding wording in the locator (or wait on a stable container and assert one of the three messages) so the test distinguishes "WSL absent" from "WSL did not answer". Files likely touched: test/E2E-remote-workspaces.test.ts, possibly src/ui/RemoteWorkspaceForm.tsx if a stable test id is preferred; size S.
+
+### Several J-* integration tests boot three servers inside Bun's default 5s limit
+- Date: 2026-10-26
+- Location: test/J-I-work-details.test.ts (restart test); test/J-C-tool-execution.test.ts; test/J-WS-select.test.ts; test/J-EXPERT-MODEL-PARALLEL.test.ts (3 tests); test/J-CFG-model-catalog.test.ts; test/J-H-provider-error.test.ts; also the proof-source test emitting `workspace.proof.current`.
+- Debt: These tests boot and stop two or three app servers in sequence (some against a shared SQLite file) inside bun's 5000ms default per-test timeout. On a loaded host they time out at 5000–5017ms even when run as a single file with no other `bun test` process running. They fail purely as a function of machine load, so a red suite does not distinguish a real regression from contention — and because the failures cluster in unrelated files, they invite the reader to suspect whichever change happens to be in flight.
+- Evidence: On unmodified `6fc51ab` in a clean worktree, `bun test test/J-I-work-details.test.ts test/J-C-tool-execution.test.ts` fails with `(fail) J-I-work-details > Work details preference survives a runtime restart against the same store [5000.11ms]  ^ this test timed out after 5000ms.` Host load average was ~4.4 with an unrelated `du -s` at 44% CPU. The same file's sibling test passed at 4874ms in the same run, i.e. the whole file sits at the limit. The same tests pass inside a larger batch when the machine is quieter.
+- Confidence: high
+- Closure: Raise the timeout for these tests explicitly (a per-test timeout argument, or a shared `bootApp`-based helper with a documented budget) so the limit reflects the actual work — three server boots — rather than the default. Files likely touched: the listed test files, possibly test/helpers.ts; size S.
+
+
+### E2E-experts second test is load-sensitive and fails on an unmodified tree
+- Date: 2026-10-26
+- Location: test/E2E-experts.test.ts:98 (`creates, edits and copies a routed Expert, then reopens solo and private history`).
+- Debt: This test takes ~33–55s wall-clock (two Playwright journeys in one test) and fails under load in two different ways, which makes a red suite ambiguous: it looks like a UI regression and lands at a different line each time. Its failure signature is not stable, so grep-for-the-known-error triage does not identify it.
+- Evidence: On the working tree it failed at line 111 (`getByRole("button", { name: "Experts and Teams" }).click()`) with `TimeoutError: click: Timeout 30000ms exceeded` and `<div class="modal-backdrop">…</div> intercepts pointer events`; run alone on the same tree it passes both tests (`EXIT:0`, 37s + 32s). On unmodified `6fc51ab` in a clean worktree, run alone, it failed at line 131 with `TimeoutError: waitForFunction: Timeout 30000ms exceeded` after 44s. Same test, three different outcomes, two of them on unmodified code.
+- Confidence: high
+- Closure: Split the two journeys into separate tests and reduce fixed 20s/30s waits so the duration reflects real readiness rather than a timeout budget; the modal-backdrop interception suggests the first journey leaves a dialog open when the second starts. Files likely touched: test/E2E-experts.test.ts; size M.
+
