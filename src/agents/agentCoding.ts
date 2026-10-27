@@ -376,7 +376,7 @@ async function invokeTool(
   }
 
   try {
-    const toolInput = { ...args, workspaceRoot: workspace.root, executionWorldId: workspace.executionWorldId } as unknown as Json;
+    const toolInput = { ...args, workspaceRoot: workspace.root, executionWorldId: workspace.executionWorldId } as unknown as Json;;
     const result = (await ctx.invoke(
       expertExecution && effectToolCallId && ["edit", "bash", "run_code"].includes(call.name)
         ? "expert.tool.invoke"
@@ -422,6 +422,23 @@ export const agentCodingAgent: AgentDefinition = {
         throw new Error(`this turn names task ${effectiveTaskId}, which is not available in this session's workspace — bind an available task or send without one`);
       }
     }
+    // J-CHECKOUT-EXECUTION: when the turn serves a Task bound to an isolated checkout, resolve the
+    // binding once, here, as a recorded step (replay sees the same association). The checkout
+    // replaces the turn's *root* only — the workspace's execution world and the Task's authority
+    // scopes are untouched — and the association is frozen into the turn's evidence beside the
+    // frozen taskId, so later rebinds never rewrite this run's provenance. A binding whose
+    // worktree vanished fails loudly with the recovery pointer instead of silently writing to the
+    // workspace root.
+    let checkout: { readonly root: string; readonly branch: string } | undefined;
+    if (effectiveTaskId) {
+      const resolved = (await ctx.invoke("task.checkout.resolve", { taskId: effectiveTaskId })) as
+        | { readonly root?: string; readonly branch?: string }
+        | null
+        | undefined;
+      if (resolved && typeof resolved.root === "string" && typeof resolved.branch === "string") {
+        checkout = { root: resolved.root, branch: resolved.branch };
+      }
+    }
     // `mode` rides the turn event so the `sessions` projection can fold the session's CURRENT
     // access mode from run inputs (usage pass U2 — the composer's per-session access-mode dropdown
     // becomes this input's source); absent (direct API runs) keeps whatever the projection already
@@ -432,6 +449,10 @@ export const agentCodingAgent: AgentDefinition = {
     // The frozen association itself: present only when a task is genuinely in scope, so an
     // unbound turn's evidence carries no taskId at all (J-RUN-task-attribution).
     if (effectiveTaskId) turnPayload.taskId = effectiveTaskId;
+    if (checkout) {
+      turnPayload.checkoutRoot = checkout.root;
+      turnPayload.checkoutBranch = checkout.branch;
+    }
     await ctx.emit("session.turn.started", turnPayload as unknown as Json);
 
     // Plan mode (J-E-plan): session state folded from this agent's own `plan.mode.changed`/
@@ -455,6 +476,10 @@ export const agentCodingAgent: AgentDefinition = {
     }
 
     const workspace = (await ctx.invoke("workspace.path", { workspaceId })) as unknown as { readonly root: string; readonly executionWorldId: string };
+    // J-CHECKOUT-EXECUTION: a bound checkout changes *where* this turn's tools work, never *what*
+    // is allowed — the same execution world executes, and `authority.check` / `risk.assess` scope
+    // to the turn's effective root exactly as they scoped to the workspace root before.
+    const effectiveRoot = checkout ? checkout.root : workspace.root;
     const history = expertExecution
       ? expertExecution.context
       : (await ctx.invoke("session.history", { sessionId, excludeRunId: ctx.runId })) as unknown as ModelMessage[];
@@ -587,7 +612,7 @@ export const agentCodingAgent: AgentDefinition = {
         // preflight Surface rides on the same durable approval continuation as any other gate.
         let preflight: { readonly surface?: Json; readonly findings: readonly Json[] } | undefined;
         if (call.name === "bash" && typeof args.command === "string" && !approvalDecision.required) {
-          const assessed = (await ctx.invoke("risk.assess", { worldId: workspace.executionWorldId, root: workspace.root, command: args.command, tool: "bash", toolCallId: call.id, ...(caseId ? { caseId } : {}) } as unknown as Json)) as unknown as { readonly approvalRequired: boolean; readonly surface?: Json; readonly findings: readonly Json[] };
+          const assessed = (await ctx.invoke("risk.assess", { worldId: workspace.executionWorldId, root: effectiveRoot, command: args.command, tool: "bash", toolCallId: call.id, ...(caseId ? { caseId } : {}) } as unknown as Json)) as unknown as { readonly approvalRequired: boolean; readonly surface?: Json; readonly findings: readonly Json[] };
           for (const finding of assessed.findings) await ctx.emit("sentinel.finding", { sessionId, toolCallId: call.id, ...(finding as object) } as unknown as Json);
           if (assessed.approvalRequired) {
             approvalDecision = { required: true, permission: "destructive-filesystem", justification: `rm on ${args.command.replace(/^rm\s+(-\S+\s+)*/, "")}` };
@@ -719,10 +744,12 @@ export const agentCodingAgent: AgentDefinition = {
             resultText = approvalDeniedToolResult(permission);
             await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
           } else {
-            resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, effectiveTaskId, expertExecution, effectToolCallId);
+            // J-CHECKOUT-EXECUTION: tools receive the turn's effective root (the bound checkout
+            // when one exists, else the workspace root) with the workspace's execution world.
+            resultText = await invokeTool(ctx, sessionId, { root: effectiveRoot, executionWorldId: workspace.executionWorldId }, call, readFiles, effectiveTaskId, expertExecution, effectToolCallId);
           }
         } else {
-          resultText = await invokeTool(ctx, sessionId, workspace, call, readFiles, effectiveTaskId, expertExecution, effectToolCallId);
+          resultText = await invokeTool(ctx, sessionId, { root: effectiveRoot, executionWorldId: workspace.executionWorldId }, call, readFiles, effectiveTaskId, expertExecution, effectToolCallId);
         }
         messages.push({ role: "tool", content: resultText, toolCallId: call.id });
         if (caseId && ["edit", "bash", "run_code"].includes(call.name) && !resultText.startsWith("Error:")) changedThisStep = true;
@@ -730,7 +757,7 @@ export const agentCodingAgent: AgentDefinition = {
       // LiveVerify: one observation per consequential batch (the debounce), only inside a Case that
       // declared checks. Healthy runs add facts but no chat; the Case/frame update from the events.
       if (caseId && changedThisStep) {
-        const observed = (await ctx.invoke("case.observe", { caseId, worldId: workspace.executionWorldId, root: workspace.root } as unknown as Json)) as unknown as { readonly facts?: readonly { readonly eventType: string; readonly payload: Json }[] };
+        const observed = (await ctx.invoke("case.observe", { caseId, worldId: workspace.executionWorldId, root: effectiveRoot } as unknown as Json)) as unknown as { readonly facts?: readonly { readonly eventType: string; readonly payload: Json }[] };
         for (const fact of observed.facts ?? []) await ctx.emit(fact.eventType, fact.payload);
       }
       if (step + 1 >= maxSteps) await consumeExpertInbox(`terminal-after-tools:${step}`, true);

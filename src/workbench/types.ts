@@ -200,5 +200,9 @@ export const WORKBENCH_EVENTS = [
   "workbench.proof.declared",
   "workbench.settlement.evidence",
   "workbench.settlement.recorded",
+  // J-CHECKOUT (PandaCode worktree affordance): the governed Task-to-checkout association.
+  // The truth is this event log; the `task-checkout-bindings` projection rows are derived.
+  "workbench.checkout.bound",
+  "workbench.checkout.removed",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

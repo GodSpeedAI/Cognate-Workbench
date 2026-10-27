@@ -18,7 +18,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -51,7 +51,9 @@ import { ageExpiredSessions, createSessionAuthenticator, ensureIdentity, issueSe
 import { sessionHistoryComponent } from "./capabilities/sessionHistory.ts";
 import { sessionCreateComponent } from "./capabilities/sessionCreate.ts";
 import { sessionTaskBindComponent } from "./capabilities/sessionTaskBind.ts";
+import { taskCheckoutComponent } from "./capabilities/taskCheckout.ts";
 import { sessionTaskBindingsProjection } from "./projections/sessionTaskBindings.ts";
+import { taskCheckoutBindingsProjection } from "./projections/taskCheckoutBindings.ts";
 import { modelConfigureComponent } from "./capabilities/modelConfigure.ts";
 import { EXECUTION_CAPABILITY_IDS, createExecutionWorldRegistry, executionWorldsComponent, localExecutionWorld } from "@godspeedai/cognate-execution";
 import { executionWorldsManageComponent, restoreExecutionWorlds } from "./capabilities/executionWorlds.ts";
@@ -230,6 +232,16 @@ const GRANTED_CAPABILITIES = [
   "session.create",
   "session.task.bind",
   "workspace.directory.suggest",
+  // J-CHECKOUT (PandaCode worktree affordance): task-scoped Git checkouts. The mutating
+  // capabilities are operator-only inside the component; `task.checkout.resolve` is the read the
+  // agent loop needs as a recorded step, so it is granted to the system actor as well.
+  "git.branch.list",
+  "git.checkout.attach",
+  "git.checkout.status",
+  "git.checkout.merge",
+  "git.checkout.remove",
+  "git.checkout.recreate",
+  "task.checkout.resolve",
   "provider.delete",
   "model.catalog",
   "config.path",
@@ -396,6 +408,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // RED journeys (J-SESSION-draft / J-WS-directory-discovery / J-TASK-scope / J-TASK-move):
   // explicit bindings for the new capabilities; see RED_JOURNEY_ANCHORS in domain/index.ts.
   const redRefs = bindRedJourneys(domain);
+  // J-CHECKOUT (PandaCode worktree affordance): task-scoped Git checkouts (J-CHECKOUT-BIND /
+  // J-CHECKOUT-EXECUTION / J-CHECKOUT-LIFECYCLE); see CHECKOUT_CAPABILITY_ANCHORS in domain/index.ts.
+  const checkoutRefs = bindCheckoutCapabilities(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -497,6 +512,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
       sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
       sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
+      taskCheckoutComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, semanticRefs: checkoutRefs }),
       workspaceDirectorySuggestComponent({ registry: executionWorlds, protectedHome: home, semanticRef: redRefs["workspace.directory.suggest"] }),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),
@@ -527,6 +543,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       { projection: executionWorldsProjection, public: true },
       { projection: sessionsProjection, public: true },
       { projection: sessionTaskBindingsProjection, public: true },
+      { projection: taskCheckoutBindingsProjection, public: true },
       { projection: plansProjection, public: true },
       { projection: subagentsProjection, public: true },
       { projection: onboardingProjection, public: true },
