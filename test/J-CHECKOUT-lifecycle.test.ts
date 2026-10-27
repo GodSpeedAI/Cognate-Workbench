@@ -228,4 +228,39 @@ describe("J-CHECKOUT-lifecycle", () => {
       }
     });
   }, 120_000);
+
+  test("a live checkout is never silently re-pointed, and two tasks never share one", async () => {
+    await withTempHome(async (home) => {
+      const { app, client } = await bootApp(home);
+      try {
+        const { workspaceId } = await seedWorkspaceOnly(client, home);
+        const taskA = await createTask(app, client, workspaceId, "First slice", fullContract(workspaceId));
+        const a = (await inv(client, "git.checkout.attach", { taskId: taskA, branch: "feature-shared" })) as unknown as Attached;
+        expect(existsSync(a.root)).toBe(true);
+
+        // Re-pointing while the old worktree is live would leave a registration nothing manages.
+        await expect(inv(client, "git.checkout.attach", { taskId: taskA, branch: "feature-second" })).rejects.toThrow(/already works in/);
+        expect(existsSync(a.root)).toBe(true);
+        expect(existsSync(join(a.root, "..", "workbench-feature-second"))).toBe(false);
+
+        // A second task cannot claim the same branch, and the refusal creates nothing.
+        const taskB = await createTask(app, client, workspaceId, "Second slice");
+        await expect(inv(client, "git.checkout.attach", { taskId: taskB, branch: "workbench/feature-shared" })).rejects.toThrow(/another task already works/);
+        const listing = await gitIn(a.root, ["worktree", "list", "--porcelain"]);
+        expect(listing.split("\n").filter(line => line.startsWith("worktree ")).length).toBe(2);
+
+        // Once the first checkout is retired the branch is genuinely free.
+        const removal = (await inv(client, "git.checkout.remove", { taskId: taskA, deleteBranch: true })) as unknown as Removal;
+        expect(removal.removed).toBe(true);
+        expect(removal.branchDeleted).toBe(true);
+        const b = (await inv(client, "git.checkout.attach", { taskId: taskB, branch: "feature-shared" })) as unknown as Attached;
+        expect(b.branch).toBe("workbench/feature-shared");
+        expect(b.root).toBe(a.root);
+        expect(existsSync(b.root)).toBe(true);
+        await expect(inv(client, "git.checkout.status", { taskId: taskA })).rejects.toThrow(/no checkout binding/);
+      } finally {
+        await app.stop();
+      }
+    });
+  }, 120_000);
 });

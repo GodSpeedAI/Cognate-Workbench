@@ -20,8 +20,9 @@ import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import {
-  createWorktree, isRepository, listBranches, mergeWorktree, MergeConflictError,
-  recreateWorktree, removeWorktree, worktreeStatus, WORKTREE_CAPABLE_WORLD_KINDS,
+  checkoutBranchName, createWorktree, isRepository, listBranches, mergeWorktree, MergeConflictError,
+  recreateWorktree, removeWorktree, worktreeDestination, worktreeExists, worktreeStatus,
+  WORKTREE_CAPABLE_WORLD_KINDS,
 } from "../workbench/gitOps.ts";
 import type { ScopedTaskRecord } from "../workbench/state.ts";
 import type { TaskCheckoutBindingRow } from "../projections/taskCheckoutBindings.ts";
@@ -134,15 +135,24 @@ export function taskCheckoutComponent(options: TaskCheckoutOptions): Component {
         const workspace = await workspaceRoot(workspaceId);
         const provider = await providerFor(workspace.executionWorldId, "git.checkout.attach");
         if (!(await isRepository(provider, workspace.root))) throw new Error("git.checkout.attach: the workspace root is not a Git repository");
-        const created = await createWorktree(provider, workspace.root, { branch: input.branch, ...(input.base ? { base: input.base } : {}), ...(input.existing !== undefined ? { existing: input.existing } : {}) });
+        // One live checkout per task: rebinding without retiring the old one would leave a
+        // registered worktree nothing manages. The UI removes first; an API caller must too.
+        const existing = await bindingRow(task.id);
+        if (existing && (await worktreeExists(provider, existing.root))) {
+          throw new Error(`git.checkout.attach: task ${task.id} already works in ${existing.branch} — remove or recreate that checkout before binding another branch`);
+        }
         // One checkout, one task: a destination another task already owns is a collision, and a
         // re-bind moves this task forward without rewriting any run's frozen per-turn checkout.
+        // Checked before creation so a refused bind never leaves a worktree behind.
+        const branch = checkoutBranchName(input.branch);
+        const destination = worktreeDestination(workspace.root, branch);
         const bindings = (await service().readProjection(options.systemCaller, { name: "task-checkout-bindings" })).rows;
         const collision = bindings.find(row => {
           const value = row.value as unknown as TaskCheckoutBindingRow;
-          return value.taskId !== task.id && value.root === created.path;
+          return value.taskId !== task.id && (value.root === destination || value.branch === branch);
         });
         if (collision) throw new Error(`git.checkout.attach: another task already works in that checkout — remove its binding first`);
+        const created = await createWorktree(provider, workspace.root, { branch: input.branch, ...(input.base ? { base: input.base } : {}), ...(input.existing !== undefined ? { existing: input.existing } : {}) });
         await recordAndWait(
           [{
             type: "workbench.checkout.bound",
