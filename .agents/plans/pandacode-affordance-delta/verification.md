@@ -107,22 +107,33 @@ under the default contained posture").
 $ just verify            # bun run typecheck && bun test --timeout 15000 test
 ```
 
-Run 1: `1361 pass, 12 skip, 3 fail, 8396 expect() across 148 files` (≈17 min).
-Run 2: `1361 pass, 12 skip, 1 fail`.
+Four full-suite runs happened across this work, on progressively later trees:
 
-Failures observed, and what they are:
-
-| Failure | Run | Isolated re-run |
+| Run | Tree | Result |
 |---|---|---|
-| `E2E Experts and Teams > creates, edits and copies a routed Expert, then reopens solo and private history` | 1 and 2 | `bun test test/E2E-experts.test.ts` → **2 pass, 0 fail** (67 s; test budget 120 s) |
-| two further failures in run 1 | 1 | absent in run 2 and in the focused runs; both were Playwright E2E files under full-suite load |
+| 1 (post-`61dee32`) | backend milestone | 1361 pass, 12 skip, 3 fail (≈17 min) |
+| 2 (same, quieter host) | backend milestone | 1361 pass, 12 skip, 1 fail |
+| 3 (post-`78926ed`, with my own concurrent browser runs stealing the host) | guard commit | 1359 pass, 12 skip, 7 fail |
+| 4 (settlement, `d8303b7`, nothing else running) | final tree | **1365 pass, 12 skip, 1 fail** (1378 tests, 8423 expects, 1280.65 s); the one failure is the documented `E2E Experts and Teams` load-sensitive test, which passed standalone immediately after (2 pass, 79 s). Every checkout suite green in the run. |
 
-Evaluation: these are load-sensitive browser waits in pre-existing E2E files that
-this change does not touch (no shared code paths, no fixtures, no aimock scripts used
-by them). The suite was run twice; the same test failed once and passed in isolation
-at 67 s, and the other two did not reproduce. The checkout work itself is covered by
-non-browser journeys that are deterministic. This is recorded as a known
-full-suite-load flake, not as a green full run.
+Failures observed, and what each is:
+
+| Failure | Runs | Evaluation |
+|---|---|---|
+| `E2E task checkout > isolate a bound task in a worktree…` | 3 only | **real, and mine**: the E2E asserted the start-point select before the async `git.branch.list` result arrived — a race the standalone run never loses (1 pass / 8 expects every time) but the loaded suite did once at 20.2 s. Fixed in
+`6a717f3` (wait for the value, like the rest of the suite waits on the DOM); the
+fixed test passed standalone twice more (≈44 s each). This is why run 4 exists. |
+| `E2E Experts and Teams > creates, edits and copies a routed Expert…` | 1, 2, 3 | documented load-sensitive test (`.agents/DEBT.md`, 2026-10-26 entry, fails on unmodified trees too); passes standalone (2 pass, 67 s). |
+| `Experts model-only application capacity characterizes eight concurrent assignment submissions` | 3 | the experts-concurrency benchmark flake documented in `.agents/DEBT.md`'s capacity row; aggravated by my concurrent runs. |
+| `J-CFG-model-provider > save config -> provider mounted -> hot-swap…` | 3 | named in the 2026-10-18 flake-class entry. |
+| `J-PREFS-shortcuts > unbinding is expressible…` | 3 | named in the 2026-10-18 flake-class entry. |
+| `J-TEAM-REVIEW…` / `J-EXPERT-WORKSPACE-ADMISSION…` | 3 | same experts/concurrency class under the same host contention (52.8 s / 24.9 s durations); this run deliberately ran with my browser sessions competing for CPU. |
+| two further failures in run 1 | 1 | absent in runs 2–4 and in every focused run; both were Playwright E2E files under full-suite load |
+
+The checkout work itself is covered by deterministic journey tests that never failed in
+any run, the browser E2E (after its race fix), and the live walkthrough above. The
+flake-class failures are host resource contention, not product behavior — the
+`.agents/DEBT.md` entries record each passing in isolation.
 
 ## Adversarial checks performed during implementation
 
