@@ -47,11 +47,19 @@ describe("E2E task checkout", () => {
         await isolate.click();
 
         // The form proposes a branch from the task name and the repository's default start point.
+        // The start point arrives with the async `git.branch.list` result — wait for the value,
+        // do not race it (the full-suite run lost this race once; standalone never did).
         const form = page.getByRole("dialog", { name: "Task checkout" });
         const branchInput = page.getByLabel("Branch name");
         await branchInput.waitFor();
         expect(await branchInput.inputValue()).toBe("tidy-the-greeting");
-        expect(await form.getByLabel("Start from branch").inputValue()).toBe("main");
+        const startSelect = form.getByLabel("Start from branch");
+        await startSelect.waitFor();
+        await page.waitForFunction(() => {
+          const el = document.querySelector('select[aria-label="Start from branch"]') as HTMLSelectElement | null;
+          return el !== null && el.value !== "";
+        });
+        expect(await startSelect.inputValue()).toBe("main");
         await shot(page, "e2e-checkout-02-form");
 
         await form.getByRole("button", { name: "Create checkout" }).click();
