@@ -213,6 +213,8 @@ export interface WorktreeStatus {
   readonly clean: boolean;
   readonly hasUpstream: boolean;
   readonly ahead: number;
+  /** Commits on the branch that the main checkout's HEAD does not contain (what a merge would add). */
+  readonly pending: number;
   readonly merged: boolean;
 }
 
@@ -232,7 +234,7 @@ export async function worktreeStatus(
       const entries = await worktreeList(provider, mainRoot).catch(() => [] as readonly WorktreeEntry[]);
       branch = entries.find(entry => entry.path === path)?.branch ?? "";
     }
-    return { exists: false, branch, changes: 0, clean: true, hasUpstream: false, ahead: 0, merged: false };
+    return { exists: false, branch, changes: 0, clean: true, hasUpstream: false, ahead: 0, pending: 0, merged: false };
   }
   let branch = await currentBranch(provider, path);
   if (!branch) branch = storedBranch;
@@ -245,12 +247,15 @@ export async function worktreeStatus(
     const count = mustGit(await runGit(provider, path, ["rev-list", "--count", "@{upstream}..HEAD"], { limitBytes: 8192 }), "counting unpushed commits");
     ahead = Number.parseInt(count.stdout.trim(), 10) || 0;
   }
+  let pending = 0;
   let merged = false;
   if (branch) {
+    const count = await runGit(provider, mainRoot, ["rev-list", "--count", `HEAD..${branch}`], { limitBytes: 8192 });
+    if (count.ok) pending = Number.parseInt(count.stdout.trim(), 10) || 0;
     const ancestor = await runGit(provider, mainRoot, ["merge-base", "--is-ancestor", branch, "HEAD"], { limitBytes: 8192 });
     merged = ancestor.ok;
   }
-  return { exists: true, branch, changes, clean: changes === 0, hasUpstream, ahead, merged };
+  return { exists: true, branch, changes, clean: changes === 0, hasUpstream, ahead, pending, merged };
 }
 
 /** Whether `cwd` has tracked (non-untracked) changes — the dirty check for merges. */
