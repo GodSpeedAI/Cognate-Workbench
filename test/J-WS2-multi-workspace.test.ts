@@ -106,7 +106,7 @@ describe("J-WS2-multi-workspace", () => {
           await app.stop();
         }
       }
-      const reopened = await startServer({ port: 0, home });
+      const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
       try {
         const { records, current } = await readWorkspaces(reopened);
         expect(records).toHaveLength(2);

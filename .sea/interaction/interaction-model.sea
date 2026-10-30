@@ -27,6 +27,11 @@ Entity "Goal"
 
 Entity "Subagent"
 
+// J-SESSION-draft / J-RUN-task-attribution: `AgentRun` is the durable agent invocation a
+// conversational turn produces — one inference or many model/tool steps. A Run is not a Task,
+// not a tool call and not a plan step; it may serve at most one Task, frozen at its start.
+Entity "AgentRun"
+
 Entity "Composer"
 
 Entity "UserPreferences"
@@ -215,6 +220,28 @@ Resource "ExperimentRoundRecord" units
 
 Resource "MethodRecommendationRecord" units
 
+// Session / Workspace / Task RED journeys. One Task entity carries a scope
+// (workspace | session); binding a Task to a Session is a durable explicit choice, never an
+// inherited side effect. Directory discovery is a read-only query into the selected execution
+// world's filesystem — it creates nothing and never falls back to another world.
+Resource "SessionDraft" units
+
+Resource "DirectorySuggestion" units
+
+Resource "TaskBindingRecord" units
+
+Resource "TaskMoveRecord" units
+
+Resource "RunTaskAttribution" units
+
+Resource "AssignmentTaskRecord" units
+
+// J-CHECKOUT (PandaCode worktree affordance): the governed Task-to-checkout association. One
+// Task may name one isolated Git checkout of its workspace's repository (a worktree and its
+// branch). The record is durable event-backed state; it is not a second workspace, a second
+// task ledger, or a Cognate execution-world / cognitive candidate-world fork.
+Resource "TaskCheckoutRecord" units
+
 // Experts and Teams resources. These represent durable event-backed state and artifacts, not a
 // second event store or a promise that the proposed capabilities have already been implemented.
 Resource "ExpertDefinitionRecord" units
@@ -368,6 +395,29 @@ Flow "RiskAssessmentRecord" from "OperatorAgent" to "RiskAssessment" quantity 1
 Flow "ExperimentRoundRecord" from "Case" to "Experiment" quantity 1
 
 Flow "MethodRecommendationRecord" from "Experiment" to "MethodRecommendation" quantity 1
+
+// Session / Workspace / Task RED journey flows. SessionDraft is the durable pre-inference
+// conversation identity the + action creates; DirectorySuggestion is read-only completion from
+// the selected execution world; TaskBindingRecord is the governed Task-to-Session association;
+// TaskMoveRecord is the governed move mutation; RunTaskAttribution freezes a Run's Task at
+// start; AssignmentTaskRecord carries a Task's identity into its delegated Expert Assignments.
+Flow "SessionDraft" from "User" to "Session" quantity 1
+
+Flow "DirectorySuggestion" from "ExecutionWorld" to "User" quantity 1
+
+Flow "TaskBindingRecord" from "Task" to "Session" quantity 1
+
+Flow "TaskMoveRecord" from "User" to "Task" quantity 1
+
+Flow "RunTaskAttribution" from "AgentRun" to "Task" quantity 1
+
+Flow "AssignmentTaskRecord" from "Assignment" to "Task" quantity 1
+
+// J-CHECKOUT flows. TaskCheckoutRecord is the governed Task-to-checkout association: the
+// operator binds a Task to an isolated worktree of the workspace's repository, the Task's
+// runs execute inside that checkout, and lifecycle decisions (merge, remove, recover) stay
+// inside the workspace's authority.
+Flow "TaskCheckoutRecord" from "Task" to "WorkspaceRecord" quantity 1
 
 // Experts and Teams flows preserve authorship and routing at the semantic boundary. Active-Team
 // cardinality is enforced atomically by the mutation capability over Cognate shared thread state.
@@ -1308,4 +1358,125 @@ Instance j_rw_aggregate_containment of "CanonicalJourney" {
     settlement: "New contained work that would exceed the aggregate concurrent-execution ceiling or the aggregate CPU-second window budget is refused before any child process is launched, from any process sharing the store; each admitted execution runs under its kernel CPU and address-space caps; a cancelled or completed execution releases its aggregate slot; a crashed holder's stale slot is reaped after its lease and accounted conservatively",
     steps: "operator configures aggregate containment quotas -> every contained execution acquires a durable aggregate slot under the quota before launch -> admitted executions run under kernel per-execution CPU and address-space limits -> completion, cancellation and crash release or reap the slot durably -> exhausted quota fails closed for new work across processes -> operator inspects the aggregate ledger",
     variants: "an unconfigured quota keeps historical uncontained-aggregate behavior; a configured quota with kernel limit tooling unavailable inside the world refuses the execution rather than running uncapped; a CPU-capped execution is recorded as capped and booked conservatively; per-process memory accounting is bounded by the kernel address-space cap and the aggregate concurrency ceiling, not measured; local uncontained workspaces are not aggregate-contained and never were"
+}
+
+// Session / Workspace / Task / Run RED journeys (docs/specs/session-workspace-task-red-journeys.md).
+// Added before implementation per the model-first rule; capabilities below are bound explicitly
+// in domain/index.ts (RED_BINDINGS) and realized by the Cognate runtime, capabilities,
+// projections and UI surfaces.
+Instance j_session_draft of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.create, workspace.select, session.history",
+    evidence_class: "proposed",
+    initiating_condition: "The operator presses + to start a fresh conversation in a workspace",
+    journey_id: "J-SESSION-draft",
+    precondition: "A workspace exists and is identified by its stable workspace id; no inference, model or credential is needed to create a draft",
+    purpose: "Create a durable draft Session with a stable identity before any prompt, without inheriting any state from a previous Session",
+    settlement: "The draft appears in the sessions projection with title New Session and status draft before any turn; reload and restart preserve it; repeating the same creation request identity returns the same Session and emits exactly one session.created event; the first turn fills the same identity instead of duplicating it; an unknown workspace cannot own a session; the creation binds to the explicitly named workspace even when another workspace is current",
+    steps: "operator names the target workspace by stable id -> session.create derives a deterministic identity from the idempotency request -> a deterministic recording run emits session.created correlated to the session -> the sidebar selects the new draft and the composer becomes ready -> the first submitted turn reuses the draft identity",
+    variants: "double-click or repeated create with the same request identity yields one Session; a draft survives full app restart; a new draft carries no previous Session's active Task, approval, focus or conversation; legacy sessions without session.created remain readable"
+}
+
+Instance j_ws_directory_discovery of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.directory.suggest, workspace.select",
+    evidence_class: "proposed",
+    initiating_condition: "The operator begins typing a project folder path while adding or choosing a workspace",
+    journey_id: "J-WS-directory-discovery",
+    precondition: "An execution world is selected and connected; browsing is read-only and pre-workspace",
+    purpose: "Suggest matching directories in the chosen execution world as the operator types, so a full absolute path never has to be known or typed",
+    settlement: "Suggestions list only directories from the selected world's filesystem, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
+    steps: "operator types a partial path -> the picker debounces and queries workspace.directory.suggest for the selected world -> the world provider lists its own parent directory and the capability filters, orders and bounds directory matches -> keyboard and pointer complete the field -> an explicit Open confirms the exact destination through workspace.select",
+    variants: "slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
+}
+
+Instance j_task_scope of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.create, task.list, session.task.bind",
+    evidence_class: "proposed",
+    initiating_condition: "The operator creates a Task or chooses which Task a conversation serves",
+    journey_id: "J-TASK-scope",
+    precondition: "One Task entity with scope workspace or session exists in a known workspace; session scope requires an existing Session of that workspace",
+    purpose: "Make a Task's visibility and its Session binding explicit, understandable and durable without exposing internal Run ids",
+    settlement: "A workspace Task is listed as available from every Session of its workspace yet no Session inherits it as active; a session Task is listed only within its owning Session until promoted or moved; binding and detaching write durable session-task binding rows that survive reload; a fresh Session starts unbound; binding across workspaces or against a session-scoped Task of another Session is refused with a readable reason; a conversation with no Task remains valid",
+    steps: "operator creates the Task with an apparent scope choice -> task.create validates the scope and owning session -> the Task row records scope and session -> the composer shows the bound Task with an accessible change or detach control -> session.task.bind records or clears the durable binding",
+    variants: "creating a session Task inside a Session binds that Session; binding an unavailable Task is refused; detaching preserves the Task, its evidence and its history; no scope is silently widened for convenience"
+}
+
+Instance j_task_move of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.move, task.list",
+    evidence_class: "proposed",
+    initiating_condition: "The operator promotes, moves or re-homes an existing Task",
+    journey_id: "J-TASK-move",
+    precondition: "The Task exists and is not in flight; the destination workspace or session is named and authorized",
+    purpose: "Move or promote a governed Task without destroying its identity, evidence or provenance",
+    settlement: "The move preserves the Task id, its evidence ledger rows and its original source-workspace provenance, and never reparents historical Runs; the contract's workspace context and scope are revalidated for the destination; stale Session bindings in the old scope are invalidated rather than silently kept; nonexistent destinations are rejected; in-flight work is not moved",
+    steps: "operator names a destination workspace or session -> task.move validates the destination and the Task's state -> one governed mutation rewrites the Task's scope and destination and records its origin -> invalidated bindings fall back to no active Task -> the Task appears only in the destination inventory",
+    variants: "cross-workspace moves recalculate resource and authority scope instead of renaming; session-scope Tasks moved to a new workspace promote to workspace scope; accepted or historical Tasks keep their evidence; a moved Task is never silently accepted"
+}
+
+Instance j_run_task_attribution of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.history, session.task.bind, plan.state",
+    evidence_class: "proposed",
+    initiating_condition: "The operator submits a conversational turn",
+    journey_id: "J-RUN-task-attribution",
+    precondition: "A Session exists or is created by the turn; a Task may or may not be bound to it",
+    purpose: "Attribute every submitted turn to exactly one durable Run, with an optional frozen Task association, never creating a Task for conversation alone",
+    settlement: "Each submitted turn starts a Cognate Run with no Task unless one is explicitly in scope; the Run's initial task association is frozen into its turn evidence and later binding changes do not rewrite history; an invalid taskId is refused against the Session and workspace context; Runs, Tasks, plan steps and Expert Assignments remain distinct vocabularies",
+    steps: "composer submits the turn -> agent run validates the optional taskId against the Session's available Tasks -> the turn-start event records the frozen association -> inference and tool steps execute -> completion and usage record under the same association",
+    variants: "a plain question completes a Run with no Task and creates nothing in the Task ledger; a bound turn and a later delegation correlate independently inspectable identities; a successful Run never establishes human acceptance"
+}
+
+Instance j_task_expert_provenance of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.create, team.converse, team.delegate, expert.converse",
+    evidence_class: "proposed",
+    initiating_condition: "The operator delegates Team work that serves an accountable Task",
+    journey_id: "J-TASK-expert-provenance",
+    precondition: "The Task exists in the Team's workspace; the Team is active with one Orchestrator",
+    purpose: "Keep delegated Expert Assignments in service of the Task that authorized them, with causal lineage and distinct run attempts",
+    settlement: "The Orchestrator's Assignment and every Specialist child retain the explicitly authorized Task identity while keeping their own distinct Runs and causal parent ids; multiple attempts never duplicate the Task; the Task's acceptance remains a separate human and criterion gate that no model output, handoff or commit automatically settles",
+    steps: "operator converses with the Team naming the Task -> team.converse validates the Task and stamps it on the root Assignment -> delegation inherits the Task identity on child Assignments -> each Assignment's Run keeps its own identity -> the human reviews settlement separately",
+    variants: "an unknown or cross-workspace Task is refused before any Assignment; retries keep the same Assignment lineage; handoffs record evidence but not acceptance"
+}
+
+Instance j_checkout_bind of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.list, git.branch.list, git.checkout.attach, git.checkout.status",
+    evidence_class: "proposed",
+    initiating_condition: "The operator assigns a Task's work to an isolated Git checkout of its workspace's repository",
+    journey_id: "J-CHECKOUT-BIND",
+    precondition: "The Task exists in a workspace whose repository root is a Git repository; the Task is not in flight; the workspace's execution world can execute Git beside the repository root",
+    purpose: "Bind a Task to one isolated checkout (a Git worktree and its branch) so its changes stay out of every other checkout, without disturbing the Task's identity, contract or evidence",
+    settlement: "A validated attach creates the worktree through the workspace's execution world and records one durable task-checkout binding event; the binding names the checkout root and branch and survives restart; a dirty or colliding branch, a missing base branch, a non-repository root, a Task in flight, and an execution world whose containment cannot reach a sibling checkout are each refused with the reason; an existing branch may be adopted only when the operator explicitly asks; the Task keeps its workspace identity and no second workspace is created",
+    steps: "operator names the branch and optional base -> git.branch.list validates names against the repository -> git.checkout.attach refuses in-flight Tasks and unsafe worlds -> the worktree is created beside the repository root -> the binding event is recorded -> later turns of the Task resolve the checkout from the projection",
+    variants: "an unstarted Task adopts the checkout without losing its draft or contract; re-binding a Task whose runs already recorded another checkout never rewrites those runs' frozen checkout; a bound Task may later be removed only through the lifecycle journey"
+}
+
+Instance j_checkout_execution of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "agent.coding, task.checkout.resolve",
+    evidence_class: "proposed",
+    initiating_condition: "A conversational turn runs for a Task that has a bound checkout",
+    journey_id: "J-CHECKOUT-EXECUTION",
+    precondition: "The Task is bound to an existing checkout; the Session's turn carries the Task identity",
+    purpose: "Execute the turn's file, edit, shell and inspection operations inside the Task's isolated checkout so parallel Tasks of one repository never collide",
+    settlement: "The run resolves the Task's checkout as a recorded step before any tool executes; every tool's root for that turn is the checkout root while the workspace's execution world and authority model stay untouched; the turn-start evidence freezes the checkout root and branch alongside the frozen Task association; two Tasks bound to different worktrees of one repository edit the same relative path without overwriting each other and the repository's main checkout stays unchanged; a missing checkout is reported rather than silently falling back to the workspace root; the checkout is where work happens, never a second source of task, run or settlement truth",
+    steps: "turn starts with the Task in scope -> the run resolves the task-checkout binding -> tool roots and risk checks are scoped to the checkout -> files, edits and commands land inside the checkout -> completion and usage record under the same Task and run correlation",
+    variants: "an unbound Task's turn executes in the workspace root exactly as before; a bound Task whose worktree disappeared fails with the recovery pointer instead of writing elsewhere; Experts and Teams delegation keeps its own identity rules and inherits no checkout by accident"
+}
+
+Instance j_checkout_lifecycle of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "git.checkout.status, git.checkout.merge, git.checkout.remove, git.checkout.recreate",
+    evidence_class: "proposed",
+    initiating_condition: "The operator inspects, integrates or cleans up a Task's isolated checkout",
+    journey_id: "J-CHECKOUT-LIFECYCLE",
+    precondition: "The Task exists and is not in flight; the checkout's repository and branch state are observable",
+    purpose: "Give the operator safe, explicit control over the checkout's integration and cleanup with refusals that explain themselves",
+    settlement: "Status reports existence, branch, uncommitted change count, upstream and merge state without writing anything; merge is refused while the Task runs or either checkout is dirty, integrates into the named target branch locally, and a conflict aborts the merge and is reported with the conflicting paths rather than being claimed as integrated; removal never forces, refuses a dirty checkout, keeps an unmerged branch, and records the removal durably; recreation restores a missing checkout at the same path on the same branch or explains why it cannot; a successful merge never settles the Task, whose acceptance stays a separate evidence and human gate",
+    steps: "operator opens the checkout controls -> status is computed from the repository -> merge, remove or recreate validate the Task and checkout state -> the guarded Git operation runs through the execution world -> the outcome is recorded or the refusal is returned",
+    variants: "a clean merged checkout may be removed together with its branch; a dirty checkout is never removed; an unmerged branch survives removal; a missing checkout is detected and recoverable; a conflicted merge leaves both checkouts unchanged"
 }

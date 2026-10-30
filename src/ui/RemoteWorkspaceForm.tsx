@@ -5,6 +5,7 @@
 // shown again, and never part of the durable record the sidebar reads.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCognate, useProjection } from "@godspeedai/cognate-react";
+import { DirectoryField } from "./DirectoryField.tsx";
 
 export interface WorldRow {
   readonly worldId: string;
@@ -66,9 +67,25 @@ function FolderStep({ world, onAdded, onBack }: { readonly world: Connected; rea
   return (
     <div className="rw-step">
       <p className="rw-connected" role="status">Connected to <strong>{world.label}</strong>.</p>
-      <Field label="Folder on that machine" hint="An absolute path, for example /home/you/project">
-        <input aria-label="Remote folder path" value={path} onChange={(e) => setPath(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter" && path.trim() && !busy) void submit(); }} autoFocus />
-      </Field>
+      {/* J-WS-directory-discovery: the shared folder type-ahead, driven by the *connected world's*
+          filesystem — typing stays responsive on slow connections (stale listings are discarded),
+          and there is never a local fallback. */}
+      <div className="rw-field">
+        <span className="rw-label">Folder on that machine</span>
+        <DirectoryField
+          worldId={world.worldId}
+          label="Remote folder path"
+          placeholder="/home/you/project"
+          value={path}
+          onChange={setPath}
+          invoke={(capability, input) => client.invoke(capability, input as never) as unknown as Promise<unknown>}
+          onSubmit={() => {
+            if (path.trim().startsWith("/") && !busy) void submit();
+          }}
+          autoFocus
+          hint={`Folders on ${world.label} — arrow keys + Tab complete, Enter opens.`}
+        />
+      </div>
       {error ? <p role="alert" className="form-error">{error}</p> : null}
       <div className="modal-actions">
         <button type="button" onClick={onBack}>Back</button>

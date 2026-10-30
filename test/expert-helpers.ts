@@ -63,7 +63,7 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
   let closed = false;
   try {
     const launch = async () => {
-      app = await startServer({ devAuth: true, port: 0, home, expertProviderFactory: providerFactory, enableScheduleEvaluation: false, ...options, runCapacity: options.runCapacity ?? 1 });
+      app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, expertProviderFactory: providerFactory, enableScheduleEvaluation: false, ...options, runCapacity: options.runCapacity ?? 1 });
       const caller = LOCAL_OPERATOR;
       const service = createRemoteRuntimeService(connectTransport(app.url), () => devToken(caller));
       client = createClient({ service, caller });
@@ -72,6 +72,15 @@ export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: E
     const workspace = join(home, "workspace");
     await mkdir(workspace, { recursive: true });
     const selected = await client!.invoke("workspace.select", { path: workspace } as never) as { workspaceId: string };
+    // Projections catch up asynchronously; services that validate a workspace read the projection,
+    // so wait until it holds the new row before handing the app to a test.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const rows = (await app!.runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" })).rows;
+      if (rows.some((row) => (row.value as { id?: string } | null)?.id === selected.workspaceId)) break;
+      if (Date.now() > deadline) throw new Error(`workspaces projection never showed ${selected.workspaceId}`);
+      await Bun.sleep(20);
+    }
     const testApp: ExpertTestApp = {
       get app() { return app!; }, get client() { return client!; }, home, workspaceId: selected.workspaceId, providerCalls: calls,
       async state() {

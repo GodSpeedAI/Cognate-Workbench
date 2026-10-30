@@ -176,6 +176,7 @@ export const WORKBENCH_EVENTS = [
   "workbench.task.created",
   "workbench.task.contract.updated",
   "workbench.task.status.changed",
+  "workbench.task.moved",
   "workbench.authority.elevated",
   "workbench.workflow.defined",
   "workbench.workflow.instantiated",
@@ -195,5 +196,13 @@ export const WORKBENCH_EVENTS = [
   "workbench.protection.blocked",
   "workbench.task.activity",
   "workbench.feedback.recorded",
+  // Governed settlement (readiness P03): the operator's declared proof, RealityTrace's evidence, SEA-Forge's settlement.
+  "workbench.proof.declared",
+  "workbench.settlement.evidence",
+  "workbench.settlement.recorded",
+  // J-CHECKOUT (PandaCode worktree affordance): the governed Task-to-checkout association.
+  // The truth is this event log; the `task-checkout-bindings` projection rows are derived.
+  "workbench.checkout.bound",
+  "workbench.checkout.removed",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

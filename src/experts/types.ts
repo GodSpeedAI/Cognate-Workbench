@@ -61,12 +61,19 @@ export interface ExpertExecution {
   liveInbox?: boolean; liveInboxClosed?: boolean;
   instructions: string; route: ModelConfig; tools: string[]; maxSteps: number; context: ModelMessage[];
   budget?: ExpertModelBudget;
+  /** J-TASK-expert-provenance: the Task this Assignment explicitly serves (stamped by the
+   * validated `team.converse`/`expert.converse` command, inherited by delegated children). The
+   * run freezes it into its evidence and attributes activity/usage — it grants no acceptance. */
+  taskId?: string | null;
 }
 export interface Assignment {
   id: string; expertId: string; conversationId: string; teamId: string | null; parentId: string | null;
   parentAttempt?: number | null;
   purpose: string; acceptance: string[]; depth: number; attempt: number; status: AssignmentStatus;
   workspaceId: string; mode: string; authorityTools: ExpertTool[];
+  /** J-TASK-expert-provenance: the Task this Assignment serves, when the operator named one —
+   * inherited by delegated children; distinct from the Assignment's own run lineage. */
+  taskId: string | null;
   execution: ExpertExecution; runId: string | null; handoff: Handoff | null;
   reconciled: boolean; review: { verdict: "revision" | "accept" | "escalate"; rationale: string; evidence: string[]; by: string } | null;
   effects?: Record<string,{commitmentId:string;state:string;tool:string;resolvedBy?:string}>;

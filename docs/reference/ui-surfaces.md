@@ -4,7 +4,7 @@ Which component shows what, and the contract every cockpit component obeys.
 
 ## The shell
 
-`src/ui/App.tsx` is a single large file (~4,000 lines) holding the sidebar, the transcript, the
+`src/ui/App.tsx` is a single large file (~5,700 lines) holding the sidebar, the transcript, the
 composer, the settings surfaces, the approval and plan-review cards, the diff review panel, and the
 subagent child view. It is **not** decomposed; that is the current state, not an endorsed structure.
 
@@ -13,7 +13,7 @@ It subscribes with `useProjection` and `useContinuations`, and calls `createClie
 
 ## The cockpit
 
-`src/ui/workbench/` — fourteen presentational components plus a view-model shaper. Each receives data
+`src/ui/workbench/` — fifteen presentational components plus a view-model shaper. Each receives data
 and callbacks as props and holds no runtime hooks.
 
 | Component | Shows |

@@ -10,6 +10,7 @@ import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRuntime } from "@godspeedai/cognate-runtime-bun";
 import { storeConfigFor } from "./store.ts";
+import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
 import type { ActionPolicy, Runtime } from "@godspeedai/cognate-runtime-bun";
 import { devTokenAuthenticator } from "@godspeedai/cognate-protocol-connect-bun";
 import { registerRuntimeService } from "@godspeedai/cognate-protocol-connect";
@@ -17,7 +18,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -34,6 +35,12 @@ import { containedWorkspaceComponent, validateContainmentConfig, type Containmen
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
 import { expertEffectComponent } from "./capabilities/expertEffect.ts";
+import { ambiguousStepComponent } from "./capabilities/ambiguousStep.ts";
+import { externalAuthorityFromEnv, governanceComponent, type ExternalAuthority } from "./capabilities/governance.ts";
+import { recordWorkbenchEvents, settlementComponent } from "./capabilities/settlement.ts";
+import { createSettlementOrchestrator } from "./settlement/orchestrator.ts";
+import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/realitytrace.ts";
+import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
@@ -42,6 +49,11 @@ import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
 import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
 import { ageExpiredSessions, createSessionAuthenticator, ensureIdentity, issueSession, OPERATOR_SESSION_TTL_MS, supersedeBootSessions, BOOT_SESSION_CAUSE, IDENTITY_THREAD } from "./auth/identity.ts";
 import { sessionHistoryComponent } from "./capabilities/sessionHistory.ts";
+import { sessionCreateComponent } from "./capabilities/sessionCreate.ts";
+import { sessionTaskBindComponent } from "./capabilities/sessionTaskBind.ts";
+import { taskCheckoutComponent } from "./capabilities/taskCheckout.ts";
+import { sessionTaskBindingsProjection } from "./projections/sessionTaskBindings.ts";
+import { taskCheckoutBindingsProjection } from "./projections/taskCheckoutBindings.ts";
 import { modelConfigureComponent } from "./capabilities/modelConfigure.ts";
 import { EXECUTION_CAPABILITY_IDS, createExecutionWorldRegistry, executionWorldsComponent, localExecutionWorld } from "@godspeedai/cognate-execution";
 import { executionWorldsManageComponent, restoreExecutionWorlds } from "./capabilities/executionWorlds.ts";
@@ -50,6 +62,7 @@ import { cognitiveComponent } from "./capabilities/cognitive.ts";
 import { agentCognitiveAgent } from "./agents/agentCognitive.ts";
 import type { MediatorSpec } from "./cognitive/mediation.ts";
 import { workspaceSelectComponent } from "./capabilities/workspaceSelect.ts";
+import { workspaceDirectorySuggestComponent } from "./capabilities/workspaceDirectorySuggest.ts";
 import { workspacePathComponent } from "./capabilities/workspacePath.ts";
 import { toolCapabilitiesComponent } from "./capabilities/tools.ts";
 import { planStateComponent } from "./capabilities/planState.ts";
@@ -89,12 +102,33 @@ export interface RunOwnershipMode {
  * is exposed only behind this verified configuration, backed by the published fenced run-write
  * ownership release: every execution pass claims authoritative store-time ownership, a stale
  * owner's late run-scoped writes are fenced, and a killed process's in-flight effect requires
- * explicit reconciliation instead of a blind repeat (ambiguousSteps: "wait"). The default keeps
- * the historical single-process restart semantics. */
+ * explicit reconciliation instead of a blind repeat (ambiguousSteps: "wait"). Single-process
+ * restarts also wait for reconciliation of an interrupted effect; they never silently repeat it. */
 export function parseRunOwnershipMode(raw: string | undefined): "single-process" | "multi-process" {
   if (raw === undefined || raw === "") return "single-process";
   if (raw === "single-process" || raw === "multi-process") return raw;
   throw new Error("COGNATE_RUN_OWNERSHIP must be 'single-process' or 'multi-process'");
+}
+
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** The server binds loopback only, but a browser page whose name DNS-rebinds to 127.0.0.1 is
+ *  same-origin with it, and the UI bundle carries the operator session. The Host header (and
+ *  Origin, when a browser sends one) is the only signal of that, so any non-loopback name is
+ *  refused before routing. Ports are not compared, so local port forwards keep working. */
+export function loopbackRefusal(headers: Headers): { status: number; reason: string } | undefined {
+  const hostname = (value: string): string | undefined => {
+    try { return new URL(value).hostname.toLowerCase(); } catch { return undefined; }
+  };
+  const host = headers.get("host");
+  const h = host === null ? undefined : hostname(`http://${host}`);
+  if (h === undefined || !LOOPBACK_HOSTNAMES.has(h)) return { status: 421, reason: "misdirected request: non-loopback Host" };
+  const origin = headers.get("origin");
+  if (origin !== null) {
+    const o = hostname(origin);
+    if (o === undefined || !LOOPBACK_HOSTNAMES.has(o)) return { status: 403, reason: "forbidden: non-loopback Origin" };
+  }
+  return undefined;
 }
 
 /** T8 (J-AUTH-SESSION): the dev authenticator is opt-in and loud. Any value other than an explicit
@@ -112,7 +146,7 @@ export interface ServerOptions {
   readonly runCapacity?: 1 | 2 | 4 | 8;
   /** T7: verified multi-process run-ownership configuration (defaults to COGNATE_RUN_OWNERSHIP,
    * then "single-process"). Multi-process semantics: fenced run writes + ambiguous-effect
-   * reconciliation; single-process keeps the historical restart behavior. */
+   * reconciliation. Both modes wait for reconciliation of an interrupted effect (never a repeat). */
   readonly runOwnership?: "single-process" | "multi-process";
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
@@ -126,13 +160,29 @@ export interface ServerOptions {
    *  dev/test opt-in re-arms the legacy client-claimed `Bearer <tenant>:<actorId>` format for the
    *  test harness; a production deployment never sets it (default COGNATE_DEV_AUTH, unset). */
   readonly devAuth?: boolean;
+  /** Where agent effects may run (default COGNATE_EXECUTION_POSTURE, unset = "contained"). Under
+   *  "contained", commands and writes in uncontained `local` worlds are refused; "uncontained-local"
+   *  is the operator's explicit opt-in to run them on this host as this user (src/executionPosture.ts). */
+  readonly executionPosture?: ExecutionPosture;
+  /** SEA-Forge as the external authority (P02). `undefined` reads COGNATE_GOVERNANCE and friends;
+   *  `null` forces governance off. Requires the contained execution posture. */
+  readonly externalAuthority?: ExternalAuthority | null;
+  /** RealityTrace for governed settlement (readiness P03); default from COGNATE_REALITYTRACE_*.
+   *  `null` forces it off. Requires SEA-Forge governance. */
+  readonly realitytrace?: RealityTraceSettings | null;
+  /** Readiness P05: the SWE_SEED binary and where declared proofs may come from (default
+   *  COGNATE_SWE_SEED_BIN / COGNATE_PROOF_SOURCE; null = no SWE_SEED, any source). */
+  readonly sweSeed?: SweSeedSettings | null;
 }
 
 export interface AppServer {
   readonly url: string;
   readonly runtime: Runtime;
+  readonly executionPosture: ExecutionPosture;
   /** T8: this boot's operator browser session token (the session-authenticated HTTP test seam). */
   readonly operatorSessionToken: string;
+  /** P03: the settlement orchestrator, when SEA-Forge governance and RealityTrace are configured. */
+  readonly settlement?: { settleRun(runId: string): Promise<void>; idle(): Promise<void> };
   stop(): Promise<void>;
 }
 
@@ -140,6 +190,9 @@ const GRANTED_CAPABILITIES = [
   RUNTIME_EXECUTION_INSPECT,
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
+  ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
+  ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
+  ...Object.keys(SETTLEMENT_CAPABILITY_ANCHORS),
   "model.generate",
   "model.configure",
   "secret.put",
@@ -176,6 +229,19 @@ const GRANTED_CAPABILITIES = [
   "identity.session.revoke",
   "identity.inspect",
   "session.setArchived",
+  "session.create",
+  "session.task.bind",
+  "workspace.directory.suggest",
+  // J-CHECKOUT (PandaCode worktree affordance): task-scoped Git checkouts. The mutating
+  // capabilities are operator-only inside the component; `task.checkout.resolve` is the read the
+  // agent loop needs as a recorded step, so it is granted to the system actor as well.
+  "git.branch.list",
+  "git.checkout.attach",
+  "git.checkout.status",
+  "git.checkout.merge",
+  "git.checkout.remove",
+  "git.checkout.recreate",
+  "task.checkout.resolve",
   "provider.delete",
   "model.catalog",
   "config.path",
@@ -288,7 +354,22 @@ function indexHtml(): string {
 export async function startServer(options: ServerOptions): Promise<AppServer> {
   const home = options.home;
   const runCapacity = parseExpertAdmissionCapacity(options.runCapacity === undefined ? process.env.COGNATE_RUN_CAPACITY : String(options.runCapacity));
-  const runOwnershipMode = options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP);
+  // The mode is still parsed (invalid COGNATE_RUN_OWNERSHIP fails boot); every mode now waits for
+  // operator reconciliation of an interrupted effect, so the value no longer changes runtime options.
+  void (options.runOwnership ?? parseRunOwnershipMode(process.env.COGNATE_RUN_OWNERSHIP));
+  const executionPosture = options.executionPosture ?? parseExecutionPosture(process.env[EXECUTION_POSTURE_ENV]);
+  const externalAuthority = options.externalAuthority === null ? undefined : options.externalAuthority ?? externalAuthorityFromEnv(process.env);
+  // Any process of this OS user can speak on_behalf_of the operator to SEA-Forge. Only the contained
+  // posture keeps agent processes away from the SEA-Forge socket (readiness S02), so governance
+  // without it would let an agent approve its own escalation.
+  if (externalAuthority && executionPosture !== "contained") {
+    throw new Error("SEA-Forge governance requires COGNATE_EXECUTION_POSTURE=contained: under uncontained-local an agent could reach the SEA-Forge socket and approve its own escalation");
+  }
+  // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
+  const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
+  if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
+  const sweSeed: SweSeedSettings = options.sweSeed === null ? { mode: "any" } : options.sweSeed ?? sweSeedFromEnv(process.env);
+  if (sweSeed.mode === "swe_seed" && !realitytrace) throw new Error("COGNATE_PROOF_SOURCE=swe_seed requires governed settlement (COGNATE_REALITYTRACE_*)");
   let containmentConfig = options.containmentConfig;
   const containmentConfigPath = process.env.COGNATE_LINUX_CONTAINMENT_CONFIG;
   if (!containmentConfig && containmentConfigPath) {
@@ -315,12 +396,21 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
   const expertRefs = bindExpertCapabilities(domain);
+  const ambiguousRefs = bindAmbiguousCapabilities(domain);
+  const governanceRefs = bindGovernanceCapabilities(domain);
+  const settlementRefs = bindSettlementCapabilities(domain);
   const scheduleRefs = bindScheduleCapabilities(domain);
   const runtimeExecutionRef = bindRuntimeExecution(domain);
   // T8: identity-administration capabilities (session issue/revoke/inspect) and the aggregate
   // containment quota setting. The containment semanticRef sits at SETTING_FIELDS index 11
   // (`settings.changeContainment`), appended to the usage-2 refs in that component's order.
   const t8 = bindT8Identity(domain);
+  // RED journeys (J-SESSION-draft / J-WS-directory-discovery / J-TASK-scope / J-TASK-move):
+  // explicit bindings for the new capabilities; see RED_JOURNEY_ANCHORS in domain/index.ts.
+  const redRefs = bindRedJourneys(domain);
+  // J-CHECKOUT (PandaCode worktree affordance): task-scoped Git checkouts (J-CHECKOUT-BIND /
+  // J-CHECKOUT-EXECUTION / J-CHECKOUT-LIFECYCLE); see CHECKOUT_CAPABILITY_ANCHORS in domain/index.ts.
+  const checkoutRefs = bindCheckoutCapabilities(domain);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -374,24 +464,29 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // providers (ssh, wsl, sandbox forks) register here without touching the tools or the agent.
   // T8: the registry is wrapped so every CONTAINED provider's executions pass the aggregate
   // containment ledger first — one operator-configured ceiling across processes, fail closed.
-  const executionWorlds = aggregateContainedRegistry(createExecutionWorldRegistry([localExecutionWorld()]), { getService, systemCaller: SYSTEM_CALLER });
+  // The execution posture wraps the registry first, so every `local`-kind provider — the base
+  // world and any directory-copy fork registered later — is effect-refused under "contained".
+  const executionWorlds = aggregateContainedRegistry(postureRegistry(createExecutionWorldRegistry([localExecutionWorld()]), executionPosture), { getService, systemCaller: SYSTEM_CALLER });
   // T11: the plugin catalog registry. Constructed here (not inside the component) so the same
   // instance can be handed to any future surface that needs to resolve a catalog entry, and so an
   // additional `PluginSource` can be registered at boot without touching the capability.
   const pluginRegistry = new PluginRegistry();
 
+  let pollApprovals: (() => Promise<number>) | undefined;
   const runtime: Runtime = await createRuntime({
     store,
+    // P02: with an external authority, every capability invoke and consequential action is decided by
+    // SEA-Forge; escalations wait for the operator's resolution there.
+    ...(externalAuthority ? { governance: externalAuthority.governance } : {}),
     // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
     // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
-    ...(runCapacity > 1 || runOwnershipMode === "multi-process"
-      ? {
-        execution: {
-          ...(runCapacity > 1 ? { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } : {}),
-          ...(runOwnershipMode === "multi-process" ? { runOwnership: { ambiguousSteps: "wait" as const } } : {}),
-        },
-      }
-      : {}),
+    // An interrupted external effect is never silently repeated: a recovering owner records
+    // `run.invocation.ambiguous` and waits for operator reconciliation (`run.invocation.reconcile`).
+    // This holds in every run-ownership mode and capacity (ambiguousSteps: "wait").
+    execution: {
+      ...(runCapacity > 1 ? { maxConcurrentRuns: runCapacity, resourceKeys: admissionKeys } : {}),
+      runOwnership: { ambiguousSteps: "wait" as const },
+    },
     // Usage pass U6 (RealityTrace, Option A): trace-worthy events get an observation intent
     // committed atomically with the event (the runtime's generic hook — no runtime dependency on
     // RealityTrace; the adapter only drains the outbox).
@@ -405,13 +500,20 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
+      ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
+      governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
+      settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs, sweSeed }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
-      containedWorkspaceComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
+      containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       identityAdminComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, semanticRefs: t8.identity }),
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
+      sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
+      sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
+      taskCheckoutComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, semanticRefs: checkoutRefs }),
+      workspaceDirectorySuggestComponent({ registry: executionWorlds, protectedHome: home, semanticRef: redRefs["workspace.directory.suggest"] }),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),
       planStateComponent(getService, planBindings.planState.semanticRef),
@@ -419,7 +521,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       onboardingDismissComponent({ getService, systemCaller: SYSTEM_CALLER }),
       settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: [...usage2.settingsChange, t8.containment], shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
-      workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs }),
+      workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       pluginInstallComponent({
@@ -440,6 +542,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       { projection: cognitiveProjection, public: true },
       { projection: executionWorldsProjection, public: true },
       { projection: sessionsProjection, public: true },
+      { projection: sessionTaskBindingsProjection, public: true },
+      { projection: taskCheckoutBindingsProjection, public: true },
       { projection: plansProjection, public: true },
       { projection: subagentsProjection, public: true },
       { projection: onboardingProjection, public: true },
@@ -452,6 +556,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   });
   const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
   serviceRef.current = governedService;
+  pollApprovals = () => runtime.pollApprovals();
   finishServiceBoot(governedService);
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
   finishExpertsBoot(experts);
@@ -481,6 +586,21 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // Re-register durable SSH/WSL worlds (lazy: nothing connects until a workspace uses one).
   await restoreExecutionWorlds({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, containmentConfig });
 
+  // P03: settle each governed agent run when it ends, and at boot any that ended while Workbench was down.
+  let settlement: ReturnType<typeof createSettlementOrchestrator> | undefined;
+  if (externalAuthority && realitytrace) {
+    if (!containmentConfig) throw new Error("governed settlement requires host containment (COGNATE_LINUX_CONTAINMENT_CONFIG): the proof runs contained");
+    const orchestrator = createSettlementOrchestrator({
+      authority: externalAuthority, realitytrace, containment: containmentConfig,
+      getService: () => runtime.service, systemCaller: SYSTEM_CALLER,
+      record: (events, correlationId) => recordWorkbenchEvents(runtime.service, SYSTEM_CALLER, events, correlationId),
+      proofSource: sweSeed.mode,
+    });
+    settlement = orchestrator;
+    runtime.store.onCommitted((events) => orchestrator.onCommitted(events));
+    void orchestrator.sweep();
+  }
+
   // J-CONTEXT-BUDGET: the billing ledger backs every ordinary-session dispatch with a durable
   // reservation and enforces the operator's spending ceilings. Prices and protocol resolve from
   // the registry's current configuration at dispatch time, never from run input.
@@ -495,6 +615,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       getService,
       systemCaller: SYSTEM_CALLER,
       getKnownWorkspaceIds: () => knownWorkspaceIds,
+      noteKnownWorkspace: (workspaceId) => {
+        knownWorkspaceIds.add(workspaceId);
+      },
       registry: executionWorlds,
       semanticRef: bindings.workspaceSelect.semanticRef,
     }),
@@ -690,9 +813,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     idleTimeout: 0,
     maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(request) {
+      const refusal = loopbackRefusal(request.headers);
+      if (refusal) return new Response(refusal.reason, { status: refusal.status, headers: hardened() });
       const url = new URL(request.url);
       if (url.pathname === "/health") {
-        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest } }, { headers: hardened() });
+        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest }, execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined } }, { headers: hardened() });
       }
       if (url.pathname.startsWith("/cognate.v1.RuntimeService/")) {
         const handler = connectHandlersByPath.get(url.pathname);
@@ -719,9 +844,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   return {
     url: `http://127.0.0.1:${server.port}`,
     runtime: {...runtime,service:governedService},
+    executionPosture,
     /** T8: this boot's browser session token — the test seam for session-authenticated HTTP.
      *  In the real browser it never leaves the generated entry; production never logs it. */
     operatorSessionToken: operatorSession.token,
+    ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       eventsController.abort();
       await scheduleEvaluator.stop();
@@ -741,4 +868,9 @@ if (import.meta.main) {
   const app = await startServer({ port, home });
   console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
   console.log(`[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is ${parseDevAuth(process.env.COGNATE_DEV_AUTH) ? "ARMED (test/dev only)" : "off"}`);
+  if (app.executionPosture === "contained") {
+    console.log(`[cognate-workbench] execution: contained — agent commands and writes run only in Linux-contained or explicitly connected remote workspaces; local workspaces are read-only to agents (${EXECUTION_POSTURE_ENV}=uncontained-local to opt out)`);
+  } else {
+    console.warn(`[cognate-workbench] execution: UNCONTAINED LOCAL — agents run commands and write files on this host as this user; path checks are not a sandbox (${EXECUTION_POSTURE_ENV}=uncontained-local)`);
+  }
 }

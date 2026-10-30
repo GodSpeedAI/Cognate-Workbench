@@ -22,6 +22,11 @@ smoke:
 setup-realitytrace:
     cargo install realitytrace --version 0.3.0 --locked --root .tmp/realitytrace
 
+# Pinned DomainForge CLI (stack lockstep version) for the SEA format fidelity test. DomainForge
+# publishes no release binaries; this is its documented crates.io install, kept inside the checkout.
+setup-domainforge:
+    cargo install domainforge-core --version 0.21.1 --features cli --locked --root .tmp/domainforge
+
 # Local pg0 installation is opt-in. Workbench also supports an external PostgreSQL URL.
 db-setup:
     bun scripts/setup-pg0.ts

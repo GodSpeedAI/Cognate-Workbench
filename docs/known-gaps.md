@@ -85,10 +85,25 @@ From the workbench design source:
   killed owner's effect requires reconciliation, and its stale write is fenced. The default remains
   a single Bun process and exactly-once physical effects are not claimed.
 - A provider call can delay graceful runtime shutdown in the consumed SDK line at the time this
-  finding was recorded (0.4.0; Workbench now pins 0.6.1). Upstream PR #44 fixes cooperative abort
+  finding was recorded (0.4.0; Workbench now pins 0.6.2). Upstream PR #44 fixes cooperative abort
   and acknowledged-continuation recovery with PostgreSQL regressions; its status is tracked
   separately and is not asserted here. Signal-ignoring handlers can still delay shutdown.
   Abrupt-process recovery is tested separately.
+- SEA-Forge as the external authority ([docs](sea-forge-authority.md)) is opt-in. When on, every capability call is a SEA-Forge round trip and ledger entry. Settlement is wired (readiness P03): RealityTrace runs the operator's declared proof, contained and read-only, and SEA-Forge settles each consequential operation on that corroborated evidence; see the docs. It needs Cognate SDK 0.6.2 or later, in which an approval governs only the operation it was granted for (Cognate PR #60); with 0.6.1 an approved edit failed on its nested filesystem call.
+- Interrupted agent capability calls wait for operator reconciliation in every run-ownership mode
+  and capacity (`ambiguousSteps: "wait"`). When a process stops during a call, the recovering
+  process does not repeat the call: it records `run.invocation.ambiguous` and opens an
+  `ambiguous-invocation` continuation, and the run stays waiting. The chat view shows "Interrupted
+  step needs reconciliation" with the capability name and an observed-outcome form; the sidebar
+  shows "Needs reconciliation". The operator resolves it with `run.invocation.reconcile`
+  (`succeeded` with a required observation, or `failed`). Agents and run-scoped calls are refused.
+  A `succeeded` record stores only `{reconciled, outcome, reason, reconciledBy}`, not the step's
+  original output. For that reason an interrupted **model call** (`model.generate`,
+  `expert.model.generate`) cannot be confirmed as succeeded — its response cannot be reconstructed
+  and it has no external effect to confirm — so the card offers only "Retry the model call"
+  (`failed`), and the agent retries it. Other capabilities' consumers receive the observation record
+  in place of their native output.
+  Exactly-once delivery of the external effect is still not claimed.
 - Human reconciliation of an ambiguous effect does not prove an objective complete. A confirmed
   successful effect requires a new follow-up objective rather than blind retry of that objective.
 - Native commitment guards cover Expert `edit`, `bash` and `run_code`; legacy coding-session tools
@@ -98,8 +113,9 @@ From the workbench design source:
   dev format is an explicit opt-in test/dev seam, and the capability policy grants user-kind
   authority to the one durable operator identity only. Best-effort local command guards remain;
   capability checks are still not OS-level or multi-user isolation. Aggregate containment now
-  covers contained (Linux bubblewrap) executions across processes; local workspaces remain
-  uncontained. This is still not a production-hardened multi-user deployment — the independent
+  covers contained (Linux bubblewrap) executions across processes. Local workspaces are
+  uncontained worlds: under the default `contained` execution posture agents cannot launch
+  processes or write files in them; `COGNATE_EXECUTION_POSTURE=uncontained-local` opts back in. This is still not a production-hardened multi-user deployment — the independent
   review's residual boundaries are recorded in
   [security-review-2026-10-17-t8.md](security-review-2026-10-17-t8.md).
 
@@ -161,13 +177,26 @@ The historical fallback badge is superseded by a working preset selector using
 | Authentication | Durable server-issued sessions (T8): revocable, hash-stored, restart-superseded; the dev bearer format exists only behind the explicit `devAuth` opt-in. Single operator, tenant-partitioned. Still not a multi-user production deployment. |
 | Network exposure | The server binds `127.0.0.1` and has no other listener. Do not proxy it to untrusted clients. |
 | Tool guards | Local default uses best-effort path/shell guards. Explicit host-configured Linux child worlds add native filesystem/process/network containment; aggregate CPU/process ceilings across processes now fail closed (T8), with kernel per-execution CPU/address-space caps. Host application isolation remains open; aggregate memory is bounded per-execution × the concurrency ceiling, not measured as a live sum. |
-| `run_code` | Its `sandbox_permissions` field names an approval gate. Actual execution uses the selected world: local default is uncontained; opt-in Linux children use namespaces. Permission approval alone provides no OS isolation. |
+| `run_code` | Its `sandbox_permissions` field names an approval gate. Actual execution uses the selected world: local workspaces refuse it under the default `contained` posture (opt-in `uncontained-local` runs it uncontained); Linux children use namespaces. Permission approval alone provides no OS isolation. |
 | Secrets | In `<home>/secrets.json` with restrictive permissions. Not in the event log. |
 | Remote worlds | SSH host keys are probed and must be explicitly trusted by a human, compared against a known source. |
 
 Development authentication does not establish a production listener or hostile-user boundary.
 See [Linux contained workspaces](linux-contained-workspaces.md) for the explicit child-world
 configuration, refusal behavior and remaining limits.
+
+## Session / Workspace / Task RED journeys — recorded limits
+
+The five formerly red suites (`test/*red.test.ts`, `test/E2E-workspace-session-ux.red.test.ts`)
+are green against the real runtime. Limits observed while making them green:
+
+| Limit | Reality |
+|---|---|
+| Projection re-read amplification | The published client re-reads every mounted projection for every replayed event (a page reload replays the tenant's whole event log). Every always-mounted store multiplies that storm; `useSessionTaskBinding` therefore subscribes only while a session is open. Long event logs + many mounted stores can still exhaust Chromium's pending-request pool (`net::ERR_INSUFFICIENT_RESOURCES`) until the framework batches or deltas projection sync — a framework change to propose upstream, not something app code should paper over. |
+| Directory suggestions | Read-only completion from the selected execution world's provider. Symlinked directories surface as neither file nor directory and are therefore never suggested (conservative, by design). Browsing the Workbench's own application home is refused. There is no fuzzy or case-insensitive matching yet — suggestions are prefix matches. |
+| Session drafts | Draft identity is deterministic from (workspaceId, requestId); the runtime's idempotency key guarantees one `session.created` event per request identity. Sessions created implicitly before this tranche (turn-only rows without `session.created`) remain readable but never show draft state retroactively — a migration was deliberately not invented. |
+| Task movement | `task.move` refuses RUNNING tasks and nonexistent destinations, preserves identity/evidence/provenance and invalidates stale bindings. The UI's consequence preview is descriptive text about what changes (paths/tools/executors/budget/protection are revalidated); it does not yet diff the destination workspace's actual tool/budget configuration against the source. |
+| Session-scoped task bindings | One task may be bound per session at a time (the binding row names at most one `taskId`); a session task created in its owning session auto-binds that session — the explicit scope choice — while workspace tasks are never auto-bound anywhere. |
 
 ## Stale references in source comments
 

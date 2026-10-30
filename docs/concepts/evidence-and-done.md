@@ -5,6 +5,35 @@ uses instead, and how a piece of work earns each level.
 
 ## The levels
 
+The levels are ordered, and each one requires the one before it. `doneLevel` enforces that with an
+early return per level, so a gap cannot be skipped — turning on a later flag while an earlier gate is
+unmet does not advance the work.
+
+```mermaid
+flowchart TB
+    S["not-started"] --> F{"finished?"}
+    F -->|"no"| STOP1["cap at not-started"]
+    F -->|"yes"| FIN["finished"]
+    FIN --> P{"produced?"}
+    P -->|"no"| STOP2["cap at finished"]
+    P -->|"yes"| PROD["produced"]
+    PROD --> T{"testedClosed?"}
+    T -->|"no"| STOP3["cap at produced"]
+    T -->|"yes"| TEST["tested"]
+    TEST --> R{"readiness.ready?"}
+    R -->|"no"| STOP4["cap at tested"]
+    R -->|"yes"| READY["ready-for-review"]
+    READY --> A{"accepted?"}
+    A -->|"no"| STOP5["cap at ready-for-review"]
+    A -->|"yes"| ACC["accepted"]
+    ACC --> O{"operationalized?"}
+    O -->|"no"| STOP6["cap at accepted"]
+    O -->|"yes"| OPS["operationalized"]
+```
+
+The source comment states the rule directly: *"Contiguity matters: if accepted=true but
+ready-for-review readiness is not satisfied, cap at tested."*
+
 | Level | Means | What moves it |
 |---|---|---|
 | `not-started` | Nothing has happened | — |
