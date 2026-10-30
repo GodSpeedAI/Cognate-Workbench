@@ -57,11 +57,30 @@ jobs:
           bun-version: 1.4.0
       - uses: extractions/setup-just@v2
 
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          toolchain: 1.99.0
+
+      # @godspeedai/domainforge 0.21.2 publishes no linux-arm64 napi binding. Build the same tag natively
+      # (DomainForge's own release recipe, Rust 1.99.0) and install it beside the pinned JS loader.
+      - name: Build DomainForge napi binding for linux-arm64
+        run: |
+          set -euo pipefail
+          bun install
+          DF_VERSION="$(node -p "require('./node_modules/@godspeedai/domainforge/package.json').version")"
+          git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
+          cd "$RUNNER_TEMP/domainforge"
+          bun install --frozen-lockfile
+          cd domainforge-typescript
+          npm run build
+          test -f domainforge-core.linux-arm64-gnu.node
+          cp domainforge-core.linux-arm64-gnu.node "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/"
+          echo "domainforge $DF_VERSION linux-arm64-gnu binding sha256: $(sha256sum domainforge-core.linux-arm64-gnu.node | cut -d' ' -f1)"
+
       - name: Native ARM64 quick start in a fresh HOME
         run: |
           export HOME="$RUNNER_TEMP/fresh-home"; mkdir -p "$HOME"
           uname -m; ldd --version | head -1
-          bun install
           just db-setup
           ./.tmp/pg0/pg0 --version || true
           (just dev > "$RUNNER_TEMP/dev.log" 2>&1 &)
