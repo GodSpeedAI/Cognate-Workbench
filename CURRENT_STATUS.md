@@ -1,3 +1,15 @@
+# Current status — revision 35
+
+Native-distribution foundation: GodSpeed pins moved to latest (Cognate SDK 0.8.0, domainforge-core 0.21.2;
+realitytrace 0.3.0 already current). The bundled pg0 pin now includes the verified linux-aarch64-gnu digest.
+A Jetson-class `clean-install-arm64` job on `ubuntu-22.04-arm` passes: it builds the DomainForge v0.21.2
+napi binding natively because the npm package ships no linux-arm64 binding. Evidence: GitHub run 41140331701.
+
+Verified: typecheck; smoke suite 73/73; both clean-install jobs green. Not yet: Jetson SSH (host key
+not accepted), pg0 ownership/recovery, native packaging, Windows/macOS.
+
+---
+
 # Current status — revision 34
 
 The egm-bootstrap documentation pass is complete: 18 EGM-compliant contract
