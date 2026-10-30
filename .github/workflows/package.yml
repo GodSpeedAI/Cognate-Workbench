@@ -1,0 +1,110 @@
+name: package
+
+# Native distributions: one compiled Cognate Workbench per platform, each smoke-tested by installing its
+# archive into an empty directory and starting it there. Artifacts only: this workflow publishes no release.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/standalone-packages]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package ${{ matrix.tag }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, target: bun-linux-x64, tag: linux-x64 }
+          - { runner: ubuntu-22.04-arm, target: bun-linux-arm64, tag: linux-arm64 }
+          - { runner: macos-14, target: bun-darwin-arm64, tag: darwin-arm64 }
+          - { runner: macos-15-intel, target: bun-darwin-x64, tag: darwin-x64 }
+          - { runner: windows-2022, target: bun-windows-x64, tag: windows-x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # @godspeedai/domainforge publishes no linux-arm64 napi binding; build the pinned tag natively.
+      - uses: dtolnay/rust-toolchain@1.99.0
+        if: matrix.target == 'bun-linux-arm64'
+      - name: Build DomainForge linux-arm64 binding
+        if: matrix.target == 'bun-linux-arm64'
+        run: |
+          set -euo pipefail
+          DF_VERSION="$(node -p "require('./node_modules/@godspeedai/domainforge/package.json').version")"
+          git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
+          cd "$RUNNER_TEMP/domainforge"
+          bun install --frozen-lockfile
+          cd domainforge-typescript
+          npm run build
+          cp domainforge-core.linux-arm64-gnu.node "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/"
+
+      - name: Build package
+        run: bun scripts/package.ts ${{ matrix.target }} ${{ matrix.tag }}
+
+      - name: Smoke test the installed archive (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$(ls dist-package/*.tar.gz)"
+          (cd dist-package && sha256sum -c "$(basename "$ARCHIVE").sha256")
+          INSTALL="$RUNNER_TEMP/install"; mkdir -p "$INSTALL" "$RUNNER_TEMP/home"
+          tar -xzf "$ARCHIVE" -C "$INSTALL"
+          PREFIX="$(ls -d "$INSTALL"/cognate-workbench-*)"
+          # Every shipped file must match the manifest it was built with.
+          bun -e 'const fs=require("fs"),path=require("path"),c=require("crypto");const root=process.argv[1];const m=JSON.parse(fs.readFileSync(path.join(root,"share/cognate-workbench/MANIFEST.json"),"utf8"));for(const f of m.files){const h=c.createHash("sha256").update(fs.readFileSync(path.join(root,f.path))).digest("hex");if(h!==f.sha256){console.error("mismatch",f.path);process.exit(1)}}console.log("manifest ok:",m.files.length,"files")' "$PREFIX"
+          HOME="$RUNNER_TEMP/home" PORT=3190 "$PREFIX/bin/cognate-workbench" > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 120); do body=$(curl -fsS http://127.0.0.1:3190/health 2>/dev/null) && break; sleep 1; done
+          echo "health: ${body:-<none>}"
+          [ -n "${body:-}" ] || { tail -80 "$RUNNER_TEMP/server.log"; exit 1; }
+          python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['ok'] is True and d['semantic']['objects'] > 0, d" "$body"
+          for path in / /app.js /app.css /astryx.css /theme.css; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3190$path"); echo "$path $code"; [ "$code" = 200 ]
+          done
+          ! curl -fsS http://127.0.0.1:3190/app.js | grep -q __COGNATE_BOOT_TOKEN__
+          pkill -f "$PREFIX/bin/cognate-workbench" || true
+
+      - name: Smoke test the installed archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = (Get-ChildItem dist-package -Filter *.zip).FullName
+          $install = Join-Path $env:RUNNER_TEMP 'install'
+          New-Item -ItemType Directory -Force $install, (Join-Path $env:RUNNER_TEMP 'home') | Out-Null
+          Expand-Archive -Path $archive -DestinationPath $install
+          $prefix = (Get-ChildItem $install -Directory -Filter 'cognate-workbench-*')[0].FullName
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'home'
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'home\AppData\Local'
+          $env:PORT = '3190'
+          $server = Start-Process -FilePath (Join-Path $prefix 'bin\cognate-workbench.exe') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
+          $health = $null
+          for ($i = 0; $i -lt 120 -and -not $health; $i++) {
+            try { $health = Invoke-RestMethod http://127.0.0.1:3190/health } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $health -or -not $health.ok) { Get-Content (Join-Path $env:RUNNER_TEMP 'server.err') -Tail 80; throw 'health check failed' }
+          Write-Output "health ok: $($health.semantic.objects) semantic objects"
+          foreach ($path in '/', '/app.js', '/app.css', '/astryx.css', '/theme.css') {
+            $code = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:3190$path").StatusCode
+            Write-Output "$path $code"
+          }
+          Stop-Process -Id $server.Id -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognate-workbench-${{ matrix.tag }}
+          path: |
+            dist-package/*.tar.gz
+            dist-package/*.zip
+            dist-package/*.sha256
+          if-no-files-found: error
+          retention-days: 14
