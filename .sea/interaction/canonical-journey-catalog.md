@@ -886,3 +886,52 @@ were added to the model before any implementation existed (model-first rule).
 - **Evidence/settlement**: a successful Run, Expert handoff or Git commit never establishes
   human acceptance — acceptance remains a separate human and criterion gate.
 - **Executable evidence**: `test/J-TASK-expert-provenance.red.test.ts`.
+
+### J-CHECKOUT-BIND (`j_checkout_bind`)
+
+- **Actor/intention**: the operator assigns a Task's work to an isolated Git checkout of its
+  workspace's repository, so the Task's changes stay out of every other checkout.
+- **Preconditions/affordance**: the Task exists, is not in flight, and its workspace root is a
+  Git repository; `git.branch.list` offers current/default/local branches; `git.checkout.attach`
+  creates the worktree and branch (or adopts an existing branch when explicitly requested).
+- **Transition/output**: one durable `workbench.checkout.bound` event (checkout root + branch)
+  recorded by a deterministic config run; the `task-checkout-bindings` projection carries the
+  association across restarts.
+- **Policy/authority**: operator-only capabilities; a Task in flight, a colliding branch without
+  the existing flag, a missing base, a non-repository root, and a contained execution world
+  that cannot reach a sibling checkout are each refused with the reason. The Task's workspace
+  identity is unchanged; no second workspace or task ledger is created.
+- **Evidence/settlement**: the binding is observable in the projection and the turn evidence of
+  later runs freezes the checkout per turn.
+- **Executable evidence**: `test/J-CHECKOUT-*.test.ts` (bind, refusal and restart suites).
+
+### J-CHECKOUT-EXECUTION (`j_checkout_execution`)
+
+- **Actor/intention**: a Task's conversational turn does its file, edit, shell and inspection
+  work inside the Task's isolated checkout.
+- **Preconditions/affordance**: the turn carries a Task in scope; `task.checkout.resolve`
+  (a recorded step) returns the live binding before any tool executes.
+- **Transition/output**: every tool root for the turn is the checkout root; `session.turn.started`
+  gains the frozen `checkoutRoot`/`checkoutBranch` beside the frozen Task association.
+- **Policy/authority**: the workspace's execution world and the Task's authority scopes govern
+  exactly as before — the checkout changes *where* work happens, never *what is allowed*; a
+  missing checkout is reported with a recovery pointer instead of falling back to the
+  workspace root.
+- **Evidence/settlement**: two Tasks in separate worktrees of one repository can edit the same
+  relative path without collision and the main checkout stays unchanged; the checkout is never
+  a second source of task, run or settlement truth.
+- **Executable evidence**: `test/J-CHECKOUT-*.test.ts` (parallel isolation suite).
+
+### J-CHECKOUT-LIFECYCLE (`j_checkout_lifecycle`)
+
+- **Actor/intention**: the operator inspects, integrates or cleans up a Task's checkout.
+- **Preconditions/affordance**: `git.checkout.status` (read-only), `git.checkout.merge`,
+  `git.checkout.remove`, `git.checkout.recreate`; all operator-only.
+- **Transition/output**: merge integrates into the named target branch locally and records the
+  outcome; remove records `workbench.checkout.removed`; recreate is a pure recovery.
+- **Policy/authority**: never force; a RUNNING Task refuses every mutation; a dirty checkout is
+  never removed; an unmerged branch is kept; a conflicted merge aborts clean and names the
+  conflicting paths; a merge never settles the Task.
+- **Evidence/settlement**: each refusal states its reason; the durable binding disappears only
+  on a recorded removal.
+- **Executable evidence**: `test/J-CHECKOUT-*.test.ts` (lifecycle and conflict suites).

@@ -469,6 +469,44 @@ export function bindRedJourneys(domain: Domain): Readonly<Record<string, Capabil
   >;
 }
 
+/**
+ * J-CHECKOUT (PandaCode worktree affordance): the governed Task-to-checkout family, anchored on
+ * the `Task` entity exactly as `task.move` is — each capability reads or mutates a Task-scoped
+ * association. The `TaskCheckoutRecord` resource plays the same role `TaskBindingRecord` plays
+ * for session bindings: the durable record type in the model, never a binding anchor.
+ * - `git.branch.list` — read-only local branch inventory of the workspace's repository.
+ * - `git.checkout.attach` — create/adopt a worktree and bind it to a Task (J-CHECKOUT-BIND).
+ * - `git.checkout.status` / `git.checkout.merge` / `git.checkout.remove` / `git.checkout.recreate`
+ *   — the guarded lifecycle (J-CHECKOUT-LIFECYCLE).
+ * - `task.checkout.resolve` — read the live binding; the agent loop's recorded step
+ *   (J-CHECKOUT-EXECUTION).
+ */
+export const CHECKOUT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "git.branch.list": "Task",
+  "git.checkout.attach": "Task",
+  "git.checkout.status": "Task",
+  "git.checkout.merge": "Task",
+  "git.checkout.remove": "Task",
+  "git.checkout.recreate": "Task",
+  "task.checkout.resolve": "Task",
+};
+
+export function bindCheckoutCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(CHECKOUT_CAPABILITY_ANCHORS).map(([id, resource]) => ({
+    semanticId: domain.semanticId(resource),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) {
+    throw new Error(`domain: expected ${bindings.length} checkout contracts, got ${contracts.length}`);
+  }
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: checkout capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
 /** Effective native capacity is inspection data, distinct from advisory parallelism plans. */
 export function bindRuntimeExecution(domain: Domain): CapabilityContract["semanticRef"] {
   const contracts = bindCapabilities(domain.projection, [{

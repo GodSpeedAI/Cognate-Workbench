@@ -158,6 +158,71 @@ To let SEA-Forge, not Workbench, decide which agent actions may run, see [SEA-Fo
 - [Troubleshooting](docs/troubleshooting.md)
 - [Source map](docs/source-map.md)
 
+## Repository Blueprint (EGM)
+
+The code subsystems live in three directories. Each carries its own EGM
+contract (`README.md`) documenting its public interface, invariants, and side
+effects, grounded in code symbols.
+
+### Subdirectories & System Boundaries
+
+- [domain](./domain/README.md) - Single-file IDM loader: loads the authoritative interaction model from `.sea/interaction/interaction-model.sea` in place (`domain/index.ts:loadDomain`) and explicitly binds every published capability to named IDM entities via count-asserting anchor tables.
+- [src](./src/README.md) - Root application package: `src/server.ts:startServer` composes the single Bun process (runtime, capability components, projections, UI), `src/store.ts` selects the PostgreSQL/pg0 persistence; children cover agents, auth, capabilities, cognitive, components, domain decisions, experts, projections, schedules, settlement, UI, and the pure workbench core.
+- [scripts](./scripts/README.md) - Operational scripts run directly with Bun: Experts aggregate benchmark, Linux containment config drafting, pinned pg0 installer (target of `just db-setup`), and DomainForge SEA format verification.
+
+Non-code directories (not EGM contracts): `test/` (journey and E2E suites),
+`docs/` (system documentation), `fixtures/` (test fixtures), `screenshots/`
+(E2E evidence), `.agents/` (status/plans/skills), `.sea/` (authoritative
+semantic model), `.github/` (workflows).
+
+### Local Interface & Invariants
+
+- [cognate.config.ts:default] — exports the app's `CognateConfig` metadata
+  (`profile: "harness"`); deliberately **not** consumed by this app's runtime —
+  `src/server.ts` composes its own runtime instead (see the module header and
+  `docs/explanation/why-single-bun-process.md`).
+
+### Global Invariants
+
+- The durable event log is the truth; every projection is a pure, rebuildable
+  fold (`src/workbench/reducer.ts:reduceWorkbench`, `src/projections/*`), and
+  each mutation goes through a deterministic recording run
+  (`src/capabilities/*` → `src/agents/agentConfig.ts:agentConfigAgent`).
+- Every executable capability is bound to a semantic ID from the authoritative
+  model loaded in place from `.sea/interaction/interaction-model.sea`; binders
+  assert exact contract counts and fail fast on drift
+  (`domain/index.ts:loadDomain` and the `bind*` family).
+- Authority is explicit: operator-only capabilities require the human actor
+  with no run attached (`src/capabilities/taskCheckout.ts:operatorOnly`,
+  `src/capabilities/workbench.ts:requireUser`); the served capability allowlist
+  is `src/server.ts:GRANTED_CAPABILITIES` scoped to the single durable operator
+  (`src/server.ts:LOCAL_OPERATOR`).
+- Secrets never appear in events, projections, or responses; they live in a
+  mode-0600 secrets file read only by server-side provider construction
+  (`src/secrets.ts:secretStore`, `src/configFile.ts:buildConfigExport`).
+- Containment is fail-closed: the execution posture defaults to contained and
+  uncontained local effects are refused at the provider-registry boundary
+  (`src/executionPosture.ts:postureRegistry`); aggregate containment quotas are
+  enforced before dispatch (`src/capabilities/aggregateContainment.ts`).
+- The server binds loopback only and refuses non-loopback Host/Origin
+  (`src/server.ts:loopbackRefusal`); the single-operator development
+  authenticator is a known security limitation, not production hardening.
+
+### Global Side Effects
+
+- PostgreSQL state via pg0 or `COGNATE_POSTGRES_URL` (`src/store.ts:storeConfigFor`); local runtime state under `.data/` (or
+  `COGNATE_WORKBENCH_HOME`/`COGNATE_HARNESS_HOME`, in that precedence); secrets in `secrets.json` (mode 0600) under that home
+  directory; generated UI assets under `.generated/`.
+- Loopback HTTP (default port 3180) serving the Connect RuntimeService and the
+  bundled UI (`src/server.ts:startServer`).
+- Boot-time wiring of background loops: schedule evaluator, completion bridge,
+  observation drain, settlement follow (`src/server.ts:startServer`).
+
+### System Verification
+
+- Run: `just verify` (typecheck, then the full test suite; equivalent to
+  `bun run typecheck && bun run test`).
+
 ## License
 
 [Apache License 2.0](LICENSE).

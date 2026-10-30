@@ -144,3 +144,24 @@ export async function acceptTask(app: AppServer, client: Client, workspaceId: st
   await waitForRow<TaskRecord>(app, `task/${taskId}`, (t) => t.status === "ACCEPTED");
   return taskId;
 }
+
+/** Run Git host-side against a test fixture: setup and commit helpers for journey tests (the
+ * app's own Git work goes through `src/workbench/gitOps.ts` inside the execution world). */
+export async function gitIn(cwd: string, args: readonly string[]): Promise<string> {
+  const proc = Bun.spawn(["git", ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Fixture Bot",
+      GIT_AUTHOR_EMAIL: "fixture-bot@example.invalid",
+      GIT_COMMITTER_NAME: "Fixture Bot",
+      GIT_COMMITTER_EMAIL: "fixture-bot@example.invalid",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  const code = await proc.exited;
+  if (code !== 0) throw new Error(`git ${args.join(" ")} failed (${code}): ${stderr}`);
+  return stdout;
+}

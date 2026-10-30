@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { budgetState, provenanceLine, rollupUsage } from "../../workbench/economics.ts";
 import type { UsageRow } from "../../workbench/state.ts";
 import { describeFocusRef, type AttentionLevel, type FocusRef } from "../../workbench/focus.ts";
+import { CheckoutChip } from "./CheckoutChip.tsx";
 import { RuntimeStrip } from "./RuntimeStrip.tsx";
 import { useBindableTasks } from "./Workbench.tsx";
 import { useWbRow } from "./data.ts";
@@ -76,6 +77,9 @@ export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bind
           <span className="wb-error" role="alert">
             {bindError}
           </span>
+        )}
+        {taskId && (
+          <CheckoutChip workspaceId={workspaceId} taskId={taskId} taskTitle={bound?.title ?? "task"} locked={state !== "idle"} />
         )}
       </div>
       <div className="wb-composerbar-focus" role="status" aria-label="Focus">

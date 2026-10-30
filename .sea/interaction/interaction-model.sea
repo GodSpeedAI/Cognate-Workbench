@@ -236,6 +236,12 @@ Resource "RunTaskAttribution" units
 
 Resource "AssignmentTaskRecord" units
 
+// J-CHECKOUT (PandaCode worktree affordance): the governed Task-to-checkout association. One
+// Task may name one isolated Git checkout of its workspace's repository (a worktree and its
+// branch). The record is durable event-backed state; it is not a second workspace, a second
+// task ledger, or a Cognate execution-world / cognitive candidate-world fork.
+Resource "TaskCheckoutRecord" units
+
 // Experts and Teams resources. These represent durable event-backed state and artifacts, not a
 // second event store or a promise that the proposed capabilities have already been implemented.
 Resource "ExpertDefinitionRecord" units
@@ -406,6 +412,12 @@ Flow "TaskMoveRecord" from "User" to "Task" quantity 1
 Flow "RunTaskAttribution" from "AgentRun" to "Task" quantity 1
 
 Flow "AssignmentTaskRecord" from "Assignment" to "Task" quantity 1
+
+// J-CHECKOUT flows. TaskCheckoutRecord is the governed Task-to-checkout association: the
+// operator binds a Task to an isolated worktree of the workspace's repository, the Task's
+// runs execute inside that checkout, and lifecycle decisions (merge, remove, recover) stay
+// inside the workspace's authority.
+Flow "TaskCheckoutRecord" from "Task" to "WorkspaceRecord" quantity 1
 
 // Experts and Teams flows preserve authorship and routing at the semantic boundary. Active-Team
 // cardinality is enforced atomically by the mutation capability over Cognate shared thread state.
@@ -1428,4 +1440,43 @@ Instance j_task_expert_provenance of "CanonicalJourney" {
     settlement: "The Orchestrator's Assignment and every Specialist child retain the explicitly authorized Task identity while keeping their own distinct Runs and causal parent ids; multiple attempts never duplicate the Task; the Task's acceptance remains a separate human and criterion gate that no model output, handoff or commit automatically settles",
     steps: "operator converses with the Team naming the Task -> team.converse validates the Task and stamps it on the root Assignment -> delegation inherits the Task identity on child Assignments -> each Assignment's Run keeps its own identity -> the human reviews settlement separately",
     variants: "an unknown or cross-workspace Task is refused before any Assignment; retries keep the same Assignment lineage; handoffs record evidence but not acceptance"
+}
+
+Instance j_checkout_bind of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "task.list, git.branch.list, git.checkout.attach, git.checkout.status",
+    evidence_class: "proposed",
+    initiating_condition: "The operator assigns a Task's work to an isolated Git checkout of its workspace's repository",
+    journey_id: "J-CHECKOUT-BIND",
+    precondition: "The Task exists in a workspace whose repository root is a Git repository; the Task is not in flight; the workspace's execution world can execute Git beside the repository root",
+    purpose: "Bind a Task to one isolated checkout (a Git worktree and its branch) so its changes stay out of every other checkout, without disturbing the Task's identity, contract or evidence",
+    settlement: "A validated attach creates the worktree through the workspace's execution world and records one durable task-checkout binding event; the binding names the checkout root and branch and survives restart; a dirty or colliding branch, a missing base branch, a non-repository root, a Task in flight, and an execution world whose containment cannot reach a sibling checkout are each refused with the reason; an existing branch may be adopted only when the operator explicitly asks; the Task keeps its workspace identity and no second workspace is created",
+    steps: "operator names the branch and optional base -> git.branch.list validates names against the repository -> git.checkout.attach refuses in-flight Tasks and unsafe worlds -> the worktree is created beside the repository root -> the binding event is recorded -> later turns of the Task resolve the checkout from the projection",
+    variants: "an unstarted Task adopts the checkout without losing its draft or contract; re-binding a Task whose runs already recorded another checkout never rewrites those runs' frozen checkout; a bound Task may later be removed only through the lifecycle journey"
+}
+
+Instance j_checkout_execution of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "agent.coding, task.checkout.resolve",
+    evidence_class: "proposed",
+    initiating_condition: "A conversational turn runs for a Task that has a bound checkout",
+    journey_id: "J-CHECKOUT-EXECUTION",
+    precondition: "The Task is bound to an existing checkout; the Session's turn carries the Task identity",
+    purpose: "Execute the turn's file, edit, shell and inspection operations inside the Task's isolated checkout so parallel Tasks of one repository never collide",
+    settlement: "The run resolves the Task's checkout as a recorded step before any tool executes; every tool's root for that turn is the checkout root while the workspace's execution world and authority model stay untouched; the turn-start evidence freezes the checkout root and branch alongside the frozen Task association; two Tasks bound to different worktrees of one repository edit the same relative path without overwriting each other and the repository's main checkout stays unchanged; a missing checkout is reported rather than silently falling back to the workspace root; the checkout is where work happens, never a second source of task, run or settlement truth",
+    steps: "turn starts with the Task in scope -> the run resolves the task-checkout binding -> tool roots and risk checks are scoped to the checkout -> files, edits and commands land inside the checkout -> completion and usage record under the same Task and run correlation",
+    variants: "an unbound Task's turn executes in the workspace root exactly as before; a bound Task whose worktree disappeared fails with the recovery pointer instead of writing elsewhere; Experts and Teams delegation keeps its own identity rules and inherits no checkout by accident"
+}
+
+Instance j_checkout_lifecycle of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "git.checkout.status, git.checkout.merge, git.checkout.remove, git.checkout.recreate",
+    evidence_class: "proposed",
+    initiating_condition: "The operator inspects, integrates or cleans up a Task's isolated checkout",
+    journey_id: "J-CHECKOUT-LIFECYCLE",
+    precondition: "The Task exists and is not in flight; the checkout's repository and branch state are observable",
+    purpose: "Give the operator safe, explicit control over the checkout's integration and cleanup with refusals that explain themselves",
+    settlement: "Status reports existence, branch, uncommitted change count, upstream and merge state without writing anything; merge is refused while the Task runs or either checkout is dirty, integrates into the named target branch locally, and a conflict aborts the merge and is reported with the conflicting paths rather than being claimed as integrated; removal never forces, refuses a dirty checkout, keeps an unmerged branch, and records the removal durably; recreation restores a missing checkout at the same path on the same branch or explains why it cannot; a successful merge never settles the Task, whose acceptance stays a separate evidence and human gate",
+    steps: "operator opens the checkout controls -> status is computed from the repository -> merge, remove or recreate validate the Task and checkout state -> the guarded Git operation runs through the execution world -> the outcome is recorded or the refusal is returned",
+    variants: "a clean merged checkout may be removed together with its branch; a dirty checkout is never removed; an unmerged branch survives removal; a missing checkout is detected and recoverable; a conflicted merge leaves both checkouts unchanged"
 }

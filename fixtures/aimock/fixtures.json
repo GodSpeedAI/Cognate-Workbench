@@ -1,6 +1,56 @@
 {
-  "_comment": "aimock (@copilotkit/aimock `llmock`) fixtures for the DeepSeek Harness reconstruction — the simulated OpenAI endpoint for cognate/test/J-*.test.ts, screenshot captures, and `just harness-up` (U1 of deepseek-harness-usage-features.md). Scenarios keep the old fixtures/mock-model/server.ts `[[scenario:<name>]]` markers as `match.userMessage` keys (aimock matches by substring against the last user turn). Multi-round tool loops use `toolCallId`-anchored follow-ups (ordered BEFORE their leg-1 fixture; leg 1 gated `hasToolResult: false`) with stable fixture-authored tool-call ids, so replay/restart serves the same script. Texts and tool arguments are copied byte-identically from the old mock where tests assert on them. Two honest divergences, both forced by aimock's static fixtures: (1) the old mock's `__REFLECT_TOOL_RESULT__` dynamic reflection is reproduced as static text — exact for every branch the tests exercise (allow/deny, approve/fail) thanks to `toolResultContains` gating, EXCEPT `delegate`, whose final text echoed a runtime-minted child run id (see the `delegate` entries); (2) a marker-less message no longer falls back to `plain` — aimock 404s it (`No fixture matched`), which J-AIM proves is surfaced as a run failure.",
+  "_comment": "aimock (@copilotkit/aimock `llmock`) fixtures for the DeepSeek Harness reconstruction \u2014 the simulated OpenAI endpoint for cognate/test/J-*.test.ts, screenshot captures, and `just harness-up` (U1 of deepseek-harness-usage-features.md). Scenarios keep the old fixtures/mock-model/server.ts `[[scenario:<name>]]` markers as `match.userMessage` keys (aimock matches by substring against the last user turn). Multi-round tool loops use `toolCallId`-anchored follow-ups (ordered BEFORE their leg-1 fixture; leg 1 gated `hasToolResult: false`) with stable fixture-authored tool-call ids, so replay/restart serves the same script. Texts and tool arguments are copied byte-identically from the old mock where tests assert on them. Two honest divergences, both forced by aimock's static fixtures: (1) the old mock's `__REFLECT_TOOL_RESULT__` dynamic reflection is reproduced as static text \u2014 exact for every branch the tests exercise (allow/deny, approve/fail) thanks to `toolResultContains` gating, EXCEPT `delegate`, whose final text echoed a runtime-minted child run id (see the `delegate` entries); (2) a marker-less message no longer falls back to `plain` \u2014 aimock 404s it (`No fixture matched`), which J-AIM proves is surfaced as a run failure.",
   "fixtures": [
+    {
+      "_comment": "J-CHECKOUT (parallel worktree isolation): task A's agent writes its own marker file. Leg 1 is gated hasToolResult:false so the follow-up anchors on the fixture-authored toolCallId. The bash redirect targets a relative path, so the write lands in whatever root the run's tools were given \u2014 the worktree under test.",
+      "match": {
+        "toolCallId": "call_checkout_a_bash_1"
+      },
+      "response": {
+        "content": "Wrote task-a's note."
+      }
+    },
+    {
+      "_comment": "J-CHECKOUT leg 1: task A.",
+      "match": {
+        "userMessage": "[[scenario:checkout-a]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_checkout_a_bash_1",
+            "name": "bash",
+            "arguments": "{\"command\":\"echo task-a > shared.txt\",\"description\":\"Write task A's marker file\"}"
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "J-CHECKOUT leg 2: task B's agent writes the same relative filename with different content.",
+      "match": {
+        "toolCallId": "call_checkout_b_bash_1"
+      },
+      "response": {
+        "content": "Wrote task-b's note."
+      }
+    },
+    {
+      "_comment": "J-CHECKOUT leg 1: task B.",
+      "match": {
+        "userMessage": "[[scenario:checkout-b]]",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_checkout_b_bash_1",
+            "name": "bash",
+            "arguments": "{\"command\":\"echo task-b > shared.txt\",\"description\":\"Write task B's marker file\"}"
+          }
+        ]
+      }
+    },
     {
       "_comment": "workbench steering (J-WB-steering, V-004): the request that carries an injected '[user steering]' message gets this scripted answer; proves the model saw the steering inside the running trajectory.",
       "match": {
@@ -242,7 +292,7 @@
       }
     },
     {
-      "_comment": "retry: attempt 1 fails 500, attempt 2 succeeds (sequenceIndex variants share one counter bucket per llmock process; a fresh llmock per test keeps it clean — the app's own retry budget supplies the second request).",
+      "_comment": "retry: attempt 1 fails 500, attempt 2 succeeds (sequenceIndex variants share one counter bucket per llmock process; a fresh llmock per test keeps it clean \u2014 the app's own retry budget supplies the second request).",
       "match": {
         "userMessage": "[[scenario:retry]]",
         "sequenceIndex": 0
@@ -457,7 +507,7 @@
         "toolCallId": "call_plan_exit_1"
       },
       "response": {
-        "content": "Tool result: Plan approved — plan mode exited; carry out the plan starting with your next step."
+        "content": "Tool result: Plan approved \u2014 plan mode exited; carry out the plan starting with your next step."
       }
     },
     {
@@ -514,7 +564,7 @@
       }
     },
     {
-      "_comment": "child: the subagent's own reply (the app sends the delegated prompt — which carries this marker — as the child's user message).",
+      "_comment": "child: the subagent's own reply (the app sends the delegated prompt \u2014 which carries this marker \u2014 as the child's user message).",
       "match": {
         "userMessage": "[[scenario:child]]"
       },
@@ -534,7 +584,7 @@
       }
     },
     {
-      "_comment": "error (J-H-provider-error): honest HTTP 500 on every request — the app retries 5 times, then turn.failed with HTTP_500.",
+      "_comment": "error (J-H-provider-error): honest HTTP 500 on every request \u2014 the app retries 5 times, then turn.failed with HTTP_500.",
       "match": {
         "userMessage": "[[scenario:error]]"
       },

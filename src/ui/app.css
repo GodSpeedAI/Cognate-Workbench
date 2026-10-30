@@ -722,6 +722,201 @@ input:focus-visible {
   color: var(--cg-danger, #c0392b);
 }
 
+/* Collapsed tool activity (plan T01). The summary row is a button so it takes keyboard focus and
+   reports `aria-expanded`, matching `.todo-widget button` rather than using <details>. The list
+   below reuses `.verbose-step-list` so expanded content looks unchanged. */
+.tool-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.tool-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--cg-text-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-group-header:hover {
+  color: var(--cg-text);
+}
+
+.tool-group-header:focus-visible {
+  outline: 2px solid var(--cg-focus, #0a84ff);
+  outline-offset: 2px;
+  border-radius: var(--cg-radius-sm);
+}
+
+/* A disclosure caret, so the row reads as expandable without an extra icon asset. */
+.tool-group-header::before {
+  content: "▸";
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tool-group-header[aria-expanded="true"]::before {
+  content: "▾";
+}
+
+.tool-group-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-failed-mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--cg-danger, #c0392b);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.tool-group-spinner {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+  animation: tool-group-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tool-group-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.8; }
+}
+
+/* Nested under `.tool-groups`, which already supplies the bottom margin. */
+.tool-group-steps {
+  margin: 0 0 0 14px;
+}
+
+.tool-group-narration {
+  font-size: 13px;
+  color: var(--cg-text-muted);
+}
+
+/* Composer attachments (plan T02). Preview-only: the notice is deliberately prominent because the
+   images do NOT travel with the message. */
+.composer-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 0;
+}
+
+.composer-attachment-notice {
+  margin: 0;
+  color: var(--cg-text-muted);
+  font-size: 12px;
+}
+
+.composer-attachment-strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composer-attachment {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--cg-border, rgba(255, 255, 255, 0.14));
+  border-radius: var(--cg-radius-sm);
+  background: var(--cg-surface-raised, rgba(255, 255, 255, 0.04));
+  max-width: 220px;
+}
+
+.composer-attachment-thumb {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.composer-attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.composer-attachment-remove {
+  flex: none;
+}
+
+.composer-paste-notice {
+  margin: 6px 0 0;
+  color: var(--cg-danger, #c0392b);
+  font-size: 12px;
+}
+
+/* Compact approvals (plan T03): a long justification is summarised to one line with a disclosure, so
+   the decision buttons never get pushed out of view. A structured `surface` is never wrapped in
+   this — see `approvalNeedsDisclosure`. */
+.approval-summary-line {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-full-text {
+  margin: 6px 0 0;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 13px;
+}
+
+.approval-disclosure {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--cg-accent, #0a84ff);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.approval-disclosure:hover {
+  text-decoration: underline;
+}
+
+.approval-disclosure:focus-visible {
+  outline: 2px solid var(--cg-focus, #0a84ff);
+  outline-offset: 2px;
+}
+
 .tab {
   border: none;
   background: transparent;
@@ -826,6 +1021,54 @@ input:focus-visible {
   white-space: nowrap;
   font-size: 12px;
   color: var(--cg-fg-muted, #6b7280);
+}
+/* Queued follow-ups (plan T04): one row per parked message, each with its own Steer / Remove so a
+   message can be pulled out of the queue or pushed into the running turn without touching the rest.
+   Rows are numbered because order is the contract — they are sent FIFO. */
+.composer-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+.composer-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.composer-queue-index {
+  min-width: 16px;
+  text-align: right;
+  color: var(--cg-fg-muted, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+.composer-queue-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cg-fg, #111827);
+}
+.composer-queue-action {
+  padding: 0 6px;
+  border: 1px solid var(--cg-border, #d1d5db);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.composer-queue-action:hover {
+  background: var(--cg-hover, rgba(0, 0, 0, 0.04));
+}
+.composer-queue-action:focus-visible {
+  outline: 2px solid var(--cg-focus, #0a84ff);
+  outline-offset: 1px;
 }
 .settings-version {
   margin-top: 24px;
