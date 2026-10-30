@@ -10,11 +10,14 @@ const PG0_VERSION = "0.15.2";
 // tag -> { platform-arch-abi: sha256 of the released binary }
 const DIGESTS: Record<string, string> = {
   "linux-x86_64-gnu": "06c4678ff7b461dba8ed1f95c5e202ead3b57b70f549a22c17a94985121c0bf5",
+  // Verified against the upstream v0.15.2 asset: ELF aarch64, max GLIBC_2.34 (Jetson Ubuntu 22.04 has 2.35).
+  "linux-aarch64-gnu": "08bf6f5e04bc456fac2f8e76bfec5705c55f0b079f11b56efa5b1f6869e20f76",
 };
 
 function target(): string {
   const { platform, arch } = process;
   if (platform === "linux" && arch === "x64") return "linux-x86_64-gnu";
+  if (platform === "linux" && arch === "arm64") return "linux-aarch64-gnu";
   throw new Error(`setup-pg0: no pinned pg0 binary for ${platform}-${arch}; install pg0 manually or set COGNATE_PG0_BIN`);
 }
 
