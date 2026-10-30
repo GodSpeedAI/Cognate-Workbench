@@ -1,0 +1,54 @@
+/* Phone remote styles. Tokens come from app.css (--cg-*); this sheet only lays out the phone screens. */
+html { -webkit-text-size-adjust: 100%; --kb: 0px; }
+body { margin: 0; background: var(--cg-bg); color: var(--cg-text); font: 16px/1.45 var(--cg-font); overflow-x: hidden; }
+.m-shell { min-height: 100dvh; box-sizing: border-box; padding: calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 72px + var(--kb)); max-width: 430px; margin: 0 auto; }
+.m-connect { padding-top: 48px; }
+.m-top { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.m-top-title { font: 600 18px/1.2 var(--cg-font-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-brand { font: 600 16px/1 var(--cg-font-display); color: var(--cg-text-muted); }
+button, input, textarea { font: inherit; color: inherit; }
+button { min-height: 44px; min-width: 44px; border-radius: var(--cg-radius-md); border: 1px solid var(--cg-border); background: var(--cg-surface-raised); cursor: pointer; padding: 0 14px; }
+button:disabled { opacity: 0.55; cursor: default; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 2px; }
+.m-primary { background: var(--cg-accent-interactive); color: var(--cg-accent-interactive-contrast); border-color: transparent; font-weight: 600; }
+.m-danger { color: var(--cg-danger); background: var(--cg-danger-bg); border-color: transparent; font-weight: 600; }
+.m-icon { font-size: 22px; min-width: 44px; }
+.m-banner, .m-notice { margin: 8px 0; font-size: 14px; color: var(--cg-text-muted); min-height: 0; }
+.m-notice:empty { display: none; }
+.m-error { color: var(--cg-danger); }
+.m-muted { color: var(--cg-text-muted); font-size: 14px; }
+.m-detail { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 "JetBrains Mono", ui-monospace, monospace; background: var(--cg-surface-sunken, rgba(127,127,127,.08)); padding: 8px 10px; border-radius: 6px; margin: 8px 0; max-height: 12em; overflow: auto; }
+.m-card { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; box-sizing: border-box; margin: 8px 0; padding: 12px 14px; background: var(--cg-surface); border: 1px solid var(--cg-border); border-radius: var(--cg-radius-panel); text-align: left; }
+.m-session { flex-direction: row; justify-content: space-between; align-items: center; }
+.m-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.m-pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--cg-border); color: var(--cg-text-muted); white-space: nowrap; }
+.m-pill-running, .m-pill-waiting { color: var(--cg-accent); border-color: var(--cg-accent); }
+.m-pill-failed { color: var(--cg-danger); border-color: var(--cg-danger); }
+.m-pill-completed { color: var(--cg-success); border-color: var(--cg-success); }
+.m-group { font: 600 13px/1.2 var(--cg-font); color: var(--cg-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 16px 0 4px; }
+.m-needs { width: 100%; margin-top: 8px; background: var(--cg-message-bubble-bg); color: var(--cg-text); font-weight: 600; }
+.m-row { display: flex; margin-top: 8px; }
+.m-seg { display: flex; gap: 6px; }
+.m-seg button[aria-pressed="true"] { background: var(--cg-accent-interactive); color: var(--cg-accent-interactive-contrast); border-color: transparent; }
+.m-search { width: 100%; box-sizing: border-box; min-height: 44px; margin-top: 8px; padding: 0 12px; border-radius: var(--cg-radius-md); border: 1px solid var(--cg-border); background: var(--cg-surface); }
+.m-timeline { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 12px; }
+.m-turn { display: flex; flex-direction: column; gap: 8px; }
+.m-bubble { max-width: 88%; padding: 10px 12px; border-radius: var(--cg-radius-lg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.m-user { align-self: flex-end; background: var(--cg-message-bubble-bg); color: var(--cg-message-bubble-text); }
+.m-agent { align-self: flex-start; background: var(--cg-surface-raised); border: 1px solid var(--cg-border); }
+.m-steps { font-size: 14px; color: var(--cg-text-muted); }
+.m-steps summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.m-steps pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--cg-code-bg); padding: 8px; border-radius: var(--cg-radius-sm); font: 13px/1.4 var(--cg-font-mono); max-height: 180px; overflow: auto; }
+/* Session view has no tab bar: the composer sits on the bottom safe area, lifted by the keyboard offset. */
+.m-composer { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + var(--kb)); max-width: 430px; margin: 0 auto; padding: 8px 16px; box-sizing: border-box; background: var(--cg-bg); border-top: 1px solid var(--cg-border); z-index: 1; }
+/* The timeline ends where the composer begins: the spacer is the composer's height plus its bottom offset. */
+.m-reserve { height: calc(var(--composer-h, 120px) + env(safe-area-inset-bottom) + var(--kb)); }
+.m-jump { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + var(--kb) + var(--composer-h, 120px) + 8px); z-index: 2; }
+.m-shell-session { padding-bottom: 0; }
+.m-composer textarea { width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 12px; border-radius: var(--cg-radius-md); border: 1px solid var(--cg-border); background: var(--cg-surface); resize: vertical; }
+.m-composer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.m-tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; max-width: 430px; margin: 0 auto; background: var(--cg-surface-raised); border-top: 1px solid var(--cg-border); padding-bottom: env(safe-area-inset-bottom); }
+.m-tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; font-size: 14px; }
+.m-tabs button[aria-current="page"] { color: var(--cg-accent); font-weight: 600; }
+.m-decision h2 { font: 600 16px/1.3 var(--cg-font); margin: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }

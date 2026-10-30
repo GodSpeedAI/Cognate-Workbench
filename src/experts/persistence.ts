@@ -92,9 +92,13 @@ function chunkHash(payload: PartitionPayload): string {
   return fingerprint(JSON.parse(JSON.stringify(payload)) as Json);
 }
 
+const MANIFEST_FIELDS: ReadonlySet<string> = new Set(["schema", "logicalSchema", "partitionVersion", "presentSections", "partitions", "sectionFingerprints"]);
+
 export function isExpertStateManifest(value: unknown): value is ExpertStateManifest {
   if (!value || typeof value !== "object") return false;
   const manifest = value as Partial<ExpertStateManifest>;
+  // Fail closed on fields this build does not know: a newer manifest may depend on them.
+  if (Object.keys(manifest).some((key) => !MANIFEST_FIELDS.has(key))) return false;
   if (manifest.schema !== 2 || manifest.logicalSchema !== 1) return false;
   if (manifest.partitionVersion !== 1 && manifest.partitionVersion !== 2) return false;
   if (!Array.isArray(manifest.presentSections) || !Array.isArray(manifest.partitions)) return false;
