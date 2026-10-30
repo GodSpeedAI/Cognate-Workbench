@@ -1,3 +1,48 @@
+# Current status — revision 34
+
+The egm-bootstrap documentation pass is complete: 18 EGM-compliant contract
+files (README.md blueprints) now cover the root, `domain/`, `scripts/`, `src/`
+and all 14 `src/**` code directories, generated with the `egm-bootstrap` skill
+(`elephant-goldfish-model`) and left semantically faithful by a drift review.
+Docs-only change; no runtime code was touched.
+
+**What was written.** Every contract carries Overview / Interface / Invariants /
+Side Effects / Verification grounded in exact `[file:symbol]` citations from a
+fresh read of the code (scouts ran inline, one worker at a time — RAM
+constraint). The root README kept its human-authored product documentation and
+gained a Repository Blueprint section (subdirectory boundaries, global
+invariants/side effects, `just verify` verification) before `## License`.
+Pruned out per the skill: `test/`, `docs/`, `fixtures/`, `screenshots/`,
+`.agents/`, `.sea/`, `.github/`, `.jolli/`, `.serena/`.
+
+**Verification.** A dedicated correctness pass explicitly read all 18 files:
+18/18 PASS (sections, markdown, every relative link resolves, ~60 named test
+files exist, 150+ citation spot-checks). The egm-drift-report pass verified
+~350 documented claims plus a ~160-symbol reverse export inventory per
+directory: verdict consistent, no doc-to-code hallucinations. Its four findings
+were fixed and re-verified against source (`WORKBENCH_EVENTS` 27→28,
+`seedCatalog` 16→17 in `src/workbench/README.md`; "30 mounted capability
+components plus observation/settlement wiring" in `src/README.md`; secrets-path
+env precedence in the root blueprint). One stale cross-reference in
+`src/ui/experts/README.md` was corrected to link `src/ui/README.md`. No test
+suite was run for this change (docs-only); the last full gate remains the
+revision-33 settlement run.
+
+**Deliberately not done.** No code changes; `cognate.config.ts` remains an
+unconsumed metadata file (documented as such); `src/secrets.ts`'s module header
+still says `$COGNATE_HARNESS_HOME` without the `COGNATE_WORKBENCH_HOME`
+precedence (source comment, out of the skill's docs-only scope — noted for the
+next code touch). Worker evidence and the drift report live outside the repo in
+`/tmp/egm-cognate-status/` (worker logs, subtree-index checkpoints,
+`final-verification.md`, `drift-report.md`).
+
+**Remaining open:** unchanged from revision 33 — T07 durable steering queue,
+T08 GitHub adapter, turn-attributed diffs, the projection re-read amplification
+upstream proposal, and the other pre-existing debts. Still a single-operator
+Workbench, not production-hardened multi-user.
+
+---
+
 # Current status — revision 33
 
 The PandaCode affordance-delta mission is settled: task-scoped Git checkouts (Priority A, T05+T06)
