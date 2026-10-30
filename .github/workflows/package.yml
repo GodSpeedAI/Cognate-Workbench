@@ -19,11 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-22.04, target: bun-linux-x64, tag: linux-x64 }
-          - { runner: ubuntu-22.04-arm, target: bun-linux-arm64, tag: linux-arm64 }
-          - { runner: macos-14, target: bun-darwin-arm64, tag: darwin-arm64 }
-          - { runner: macos-15-intel, target: bun-darwin-x64, tag: darwin-x64 }
-          - { runner: windows-2022, target: bun-windows-x64, tag: windows-x64 }
+          - { runner: ubuntu-22.04, target: bun-linux-x64, tag: linux-x64, binding: linux-x64-gnu }
+          - { runner: ubuntu-22.04-arm, target: bun-linux-arm64, tag: linux-arm64, binding: linux-arm64-gnu }
+          - { runner: macos-14, target: bun-darwin-arm64, tag: darwin-arm64, binding: darwin-arm64 }
+          - { runner: macos-15-intel, target: bun-darwin-x64, tag: darwin-x64, binding: darwin-x64 }
+          - { runner: windows-2022, target: bun-windows-x64, tag: windows-x64, binding: win32-x64-msvc }
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -32,20 +32,25 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # @godspeedai/domainforge publishes no linux-arm64 napi binding; build the pinned tag natively.
+      # @godspeedai/domainforge 0.21.2 ships only the linux-x64 napi binding. Every other platform builds
+      # the pinned tag's napi cdylib natively with cargo (no Node or Python step), then installs it beside
+      # the JS loader under the name that loader expects.
       - uses: dtolnay/rust-toolchain@1.99.0
-        if: matrix.target == 'bun-linux-arm64'
-      - name: Build DomainForge linux-arm64 binding
-        if: matrix.target == 'bun-linux-arm64'
+        if: matrix.binding != 'linux-x64-gnu'
+      - name: Build DomainForge ${{ matrix.binding }} binding
+        if: matrix.binding != 'linux-x64-gnu'
+        shell: bash
+        env:
+          BINDING: ${{ matrix.binding }}
         run: |
           set -euo pipefail
-          DF_VERSION="$(node -p "require('./node_modules/@godspeedai/domainforge/package.json').version")"
+          DF_VERSION="$(bun -e 'console.log(require("./node_modules/@godspeedai/domainforge/package.json").version)')"
           git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
-          cd "$RUNNER_TEMP/domainforge"
-          bun install --frozen-lockfile
-          cd domainforge-typescript
-          npm run build
-          cp domainforge-core.linux-arm64-gnu.node "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/"
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/domainforge/domainforge-core/Cargo.toml" --features typescript,three_valued_logic --lib
+          LIB="$(find "$RUNNER_TEMP/domainforge/target/release" -maxdepth 1 \( -name 'domainforge_core.dll' -o -name 'libdomainforge_core.so' -o -name 'libdomainforge_core.dylib' \) | head -1)"
+          test -n "$LIB"
+          cp "$LIB" "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/domainforge-core.$BINDING.node"
+          bun -e 'console.log("domainforge", process.argv[1], process.argv[2], "sha256:", new Bun.CryptoHasher("sha256").update(require("fs").readFileSync(process.argv[3])).digest("hex"))' "$DF_VERSION" "$BINDING" "$LIB"
 
       - name: Build package
         run: bun scripts/package.ts ${{ matrix.target }} ${{ matrix.tag }}
