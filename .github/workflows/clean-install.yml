@@ -44,3 +44,56 @@ jobs:
       - name: Server log on failure
         if: failure()
         run: tail -100 "$RUNNER_TEMP/dev.log" || true
+
+  # Jetson-class proxy: aarch64 on Ubuntu 22.04 (glibc 2.35), the AGX Orin's OS. Runs the bundled-pg0
+  # path with the ARM64 binary so its ABI is exercised natively, not just cross-checked.
+  clean-install-arm64:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: extractions/setup-just@v2
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          toolchain: 1.99.0
+
+      # @godspeedai/domainforge 0.21.2 publishes no linux-arm64 napi binding. Build the same tag natively
+      # (DomainForge's own release recipe, Rust 1.99.0) and install it beside the pinned JS loader.
+      - name: Build DomainForge napi binding for linux-arm64
+        run: |
+          set -euo pipefail
+          bun install
+          DF_VERSION="$(node -p "require('./node_modules/@godspeedai/domainforge/package.json').version")"
+          git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
+          cd "$RUNNER_TEMP/domainforge"
+          bun install --frozen-lockfile
+          cd domainforge-typescript
+          npm run build
+          test -f domainforge-core.linux-arm64-gnu.node
+          cp domainforge-core.linux-arm64-gnu.node "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/"
+          echo "domainforge $DF_VERSION linux-arm64-gnu binding sha256: $(sha256sum domainforge-core.linux-arm64-gnu.node | cut -d' ' -f1)"
+
+      - name: Native ARM64 quick start in a fresh HOME
+        run: |
+          export HOME="$RUNNER_TEMP/fresh-home"; mkdir -p "$HOME"
+          uname -m; ldd --version | head -1
+          just db-setup
+          ./.tmp/pg0/pg0 --version || true
+          (just dev > "$RUNNER_TEMP/dev.log" 2>&1 &)
+          for i in $(seq 1 180); do
+            if body=$(curl -fsS http://127.0.0.1:3180/health 2>/dev/null); then break; fi
+            sleep 1
+          done
+          echo "health: ${body:-<none>}"
+          [ -n "${body:-}" ] || { tail -80 "$RUNNER_TEMP/dev.log"; exit 1; }
+          python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['ok'] is True and d['semantic']['objects'] > 0, d" "$body"
+          ./.tmp/pg0/pg0 info --name cognate-dev
+          echo "arm64 clean install OK"
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -100 "$RUNNER_TEMP/dev.log" || true
