@@ -24,6 +24,21 @@ several commands named in older notes have no recipe.
 `just dev` does **not** require `just db-up`. The runtime starts the named pg0 instance on demand.
 Use `db-up` / `db-status` / `db-down` to manage it explicitly.
 
+## The standalone command: `cognate-workbench`
+
+The compiled executable in a native package. Its source entry point is `src/cli.ts`.
+
+| Command | Purpose |
+|---|---|
+| `cognate-workbench` / `cognate-workbench start` | Verify the bundled pg0, start or reconnect its database, and run the server on `PORT` (default 3180) |
+| `cognate-workbench doctor` | Report version and commit, runtime, install location, data home, pg0 identity, database mode and health, semantic model, authentication, execution posture, containment, and optional integrations. Exits non-zero only for an unusable installation (pg0 mismatch, unreachable database, missing model). It starts nothing and never prints a credential |
+| `cognate-workbench --version` | The version, commit, Bun target and pg0 version the package was built from |
+| `cognate-workbench --help` | Usage and the environment variables that matter |
+
+From a checkout, `bun src/cli.ts <command>` runs the same commands; `bun run dev` and `bun run start` call `start`.
+
+Exit status: `0` success, `1` a refusal or failure (the message names the condition), `2` an unknown command.
+
 ## Package scripts
 
 | Script | Command |
