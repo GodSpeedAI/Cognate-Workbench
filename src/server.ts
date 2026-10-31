@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultHome, packaged, resourcePath } from "./resources.ts";
+import { startPg0Detached } from "./pg0Launch.ts";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
@@ -911,6 +912,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
 if (import.meta.main) {
   // The packaged pg0 binary is used unless the operator names another one (see findPg0Bin's order).
   if (packaged) process.env.COGNATE_PG0_BIN ??= resourcePath("bin", process.platform === "win32" ? "pg0.exe" : "pg0");
+  // An explicit external PostgreSQL URL means pg0 is never started (see src/store.ts).
+  if (packaged && !process.env.COGNATE_POSTGRES_URL) {
+    await startPg0Detached(process.env.COGNATE_PG0_BIN!, process.env.COGNATE_PG0_NAME ?? "cognate-dev");
+  }
   const port = Number(process.env.PORT ?? 3180);
   const home = process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? defaultHome();
   console.log(`[cognate-workbench] data home: ${home} (packaged: ${packaged}, resources: ${resourcePath()})`);
