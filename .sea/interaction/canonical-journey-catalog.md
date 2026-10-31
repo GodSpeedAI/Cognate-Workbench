@@ -935,3 +935,20 @@ were added to the model before any implementation existed (model-first rule).
 - **Evidence/settlement**: each refusal states its reason; the durable binding disappears only
   on a recorded removal.
 - **Executable evidence**: `test/J-CHECKOUT-*.test.ts` (lifecycle and conflict suites).
+
+## Packaged installation (standalone native distribution)
+
+These journeys are operator-facing. Each is an `Instance ... of "CanonicalJourney"` in
+`interaction-model.sea` with the same `journey_id`. Their evidence is the qualification scripts
+(`scripts/qualify-*.sh`, `scripts/qualify-browser.ts`) run against the installed archive, and the
+recorded results in `validation/`. Their status changes only when that evidence is recorded.
+
+| Journey ID | Settles when |
+|---|---|
+| `J-PKG-first-launch` | The bundled instance is recorded initialised and running, `/health` reports the semantic model, and the UI renders |
+| `J-PKG-durable-restart` | A value written before a clean stop is read after relaunch; the old boot's token is refused |
+| `J-PKG-interrupted-ownership` | After SIGKILL, relaunch reuses the same postmaster and keeps the value; a second owner of the same home is refused |
+| `J-PKG-external-postgres` | With `COGNATE_POSTGRES_URL`, no bundled instance starts, and the external server is untouched by Workbench |
+| `J-PKG-fail-closed` | Each of the failure cases in the mission's Test E exits non-zero with a named condition and creates no store |
+| `J-PKG-upgrade-uninstall` | Earlier state reads back after a package replacement; uninstall leaves the data home and instance |
+| `J-PKG-doctor` | `cognate-workbench doctor` reports every required field and exits non-zero on an unusable installation |
