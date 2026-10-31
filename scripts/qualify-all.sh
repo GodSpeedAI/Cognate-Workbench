@@ -11,6 +11,8 @@ ARCHIVE="${1:?usage: qualify-all.sh <archive.tar.gz> <work-root> [base-port]}"
 ROOT="${2:?usage: qualify-all.sh <archive.tar.gz> <work-root> [base-port]}"
 BASE="${3:-3300}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Each install replaces HOME with a disposable one; keep Playwright's browser cache at the real location.
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
 mkdir -p "$ROOT"
 ARCHIVE="$(cd "$(dirname "$ARCHIVE")" && pwd)/$(basename "$ARCHIVE")"
 

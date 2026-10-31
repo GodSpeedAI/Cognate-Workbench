@@ -22,6 +22,9 @@ jobs:
     name: package ${{ matrix.tag }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      # One browser cache for the install step and the qualification, which runs under a disposable HOME.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +97,16 @@ jobs:
           set -euo pipefail
           ARCHIVE="$(ls "$PWD"/dist-package/*.tar.gz)"
           bash scripts/qualify-all.sh "$ARCHIVE" "$RUNNER_TEMP/qualify" 3500
+
+      - name: Show the failing qualification logs
+        if: failure() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          for log in "$RUNNER_TEMP"/qualify/*.log; do
+            echo "::group::$(basename "$log")"
+            grep -vE '^\s*$' "$log" | tail -60
+            echo "::endgroup::"
+          done
 
       - name: Install and smoke test the native package (Linux)
         if: runner.os == 'Linux'
