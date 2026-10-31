@@ -78,6 +78,23 @@ jobs:
           ! curl -fsS http://127.0.0.1:3190/app.js | grep -q __COGNATE_BOOT_TOKEN__
           pkill -f "$PREFIX/bin/cognate-workbench" || true
 
+      - name: Diagnose pg0 start on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP 'install'
+          $prefix = (Get-ChildItem $install -Directory -Filter 'cognate-workbench-*')[0].FullName
+          $pg0 = Join-Path $prefix 'share\cognate-workbench\bin\pg0.exe'
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'home'
+          $out = Join-Path $env:RUNNER_TEMP 'pg0-start.out'
+          $proc = Start-Process -FilePath $pg0 -ArgumentList 'start', '--name', 'diag-cognate' -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+          $finished = $proc.WaitForExit(300000)
+          Write-Output "pg0 start finished=$finished exit=$(if ($finished) { $proc.ExitCode } else { 'timeout' })"
+          Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 20
+          Get-Content "$out.err" -ErrorAction SilentlyContinue | Select-Object -First 20
+          & $pg0 info --name diag-cognate 2>&1 | Select-Object -First 10
+          & $pg0 stop --name diag-cognate 2>&1 | Select-Object -First 5
+
       - name: Smoke test the installed archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
