@@ -10,7 +10,7 @@
 // Both runs are inspected through the Connect API (run record, workspace file system). The executable runs with
 // a disposable data home, so nothing is written to the operator's profile.
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -36,7 +36,10 @@ function fail(message: string): never {
 
 // 1. The deterministic model server, exactly as the journey tests run it.
 const mockLog = join(work, "llmock.log");
-const llmock = Bun.spawn([join(repo, "node_modules/.bin/llmock"), "-p", "0", "-f", join(repo, "fixtures/aimock/fixtures.json")], {
+// Run the real llmock script under this Bun runtime: its shebang would resolve `node` through the shell's version
+// manager, which is not available to a script that runs with a different HOME.
+const llmockScript = await realpath(join(repo, "node_modules/.bin/llmock"));
+const llmock = Bun.spawn([process.execPath, llmockScript, "-p", "0", "-f", join(repo, "fixtures/aimock/fixtures.json")], {
   stdout: Bun.file(mockLog),
   stderr: Bun.file(join(work, "llmock.err")),
 });
