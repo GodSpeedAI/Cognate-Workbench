@@ -7,8 +7,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Compiled module URLs live in Bun's virtual filesystem: `$bunfs` on POSIX, `B:/~BUN/` on Windows.
-export const packaged = import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN");
+// Compiled module URLs live in Bun's virtual filesystem: `$bunfs` on POSIX, `B:/~BUN/` on Windows. The
+// Windows form arrives percent-encoded in the URL, so the check runs on the decoded location.
+const moduleLocation = decodeURIComponent(import.meta.url);
+export const packaged = moduleLocation.includes("$bunfs") || moduleLocation.includes("~BUN");
 
 const checkoutRoot = fileURLToPath(new URL("..", import.meta.url));
 
