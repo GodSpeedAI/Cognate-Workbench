@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           ARCHIVE="$(ls dist-package/*.tar.gz)"
-          (cd dist-package && sha256sum -c "$(basename "$ARCHIVE").sha256")
+          (cd dist-package && shasum -a 256 -c "$(basename "$ARCHIVE").sha256")
           INSTALL="$RUNNER_TEMP/install"; mkdir -p "$INSTALL" "$RUNNER_TEMP/home"
           tar -xzf "$ARCHIVE" -C "$INSTALL"
           PREFIX="$(ls -d "$INSTALL"/cognate-workbench-*)"
@@ -91,12 +91,17 @@ jobs:
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'home'
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'home\AppData\Local'
           $env:PORT = '3190'
+          Write-Output "LOCALAPPDATA=$env:LOCALAPPDATA USERPROFILE=$env:USERPROFILE COGNATE_WORKBENCH_HOME=$env:COGNATE_WORKBENCH_HOME COGNATE_HARNESS_HOME=$env:COGNATE_HARNESS_HOME"
           $server = Start-Process -FilePath (Join-Path $prefix 'bin\cognate-workbench.exe') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
           $health = $null
           for ($i = 0; $i -lt 120 -and -not $health; $i++) {
             try { $health = Invoke-RestMethod http://127.0.0.1:3190/health } catch { Start-Sleep -Seconds 1 }
           }
-          if (-not $health -or -not $health.ok) { Get-Content (Join-Path $env:RUNNER_TEMP 'server.err') -Tail 80; throw 'health check failed' }
+          if (-not $health -or -not $health.ok) {
+            Get-Content (Join-Path $env:RUNNER_TEMP 'server.log') -Tail 40
+            Get-Content (Join-Path $env:RUNNER_TEMP 'server.err') -Tail 80
+            throw 'health check failed'
+          }
           Write-Output "health ok: $($health.semantic.objects) semantic objects"
           foreach ($path in '/', '/app.js', '/app.css', '/astryx.css', '/theme.css') {
             $code = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:3190$path").StatusCode

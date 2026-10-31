@@ -913,6 +913,7 @@ if (import.meta.main) {
   if (packaged) process.env.COGNATE_PG0_BIN ??= resourcePath("bin", process.platform === "win32" ? "pg0.exe" : "pg0");
   const port = Number(process.env.PORT ?? 3180);
   const home = process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? defaultHome();
+  console.log(`[cognate-workbench] data home: ${home} (packaged: ${packaged}, resources: ${resourcePath()})`);
   const app = await startServer({ port, home });
   console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
   console.log(`[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is ${parseDevAuth(process.env.COGNATE_DEV_AUTH) ? "ARMED (test/dev only)" : "off"}`);
