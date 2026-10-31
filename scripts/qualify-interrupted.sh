@@ -61,5 +61,6 @@ echo "conflict: second owner refused (exit $CONFLICT_EXIT, EADDRINUSE); recovere
 
 # 5. The recovered owner shuts down cleanly.
 stop_server recovered
-echo "recovered: clean SIGTERM shutdown"
+[ -z "$(pg0_pid cognate-dev)" ] || { echo "FAIL: bundled database still running after a clean shutdown"; exit 1; }
+echo "recovered: clean SIGTERM shutdown; bundled database stopped"
 echo "PASS: interrupted owner recovered without data loss, duplicate initialisation, or a second owner"
