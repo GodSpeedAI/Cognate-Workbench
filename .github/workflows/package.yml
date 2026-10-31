@@ -1,9 +1,16 @@
 name: package
 
-# Native distributions: one compiled Cognate Workbench per platform, each smoke-tested by installing its
-# archive into an empty directory and starting it there. Artifacts only: this workflow publishes no release.
+# Native distributions: one compiled Cognate Workbench per platform. Each platform builds its archive and native
+# installer, qualifies the archive (bundled pg0, durability, ownership, external PostgreSQL, fail-closed, upgrade,
+# browser), installs the native package, and smoke-tests the installed executable. Artifacts are uploaded; a formal
+# release is published only when `publish_release` is set after every platform qualifies.
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish a formal GitHub Release after every platform qualifies (leave off to test packaging only)"
+        type: boolean
+        default: false
   push:
     branches: [feat/standalone-packages]
 
@@ -32,6 +39,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Browser for the UI qualification
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then bun x playwright install --with-deps chromium; else bun x playwright install chromium; fi
+
+      - name: NSIS for the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files (x86)\NSIS'
+
       # @godspeedai/domainforge 0.21.2 ships only the linux-x64 napi binding. Every other platform builds
       # the pinned tag's napi cdylib natively with cargo (no Node or Python step), then installs it beside
       # the JS loader under the name that loader expects.
@@ -55,64 +74,66 @@ jobs:
       - name: Build package
         run: bun scripts/package.ts ${{ matrix.target }} ${{ matrix.tag }}
 
-      - name: Smoke test the installed archive (POSIX)
+      - name: Verify the archive and its manifest (POSIX)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
           ARCHIVE="$(ls dist-package/*.tar.gz)"
           (cd dist-package && shasum -a 256 -c "$(basename "$ARCHIVE").sha256")
-          INSTALL="$RUNNER_TEMP/install"; mkdir -p "$INSTALL" "$RUNNER_TEMP/home"
+          INSTALL="$RUNNER_TEMP/manifest-install"; mkdir -p "$INSTALL"
           tar -xzf "$ARCHIVE" -C "$INSTALL"
           PREFIX="$(ls -d "$INSTALL"/cognate-workbench-*)"
-          # Every shipped file must match the manifest it was built with.
           bun -e 'const fs=require("fs"),path=require("path"),c=require("crypto");const root=process.argv[1];const m=JSON.parse(fs.readFileSync(path.join(root,"share/cognate-workbench/MANIFEST.json"),"utf8"));for(const f of m.files){const h=c.createHash("sha256").update(fs.readFileSync(path.join(root,f.path))).digest("hex");if(h!==f.sha256){console.error("mismatch",f.path);process.exit(1)}}console.log("manifest ok:",m.files.length,"files")' "$PREFIX"
-          HOME="$RUNNER_TEMP/home" PORT=3190 "$PREFIX/bin/cognate-workbench" > "$RUNNER_TEMP/server.log" 2>&1 &
-          for i in $(seq 1 120); do body=$(curl -fsS http://127.0.0.1:3190/health 2>/dev/null) && break; sleep 1; done
-          echo "health: ${body:-<none>}"
-          [ -n "${body:-}" ] || { tail -80 "$RUNNER_TEMP/server.log"; exit 1; }
-          python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['ok'] is True and d['semantic']['objects'] > 0, d" "$body"
-          for path in / /app.js /app.css /astryx.css /theme.css; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3190$path"); echo "$path $code"; [ "$code" = 200 ]
-          done
-          ! curl -fsS http://127.0.0.1:3190/app.js | grep -q __COGNATE_BOOT_TOKEN__
-          pkill -f "$PREFIX/bin/cognate-workbench" || true
 
-      - name: Diagnose pg0 start on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Qualify the archive (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          $archive = (Get-ChildItem dist-package -Filter *.zip).FullName
-          $install = Join-Path $env:RUNNER_TEMP 'diag-install'
-          New-Item -ItemType Directory -Force $install, (Join-Path $env:RUNNER_TEMP 'home') | Out-Null
-          Expand-Archive -Path $archive -DestinationPath $install
-          $prefix = (Get-ChildItem $install -Directory -Filter 'cognate-workbench-*')[0].FullName
-          $pg0 = Join-Path $prefix 'share\cognate-workbench\bin\pg0.exe'
-          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'home'
-          $out = Join-Path $env:RUNNER_TEMP 'pg0-start.out'
-          $proc = Start-Process -FilePath $pg0 -ArgumentList 'start', '--name', 'diag-cognate' -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError "$out.err"
-          $finished = $proc.WaitForExit(300000)
-          Write-Output "pg0 start finished=$finished exit=$(if ($finished) { $proc.ExitCode } else { 'timeout' })"
-          Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 20
-          Get-Content "$out.err" -ErrorAction SilentlyContinue | Select-Object -First 20
-          & $pg0 info --name diag-cognate 2>&1 | Select-Object -First 10
-          & $pg0 stop --name diag-cognate 2>&1 | Select-Object -First 5
+          set -euo pipefail
+          ARCHIVE="$(ls "$PWD"/dist-package/*.tar.gz)"
+          bash scripts/qualify-all.sh "$ARCHIVE" "$RUNNER_TEMP/qualify" 3500
 
-      - name: Smoke test the installed archive (Windows)
+      - name: Install and smoke test the native package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB="$(ls "$PWD"/dist-package/*.deb)"
+          ARCH="$(dpkg-deb -f "$DEB" Architecture)"; echo "package architecture: $ARCH"
+          sudo dpkg -i "$DEB"
+          test -x /usr/bin/cognate-workbench
+          HOME="$RUNNER_TEMP/deb-home" bash scripts/qualify-installed.sh /usr/bin/cognate-workbench 3590
+          sudo dpkg -r cognate-workbench
+          test ! -e /usr/bin/cognate-workbench
+
+      - name: Install and smoke test the native package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$(ls "$PWD"/dist-package/*.pkg)"
+          sudo installer -pkg "$PKG" -target /
+          test -x /usr/local/bin/cognate-workbench
+          HOME="$RUNNER_TEMP/pkg-home" bash scripts/qualify-installed.sh /usr/local/bin/cognate-workbench 3590
+          sudo rm -rf /usr/local/lib/cognate-workbench /usr/local/bin/cognate-workbench
+          test ! -e /usr/local/bin/cognate-workbench
+
+      - name: Install and smoke test the native package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $archive = (Get-ChildItem dist-package -Filter *.zip).FullName
-          $install = Join-Path $env:RUNNER_TEMP 'install'
-          New-Item -ItemType Directory -Force $install, (Join-Path $env:RUNNER_TEMP 'home') | Out-Null
-          Expand-Archive -Path $archive -DestinationPath $install
-          $prefix = (Get-ChildItem $install -Directory -Filter 'cognate-workbench-*')[0].FullName
-          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'home'
-          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'home\AppData\Local'
+          $setup = (Get-ChildItem dist-package -Filter *-setup.exe).FullName
+          Start-Process -FilePath $setup -ArgumentList '/S' -Wait
+          $root = Join-Path $env:LOCALAPPDATA 'Programs\CognateWorkbench'
+          $exe = Join-Path $root 'bin\cognate-workbench.exe'
+          if (-not (Test-Path $exe)) { throw "installed executable missing at $exe" }
+          $version = & $exe --version
+          Write-Output "installed: $version"
+          & $exe doctor
+          $server = Start-Process -FilePath $exe -ArgumentList 'start' -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
           $env:PORT = '3190'
-          Write-Output "LOCALAPPDATA=$env:LOCALAPPDATA USERPROFILE=$env:USERPROFILE COGNATE_WORKBENCH_HOME=$env:COGNATE_WORKBENCH_HOME COGNATE_HARNESS_HOME=$env:COGNATE_HARNESS_HOME"
-          $server = Start-Process -FilePath (Join-Path $prefix 'bin\cognate-workbench.exe') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
           # Windows runners start PostgreSQL slowly, so wait on a wall-clock deadline, not a retry count.
           $health = $null
           $started = Get-Date
@@ -131,6 +152,9 @@ jobs:
             Write-Output "$path $code"
           }
           Stop-Process -Id $server.Id -Force
+          $uninstall = Join-Path $root 'uninstall.exe'
+          Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait
+          if (Test-Path $exe) { throw 'uninstall left the executable behind' }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -138,6 +162,39 @@ jobs:
           path: |
             dist-package/*.tar.gz
             dist-package/*.zip
+            dist-package/*.deb
+            dist-package/*.pkg
+            dist-package/*.dmg
+            dist-package/*-setup.exe
             dist-package/*.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+  release:
+    name: publish release
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cognate-workbench-*
+          path: release
+          merge-multiple: true
+      - name: Checksums and release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum $(ls *.tar.gz *.zip *.deb *.pkg *.dmg *-setup.exe 2>/dev/null) > SHA256SUMS
+          cat SHA256SUMS
+          VERSION="$(ls cognate-workbench-*.tar.gz | head -1 | sed -E 's/cognate-workbench-([0-9.]+)-.*/\1/')"
+          TAG="v${VERSION}"
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Cognate Workbench $VERSION" \
+            --notes "Native packages built from commit $GITHUB_SHA by the package workflow run $GITHUB_RUN_ID. Each platform qualified its archive and installed its native package before this release was published. Verify downloads against SHA256SUMS. Installers are unsigned: macOS and Windows will ask for confirmation on first run." \
+            ./*.tar.gz ./*.zip ./*.deb ./*.pkg ./*.dmg ./*-setup.exe ./SHA256SUMS
