@@ -105,7 +105,16 @@ export async function buildMacInstaller(input: InstallerInput, arch: "arm64" | "
     "",
   ].join("\n"));
   const dmg = join(input.out, `${base}.dmg`);
-  await run(["hdiutil", "create", "-volname", `Cognate Workbench ${input.version}`, "-srcfolder", staging, "-ov", "-format", "UDZO", dmg]);
+  // hdiutil reports "Resource busy" when the runner's disk is still held by a previous step; a short retry clears it.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run(["hdiutil", "create", "-volname", `Cognate Workbench ${input.version}`, "-srcfolder", staging, "-ov", "-format", "UDZO", dmg]);
+      break;
+    } catch (error) {
+      if (attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 5000 * attempt));
+    }
+  }
   await rm(staging, { recursive: true, force: true });
   return [pkg, dmg];
 }
