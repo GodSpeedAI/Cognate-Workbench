@@ -65,11 +65,12 @@ export async function pg0Info(bin: string, name: string): Promise<Pg0Info | unde
 
 /** Start the instance with the record's data directory and password, logging to a file (never a pipe: postgres
  * inherits its stdio, and a pipe that stays open is what hangs `pg0 start` on Windows). */
-async function startWithRecord(bin: string, record: BundledRecord, logPath: string): Promise<void> {
+export async function startWithRecord(bin: string, record: BundledRecord, logPath: string): Promise<void> {
   await mkdir(join(logPath, ".."), { recursive: true });
   const log = openSync(logPath, "a");
   try {
-    const child = spawn(bin, ["start", "--name", record.name, "--data-dir", record.dataDir, "--password", record.password], {
+    // `--password=` in one argument: a generated password may begin with "-" (base64url), which pg0 would otherwise read as an option.
+    const child = spawn(bin, ["start", "--name", record.name, "--data-dir", record.dataDir, `--password=${record.password}`], {
       stdio: ["ignore", log, log],
       windowsHide: true,
     });
