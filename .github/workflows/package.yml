@@ -93,10 +93,13 @@ jobs:
           $env:PORT = '3190'
           Write-Output "LOCALAPPDATA=$env:LOCALAPPDATA USERPROFILE=$env:USERPROFILE COGNATE_WORKBENCH_HOME=$env:COGNATE_WORKBENCH_HOME COGNATE_HARNESS_HOME=$env:COGNATE_HARNESS_HOME"
           $server = Start-Process -FilePath (Join-Path $prefix 'bin\cognate-workbench.exe') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
+          # Windows runners start PostgreSQL slowly, so wait on a wall-clock deadline, not a retry count.
           $health = $null
-          for ($i = 0; $i -lt 120 -and -not $health; $i++) {
-            try { $health = Invoke-RestMethod http://127.0.0.1:3190/health } catch { Start-Sleep -Seconds 1 }
+          $started = Get-Date
+          while (-not $health -and ((Get-Date) - $started).TotalSeconds -lt 900) {
+            try { $health = Invoke-RestMethod -TimeoutSec 5 http://127.0.0.1:3190/health } catch { Start-Sleep -Seconds 2 }
           }
+          Write-Output ("health after {0:N0}s" -f ((Get-Date) - $started).TotalSeconds)
           if (-not $health -or -not $health.ok) {
             Get-Content (Join-Path $env:RUNNER_TEMP 'server.log') -Tail 40
             Get-Content (Join-Path $env:RUNNER_TEMP 'server.err') -Tail 80
