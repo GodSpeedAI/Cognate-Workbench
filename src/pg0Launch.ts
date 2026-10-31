@@ -56,11 +56,11 @@ function run(bin: string, args: readonly string[], stdio: "pipe" | "ignore"): Pr
 /** `pg0 info`: `undefined` when the instance does not exist. Any other failure is an error, never "missing". */
 export async function pg0Info(bin: string, name: string): Promise<Pg0Info | undefined> {
   const result = await run(bin, ["info", "--name", name, "-o", "json"], "pipe");
-  if (result.code !== 0) {
-    if (/does not exist/i.test(result.stdout + result.stderr)) return undefined;
-    throw new Error(`pg0 info --name ${name} failed (exit ${result.code}): ${result.stderr.trim() || result.stdout.trim()}`);
-  }
-  return JSON.parse(result.stdout) as Pg0Info;
+  // A missing instance exits 0 and reports only {"name","running":false}; the text form says "does not exist".
+  if (/does not exist/i.test(result.stdout + result.stderr)) return undefined;
+  if (result.code !== 0) throw new Error(`pg0 info --name ${name} failed (exit ${result.code}): ${result.stderr.trim() || result.stdout.trim()}`);
+  const info = JSON.parse(result.stdout) as Partial<Pg0Info>;
+  return info.data_dir === undefined ? undefined : (info as Pg0Info);
 }
 
 /** Start the instance with the record's data directory and password, logging to a file (never a pipe: postgres
