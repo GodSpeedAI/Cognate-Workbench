@@ -53,7 +53,9 @@ start_server() {
     if ! kill -0 "$(pid_of "$label")" 2>/dev/null; then break; fi
     sleep 1
   done
-  echo "FAIL: server $label did not become healthy"; tail -40 "$WORK/server-$label.log"; return 1
+  echo "FAIL: server $label did not become healthy"; tail -40 "$WORK/server-$label.log"
+  tail -20 "$DATA_HOME/logs/pg0.log" 2>/dev/null || true
+  return 1
 }
 
 wait_exit() {
