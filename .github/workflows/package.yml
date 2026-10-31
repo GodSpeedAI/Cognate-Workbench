@@ -42,7 +42,8 @@ jobs:
       - name: Browser for the UI qualification
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then bun x playwright install --with-deps chromium; else bun x playwright install chromium; fi
+          # The repository's own pinned Playwright (node_modules/.bin), so the browser revision matches playwright-core.
+          if [ "$RUNNER_OS" = Linux ]; then bun run playwright install --with-deps chromium; else bun run playwright install chromium; fi
 
       - name: NSIS for the Windows installer
         if: runner.os == 'Windows'
