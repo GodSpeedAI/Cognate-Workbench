@@ -150,7 +150,15 @@ try {
   const writeRun = await settle(write.runId);
   const written = existsSync(join(workspaceDir, "shared.txt"));
   if (written) fail("the agent wrote a file in a local workspace under the default posture");
-  console.log(`workflow: the write was refused (run ${write.runId} ended ${statusOf(writeRun)}; shared.txt absent)`);
+  // The refusal must be on the record: the bash tool call happened and the runtime refused it.
+  const trace = await call("ReadProjection", { name: "session-trace" });
+  const entry = trace.entries?.find((e: any) => e.key === `trace/${sessionB}`);
+  const bashCalls = (entry?.value?.turns ?? []).flatMap((turn: any) => turn.tools ?? []).filter((tool: any) => tool.tool === "bash");
+  if (bashCalls.length === 0) fail("the bash tool call is not in the session trace");
+  if (!bashCalls.every((tool: any) => /Refused process\.exec/.test(String(tool.error ?? "")))) {
+    fail(`the bash call was not refused by the runtime: ${JSON.stringify(bashCalls).slice(0, 300)}`);
+  }
+  console.log(`workflow: the bash write was refused by the runtime (run ${write.runId} ended ${statusOf(writeRun)}; shared.txt absent)`);
   console.log("PASS: deterministic workflow completed, and the local write stayed refused under the default posture");
   await rm(workspaceDir, { recursive: true, force: true });
 } catch (error) {
