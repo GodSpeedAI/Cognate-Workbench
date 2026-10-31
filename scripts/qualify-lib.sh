@@ -29,7 +29,12 @@ install_archive() {
   PG0="$APP/share/cognate-workbench/bin/pg0"
   export HOME="$work/home"
   export XDG_DATA_HOME="$work/home/.local/share"
-  DATA_HOME="$XDG_DATA_HOME/cognate-workbench"
+  # The data home where the app's own resolver puts it (src/resources.ts): Application Support on macOS, XDG elsewhere.
+  if [ "$(uname -s)" = Darwin ]; then
+    DATA_HOME="$HOME/Library/Application Support/CognateWorkbench"
+  else
+    DATA_HOME="$XDG_DATA_HOME/cognate-workbench"
+  fi
 }
 
 pid_of() { cat "$WORK/$1.pid"; }
