@@ -205,11 +205,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cd release
-          sha256sum $(ls *.tar.gz *.zip *.deb *.pkg *.dmg *-setup.exe 2>/dev/null) > SHA256SUMS
-          cat SHA256SUMS
-          VERSION="$(ls cognate-workbench-*.tar.gz | head -1 | sed -E 's/cognate-workbench-([0-9.]+)-.*/\1/')"
+          # Checksums are computed inside release/ so the file names carry no directory; gh runs from the repository root.
+          (cd release && sha256sum $(ls *.tar.gz *.zip *.deb *.pkg *.dmg *-setup.exe 2>/dev/null) > SHA256SUMS && cat SHA256SUMS)
+          VERSION="$(ls release/cognate-workbench-*.tar.gz | head -1 | sed -E 's|.*/cognate-workbench-([0-9.]+)-.*|\1|')"
           TAG="v${VERSION}"
-          gh release create "$TAG" --target "$GITHUB_SHA" --title "Cognate Workbench $VERSION" \
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Cognate Workbench $VERSION" \
             --notes "Native packages built from commit $GITHUB_SHA by the package workflow run $GITHUB_RUN_ID. Each platform qualified its archive and installed its native package before this release was published. Verify downloads against SHA256SUMS. Installers are unsigned: macOS and Windows will ask for confirmation on first run." \
-            ./*.tar.gz ./*.zip ./*.deb ./*.pkg ./*.dmg ./*-setup.exe ./SHA256SUMS
+            release/*.tar.gz release/*.zip release/*.deb release/*.pkg release/*.dmg release/*-setup.exe release/SHA256SUMS
