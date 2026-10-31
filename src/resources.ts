@@ -1,14 +1,14 @@
 // Read-only application resources and the per-user data home.
-// Development reads resources from the checkout. A packaged build (a `bun build --compile` executable,
-// whose module URLs point into Bun's virtual `$bunfs` filesystem) reads them from the install's share
-// directory beside the executable: `<prefix>/bin/cognate-workbench` and `<prefix>/share/cognate-workbench/`.
-// `COGNATE_RESOURCE_DIR` overrides both. The resource tree mirrors the checkout's paths, so callers pass
-// the same relative path in either mode.
+// Development reads resources from the checkout. A packaged build (a `bun build --compile` executable)
+// reads them from the install's share directory beside the executable: `<prefix>/bin/cognate-workbench`
+// and `<prefix>/share/cognate-workbench/`. `COGNATE_RESOURCE_DIR` overrides both. The resource tree mirrors
+// the checkout's paths, so callers pass the same relative path in either mode.
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const packaged = import.meta.url.includes("$bunfs");
+// Compiled module URLs live in Bun's virtual filesystem: `$bunfs` on POSIX, `B:/~BUN/` on Windows.
+export const packaged = import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN");
 
 const checkoutRoot = fileURLToPath(new URL("..", import.meta.url));
 
