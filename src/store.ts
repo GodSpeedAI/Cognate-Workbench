@@ -15,9 +15,16 @@ export function postgresUrl(): string {
   return process.env.COGNATE_POSTGRES_URL ?? "postgres://postgres:postgres@127.0.0.1:5432/postgres";
 }
 
+let bundledUrl: string | undefined;
+
+/** Packaged installs resolve their bundled pg0 instance at boot (see `prepareBundledDatabase`) and hand its URL here. */
+export function setBundledDatabaseUrl(url: string | undefined): void {
+  bundledUrl = url;
+}
+
 export function storeConfigFor(dataPath: string, app: string): RuntimeStoreConfig {
   const schema = schemaFor(dataPath, app);
-  const url = process.env.COGNATE_POSTGRES_URL;
+  const url = process.env.COGNATE_POSTGRES_URL ?? bundledUrl;
   return url
     ? { postgres: { url, schema } }
     : { postgresPg0: { name: process.env.COGNATE_PG0_NAME ?? "cognate-dev", schema } };

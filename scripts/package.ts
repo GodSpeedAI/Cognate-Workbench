@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PG0_DIGESTS, PG0_VERSION, pg0Url } from "./pg0-pins.ts";
+import { PG0_DIGESTS, PG0_VERSION, POSTGRES_VERSION, pg0Url } from "./pg0-pins.ts";
 import { BOOT_TOKEN_PLACEHOLDER, BROWSER_ENTRY_TEMPLATE, LOCAL_OPERATOR } from "../src/server.ts";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
@@ -80,7 +80,7 @@ await copyInto(join(repo, ".sea/interaction/interaction-model.sea"), join(share,
 
 // 4. Compiled executable.
 const exe = join(prefix, "bin", `cognate-workbench${platform.exeSuffix}`);
-const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/server.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
+const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
 if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile failed for ${bunTarget}`);
 
 // 5. pg0, fetched from the pinned release and verified before it is staged.
@@ -114,7 +114,7 @@ const manifest = {
   tag,
   bunTarget,
   commit,
-  pg0: { version: PG0_VERSION, asset: `pg0-${platform.pg0}`, sha256: pg0Digest },
+  pg0: { version: PG0_VERSION, postgres: POSTGRES_VERSION, asset: `pg0-${platform.pg0}`, sha256: pg0Digest },
   domainforgeBinding: platform.binding,
   files: files.sort((a, b) => a.path.localeCompare(b.path)),
 };

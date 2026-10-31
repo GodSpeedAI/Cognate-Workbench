@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun src/server.ts",
-    "start": "bun src/server.ts",
+    "dev": "bun src/cli.ts start",
+    "start": "bun src/cli.ts start",
     "test": "bun test --timeout 15000 test",
     "typecheck": "tsc -p tsconfig.json",
     "verify": "bun run typecheck && bun run test",

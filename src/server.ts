@@ -6,7 +6,6 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultHome, packaged, resourcePath } from "./resources.ts";
-import { startPg0Detached, stopPg0 } from "./pg0Launch.ts";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
@@ -907,44 +906,4 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       await executionWorlds.dispose();
     },
   };
-}
-
-if (import.meta.main) {
-  // The packaged pg0 binary is used unless the operator names another one (see findPg0Bin's order).
-  if (packaged) process.env.COGNATE_PG0_BIN ??= resourcePath("bin", process.platform === "win32" ? "pg0.exe" : "pg0");
-  const port = Number(process.env.PORT ?? 3180);
-  const home = process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? defaultHome();
-  console.log(`[cognate-workbench] data home: ${home} (packaged: ${packaged}, resources: ${resourcePath()})`);
-  // An explicit external PostgreSQL URL means pg0 is never started or stopped (see src/store.ts). The bundled
-  // instance is marked as owned by this data home, so a clean shutdown stops only what this installation runs.
-  const bundledPg0 = packaged && !process.env.COGNATE_POSTGRES_URL;
-  const pg0Name = process.env.COGNATE_PG0_NAME ?? "cognate-dev";
-  const pg0Owner = join(home, "bundled-pg0.owner");
-  if (bundledPg0) {
-    await startPg0Detached(process.env.COGNATE_PG0_BIN!, pg0Name);
-    await mkdir(home, { recursive: true });
-    await writeFile(pg0Owner, `${pg0Name}\n`);
-  }
-  const app = await startServer({ port, home });
-  // A clean shutdown closes the application first, then stops the bundled database if this data home owns it.
-  let closing: Promise<void> | undefined;
-  const shutdown = (signal: string): Promise<void> => closing ??= (async () => {
-    console.log(`[cognate-workbench] ${signal}: closing the application`);
-    await app.stop();
-    if (bundledPg0 && existsSync(pg0Owner)) {
-      await stopPg0(process.env.COGNATE_PG0_BIN!, pg0Name);
-      await rm(pg0Owner, { force: true });
-      console.log(`[cognate-workbench] bundled database ${pg0Name} stopped (owned by this data home)`);
-    }
-    process.exit(0);
-  })();
-  process.once("SIGTERM", () => void shutdown("SIGTERM"));
-  process.once("SIGINT", () => void shutdown("SIGINT"));
-  console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
-  console.log(`[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is ${parseDevAuth(process.env.COGNATE_DEV_AUTH) ? "ARMED (test/dev only)" : "off"}`);
-  if (app.executionPosture === "contained") {
-    console.log(`[cognate-workbench] execution: contained — agent commands and writes run only in Linux-contained or explicitly connected remote workspaces; local workspaces are read-only to agents (${EXECUTION_POSTURE_ENV}=uncontained-local to opt out)`);
-  } else {
-    console.warn(`[cognate-workbench] execution: UNCONTAINED LOCAL — agents run commands and write files on this host as this user; path checks are not a sandbox (${EXECUTION_POSTURE_ENV}=uncontained-local)`);
-  }
 }

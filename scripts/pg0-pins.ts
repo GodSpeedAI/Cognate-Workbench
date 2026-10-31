@@ -2,6 +2,10 @@
 // digests; pg0 publishes bare binaries without signatures, so the sha256 pins are the trust anchor.
 export const PG0_VERSION = "0.15.2";
 
+// The PostgreSQL server version that this pg0 release installs by default (`pg0 start --version`).
+// The bundled database record pins it: a different server version is refused, never upgraded silently.
+export const POSTGRES_VERSION = "18.1.0";
+
 // asset name suffix (`pg0-<key>`) -> sha256 of the released binary
 export const PG0_DIGESTS: Readonly<Record<string, string>> = {
   "linux-x86_64-gnu": "06c4678ff7b461dba8ed1f95c5e202ead3b57b70f549a22c17a94985121c0bf5",
