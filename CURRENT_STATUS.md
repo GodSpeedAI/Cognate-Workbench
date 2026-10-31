@@ -33,8 +33,14 @@ secret-provisioning interface); pg0 writes it to its instance metadata, which is
 password, a framework gap to report separately. Bubblewrap is absent on the Jetson, so contained agent
 execution is refused there by design; the doctor reports it without failing.
 
-**Next.** Merge PR #22 into `main` with a merge commit; dispatch the `package` workflow on `main` with
-`publish_release=true` to create `v0.1.0`; verify the release assets and `SHA256SUMS`.
+**Released.** `v0.1.0` is published from `main` commit `80c5cca` by package run 41175569205 (all five
+packages and the release job green). Twelve assets; every one matches the release `SHA256SUMS`, which was
+checked by downloading the assets back. The branch-level fixes that made CI green after revision 36 were
+merged as #23 (pg0 `--password=` form, for passwords that begin with `-`), #24 (release step runs from the
+repository root) and #25 (retry for the pinned pg0 download).
+
+**Next.** Nothing is pending for this release. Windows and macOS installers are unsigned; installing them on
+real machines has not been done by the author.
 
 ---
 
