@@ -94,12 +94,14 @@ async function invoke(capability: string, input: unknown): Promise<any> {
 }
 
 async function settle(runId: string): Promise<any> {
+  let last: any = undefined;
   for (let i = 0; i < 400; i++) {
-    const run = await call("GetRun", { runId });
+    last = await call("GetRun", { runId });
+    const run = last.run ?? last;
     if (["completed", "failed", "cancelled"].includes(run.status)) return run;
     await Bun.sleep(100);
   }
-  fail(`run ${runId} did not settle`);
+  fail(`run ${runId} did not settle; last view: ${JSON.stringify(last).slice(0, 400)}`);
 }
 
 let exitCode = 0;
