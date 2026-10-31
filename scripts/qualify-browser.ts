@@ -11,7 +11,7 @@ const [url, outDir, executable] = process.argv.slice(2);
 if (!url || !outDir) throw new Error("usage: bun scripts/qualify-browser.ts <url> <out-dir> [chromium-executable]");
 await mkdir(outDir, { recursive: true });
 
-const browser = await chromium.launch({ headless: true, executablePath: executable, args: ["--no-sandbox"] });
+const browser = await chromium.launch({ headless: true, executablePath: executable || undefined, args: ["--no-sandbox"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 const appErrors: string[] = [];
