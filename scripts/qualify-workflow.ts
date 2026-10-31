@@ -93,12 +93,17 @@ async function invoke(capability: string, input: unknown): Promise<any> {
   return result.output ?? result;
 }
 
+/** The run API reports `RUN_STATUS_COMPLETED` and similar; compare on the bare lower-case word. */
+function statusOf(run: any): string {
+  return String(run.status ?? "").replace(/^RUN_STATUS_/, "").toLowerCase();
+}
+
 async function settle(runId: string): Promise<any> {
   let last: any = undefined;
   for (let i = 0; i < 400; i++) {
     last = await call("GetRun", { runId });
     const run = last.run ?? last;
-    if (["completed", "failed", "cancelled"].includes(run.status)) return run;
+    if (["completed", "failed", "cancelled"].includes(statusOf(run))) return run;
     await Bun.sleep(100);
   }
   fail(`run ${runId} did not settle; last view: ${JSON.stringify(last).slice(0, 400)}`);
@@ -130,7 +135,7 @@ try {
     correlationId: `session:${sessionA}`,
   });
   const plainRun = await settle(plain.runId);
-  if (plainRun.status !== "completed") fail(`plain run ended ${plainRun.status}: ${JSON.stringify(plainRun.error ?? plainRun.output ?? {}).slice(0, 300)}`);
+  if (statusOf(plainRun) !== "completed") fail(`plain run ended ${statusOf(plainRun)}: ${JSON.stringify(plainRun.error ?? plainRun.output ?? {}).slice(0, 300)}`);
   if (plainRun.output?.text !== PLAIN_TEXT) fail(`plain run output was ${JSON.stringify(plainRun.output).slice(0, 200)}`);
   console.log(`workflow: plain completion settled as completed with the fixture text (run ${plain.runId})`);
 
@@ -145,7 +150,7 @@ try {
   const writeRun = await settle(write.runId);
   const written = existsSync(join(workspaceDir, "shared.txt"));
   if (written) fail("the agent wrote a file in a local workspace under the default posture");
-  console.log(`workflow: the write was refused (run ${write.runId} ended ${writeRun.status}; shared.txt absent)`);
+  console.log(`workflow: the write was refused (run ${write.runId} ended ${statusOf(writeRun)}; shared.txt absent)`);
   console.log("PASS: deterministic workflow completed, and the local write stayed refused under the default posture");
   await rm(workspaceDir, { recursive: true, force: true });
 } catch (error) {
