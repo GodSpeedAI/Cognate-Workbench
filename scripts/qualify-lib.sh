@@ -14,6 +14,9 @@
 #   stop_pg0 [name]                               stop the bundled instance this home recorded (no-op if none)
 #   expect_refusal <label> <port> <grep-pattern>  run the server to exit; it must fail with the pattern in its log
 set -euo pipefail
+# A failing command must name itself: a bare non-zero exit gives no clue on the runner that failed.
+set -E
+trap 'echo "FAIL: ${BASH_SOURCE[0]##*/} line $LINENO exited $?" >&2' ERR
 
 install_archive() {
   local archive="$1" work="$2"
@@ -89,7 +92,7 @@ rpc() {
 }
 
 setting() {
-  rpc "$1" "$2" ReadProjection '{"name":"settings"}' | head -n -1 | grep -oE '"sendBehavior" *: *"[a-z]+"' | head -1 | sed -E 's/.*: *"([a-z]+)"/\1/' || true
+  rpc "$1" "$2" ReadProjection '{"name":"settings"}' | sed '$d' | grep -oE '"sendBehavior" *: *"[a-z]+"' | head -1 | sed -E 's/.*: *"([a-z]+)"/\1/' || true
 }
 
 # The projection folds a write in shortly after the write is accepted, so read with a bounded poll.

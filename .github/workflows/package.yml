@@ -146,8 +146,9 @@ jobs:
           $version = & $exe --version
           Write-Output "installed: $version"
           & $exe doctor
-          $server = Start-Process -FilePath $exe -ArgumentList 'start' -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
+          # The child inherits the environment at launch, so the port must be set before Start-Process.
           $env:PORT = '3190'
+          $server = Start-Process -FilePath $exe -ArgumentList 'start' -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
           # Windows runners start PostgreSQL slowly, so wait on a wall-clock deadline, not a retry count.
           $health = $null
           $started = Get-Date
