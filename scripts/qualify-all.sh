@@ -29,9 +29,12 @@ for journey in durable interrupted stale fail-closed external upgrade; do
 done
 
 # Browser qualification on a fresh install: the UI renders from the installed assets and drives Settings.
+# Needs the repository checkout (its Playwright install); COGNATE_QUALIFY_BROWSER=0 skips it.
 index=$((index + 1))
 port=$((BASE + index * 10))
-if (
+if [ "${COGNATE_QUALIFY_BROWSER:-1}" = 0 ]; then
+  echo "SKIP  browser (COGNATE_QUALIFY_BROWSER=0)"
+elif (
   source "$HERE/qualify-lib.sh"
   install_archive "$ARCHIVE" "$ROOT/browser"
   trap 'stop_server browser 2>/dev/null; stop_pg0' EXIT

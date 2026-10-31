@@ -68,7 +68,7 @@ export async function buildDeb(input: InstallerInput, arch: "amd64" | "arm64"): 
     "",
   ].join("\n"));
   const file = join(input.out, `cognate-workbench_${input.version}_${arch}.deb`);
-  await run(["dpkg-deb", "--build", "--root-owner-group", root, file]);
+  await run(["dpkg-deb", "-Zgzip", "--build", "--root-owner-group", root, file]);
   await rm(root, { recursive: true, force: true });
   return file;
 }
