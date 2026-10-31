@@ -38,16 +38,18 @@ await page.waitForFunction(() => (document.querySelector("#root")?.children.leng
 await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => undefined);
 await page.screenshot({ path: `${outDir}/workbench.png`, fullPage: true });
 
-// Navigation: dismiss the first-run notice, then open Settings from the sidebar.
-// The dismissal is a durable event; the dialog closes once its projection folds in, so wait for that.
+// Navigation: dismiss the first-run dialogs (notice, then the API-key step), then open Settings.
+// Each dismissal is a durable event; a dialog closes once its projection folds in, so wait for that.
 const welcome = page.getByRole("button", { name: "Continue" });
-if (await welcome.count()) {
-  await welcome.first().click();
-  await page.locator(".modal-backdrop").first().waitFor({ state: "detached", timeout: 60_000 }).catch(() => undefined);
-}
+if (await welcome.count()) await welcome.first().click();
+const configureLater = page.getByRole("button", { name: "Configure later" });
+await configureLater.first().waitFor({ state: "visible", timeout: 60_000 }).catch(() => undefined);
+if (await configureLater.count()) await configureLater.first().click();
+await page.locator(".modal-backdrop").first().waitFor({ state: "detached", timeout: 60_000 });
 await page.getByText("Settings", { exact: true }).first().click();
 await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => undefined);
-const settingsVisible = (await page.innerText("body")).includes("Settings");
+// "Agent presets" is a Settings section label; the sidebar's "Settings" link alone would always match.
+const settingsVisible = await page.getByText("Agent presets", { exact: true }).isVisible();
 await page.screenshot({ path: `${outDir}/settings.png`, fullPage: true });
 
 const text = (await page.innerText("body")).trim();
