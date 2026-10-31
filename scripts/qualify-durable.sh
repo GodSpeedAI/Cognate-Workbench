@@ -5,8 +5,8 @@
 #
 # Installs the archive into <work-dir> with a disposable HOME, then: writes a real setting through the
 # app's Connect API, stops the server, starts it again, and checks the value survived. It also checks that
-# the previous boot's session token is refused after restart, and that the bundled pg0 instance outlives
-# the server process (the database lifecycle is pg0's, not the server's).
+# the previous boot's session token is refused after restart, and that a clean shutdown stops the bundled
+# database this data home owns.
 set -euo pipefail
 
 ARCHIVE="${1:?usage: qualify-durable.sh <archive.tar.gz> <work-dir> [port]}"
@@ -84,10 +84,12 @@ AFTER_WRITE="$(await_value "$TOKEN_ONE" steer || true)"
 echo "first boot: after write=$AFTER_WRITE"
 [ "$AFTER_WRITE" = steer ] || { echo "FAIL: write not visible in the same boot"; stop_server; exit 1; }
 
-# 2. Normal shutdown. The server stops; pg0 must keep its instance.
+# 2. Normal shutdown. The server stops, and it stops the bundled database because this data home owns it.
 stop_server
-echo "server stopped"
-"$PG0" info --name cognate-dev 2>&1 | head -4 || true
+if "$PG0" info --name cognate-dev 2>/dev/null | grep -q "is running"; then
+  echo "FAIL: bundled database still running after a clean shutdown"; exit 1
+fi
+echo "server stopped; bundled database stopped"
 
 # 3. Relaunch with the same home: the value must survive, and the old session must not.
 start_server second

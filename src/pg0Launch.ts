@@ -15,6 +15,18 @@ function isRunning(bin: string, name: string): Promise<boolean> {
   });
 }
 
+/** Stop the named pg0 instance and resolve once `pg0 stop` has exited (pg0 waits for the postmaster). */
+export function stopPg0(bin: string, name: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, ["stop", "--name", name], { stdio: "ignore", windowsHide: true });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`pg0 stop --name ${name} exited with ${code}`));
+    });
+  });
+}
+
 export async function startPg0Detached(bin: string, name: string): Promise<void> {
   if (await isRunning(bin, name)) return;
   await new Promise<void>((resolve, reject) => {
