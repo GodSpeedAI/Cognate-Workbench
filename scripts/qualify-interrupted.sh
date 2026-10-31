@@ -60,8 +60,10 @@ mkdir -p "$OTHER_HOME"
 export COGNATE_WORKBENCH_HOME="$OTHER_HOME"
 expect_refusal occupied-port-second-owner "$PORT" "EADDRINUSE"
 unset COGNATE_WORKBENCH_HOME
-OTHER_NAME="$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$OTHER_HOME/database/bundled.json" | head -1)"
-stop_pg0 "$OTHER_NAME"
+# The refused owner must not have created a database; if it had, it would be this other home's to stop.
+if [ -f "$OTHER_HOME/database/bundled.json" ]; then
+  stop_pg0 "$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$OTHER_HOME/database/bundled.json" | head -1)"
+fi
 [ "$(pg0_pid "$NAME")" = "$PG0_OWNER" ] || { echo "FAIL: the port conflict disturbed the database"; exit 1; }
 [ "$(await_setting "$PORT" "$TOKEN_RECOVERED" steer)" = steer ] || { echo "FAIL: recovered owner lost state after the conflicts"; exit 1; }
 echo "conflicts: second owners refused; recovered owner and its database intact"
