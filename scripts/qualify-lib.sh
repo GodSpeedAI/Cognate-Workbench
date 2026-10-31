@@ -8,6 +8,7 @@
 #   rpc <port> <token> <method> <json>            Connect JSON call; prints body then HTTP status
 #   setting <port> <token>                        the current sendBehavior value (empty if unset)
 #   await_setting <port> <token> <expected>       poll until the projection shows the expected value
+#   sha256_of <file>                              portable SHA-256 hex digest
 #   db_name                                       the bundled pg0 instance this data home recorded (empty if none)
 #   pg0_pid [name]                                PID of a running bundled instance (empty if none)
 #   stop_pg0 [name]                               stop the bundled instance this home recorded (no-op if none)
@@ -29,6 +30,11 @@ install_archive() {
 }
 
 pid_of() { cat "$WORK/$1.pid"; }
+
+# Portable SHA-256 of a file (GNU sha256sum on Linux, shasum on macOS).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
 
 start_server() {
   local label="$1" port="$2"

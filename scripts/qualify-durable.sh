@@ -23,7 +23,7 @@ trap 'stop_pg0' EXIT
 # A. First launch.
 MANIFEST="$APP/share/cognate-workbench/MANIFEST.json"
 EXPECTED_PG0="$(sed -n '/"pg0": {/,/}/p' "$MANIFEST" | sed -n 's/.*"sha256": *"\([0-9a-f]\{64\}\)".*/\1/p')"
-ACTUAL_PG0="$(sha256sum "$PG0" | cut -d' ' -f1)"
+ACTUAL_PG0="$(sha256_of "$PG0")"
 [ "$ACTUAL_PG0" = "$EXPECTED_PG0" ] || { echo "FAIL: bundled pg0 digest $ACTUAL_PG0 does not match the manifest"; exit 1; }
 echo "first launch: bundled pg0 digest matches the manifest"
 

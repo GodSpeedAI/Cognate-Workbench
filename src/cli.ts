@@ -76,6 +76,15 @@ async function acquireHomeLock(home: string, port: number): Promise<() => Promis
   };
 }
 
+/** Refuse an occupied port before any database is touched, so a losing second owner leaves nothing running. */
+async function assertPortFree(port: number): Promise<void> {
+  try {
+    Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("") }).stop(true);
+  } catch {
+    throw new Error(`port ${port} is already in use (EADDRINUSE); another service or Workbench holds it`);
+  }
+}
+
 async function start(): Promise<void> {
   // The packaged pg0 binary is used unless the operator names another one.
   if (packaged) process.env.COGNATE_PG0_BIN ??= pg0Path();
@@ -92,6 +101,7 @@ async function start(): Promise<void> {
   const releaseLock = await acquireHomeLock(home, port);
   let app: Awaited<ReturnType<typeof startServer>>;
   try {
+    await assertPortFree(port);
     if (bundled) {
       const bin = process.env.COGNATE_PG0_BIN!;
       await verifyPg0(bin, release);
@@ -217,7 +227,7 @@ async function doctor(): Promise<number> {
   const posture = process.env[EXECUTION_POSTURE_ENV] ?? "contained";
   add("execution posture", posture === "uncontained-local" ? "UNCONTAINED LOCAL (opt-in)" : "contained (default)", posture !== "uncontained-local");
   const bwrap = Bun.which("bwrap");
-  add("containment", bwrap ? `bubblewrap available at ${bwrap}` : "bubblewrap not found: contained agent execution is refused on this host", process.platform !== "linux" || Boolean(bwrap));
+  add("containment", bwrap ? `bubblewrap available at ${bwrap}` : "bubblewrap not found: contained agent execution is refused on this host (reported, not a failed install)");
   add("RealityTrace (sxr)", process.env.SXR_BIN ?? (Bun.which("sxr") ?? "not installed (observations stay queued)"), true);
   add("SEA-Forge governance", process.env.COGNATE_GOVERNANCE ?? "off", true);
 
@@ -280,7 +290,7 @@ if (import.meta.main) {
     },
     (error: Error) => {
       console.error(`[cognate-workbench] ${error.message}`);
-      process.exitCode = 1;
+      process.exit(1);
     },
   );
 }

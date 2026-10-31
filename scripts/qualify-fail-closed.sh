@@ -36,7 +36,7 @@ mv "$PG0.away" "$PG0"
 
 # 2. Corrupted bundled pg0 (one byte changed): integrity verification must fail before anything runs.
 cp "$PG0" "$PG0.bak"
-printf 'x' | dd of="$PG0" bs=1 seek=4096 conv=notrunc status=none
+printf 'x' | dd of="$PG0" bs=1 seek=4096 conv=notrunc 2>/dev/null
 expect_refusal corrupted-pg0 "$PORT" "integrity verification"
 mv "$PG0.bak" "$PG0"
 
@@ -54,7 +54,7 @@ expect_refusal unrecorded-instance "$PORT" "refusing to adopt"
 cp "$WORK/record.good" "$RECORD"
 
 # 5. Incompatible PostgreSQL version recorded for the instance.
-sed -i 's/"version": *"[^"]*"/"version": "17.0.0"/' "$RECORD"
+sed -i.bak 's/"version": *"[^"]*"/"version": "17.0.0"/' "$RECORD" && rm -f "$RECORD.bak"
 expect_refusal incompatible-version "$PORT" "this build expects 17.0.0"
 cp "$WORK/record.good" "$RECORD"
 
