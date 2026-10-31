@@ -48,6 +48,23 @@ else
   FAILED+=("browser")
 fi
 
+# Deterministic agent workflow (no cost): the fixtures drive a real run, and the sandbox refusal is on the trace.
+index=$((index + 1))
+port=$((BASE + index * 10))
+if [ "${COGNATE_QUALIFY_BROWSER:-1}" = 0 ]; then
+  echo "SKIP  workflow (COGNATE_QUALIFY_BROWSER=0)"
+elif (
+  source "$HERE/qualify-lib.sh"
+  install_archive "$ARCHIVE" "$ROOT/workflow"
+  cd "$(dirname "$HERE")" && bun scripts/qualify-workflow.ts "$BIN" "$port" "$ROOT/workflow/run"
+) > "$ROOT/workflow.log" 2>&1; then
+  echo "PASS  workflow"
+else
+  echo "FAIL  workflow (log: $ROOT/workflow.log)"
+  tail -12 "$ROOT/workflow.log"
+  FAILED+=("workflow")
+fi
+
 if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "qualification FAILED: ${FAILED[*]}"
   exit 1
