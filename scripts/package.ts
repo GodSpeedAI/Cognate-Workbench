@@ -87,9 +87,22 @@ if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile 
 // 5. pg0, fetched from the pinned release and verified before it is staged.
 const pg0Digest = PG0_DIGESTS[platform.pg0];
 if (!pg0Digest) throw new Error(`package: no pinned pg0 digest for ${platform.pg0}`);
-const pg0Response = await fetch(pg0Url(platform.pg0));
-if (!pg0Response.ok) throw new Error(`package: pg0 download failed: ${pg0Response.status}`);
-const pg0Bytes = Buffer.from(await pg0Response.arrayBuffer());
+// Retried on network errors and server errors: a runner's DNS or connection can time out once, and the digest below
+// still decides whether the bytes are accepted.
+async function fetchPg0(url: string): Promise<Buffer> {
+  for (let attempt = 1; ; attempt++) {
+    let response: Response | undefined;
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      if (attempt === 4) throw error;
+    }
+    if (response?.ok) return Buffer.from(await response.arrayBuffer());
+    if (response && (response.status < 500 || attempt === 4)) throw new Error(`package: pg0 download failed: ${response.status}`);
+    await new Promise((resolve) => setTimeout(resolve, 5000 * attempt));
+  }
+}
+const pg0Bytes = await fetchPg0(pg0Url(platform.pg0));
 const pg0Actual = createHash("sha256").update(pg0Bytes).digest("hex");
 if (pg0Actual !== pg0Digest) throw new Error(`package: pg0 sha256 mismatch for ${platform.pg0}: got ${pg0Actual}`);
 await writeFile(join(share, "bin", pg0Name), pg0Bytes);
