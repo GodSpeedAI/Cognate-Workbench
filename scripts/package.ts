@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { PG0_DIGESTS, PG0_VERSION, POSTGRES_VERSION, pg0Url } from "./pg0-pins.ts";
 import { BOOT_TOKEN_PLACEHOLDER, BROWSER_ENTRY_TEMPLATE, LOCAL_OPERATOR } from "../src/server.ts";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
+import { buildDeb, buildMacInstaller, buildWindowsInstaller } from "./installers.ts";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const [bunTarget, tag] = process.argv.slice(2);
@@ -128,4 +129,15 @@ const archiveBytes = await readFile(join(out, archive));
 const archiveDigest = createHash("sha256").update(archiveBytes).digest("hex");
 await writeFile(join(out, `${archive}.sha256`), `${archiveDigest}  ${archive}\n`);
 console.log(`package: ${archive} sha256=${archiveDigest} (${files.length} files, pg0 ${PG0_VERSION}, commit ${commit.slice(0, 12)})`);
+// 8. Platform installer(s) from the same staged folder: .deb, .pkg + .dmg, or the Windows per-user setup.
+const installerInput = { tag, version: pkg.version, commit, prefix, out, repo };
+const installers: string[] = [];
+if (tag.startsWith("linux")) installers.push(await buildDeb(installerInput, tag.endsWith("arm64") ? "arm64" : "amd64"));
+else if (tag.startsWith("darwin")) installers.push(...await buildMacInstaller(installerInput, tag.endsWith("arm64") ? "arm64" : "x64"));
+else if (tag === "windows-x64") installers.push(await buildWindowsInstaller(installerInput));
+for (const file of installers) {
+  const digest = createHash("sha256").update(await readFile(file)).digest("hex");
+  await writeFile(`${file}.sha256`, `${digest}  ${file.split(/[\\/]/).pop()}\n`);
+  console.log(`package: ${file.split(/[\\/]/).pop()} sha256=${digest}`);
+}
 if (!existsSync(exe)) throw new Error("package: executable missing after compile");
