@@ -2,9 +2,10 @@
 // See docs/explanation/why-single-bun-process.md for why this is a hand-composed
 // `createRuntime` rather than `createHarness`.
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { defaultHome, packaged, resourcePath } from "./resources.ts";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
@@ -301,7 +302,10 @@ function buildActionPolicy(): ActionPolicy {
 // bootstrap (a held font response cannot delay DOMContentLoaded — the browser journeys prove
 // this), and the CSP forbids inline event handlers — so the document only preconnects, and the
 // entry module below appends the stylesheet link dynamically (parser-async by construction).
-const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string) => `
+// A packaged build ships its desktop bundle prebuilt with this placeholder where the boot token goes,
+// so no release artifact contains a per-boot secret. The server substitutes the live token at boot.
+export const BOOT_TOKEN_PLACEHOLDER = "__COGNATE_BOOT_TOKEN__";
+export const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string) => `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@godspeedai/cognate-client";
@@ -779,21 +783,27 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     }));
   }
 
-  const appDir = fileURLToPath(new URL("..", import.meta.url));
-  const generatedDir = join(appDir, ".generated");
-  await mkdir(generatedDir, { recursive: true });
-  const entryPath = join(generatedDir, "entry.tsx");
-  await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token));
-  const build = await Bun.build({ entrypoints: [entryPath], target: "browser", format: "esm" });
-  if (!build.success) throw new Error(`server: failed to bundle the UI: ${build.logs.map((log) => String(log)).join("; ")}`);
-  const bundleJs = await build.outputs[0]!.text();
-  const cssPaths = stylesheetPaths();
-  const appCssPath = fileURLToPath(new URL("./ui/app.css", import.meta.url));
+  let bundleJs: string;
+  if (packaged) {
+    bundleJs = (await Bun.file(resourcePath("dist", "web", "app.js")).text())
+      .replaceAll(JSON.stringify(BOOT_TOKEN_PLACEHOLDER), JSON.stringify(operatorSession.token));
+  } else {
+    const generatedDir = resourcePath(".generated");
+    await mkdir(generatedDir, { recursive: true });
+    const entryPath = join(generatedDir, "entry.tsx");
+    await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token));
+    const build = await Bun.build({ entrypoints: [entryPath], target: "browser", format: "esm" });
+    if (!build.success) throw new Error(`server: failed to bundle the UI: ${build.logs.map((log) => String(log)).join("; ")}`);
+    bundleJs = await build.outputs[0]!.text();
+  }
+  // A packaged build serves the Astryx stylesheets from its share directory, copied there at build time.
+  const cssPaths = packaged ? [resourcePath("dist", "web", "astryx.css"), resourcePath("dist", "web", "theme.css")] : stylesheetPaths();
+  const appCssPath = resourcePath("src", "ui", "app.css");
   // The workbench cockpit's styles are layered after app.css: shared primitives first, then each
   // component's layout-only sheet (the server concatenates; components never import CSS).
   const WORKBENCH_CSS = ["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"];
   const cssParts: string[] = [];
-  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => fileURLToPath(new URL(`./ui/workbench/${n}.css`, import.meta.url))), fileURLToPath(new URL("./ui/experts/experts.css",import.meta.url))]) {
+  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css")]) {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");
@@ -896,17 +906,4 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       await executionWorlds.dispose();
     },
   };
-}
-
-if (import.meta.main) {
-  const port = Number(process.env.PORT ?? 3180);
-  const home = process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? join(dirname(fileURLToPath(new URL(".", import.meta.url))), "..", ".data");
-  const app = await startServer({ port, home });
-  console.log(`[cognate-workbench] listening on ${app.url} (home: ${home})`);
-  console.log(`[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is ${parseDevAuth(process.env.COGNATE_DEV_AUTH) ? "ARMED (test/dev only)" : "off"}`);
-  if (app.executionPosture === "contained") {
-    console.log(`[cognate-workbench] execution: contained — agent commands and writes run only in Linux-contained or explicitly connected remote workspaces; local workspaces are read-only to agents (${EXECUTION_POSTURE_ENV}=uncontained-local to opt out)`);
-  } else {
-    console.warn(`[cognate-workbench] execution: UNCONTAINED LOCAL — agents run commands and write files on this host as this user; path checks are not a sandbox (${EXECUTION_POSTURE_ENV}=uncontained-local)`);
-  }
 }

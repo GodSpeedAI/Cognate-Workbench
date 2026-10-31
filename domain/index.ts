@@ -7,11 +7,9 @@
 // `APP/.sea/interaction/interaction-model.sea` at startup via `loadSemanticProjection`. That file
 // remains the single source of truth for the IDM; this module is the one place that knows its path.
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { bindCapabilities, loadSemanticProjection, type CapabilityBinding, type SemanticProjection } from "@godspeedai/cognate-domainforge";
 import type { CapabilityContract, SemanticRef } from "@godspeedai/cognate-kernel-api";
-
-const INTERACTION_MODEL_URL = new URL("../.sea/interaction/interaction-model.sea", import.meta.url);
+import { resourcePath } from "../src/resources.ts";
 
 export interface Domain {
   readonly projection: SemanticProjection;
@@ -21,7 +19,7 @@ export interface Domain {
 
 /** Parse the IDM and fail fast on any error (spec: "fail fast on errors"). */
 export async function loadDomain(): Promise<Domain> {
-  const path = fileURLToPath(INTERACTION_MODEL_URL);
+  const path = resourcePath(".sea", "interaction", "interaction-model.sea");
   const source = await readFile(path, "utf8");
   const result = loadSemanticProjection(source, { uri: `domain/${path}` });
   if (!result.ok) {

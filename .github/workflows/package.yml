@@ -1,0 +1,215 @@
+name: package
+
+# Native distributions: one compiled Cognate Workbench per platform. Each platform builds its archive and native
+# installer, qualifies the archive (bundled pg0, durability, ownership, external PostgreSQL, fail-closed, upgrade,
+# browser), installs the native package, and smoke-tests the installed executable. Artifacts are uploaded; a formal
+# release is published only when `publish_release` is set after every platform qualifies.
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish a formal GitHub Release after every platform qualifies (leave off to test packaging only)"
+        type: boolean
+        default: false
+  push:
+    branches: [feat/standalone-packages]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package ${{ matrix.tag }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, target: bun-linux-x64, tag: linux-x64, binding: linux-x64-gnu }
+          - { runner: ubuntu-22.04-arm, target: bun-linux-arm64, tag: linux-arm64, binding: linux-arm64-gnu }
+          - { runner: macos-14, target: bun-darwin-arm64, tag: darwin-arm64, binding: darwin-arm64 }
+          - { runner: macos-15-intel, target: bun-darwin-x64, tag: darwin-x64, binding: darwin-x64 }
+          - { runner: windows-2022, target: bun-windows-x64, tag: windows-x64, binding: win32-x64-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Browser for the UI qualification
+        shell: bash
+        run: |
+          # One browser cache for this job: the qualification runs under a disposable HOME, so it must not rely on the default.
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright" >> "$GITHUB_ENV"
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/ms-playwright"
+          # The repository's own pinned Playwright (node_modules/.bin), so the browser revision matches playwright-core.
+          if [ "$RUNNER_OS" = Linux ]; then bun run playwright install --with-deps chromium; else bun run playwright install chromium; fi
+
+      - name: NSIS for the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files (x86)\NSIS'
+
+      # @godspeedai/domainforge 0.21.2 ships only the linux-x64 napi binding. Every other platform builds
+      # the pinned tag's napi cdylib natively with cargo (no Node or Python step), then installs it beside
+      # the JS loader under the name that loader expects.
+      - uses: dtolnay/rust-toolchain@1.99.0
+        if: matrix.binding != 'linux-x64-gnu'
+      - name: Build DomainForge ${{ matrix.binding }} binding
+        if: matrix.binding != 'linux-x64-gnu'
+        shell: bash
+        env:
+          BINDING: ${{ matrix.binding }}
+        run: |
+          set -euo pipefail
+          DF_VERSION="$(bun -e 'console.log(require("./node_modules/@godspeedai/domainforge/package.json").version)')"
+          git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/domainforge/domainforge-core/Cargo.toml" --features typescript,three_valued_logic --lib
+          LIB="$(find "$RUNNER_TEMP/domainforge/target/release" -maxdepth 1 \( -name 'domainforge_core.dll' -o -name 'libdomainforge_core.so' -o -name 'libdomainforge_core.dylib' \) | head -1)"
+          test -n "$LIB"
+          cp "$LIB" "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/domainforge-core.$BINDING.node"
+          bun -e 'console.log("domainforge", process.argv[1], process.argv[2], "sha256:", new Bun.CryptoHasher("sha256").update(require("fs").readFileSync(process.argv[3])).digest("hex"))' "$DF_VERSION" "$BINDING" "$LIB"
+
+      - name: Build package
+        run: bun scripts/package.ts ${{ matrix.target }} ${{ matrix.tag }}
+
+      - name: Verify the archive and its manifest (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$(ls dist-package/*.tar.gz)"
+          (cd dist-package && shasum -a 256 -c "$(basename "$ARCHIVE").sha256")
+          INSTALL="$RUNNER_TEMP/manifest-install"; mkdir -p "$INSTALL"
+          tar -xzf "$ARCHIVE" -C "$INSTALL"
+          PREFIX="$(ls -d "$INSTALL"/cognate-workbench-*)"
+          bun -e 'const fs=require("fs"),path=require("path"),c=require("crypto");const root=process.argv[1];const m=JSON.parse(fs.readFileSync(path.join(root,"share/cognate-workbench/MANIFEST.json"),"utf8"));for(const f of m.files){const h=c.createHash("sha256").update(fs.readFileSync(path.join(root,f.path))).digest("hex");if(h!==f.sha256){console.error("mismatch",f.path);process.exit(1)}}console.log("manifest ok:",m.files.length,"files")' "$PREFIX"
+
+      - name: Qualify the archive (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$(ls "$PWD"/dist-package/*.tar.gz)"
+          bash scripts/qualify-all.sh "$ARCHIVE" "$RUNNER_TEMP/qualify" 3500
+
+      - name: Show the failing qualification logs
+        if: failure() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          for log in "$RUNNER_TEMP"/qualify/*.log; do
+            echo "::group::$(basename "$log")"
+            grep -vE '^\s*$' "$log" | tail -60
+            echo "::endgroup::"
+          done
+
+      - name: Install and smoke test the native package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB="$(ls "$PWD"/dist-package/*.deb)"
+          ARCH="$(dpkg-deb -f "$DEB" Architecture)"; echo "package architecture: $ARCH"
+          sudo dpkg -i "$DEB"
+          test -x /usr/bin/cognate-workbench
+          HOME="$RUNNER_TEMP/deb-home" bash scripts/qualify-installed.sh /usr/bin/cognate-workbench 3590
+          sudo dpkg -r cognate-workbench
+          test ! -e /usr/bin/cognate-workbench
+
+      - name: Install and smoke test the native package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$(ls "$PWD"/dist-package/*.pkg)"
+          sudo installer -pkg "$PKG" -target /
+          test -x /usr/local/bin/cognate-workbench
+          HOME="$RUNNER_TEMP/pkg-home" bash scripts/qualify-installed.sh /usr/local/bin/cognate-workbench 3590
+          sudo rm -rf /usr/local/lib/cognate-workbench /usr/local/bin/cognate-workbench
+          test ! -e /usr/local/bin/cognate-workbench
+
+      - name: Install and smoke test the native package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Get-ChildItem dist-package -Filter *-setup.exe).FullName
+          Start-Process -FilePath $setup -ArgumentList '/S' -Wait
+          $root = Join-Path $env:LOCALAPPDATA 'Programs\CognateWorkbench'
+          $exe = Join-Path $root 'bin\cognate-workbench.exe'
+          if (-not (Test-Path $exe)) { throw "installed executable missing at $exe" }
+          $version = & $exe --version
+          Write-Output "installed: $version"
+          & $exe doctor
+          # The child inherits the environment at launch, so the port must be set before Start-Process.
+          $env:PORT = '3190'
+          $server = Start-Process -FilePath $exe -ArgumentList 'start' -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'server.err')
+          # Windows runners start PostgreSQL slowly, so wait on a wall-clock deadline, not a retry count.
+          $health = $null
+          $started = Get-Date
+          while (-not $health -and ((Get-Date) - $started).TotalSeconds -lt 900) {
+            try { $health = Invoke-RestMethod -TimeoutSec 5 http://127.0.0.1:3190/health } catch { Start-Sleep -Seconds 2 }
+          }
+          Write-Output ("health after {0:N0}s" -f ((Get-Date) - $started).TotalSeconds)
+          if (-not $health -or -not $health.ok) {
+            Get-Content (Join-Path $env:RUNNER_TEMP 'server.log') -Tail 40
+            Get-Content (Join-Path $env:RUNNER_TEMP 'server.err') -Tail 80
+            throw 'health check failed'
+          }
+          Write-Output "health ok: $($health.semantic.objects) semantic objects"
+          foreach ($path in '/', '/app.js', '/app.css', '/astryx.css', '/theme.css') {
+            $code = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:3190$path").StatusCode
+            Write-Output "$path $code"
+          }
+          Stop-Process -Id $server.Id -Force
+          $uninstall = Join-Path $root 'uninstall.exe'
+          Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait
+          if (Test-Path $exe) { throw 'uninstall left the executable behind' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognate-workbench-${{ matrix.tag }}
+          path: |
+            dist-package/*.tar.gz
+            dist-package/*.zip
+            dist-package/*.deb
+            dist-package/*.pkg
+            dist-package/*.dmg
+            dist-package/*-setup.exe
+            dist-package/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: publish release
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cognate-workbench-*
+          path: release
+          merge-multiple: true
+      - name: Checksums and release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum $(ls *.tar.gz *.zip *.deb *.pkg *.dmg *-setup.exe 2>/dev/null) > SHA256SUMS
+          cat SHA256SUMS
+          VERSION="$(ls cognate-workbench-*.tar.gz | head -1 | sed -E 's/cognate-workbench-([0-9.]+)-.*/\1/')"
+          TAG="v${VERSION}"
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Cognate Workbench $VERSION" \
+            --notes "Native packages built from commit $GITHUB_SHA by the package workflow run $GITHUB_RUN_ID. Each platform qualified its archive and installed its native package before this release was published. Verify downloads against SHA256SUMS. Installers are unsigned: macOS and Windows will ask for confirmation on first run." \
+            ./*.tar.gz ./*.zip ./*.deb ./*.pkg ./*.dmg ./*-setup.exe ./SHA256SUMS

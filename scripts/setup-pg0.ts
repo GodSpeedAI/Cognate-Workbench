@@ -1,18 +1,9 @@
 // Install the pinned pg0 binary (checksum-verified) into .tmp/pg0 for local PostgreSQL development.
-// pg0 releases publish bare binaries without signatures, so the commit pins the exact sha256 — same
-// trust pattern as the repo's RealityTrace pin (pinned version + recorded digest, verified every run).
+// Pins live in scripts/pg0-pins.ts, shared with the native packager.
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-
-const PG0_VERSION = "0.15.2";
-
-// tag -> { platform-arch-abi: sha256 of the released binary }
-const DIGESTS: Record<string, string> = {
-  "linux-x86_64-gnu": "06c4678ff7b461dba8ed1f95c5e202ead3b57b70f549a22c17a94985121c0bf5",
-  // Verified against the upstream v0.15.2 asset: ELF aarch64, max GLIBC_2.34 (Jetson Ubuntu 22.04 has 2.35).
-  "linux-aarch64-gnu": "08bf6f5e04bc456fac2f8e76bfec5705c55f0b079f11b56efa5b1f6869e20f76",
-};
+import { PG0_DIGESTS, PG0_VERSION, pg0Url } from "./pg0-pins.ts";
 
 function target(): string {
   const { platform, arch } = process;
@@ -22,7 +13,7 @@ function target(): string {
 }
 
 const key = target();
-const digest = DIGESTS[key];
+const digest = PG0_DIGESTS[key];
 if (!digest) throw new Error(`setup-pg0: no recorded sha256 for ${key} — verify the release binary and add its digest`);
 
 const binDir = ".tmp/pg0";
@@ -39,7 +30,7 @@ if (existsSync(binPath)) {
   unlinkSync(binPath);
 }
 
-const url = `https://github.com/vectorize-io/pg0/releases/download/v${PG0_VERSION}/pg0-${key}`;
+const url = pg0Url(key);
 console.log(`setup-pg0: downloading ${url}`);
 const response = await fetch(url);
 if (!response.ok) throw new Error(`setup-pg0: download failed: ${response.status} ${response.statusText}`);

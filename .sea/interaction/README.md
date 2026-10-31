@@ -33,6 +33,10 @@ precondition, and settlement) rather than a step folded silently into `J-A-first
 canonicalized as their own journeys and `J-A-first-use` composes them (see
 `canonical-journey-catalog.md`).
 
+Packaged installation adds `J-PKG-first-launch`, `J-PKG-durable-restart`, `J-PKG-interrupted-ownership`,
+`J-PKG-external-postgres`, `J-PKG-fail-closed`, `J-PKG-upgrade-uninstall`, and `J-PKG-doctor`.
+Their evidence is the installed-archive qualification, not `test/` (see the catalog).
+
 Experts & Teams add the proposed IDs `J-EXPERT-CREATE`, `J-EXPERT-SOLO`, `J-TEAM-CREATE`,
 `J-TEAM-ACTIVATE`, `J-TEAM-REPLACE-ORCHESTRATOR`, `J-TEAM-DELEGATE`, `J-TEAM-HANDOFF`,
 `J-TEAM-CONVERSE`, `J-TEAM-RECOVER`, `J-TEAM-REVIEW`, `J-EXPERT-MEMORY`, and

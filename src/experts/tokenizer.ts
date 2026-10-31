@@ -17,10 +17,19 @@ export const ENVELOPE_MARGIN_TOKENS = 256;
 
 const loaded = new Map<TokenizerEncoding, Promise<{ countTokens(text: string): number }>>();
 
+const ENCODING_LOADERS: Record<TokenizerEncoding, () => Promise<unknown>> = {
+  o200k_base: () => import("gpt-tokenizer/encoding/o200k_base.js"),
+  cl100k_base: () => import("gpt-tokenizer/encoding/cl100k_base.js"),
+  p50k_base: () => import("gpt-tokenizer/encoding/p50k_base.js"),
+  r50k_base: () => import("gpt-tokenizer/encoding/r50k_base.js"),
+};
+
 async function loadEncoding(encoding: TokenizerEncoding): Promise<{ countTokens(text: string): number }> {
   const existing = loaded.get(encoding);
   if (existing) return existing;
-  const pending = import(`gpt-tokenizer/encoding/${encoding}.js`)
+  // Literal specifiers: `bun build --compile` bundles only the imports it can see, so a template-string
+  // specifier would fail inside the packaged executable. Each encoding still loads lazily on first use.
+  const pending = ENCODING_LOADERS[encoding]()
     .then(module => ((module as { default?: { countTokens(text: string): number } }).default ?? module as unknown as { countTokens(text: string): number }));
   loaded.set(encoding, pending);
   return pending;

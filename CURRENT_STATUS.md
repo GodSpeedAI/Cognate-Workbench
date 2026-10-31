@@ -1,3 +1,43 @@
+# Current status — revision 36
+
+Standalone packages for Linux (x64, arm64), macOS (arm64, x64) and Windows (x64) are built and
+qualified in CI from one commit (`bdb079d`). Each package bundles the Workbench executable, its browser
+assets and the pinned, checksum-verified pg0 manager. The data home is per user; the bundled database is
+recorded per data home and stopped only by the process that started it. External PostgreSQL is set with
+`COGNATE_POSTGRES_URL`. Installers are unsigned.
+
+**Verified.** GitHub run 41168736030 (`package`, head `bdb079d`): linux-x64, linux-arm64, darwin-arm64,
+darwin-x64 and windows-x64 all succeeded. Each POSIX job ran the six journeys (durable restart,
+interrupted ownership, stale recovery, fail-closed refusals, external PostgreSQL, upgrade), the browser
+UI journey and the deterministic workflow, and each native package was installed, smoke-tested and removed.
+Windows ran install, doctor, start, health and uninstall. Also green on `bdb079d`: clean-install (runs
+41168740818, 41168735911) and verify (41168740630). Earlier, the full qualification passed on a
+Jetson (AGX Orin, Ubuntu 22.04.5, aarch64) against an archive of the same runtime source
+(sha256 `62cc73eb292c64c833bb0f213847d4a232a728862f1410535b7f78d6e0f46431`); the `.deb`
+(sha256 `1ddd9953d4f91e11d7ac2a2d39c7340762f1e6135adb11676c0786e049c60ff5`) was checked by extraction and
+run via `/usr/bin`, not installed system-wide.
+
+**Fixed in CI this revision.** The browser install now uses the repository's pinned Playwright and one
+shared browser cache; the qualification helpers read the data home where each platform keeps it (macOS
+Application Support); `head -n -1` replaced with a portable form; the Windows smoke test sets its port before
+launch; `hdiutil` retries on a busy resource; failing journeys name their line.
+
+**Not verified.** Installing the `.deb` system-wide on the Jetson (needs sudo, not available there). Real
+macOS and Windows machines: CI runners only. Signed or notarised installers (none). Upgrade across two
+different builds (the upgrade journey reinstalls the same build). Windows stopping the bundled database
+cleanly (the smoke test ends the process forcibly).
+
+**Known limits.** The pg0 password is passed as a command-line argument to `pg0 start` (pg0 has no
+secret-provisioning interface); pg0 writes it to its instance metadata, which is tightened to 0600. The SDK
+`postgresPg0` driver is bypassed in bundled mode because `pg0 start --name` cannot reuse a data directory or
+password, a framework gap to report separately. Bubblewrap is absent on the Jetson, so contained agent
+execution is refused there by design; the doctor reports it without failing.
+
+**Next.** Merge PR #22 into `main` with a merge commit; dispatch the `package` workflow on `main` with
+`publish_release=true` to create `v0.1.0`; verify the release assets and `SHA256SUMS`.
+
+---
+
 # Current status — revision 35
 
 Native-distribution foundation: GodSpeed pins moved to latest (Cognate SDK 0.8.0, domainforge-core 0.21.2;

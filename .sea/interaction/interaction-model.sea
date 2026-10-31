@@ -1480,3 +1480,98 @@ Instance j_checkout_lifecycle of "CanonicalJourney" {
     steps: "operator opens the checkout controls -> status is computed from the repository -> merge, remove or recreate validate the Task and checkout state -> the guarded Git operation runs through the execution world -> the outcome is recorded or the refusal is returned",
     variants: "a clean merged checkout may be removed together with its branch; a dirty checkout is never removed; an unmerged branch survives removal; a missing checkout is detected and recoverable; a conflicted merge leaves both checkouts unchanged"
 }
+
+// Packaged installation (standalone native distribution). Operator-facing journeys: a native package
+// installs, starts its bundled PostgreSQL (pg0) or an explicit external server, and keeps durable state
+// across restart, interruption, upgrade and uninstall. Evidence lives in scripts/qualify-*.sh and
+// CI; status is recorded in .sea/interaction/validation/ and CURRENT_STATUS.md, not in this model.
+Instance j_pkg_first_launch of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "cognate-workbench start, bundled pg0 initialise, pg0 integrity check, semantic model load",
+    evidence_class: "declared",
+    initiating_condition: "A native package is installed and no data home exists for it",
+    journey_id: "J-PKG-first-launch",
+    precondition: "Installed package with a verified bundled pg0 executable; no source checkout, no Bun, no PostgreSQL installed by the operator",
+    purpose: "Start the application on a fresh per-user data home with no manual database setup",
+    settlement: "The bundled instance is recorded as initialised and running, /health reports the canonical semantic model, and the browser UI renders",
+    steps: "run cognate-workbench start -> integrity check of bundled pg0 -> record new instance with a generated password -> pg0 start with the recorded data directory -> resolve endpoint from pg0 info -> boot runtime -> serve UI",
+    variants: "pg0 missing or altered fails before any database is touched; an unrelated pg0 instance with the same name is refused"
+}
+
+Instance j_pkg_durable_restart of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "clean shutdown, bundled pg0 stop, restart reconnect, durable projection read",
+    evidence_class: "declared",
+    initiating_condition: "A durable Workbench setting or record exists in the bundled database",
+    journey_id: "J-PKG-durable-restart",
+    precondition: "J-PKG-first-launch has settled for this data home",
+    purpose: "Prove durable Workbench state survives a normal stop and relaunch with a fresh boot session",
+    settlement: "After SIGTERM the bundled instance is stopped; after relaunch the same value is read, and the previous boot's session token is refused",
+    steps: "write settings.changeSendBehavior -> SIGTERM -> pg0 stopped -> relaunch -> reconnect to the same data directory -> read the value -> old token returns 401",
+    variants: "external PostgreSQL URL: the instance is never stopped by Workbench"
+}
+
+Instance j_pkg_interrupted_ownership of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "owner lock recovery, bundled pg0 reconnect, port-conflict refusal",
+    evidence_class: "declared",
+    initiating_condition: "The owning server process was killed while holding durable state",
+    journey_id: "J-PKG-interrupted-ownership",
+    precondition: "A durable write has been acknowledged before the kill",
+    purpose: "Recover ownership after abnormal termination without losing data or initialising a second database",
+    settlement: "The relaunch reuses the same postmaster PID and returns the pre-crash value; a second owner of the same data home is refused without touching the database",
+    steps: "SIGKILL owner -> relaunch -> stale lock taken over -> pg0 reused -> value read -> second owner refused -> clean SIGTERM stops the bundled instance",
+    variants: "stale postmaster.pid left by a crash of the database process as well: relaunch starts a new postmaster and keeps the data"
+}
+
+Instance j_pkg_external_postgres of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "external PostgreSQL URL selection, persistence through the store contract",
+    evidence_class: "declared",
+    initiating_condition: "The operator sets COGNATE_POSTGRES_URL to a separately managed server",
+    journey_id: "J-PKG-external-postgres",
+    precondition: "A separately managed PostgreSQL server is reachable at the configured URL",
+    purpose: "Persist Workbench state in an operator-owned server without the bundled database running",
+    settlement: "No bundled pg0 instance is started; state persists across restart; the external server is still running and unchanged after Workbench stops",
+    steps: "set COGNATE_POSTGRES_URL -> start -> verify no bundled instance -> write and read state -> stop -> external server still running -> restart and read state",
+    variants: "wrong credentials or unreachable server: the start fails and never falls back to the bundled instance or an in-memory store"
+}
+
+Instance j_pkg_fail_closed of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "integrity verification, stale-metadata refusal, ownership refusal, database startup error reporting",
+    evidence_class: "declared",
+    initiating_condition: "A misconfigured, corrupted, stale, conflicting or incompatible database state is present",
+    journey_id: "J-PKG-fail-closed",
+    precondition: "Installed package; the failure condition is created deliberately in a disposable home",
+    purpose: "Refuse to run against a database that cannot be proven to be this installation's, rather than create or adopt one silently",
+    settlement: "Each failure exits non-zero with a message that names the condition; no empty store is created and no other instance is modified",
+    steps: "missing pg0 -> corrupted pg0 -> recorded instance removed -> conflicting instance without record -> incompatible PostgreSQL version -> invalid external credentials -> unreachable external server",
+    variants: "every case must hold in both bundled and external modes"
+}
+
+Instance j_pkg_upgrade_uninstall of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "reinstall over an existing data home, uninstall of package binaries",
+    evidence_class: "declared",
+    initiating_condition: "A newer package is installed over, or in place of, an earlier one",
+    journey_id: "J-PKG-upgrade-uninstall",
+    precondition: "A data home with durable state exists from an earlier package",
+    purpose: "Replace application binaries without losing durable state, and remove them without touching data or unrelated PostgreSQL instances",
+    settlement: "After upgrade the earlier state reads back unchanged; after uninstall the data home and the bundled instance still exist",
+    steps: "write state -> stop -> replace the package -> relaunch -> read state -> remove the package -> data home and bundled instance remain",
+    variants: "a schema or engine change requires an explicit migration check before any write"
+}
+
+Instance j_pkg_doctor of "CanonicalJourney" {
+    actor: "Operator",
+    capabilities: "cognate-workbench doctor diagnostics, version identity, database health probe",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants to know what an installation is using and whether it is healthy",
+    journey_id: "J-PKG-doctor",
+    precondition: "Installed package, with or without a running database",
+    purpose: "Report selected database mode, executable identity, data location, health, posture and optional integrations without changing state",
+    settlement: "Diagnostics print every required field; exit status is non-zero when the executable identity, the semantic model or the database is not usable",
+    steps: "cognate-workbench doctor -> identity and integrity -> database mode and probe -> semantic model -> posture -> integrations",
+    variants: "a stopped bundled instance is reported as stopped, not started; credentials are never printed"
+}
