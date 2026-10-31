@@ -39,8 +39,12 @@ await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => unde
 await page.screenshot({ path: `${outDir}/workbench.png`, fullPage: true });
 
 // Navigation: dismiss the first-run notice, then open Settings from the sidebar.
+// The dismissal is a durable event; the dialog closes once its projection folds in, so wait for that.
 const welcome = page.getByRole("button", { name: "Continue" });
-if (await welcome.count()) await welcome.first().click();
+if (await welcome.count()) {
+  await welcome.first().click();
+  await page.locator(".modal-backdrop").first().waitFor({ state: "detached", timeout: 60_000 }).catch(() => undefined);
+}
 await page.getByText("Settings", { exact: true }).first().click();
 await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => undefined);
 const settingsVisible = (await page.innerText("body")).includes("Settings");
