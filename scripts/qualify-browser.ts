@@ -38,8 +38,17 @@ await page.waitForFunction(() => (document.querySelector("#root")?.children.leng
 await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => undefined);
 await page.screenshot({ path: `${outDir}/workbench.png`, fullPage: true });
 
+// Navigation: dismiss the first-run notice, then open Settings from the sidebar.
+const welcome = page.getByRole("button", { name: "Continue" });
+if (await welcome.count()) await welcome.first().click();
+await page.getByText("Settings", { exact: true }).first().click();
+await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => undefined);
+const settingsVisible = (await page.innerText("body")).includes("Settings");
+await page.screenshot({ path: `${outDir}/settings.png`, fullPage: true });
+
 const text = (await page.innerText("body")).trim();
 const result = {
+  settingsVisible,
   title: await page.title(),
   renderedTextLength: text.length,
   apiResponses: apiStatuses.length,
@@ -52,3 +61,4 @@ await browser.close();
 
 if (text.length === 0) throw new Error("the page rendered no text");
 if (appErrors.length > 0) throw new Error(`${appErrors.length} unexpected application error(s)`);
+if (!settingsVisible) throw new Error("the Settings view did not open");
