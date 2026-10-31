@@ -82,7 +82,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $install = Join-Path $env:RUNNER_TEMP 'install'
+          $archive = (Get-ChildItem dist-package -Filter *.zip).FullName
+          $install = Join-Path $env:RUNNER_TEMP 'diag-install'
+          New-Item -ItemType Directory -Force $install, (Join-Path $env:RUNNER_TEMP 'home') | Out-Null
+          Expand-Archive -Path $archive -DestinationPath $install
           $prefix = (Get-ChildItem $install -Directory -Filter 'cognate-workbench-*')[0].FullName
           $pg0 = Join-Path $prefix 'share\cognate-workbench\bin\pg0.exe'
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'home'
