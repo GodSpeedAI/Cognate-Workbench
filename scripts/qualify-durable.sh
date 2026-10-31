@@ -1,105 +1,65 @@
 #!/usr/bin/env bash
-# Durable-restart qualification for an installed Cognate Workbench archive.
+# First launch (J-PKG-first-launch) and durable restart (J-PKG-durable-restart) for an installed archive.
 #
 #   scripts/qualify-durable.sh <archive.tar.gz> <work-dir> [port]
 #
-# Installs the archive into <work-dir> with a disposable HOME, then: writes a real setting through the
-# app's Connect API, stops the server, starts it again, and checks the value survived. It also checks that
-# the previous boot's session token is refused after restart, and that a clean shutdown stops the bundled
-# database this data home owns.
+# With a fresh, disposable data home: the bundled pg0 is verified against the release manifest, initialises
+# itself, listens on loopback, and serves the canonical semantic model. A real setting is written through the
+# Connect API, the server is stopped cleanly (the bundled database must stop with it), relaunched, and the
+# value must still be there. The previous boot's browser session must be refused.
 set -euo pipefail
 
 ARCHIVE="${1:?usage: qualify-durable.sh <archive.tar.gz> <work-dir> [port]}"
-WORK="${2:?usage: qualify-durable.sh <archive.tar.gz> <work-dir> [port]}"
-PORT="${3:-3200}"
-BASE="http://127.0.0.1:$PORT"
+WORK_DIR="${2:?usage: qualify-durable.sh <archive.tar.gz> <work-dir> [port]}"
+PORT="${3:-3300}"
 
-rm -rf "$WORK"
-mkdir -p "$WORK/home" "$WORK/install"
-tar -xzf "$ARCHIVE" -C "$WORK/install"
-APP="$(ls -d "$WORK"/install/cognate-workbench-*)"
-BIN="$APP/bin/cognate-workbench"
-PG0="$APP/share/cognate-workbench/bin/pg0"
-export HOME="$WORK/home"
-PID_FILE="$WORK/server.pid"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=qualify-lib.sh
+source "$HERE/qualify-lib.sh"
 
-start_server() {
-  local log="$WORK/server-$1.log"
-  PORT="$PORT" "$BIN" > "$log" 2>&1 &
-  echo $! > "$PID_FILE"
-  for _ in $(seq 1 240); do
-    if curl -fsS "$BASE/health" >/dev/null 2>&1; then return 0; fi
-    sleep 1
-  done
-  echo "FAIL: server $1 did not become healthy"; tail -40 "$log"; exit 1
-}
+install_archive "$ARCHIVE" "$WORK_DIR"
+trap 'stop_pg0' EXIT
 
-stop_server() {
-  local pid; pid="$(cat "$PID_FILE")"
-  kill -TERM "$pid"
-  for _ in $(seq 1 60); do
-    if ! kill -0 "$pid" 2>/dev/null; then return 0; fi
-    sleep 1
-  done
-  echo "FAIL: server did not exit on SIGTERM"; kill -KILL "$pid"; exit 1
-}
+# A. First launch.
+MANIFEST="$APP/share/cognate-workbench/MANIFEST.json"
+EXPECTED_PG0="$(sed -n '/"pg0": {/,/}/p' "$MANIFEST" | sed -n 's/.*"sha256": *"\([0-9a-f]\{64\}\)".*/\1/p')"
+ACTUAL_PG0="$(sha256sum "$PG0" | cut -d' ' -f1)"
+[ "$ACTUAL_PG0" = "$EXPECTED_PG0" ] || { echo "FAIL: bundled pg0 digest $ACTUAL_PG0 does not match the manifest"; exit 1; }
+echo "first launch: bundled pg0 digest matches the manifest"
 
-# The served bundle carries this boot's browser session bearer as a `wbs1.` token; the variable that holds
-# it is minified, so the token format is matched instead of a name.
-boot_token() {
-  curl -fsS "$BASE/app.js" | grep -oE '"wbs1\.[^"]+"' | head -1 | tr -d '"'
-}
+start_server first "$PORT"
+HEALTH="$(curl -fsS "http://127.0.0.1:$PORT/health")"
+echo "$HEALTH" | grep -q '"ok":true' || { echo "FAIL: /health not ok: $HEALTH"; exit 1; }
+echo "$HEALTH" | grep -qE '"objects": *[1-9]' || { echo "FAIL: semantic model not loaded: $HEALTH"; exit 1; }
+echo "first launch: /health ok, semantic model loaded"
 
-# POST a Connect JSON call; prints the body, then the status on its own line.
-rpc() {
-  local token="$1" method="$2" body="$3"
-  curl -s -w '\n%{http_code}' -X POST -H 'content-type: application/json' \
-    -H "authorization: Bearer $token" "$BASE/cognate.v1.RuntimeService/$method" -d "$body"
-}
+NAME="$(db_name)"
+[ -n "$NAME" ] || { echo "FAIL: no database record after first launch"; exit 1; }
+PG0_PORT="$("$PG0" info --name "$NAME" -o json | sed -n 's/.*"port": *\([0-9]*\).*/\1/p')"
+(exec 3<>"/dev/tcp/127.0.0.1/$PG0_PORT") 2>/dev/null || { echo "FAIL: PostgreSQL is not listening on 127.0.0.1:$PG0_PORT"; exit 1; }
+echo "first launch: PostgreSQL \"$NAME\" listening on 127.0.0.1:$PG0_PORT"
 
-send_behavior() {
-  local token="$1"
-  rpc "$token" ReadProjection '{"name":"settings"}' | head -n -1 | grep -oE '"sendBehavior" *: *"[a-z]+"' | head -1 | sed -E 's/.*: *"([a-z]+)"/\1/' || true
-}
+# B. Durable restart.
+TOKEN_FIRST="$(boot_token "$PORT")"
+[ -n "$TOKEN_FIRST" ] || { echo "FAIL: no boot token"; exit 1; }
+WRITE="$(rpc "$PORT" "$TOKEN_FIRST" Invoke '{"capability":"settings.changeSendBehavior","input":{"sendBehavior":"steer"}}' | tail -n 1)"
+[ "$WRITE" = 200 ] || { echo "FAIL: write returned $WRITE"; exit 1; }
+[ "$(await_setting "$PORT" "$TOKEN_FIRST" steer)" = steer ] || { echo "FAIL: write not visible before the restart"; exit 1; }
+echo "restart: wrote sendBehavior=steer"
 
-# 1. First boot: write a setting, read it back.
-start_server first
-TOKEN_ONE="$(boot_token)"
-[ -n "$TOKEN_ONE" ] || { echo "FAIL: could not read the boot session token"; exit 1; }
-BEFORE="$(send_behavior "$TOKEN_ONE")"
-WRITE_STATUS="$(rpc "$TOKEN_ONE" Invoke '{"capability":"settings.changeSendBehavior","input":{"sendBehavior":"steer"}}' | tail -n 1)"
-echo "first boot: before=${BEFORE:-<unset>} write_status=$WRITE_STATUS"
-[ "$WRITE_STATUS" = 200 ] || { echo "FAIL: write returned $WRITE_STATUS"; exit 1; }
-# The write is accepted before its projection folds it in, so poll the read for a bounded time.
-await_value() {
-  local token="$1" expected="$2" value=""
-  for _ in $(seq 1 30); do
-    value="$(send_behavior "$token")"
-    if [ "$value" = "$expected" ]; then echo "$value"; return 0; fi
-    sleep 1
-  done
-  echo "$value"; return 1
-}
-AFTER_WRITE="$(await_value "$TOKEN_ONE" steer || true)"
-echo "first boot: after write=$AFTER_WRITE"
-[ "$AFTER_WRITE" = steer ] || { echo "FAIL: write not visible in the same boot"; stop_server; exit 1; }
+stop_server first
+[ -z "$(pg0_pid "$NAME")" ] || { echo "FAIL: bundled database still running after a clean shutdown"; exit 1; }
+echo "restart: clean shutdown stopped the bundled database"
 
-# 2. Normal shutdown. The server stops, and it stops the bundled database because this data home owns it.
-stop_server
-if "$PG0" info --name cognate-dev 2>/dev/null | grep -q "is running"; then
-  echo "FAIL: bundled database still running after a clean shutdown"; exit 1
-fi
-echo "server stopped; bundled database stopped"
+start_server second "$PORT"
+[ "$(pg0_pid "$NAME")" != "" ] || { echo "FAIL: bundled database not running after relaunch"; exit 1; }
+TOKEN_SECOND="$(boot_token "$PORT")"
+VALUE="$(await_setting "$PORT" "$TOKEN_SECOND" steer || true)"
+[ "$VALUE" = steer ] || { echo "FAIL: durable value lost across restart (got '${VALUE:-<unset>}')"; exit 1; }
+OLD="$(rpc "$PORT" "$TOKEN_FIRST" ReadProjection '{"name":"settings"}' | tail -n 1)"
+[ "$OLD" = 401 ] || { echo "FAIL: previous boot's session still accepted ($OLD)"; exit 1; }
+echo "restart: value survived; previous boot's session refused (401)"
 
-# 3. Relaunch with the same home: the value must survive, and the old session must not.
-start_server second
-TOKEN_TWO="$(boot_token)"
-AFTER_RESTART="$(await_value "$TOKEN_TWO" steer || true)"
-echo "second boot: after restart=$AFTER_RESTART"
-[ "$AFTER_RESTART" = steer ] || { echo "FAIL: setting lost across restart"; stop_server; exit 1; }
-OLD_STATUS="$(rpc "$TOKEN_ONE" ReadProjection '{"name":"settings"}' | tail -n 1)"
-echo "second boot: previous-boot token status=$OLD_STATUS"
-[ "$OLD_STATUS" = 401 ] || { echo "FAIL: previous boot's session still accepted ($OLD_STATUS)"; exit 1; }
-
-stop_server
-echo "PASS: durable setting survived a normal restart; previous session refused"
+stop_server second
+[ -z "$(pg0_pid "$NAME")" ] || { echo "FAIL: bundled database still running after second clean shutdown"; exit 1; }
+echo "PASS: first launch and durable restart on the installed package (J-PKG-first-launch, J-PKG-durable-restart)"

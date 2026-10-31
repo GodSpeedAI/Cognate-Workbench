@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Interrupted-ownership qualification for an installed Cognate Workbench archive.
+# Interrupted ownership (J-PKG-interrupted-ownership) for an installed Cognate Workbench archive.
 #
 #   scripts/qualify-interrupted.sh <archive.tar.gz> <work-dir> [port]
 #
-# The owner process is killed with SIGKILL while it holds durable state. The bundled pg0 instance
-# is left running (it outlives the server by design). The test then checks that a relaunch:
-#   1. reconnects to the same pg0 instance (same postmaster PID: no re-initialisation, no second start),
-#   2. returns the value written before the crash, and refuses the crashed boot's session,
-#   3. refuses a second owner on the same port without touching the database,
-#   4. shuts down cleanly on SIGTERM.
+# The owner process is killed with SIGKILL while it holds durable state. The bundled pg0 instance is left
+# running (it outlives the server by design). The relaunch must:
+#   1. reuse the same database process (same postmaster PID: no re-initialisation, no second start),
+#   2. return the value written before the crash, and refuse the crashed boot's session,
+#   3. refuse a second live owner of the same data home (lock), and a second owner on an occupied port
+#      (EADDRINUSE) without disturbing either database,
+#   4. shut down cleanly on SIGTERM, stopping the bundled database it owns.
 set -euo pipefail
 
 ARCHIVE="${1:?usage: qualify-interrupted.sh <archive.tar.gz> <work-dir> [port]}"
 WORK_DIR="${2:?usage: qualify-interrupted.sh <archive.tar.gz> <work-dir> [port]}"
 PORT="${3:-3300}"
-PORT_TWO="$((PORT + 1))"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=qualify-lib.sh
 source "$HERE/qualify-lib.sh"
 
 install_archive "$ARCHIVE" "$WORK_DIR"
-trap 'stop_pg0 cognate-dev' EXIT
+trap 'stop_pg0' EXIT
 
 # 1. Owner boot: write durable state, record the database owner.
 start_server owner "$PORT"
@@ -30,37 +30,43 @@ TOKEN_CRASHED="$(boot_token "$PORT")"
 WRITE="$(rpc "$PORT" "$TOKEN_CRASHED" Invoke '{"capability":"settings.changeSendBehavior","input":{"sendBehavior":"steer"}}' | tail -n 1)"
 [ "$WRITE" = 200 ] || { echo "FAIL: write returned $WRITE"; exit 1; }
 [ "$(await_setting "$PORT" "$TOKEN_CRASHED" steer)" = steer ] || { echo "FAIL: write not visible before the crash"; exit 1; }
-PG0_OWNER="$(pg0_pid cognate-dev)"
-[ -n "$PG0_OWNER" ] || { echo "FAIL: no running pg0 instance"; exit 1; }
-echo "owner: wrote steer; pg0 postmaster pid=$PG0_OWNER"
+NAME="$(db_name)"
+PG0_OWNER="$(pg0_pid "$NAME")"
+[ -n "$PG0_OWNER" ] || { echo "FAIL: no running bundled instance"; exit 1; }
+echo "owner: wrote steer; database \"$NAME\" postmaster pid=$PG0_OWNER"
 
 # 2. Abnormal termination of the owner process.
 kill_server owner
-echo "owner: killed with SIGKILL"
+echo "owner: killed with SIGKILL (its lock is left behind)"
 
-# 3. Relaunch: must reconnect, not re-initialise.
+# 3. Relaunch: must take over the lock, reconnect, and not re-initialise.
 start_server recovered "$PORT"
-PG0_RECOVERED="$(pg0_pid cognate-dev)"
+PG0_RECOVERED="$(pg0_pid "$NAME")"
 [ "$PG0_RECOVERED" = "$PG0_OWNER" ] || { echo "FAIL: relaunch changed the postmaster ($PG0_OWNER -> $PG0_RECOVERED)"; exit 1; }
 TOKEN_RECOVERED="$(boot_token "$PORT")"
 VALUE="$(await_setting "$PORT" "$TOKEN_RECOVERED" steer || true)"
-echo "recovered: pg0 pid=$PG0_RECOVERED value=${VALUE:-<unset>}"
+echo "recovered: database pid=$PG0_RECOVERED value=${VALUE:-<unset>}"
 [ "$VALUE" = steer ] || { echo "FAIL: durable value lost across the crash"; exit 1; }
 OLD="$(rpc "$PORT" "$TOKEN_CRASHED" ReadProjection '{"name":"settings"}' | tail -n 1)"
 [ "$OLD" = 401 ] || { echo "FAIL: crashed boot's session still accepted ($OLD)"; exit 1; }
 
-# 4. A second owner on the same port must refuse to start and must leave the database alone.
-PORT="$PORT" "$BIN" > "$WORK/server-conflict.log" 2>&1 < /dev/null &
-CONFLICT_PID=$!
-set +e; wait "$CONFLICT_PID"; CONFLICT_EXIT=$?; set -e
-[ "$CONFLICT_EXIT" -ne 0 ] || { echo "FAIL: a second owner started on an occupied port"; exit 1; }
-grep -q 'EADDRINUSE' "$WORK/server-conflict.log" || { echo "FAIL: conflict was not reported as a port conflict"; tail -20 "$WORK/server-conflict.log"; exit 1; }
-[ "$(pg0_pid cognate-dev)" = "$PG0_OWNER" ] || { echo "FAIL: the conflicting launch disturbed the database"; exit 1; }
-[ "$(await_setting "$PORT" "$TOKEN_RECOVERED" steer)" = steer ] || { echo "FAIL: recovered owner lost state after the conflict"; exit 1; }
-echo "conflict: second owner refused (exit $CONFLICT_EXIT, EADDRINUSE); recovered owner intact"
+# 4a. A second live owner of the same data home must be refused by the lock, before any database work.
+expect_refusal same-home-second-owner "$((PORT + 1))" "is using data home"
+[ "$(pg0_pid "$NAME")" = "$PG0_OWNER" ] || { echo "FAIL: the refused owner disturbed the database"; exit 1; }
 
-# 5. The recovered owner shuts down cleanly.
+# 4b. A second owner with its own home on the occupied port must fail to listen and leave this database alone.
+OTHER_HOME="$WORK/other-home"
+mkdir -p "$OTHER_HOME"
+export COGNATE_WORKBENCH_HOME="$OTHER_HOME"
+expect_refusal occupied-port-second-owner "$PORT" "EADDRINUSE"
+unset COGNATE_WORKBENCH_HOME
+OTHER_NAME="$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$OTHER_HOME/database/bundled.json" | head -1)"
+stop_pg0 "$OTHER_NAME"
+[ "$(pg0_pid "$NAME")" = "$PG0_OWNER" ] || { echo "FAIL: the port conflict disturbed the database"; exit 1; }
+[ "$(await_setting "$PORT" "$TOKEN_RECOVERED" steer)" = steer ] || { echo "FAIL: recovered owner lost state after the conflicts"; exit 1; }
+echo "conflicts: second owners refused; recovered owner and its database intact"
+
+# 5. The recovered owner shuts down cleanly and stops the database it owns.
 stop_server recovered
-[ -z "$(pg0_pid cognate-dev)" ] || { echo "FAIL: bundled database still running after a clean shutdown"; exit 1; }
-echo "recovered: clean SIGTERM shutdown; bundled database stopped"
-echo "PASS: interrupted owner recovered without data loss, duplicate initialisation, or a second owner"
+[ -z "$(pg0_pid "$NAME")" ] || { echo "FAIL: bundled database still running after a clean shutdown"; exit 1; }
+echo "PASS: interrupted owner recovered without data loss, duplicate initialisation, or a second owner (J-PKG-interrupted-ownership)"

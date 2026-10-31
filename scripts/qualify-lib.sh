@@ -1,6 +1,6 @@
 # Shared helpers for the installed-archive qualification scripts. Source this file; do not run it.
 #
-#   install_archive <archive.tar.gz> <work-dir>   fresh install + disposable HOME
+#   install_archive <archive.tar.gz> <work-dir>   fresh install + disposable HOME and XDG data home
 #   start_server <label> <port>                   launch, wait for /health, record PID in $WORK/<label>.pid
 #   stop_server <label>                           SIGTERM, wait for exit (fails if it does not exit)
 #   kill_server <label>                           SIGKILL (abnormal termination), wait for exit
@@ -8,27 +8,31 @@
 #   rpc <port> <token> <method> <json>            Connect JSON call; prints body then HTTP status
 #   setting <port> <token>                        the current sendBehavior value (empty if unset)
 #   await_setting <port> <token> <expected>       poll until the projection shows the expected value
-#   pg0_pid <name>                                PID of a running bundled pg0 instance (empty if none)
-#   stop_pg0 <name>                               stop the bundled pg0 instance and wait for its postmaster
+#   db_name                                       the bundled pg0 instance this data home recorded (empty if none)
+#   pg0_pid [name]                                PID of a running bundled instance (empty if none)
+#   stop_pg0 [name]                               stop the bundled instance this home recorded (no-op if none)
+#   expect_refusal <label> <port> <grep-pattern>  run the server to exit; it must fail with the pattern in its log
 set -euo pipefail
 
 install_archive() {
   local archive="$1" work="$2"
   rm -rf "$work"
-  mkdir -p "$work/home" "$work/install"
+  mkdir -p "$work/home/.local/share" "$work/install"
   tar -xzf "$archive" -C "$work/install"
   WORK="$work"
   APP="$(ls -d "$work"/install/cognate-workbench-*)"
   BIN="$APP/bin/cognate-workbench"
   PG0="$APP/share/cognate-workbench/bin/pg0"
   export HOME="$work/home"
+  export XDG_DATA_HOME="$work/home/.local/share"
+  DATA_HOME="$XDG_DATA_HOME/cognate-workbench"
 }
 
 pid_of() { cat "$WORK/$1.pid"; }
 
 start_server() {
   local label="$1" port="$2"
-  PORT="$port" "$BIN" > "$WORK/server-$label.log" 2>&1 < /dev/null &
+  PORT="$port" "$BIN" start > "$WORK/server-$label.log" 2>&1 < /dev/null &
   echo $! > "$WORK/$label.pid"
   for _ in $(seq 1 240); do
     if curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1; then return 0; fi
@@ -59,6 +63,15 @@ kill_server() {
   wait_exit "$pid" || { echo "FAIL: server $1 survived SIGKILL"; return 1; }
 }
 
+# Runs the server with the given environment and expects it to exit non-zero with the pattern in its output.
+expect_refusal() {
+  local label="$1" port="$2" pattern="$3" code=0
+  PORT="$port" "$BIN" start > "$WORK/server-$label.log" 2>&1 < /dev/null || code=$?
+  if [ "$code" -eq 0 ]; then echo "FAIL: $label started; it must be refused"; tail -20 "$WORK/server-$label.log"; return 1; fi
+  if ! grep -q -- "$pattern" "$WORK/server-$label.log"; then echo "FAIL: $label refused, but not with '$pattern'"; tail -20 "$WORK/server-$label.log"; return 1; fi
+  echo "refused: $label (exit $code): $(grep -m1 -- "$pattern" "$WORK/server-$label.log" | cut -c1-200)"
+}
+
 boot_token() {
   curl -fsS "http://127.0.0.1:$1/app.js" | grep -oE '"wbs1\.[^"]+"' | head -1 | tr -d '"'
 }
@@ -84,10 +97,18 @@ await_setting() {
   echo "$value"; return 1
 }
 
+db_name() {
+  sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$DATA_HOME/database/bundled.json" 2>/dev/null | head -1
+}
+
 pg0_pid() {
-  "$PG0" info --name "$1" 2>/dev/null | awk '/PID:/ {print $2; exit}' || true
+  local name="${1:-$(db_name)}"
+  [ -n "$name" ] || return 0
+  "$PG0" info --name "$name" 2>/dev/null | awk '/PID:/ {print $2; exit}' || true
 }
 
 stop_pg0() {
-  HOME="$WORK/home" "$PG0" stop --name "$1" >/dev/null 2>&1 || true
+  local name="${1:-$(db_name)}"
+  [ -n "$name" ] || return 0
+  "$PG0" stop --name "$name" >/dev/null 2>&1 || true
 }
