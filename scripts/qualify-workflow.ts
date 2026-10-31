@@ -35,19 +35,19 @@ function fail(message: string): never {
 }
 
 // 1. The deterministic model server, exactly as the journey tests run it.
-const llmock = Bun.spawn([join(repo, "node_modules/.bin/llmock"), "-p", "0", "-f", join(repo, "fixtures/aimock/fixtures.json")], { stdout: "pipe", stderr: "pipe" });
-let mockBuffer = "";
-const mockPort = await (async () => {
-  const reader = llmock.stdout.getReader();
-  const decoder = new TextDecoder();
-  for (let i = 0; i < 200; i++) {
-    const chunk = await Promise.race([reader.read(), new Promise<null>((r) => setTimeout(() => r(null), 500))]);
-    if (chunk && !chunk.done) mockBuffer += decoder.decode(chunk.value);
-    const match = /aimock server listening on http:\/\/127\.0\.0\.1:(\d+)/.exec(mockBuffer);
-    if (match) return Number(match[1]);
-  }
-  fail(`llmock did not report a port (output: ${mockBuffer.trim()})`);
-})();
+const mockLog = join(work, "llmock.log");
+const llmock = Bun.spawn([join(repo, "node_modules/.bin/llmock"), "-p", "0", "-f", join(repo, "fixtures/aimock/fixtures.json")], {
+  stdout: Bun.file(mockLog),
+  stderr: Bun.file(join(work, "llmock.err")),
+});
+// llmock reports its port on stdout once it is listening; poll the log file rather than a pipe.
+let mockPort = 0;
+for (let i = 0; i < 120 && !mockPort; i++) {
+  const match = /aimock server listening on http:\/\/127\.0\.0\.1:(\d+)/.exec(await readFile(mockLog, "utf8").catch(() => ""));
+  if (match) mockPort = Number(match[1]);
+  else await Bun.sleep(500);
+}
+if (!mockPort) fail(`llmock did not report a port (see ${mockLog})`);
 console.log(`model: deterministic llmock on 127.0.0.1:${mockPort}`);
 
 // 2. The installed executable, with a disposable data home.
