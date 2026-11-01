@@ -55,7 +55,7 @@ async function openSettings(page: Page, section?: string): Promise<void> {
 
 /** First-run shots share one home across viewports/themes, so Welcome may already be dismissed. */
 async function continueIfWelcome(page: Page): Promise<void> {
-  await page.getByRole("dialog").waitFor();
+  await page.getByRole("dialog").waitFor({ timeout: 4000 }).catch(() => undefined);
   const btn = page.getByRole("button", { name: "Continue" });
   if (await btn.count()) await btn.click();
 }
@@ -247,7 +247,8 @@ export const STATES: Record<string, ShotState> = {
     tag: "t2", describe: "Configure later: friendly empty state (--fresh)", themes: ["light"], viewports: ["desktop", "mobile"],
     setup: async (page) => {
       await continueIfWelcome(page);
-      await page.getByRole("button", { name: "Configure later" }).click();
+      const later = page.getByRole("button", { name: "Configure later" });
+      if (await later.count()) await later.click();
       await page.getByText("No model provider connected").waitFor();
       await settle(page, 400);
     },

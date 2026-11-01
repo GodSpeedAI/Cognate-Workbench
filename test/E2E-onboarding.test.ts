@@ -13,7 +13,7 @@ const shot = async (page: Page, name: string) => {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) });
 };
 
-describe("E2E first-run onboarding", () => {
+describe("J-A-first-use E2E first-run onboarding", () => {
   test("Welcome -> provider form -> folder -> working conversation; reload shows no onboarding", async () => {
     const mock = await bootAimock();
     try {
@@ -103,6 +103,10 @@ describe("E2E first-run onboarding", () => {
       try {
         const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
         await page.goto(app.url);
+        await page.getByRole("button", { name: "Continue" }).click();
+        // Back returns to Welcome without losing the flow.
+        await page.getByRole("button", { name: "← Back" }).click();
+        await page.getByRole("heading", { name: "Welcome to Cognate Console" }).waitFor();
         await page.getByRole("button", { name: "Continue" }).click();
         await page.getByRole("button", { name: "Configure later" }).click();
         await page.getByRole("dialog").waitFor({ state: "detached" });
