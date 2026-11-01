@@ -152,8 +152,9 @@ export function FilesTab({ invoke, workspaceId, workspaceName }: { readonly invo
             </div>
           ))}
         </div>
-        {!cur ? (
-          <>
+        <div className={cur ? "ft-body ft-split" : "ft-body"}>
+        {(
+          <div className="ft-tree-pane">
             <div className="ft-bar">
               <input className="ft-filter" type="search" placeholder="Filter loaded files" aria-label="Filter files" value={filter} onChange={(e) => { setFilter(e.target.value); setActive(0); }} />
               <button type="button" className="icon-btn" aria-label="Refresh files" title="Refresh" onClick={refresh}>↻</button>
@@ -195,8 +196,9 @@ export function FilesTab({ invoke, workspaceId, workspaceName }: { readonly invo
                 {root.truncated && <div className="ft-hint">Listing truncated</div>}
               </div>
             )}
-          </>
-        ) : (
+          </div>
+        )}
+        {cur && (
           <div className="ft-viewer">
             <div className="ft-vbar">
               <span className="ft-lang">{cur.data?.language ?? "text"}</span>
@@ -218,6 +220,7 @@ export function FilesTab({ invoke, workspaceId, workspaceName }: { readonly invo
             )}
           </div>
         )}
+        </div>
       </div>
     );
   }

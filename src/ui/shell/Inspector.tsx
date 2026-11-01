@@ -24,7 +24,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { XIcon } from "../icons.tsx";
+import { PanelRightIcon } from "../icons.tsx";
 import { clampWidth, ResizeHandle } from "./ResizeHandle.tsx";
 
 export const INSPECTOR_DEFAULT_WIDTH = 340;
@@ -332,7 +332,7 @@ export function Inspector({ sidebarWidth }: { readonly sidebarWidth: number }) {
             ))}
           </div>
           <button type="button" className="icon-btn inspector-close" aria-label="Hide inspector" title="Hide inspector" onClick={closeInspector}>
-            <XIcon />
+            <PanelRightIcon />
           </button>
         </div>
         <div
