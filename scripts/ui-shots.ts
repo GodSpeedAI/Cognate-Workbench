@@ -118,6 +118,25 @@ async function ensureInspector(page: Page, tab: string): Promise<void> {
   await settle(page, 300);
 }
 
+/** D-4 folder autocomplete: browse a seeded user home (projects/, Documents/, work/alpha ...). The app runs
+ *  in this process and the suggest capability reads $HOME per call, so pointing HOME at the seeded
+ *  folder for the duration of the capture is enough. */
+async function seedBrowseHome(): Promise<string> {
+  const base = await mkdtemp(join(tmpdir(), "ui-shots-home-"));
+  for (const dir of ["projects/cognate-workbench", "projects/prototype-lab", "Documents/taxes", "work/alpha", "work/beta", "Downloads"]) await mkdir(join(base, dir), { recursive: true });
+  process.env.HOME = base;
+  return base;
+}
+
+async function openAddWorkspaceInput(page: Page, ctx: ShotContext) {
+  if (ctx.viewport === "mobile") await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await page.getByRole("button", { name: "Add workspace" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add workspace" });
+  await dialog.waitFor();
+  const input = dialog.getByRole("combobox").first();
+  return { dialog, input };
+}
+
 export const STATES: Record<string, ShotState> = {
   shell: { tag: "t1a", describe: "Main shell, workspace with sessions", viewports: ["desktop", "mobile"], setup: async (page) => { await page.locator(".session-row-wrap").first().waitFor().catch(() => undefined); await settle(page); } },
   "settings-general": { tag: "t1a", describe: "Settings > General", viewports: ["desktop", "mobile"], setup: (page) => openSettings(page, "General") },
@@ -151,6 +170,26 @@ export const STATES: Record<string, ShotState> = {
       await page.getByRole("dialog", { name: "Add workspace" }).waitFor();
       await settle(page);
     },
+  },
+  "dir-suggest-empty": {
+    tag: "d4", describe: "Add workspace: empty field focused (home folders offered)", themes: ["light"],
+    setup: async (page, ctx) => { await seedBrowseHome(); const { input } = await openAddWorkspaceInput(page, ctx); await input.focus(); await settle(page, 800); },
+  },
+  "dir-suggest-fragment": {
+    tag: "d4", describe: "Add workspace: partial fragment 'pro' matches projects/", themes: ["light"],
+    setup: async (page, ctx) => { await seedBrowseHome(); const { input } = await openAddWorkspaceInput(page, ctx); await input.pressSequentially("pro", { delay: 20 }); await settle(page, 800); },
+  },
+  "dir-suggest-tilde": {
+    tag: "d4", describe: "Add workspace: '~/' lists the home folders", themes: ["light"],
+    setup: async (page, ctx) => { await seedBrowseHome(); const { input } = await openAddWorkspaceInput(page, ctx); await input.pressSequentially("~/", { delay: 20 }); await settle(page, 800); },
+  },
+  "dir-suggest-fuzzy": {
+    tag: "d4", describe: "Add workspace: fuzzy fragment 'cgw' reaches a nested name", themes: ["light"],
+    setup: async (page, ctx) => { await seedBrowseHome(); const { input } = await openAddWorkspaceInput(page, ctx); await input.pressSequentially("~/projects/cgw", { delay: 20 }); await settle(page, 800); },
+  },
+  "dir-suggest-drilldown": {
+    tag: "d4", describe: "Add workspace: Tab completes 'wo' to work/ and lists its children", themes: ["light"],
+    setup: async (page, ctx) => { await seedBrowseHome(); const { input } = await openAddWorkspaceInput(page, ctx); await input.pressSequentially("wo", { delay: 20 }); await settle(page, 600); await input.press("Tab"); await settle(page, 900); },
   },
   "remote-dialog": {
     tag: "t1a", describe: "Control from your phone dialog (X on the right)", themes: ["light"],
