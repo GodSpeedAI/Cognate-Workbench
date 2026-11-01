@@ -811,7 +811,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // component's layout-only sheet (the server concatenates; components never import CSS).
   const WORKBENCH_CSS = ["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"];
   const cssParts: string[] = [];
-  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css")]) {
+  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css"), resourcePath("src", "ui", "inspector", "inspector.css")]) {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");

@@ -72,7 +72,7 @@ const [astryx, theme] = stylesheetPaths();
 await copyInto(astryx!, join(web, "astryx.css"));
 await copyInto(theme!, join(web, "theme.css"));
 const cssFiles = [
-  "src/ui/app.css", "src/ui/mobile/mobile.css", "src/ui/experts/experts.css",
+  "src/ui/app.css", "src/ui/mobile/mobile.css", "src/ui/experts/experts.css", "src/ui/inspector/inspector.css",
   ...["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"].map((n) => `src/ui/workbench/${n}.css`),
 ];
 for (const f of cssFiles) await copyInto(join(repo, f), join(share, f));

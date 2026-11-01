@@ -1,0 +1,61 @@
+/* Inspector Files and Config tabs. Tokens come from app.css; code surfaces use the graphite pair. */
+.ft, .cfg { display: flex; flex-direction: column; gap: 8px; min-height: 0; height: 100%; font-size: 12.5px; }
+.ci-note { margin: 0; color: var(--cg-text-muted); font-size: 12px; }
+.ci-warn { color: var(--cg-danger); }
+.ci-callout { padding: 8px 10px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-sm); font-size: 12px; overflow-wrap: anywhere; }
+.ci-danger { background: var(--cg-danger-bg); border-color: var(--cg-danger); color: var(--cg-danger); }
+.ci-ok { background: color-mix(in oklch, var(--cg-success) 12%, transparent); border-color: var(--cg-success); color: var(--cg-text); }
+.ci-danger-text { color: var(--cg-danger); }
+.ci-link { background: none; border: 0; padding: 0 0 0 6px; color: var(--cg-accent); text-decoration: underline; cursor: pointer; font: inherit; }
+
+.ft-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cg-border); flex: none; }
+.ft-tab { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 150px; border: 0; background: none; color: var(--cg-text-muted); border-radius: var(--cg-radius-xs) var(--cg-radius-xs) 0 0; }
+.ft-tab-tree { padding: 5px 8px; cursor: pointer; font: inherit; }
+.ft-tab-tree[aria-selected="true"], .ft-tab-on { background: var(--cg-active); color: var(--cg-text); }
+.ft-tab-main { border: 0; background: none; color: inherit; font: inherit; padding: 5px 2px 5px 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-tab-x { border: 0; background: none; color: inherit; padding: 4px 6px; cursor: pointer; border-radius: var(--cg-radius-xs); }
+.ft-tab-x:hover { background: var(--cg-hover); }
+.ft-tab button:focus-visible, .ft-tree:focus-visible, .cv:focus-visible, .ft-filter:focus-visible, .cfg-btn:focus-visible { outline: 2px solid var(--cg-focus); outline-offset: -2px; }
+
+.ft-bar { display: flex; gap: 4px; flex: none; }
+.ft-filter { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-sm); background: var(--cg-surface); color: var(--cg-text); font: inherit; }
+.ft-tree { flex: 1; min-height: 0; overflow: auto; }
+.ft-row { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 6px; cursor: pointer; border-radius: var(--cg-radius-xs); white-space: nowrap; }
+.ft-row:hover { background: var(--cg-hover); }
+.ft-row-active { background: var(--cg-active); }
+.ft-tree:focus-visible .ft-row-active { outline: 1px solid var(--cg-focus); }
+.ft-chev, .ft-ico { display: inline-flex; width: 14px; justify-content: center; flex: none; color: var(--cg-text-muted); }
+.ft-glyph { font: 600 9px var(--cg-font-mono); color: var(--cg-accent); }
+.ft-name { overflow: hidden; text-overflow: ellipsis; }
+.ft-hint { color: var(--cg-text-faint); font-size: 11.5px; padding: 2px 6px; }
+
+.ft-viewer { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
+.ft-vbar { display: flex; align-items: center; gap: 8px; flex: none; }
+.ft-lang { font: 600 10.5px var(--cg-font-mono); text-transform: uppercase; color: var(--cg-text-muted); }
+.ft-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--cg-text-faint); font-size: 11px; }
+.ft-wrap { display: inline-flex; align-items: center; gap: 4px; color: var(--cg-text-muted); font-size: 11.5px; }
+
+.cv { flex: 1; min-height: 160px; display: flex; background: var(--cg-graphite); color: var(--cg-graphite-ink); border-radius: var(--cg-radius-sm); overflow: auto; font: 12px/1.55 var(--cg-font-mono); }
+.cv-body { display: flex; min-width: 100%; width: max-content; }
+.cv-wrap .cv-body { width: 100%; }
+.cv-gutter { flex: none; padding: 8px 8px 8px 10px; text-align: right; color: color-mix(in oklch, var(--cg-graphite-ink) 45%, transparent); user-select: none; overflow: hidden; }
+.cv-ln { height: 1.55em; }
+.cv-ln-error { background: var(--cg-danger); color: var(--cg-accent-contrast); }
+.cv-code { margin: 0; padding: 8px 10px 8px 4px; flex: 1; font: inherit; tab-size: 2; }
+.cv-line { white-space: pre; height: 1.55em; }
+.cv-wrap .cv-line { white-space: pre-wrap; overflow-wrap: anywhere; height: auto; min-height: 1.55em; }
+.cv-wrap .cv-gutter { align-self: flex-start; }
+.cv-edit { overflow: hidden; min-height: 240px; }
+.cv-edit .cv-body { width: 100%; }
+.cv-textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; padding: 8px 10px 8px 4px; white-space: pre; overflow: auto; tab-size: 2; }
+.cv-edit:focus-within { outline: 2px solid var(--cg-focus); outline-offset: -2px; }
+
+.cfg-head { display: flex; align-items: center; gap: 8px; flex: none; }
+.cfg-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font: 11px var(--cg-font-mono); color: var(--cg-text-muted); }
+.cfg-status { font-size: 11px; color: var(--cg-success); }
+.cfg-status-new { color: var(--cg-text-faint); }
+.cfg-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: none; }
+.cfg-dirty { margin-right: auto; font-size: 11.5px; color: var(--cg-text-muted); }
+.cfg-btn { padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); background: var(--cg-surface); color: var(--cg-text); font: inherit; cursor: pointer; }
+.cfg-btn:disabled { opacity: 0.5; cursor: default; }
+.cfg-btn-primary { background: var(--cg-accent); border-color: var(--cg-accent); color: var(--cg-accent-contrast); }
