@@ -53,6 +53,13 @@ async function openSettings(page: Page, section?: string): Promise<void> {
   await settle(page);
 }
 
+async function ensureInspector(page: Page, tab: string): Promise<void> {
+  const toggle = page.getByRole("button", { name: "Toggle inspector" });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  await page.getByRole("tab", { name: tab, exact: true }).click();
+  await settle(page, 300);
+}
+
 export const STATES: Record<string, ShotState> = {
   shell: { tag: "t1a", describe: "Main shell, workspace with sessions", viewports: ["desktop", "mobile"], setup: async (page) => { await page.locator(".session-row-wrap").first().waitFor().catch(() => undefined); await settle(page); } },
   "settings-general": { tag: "t1a", describe: "Settings > General", viewports: ["desktop", "mobile"], setup: (page) => openSettings(page, "General") },
@@ -143,11 +150,68 @@ export const STATES: Record<string, ShotState> = {
     setup: async (page) => {
       const row = page.locator(".session-row-wrap").first();
       await row.hover();
-      await row.getByRole("button", { name: /^Archive/ }).click();
+      await row.getByRole("button", { name: /^Session actions/ }).click();
+      await row.getByRole("menuitem", { name: /^Archive/ }).click();
       await page.getByRole("status").getByText("Session archived").waitFor();
       await settle(page, 300);
     },
   },
+
+  // ---- T1b: header, inspector, context bar, sidebar, drawer ----
+  "t1b-shell": { tag: "t1b", describe: "Shell: header view switch, sidebar, hero with context bar, inspector (Context)", viewports: ["desktop", "mobile"], themes: ["light", "dark"], setup: async (page) => { await page.locator(".session-row-wrap").first().waitFor().catch(() => undefined); await settle(page, 400); } },
+  "t1b-inspector-context": { tag: "t1b", describe: "Inspector open on Context", themes: ["light"], setup: async (page) => { await ensureInspector(page, "Context"); } },
+  "t1b-inspector-changes": { tag: "t1b", describe: "Inspector open on Changes (empty state)", themes: ["light", "dark"], setup: async (page) => { await ensureInspector(page, "Changes"); } },
+  "t1b-inspector-details": { tag: "t1b", describe: "Inspector open on Details (empty state)", themes: ["light"], setup: async (page) => { await ensureInspector(page, "Details"); } },
+  "t1b-inspector-wide": {
+    tag: "t1b", describe: "Inspector resized wide with the keyboard", themes: ["light"],
+    setup: async (page) => {
+      await ensureInspector(page, "Context");
+      await page.getByRole("separator", { name: "Resize inspector" }).focus();
+      for (let i = 0; i < 12; i++) await page.keyboard.press("Shift+ArrowLeft");
+      await settle(page);
+    },
+  },
+  "t1b-mobile-drawer": { tag: "t1b", describe: "Mobile: sidebar drawer open with scrim", viewports: ["mobile"], themes: ["light", "dark"], setup: async (page) => { await page.getByRole("button", { name: "Expand sidebar" }).click(); await settle(page, 400); } },
+  "t1b-mobile-inspector": { tag: "t1b", describe: "Mobile: inspector as a full-screen sheet", viewports: ["mobile"], themes: ["light"], setup: async (page) => { await page.getByRole("button", { name: "Toggle inspector" }).click(); await settle(page, 400); } },
+  "t1b-session-row-menu": {
+    tag: "t1b", describe: "Sidebar session row hover with the actions menu", themes: ["light", "dark"],
+    setup: async (page) => {
+      const row = page.locator(".session-row-wrap").first();
+      await row.waitFor();
+      await row.hover();
+      await row.getByRole("button", { name: /^Session actions/ }).click();
+      await settle(page, 200);
+    },
+  },
+  "t1b-task-menu": {
+    tag: "t1b", describe: "Context bar: task chip menu", themes: ["light"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: /^Task:/ }).click();
+      await settle(page, 200);
+    },
+  },
+  "t1b-running-turn": {
+    tag: "t1b", describe: "Session with a running turn: context bar shows RUNNING", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
+    setup: async (page, ctx) => {
+      if (ctx.viewport === "mobile") await page.getByRole("button", { name: "Expand sidebar" }).click();
+      await page.locator(".session-row-wrap").first().click();
+      const box = page.getByRole("textbox", { name: /Message or run a task/ });
+      await box.fill("Summarise the README");
+      await box.press("Enter");
+      await page.getByRole("button", { name: "Stop generating" }).waitFor();
+      await settle(page, 2500);
+    },
+  },
+  "t1b-settings-inspector": {
+    tag: "t1b", describe: "Settings page with the inspector open beside it", themes: ["light"],
+    setup: async (page) => {
+      await ensureInspector(page, "Context");
+      await openSettings(page, "General");
+    },
+  },
+  "t1b-view-workbench": { tag: "t1b", describe: "Header view switch on Workbench", themes: ["light"], setup: async (page) => { await page.getByRole("button", { name: "Workbench", exact: true }).click(); await settle(page, 500); } },
+  "t1b-view-experts": { tag: "t1b", describe: "Header view switch on Experts & Teams", themes: ["light"], setup: async (page) => { await page.getByRole("button", { name: "Experts and Teams", exact: true }).click(); await settle(page, 500); } },
+  "t1b-first-run": { tag: "t1b", describe: "No workspace: Choose a folder to work in", themes: ["light"], setup: async (page) => { await settle(page, 400); } },
 };
 
 interface Options {

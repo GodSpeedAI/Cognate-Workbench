@@ -76,7 +76,6 @@ describe("E2E Experts and Teams", () => {
         mobile.on("pageerror", (error) => errors.push(error.message));
         mobile.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
         await mobile.goto(app.url);
-        await mobile.getByRole("button", { name: "Expand sidebar", exact: true }).click({ timeout: 8_000 });
         await mobile.getByRole("button", { name: "Experts and Teams", exact: true }).click({ timeout: 8_000 });
         await mobile.getByRole("button", { name: "Expand sidebar", exact: true }).waitFor({ timeout: 8_000 });
         await mobile.getByRole("button", { name: /Quality Review Team/ }).click({ timeout: 8_000 });

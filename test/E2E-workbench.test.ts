@@ -100,7 +100,7 @@ describe("E2E workbench cockpit", () => {
         await waitForRow<TaskRecord>(app, `task/${taskId}`, (t) => t.status === "RUNNING");
         const bar = page.locator(".wb-composerbar");
         await bar.waitFor();
-        expect(await bar.locator("select").inputValue()).toBe(taskId);
+        expect(await bar.locator("button#wb-bind-task").innerText()).toContain("Update the greeting");
         expect(await bar.getByRole("status", { name: "Runtime" }).innerText()).toMatch(/idle/i);
         const composer = page.getByRole("textbox", { name: /Message or run a task/ });
         await composer.fill("[[scenario:edit]] change the greeting");

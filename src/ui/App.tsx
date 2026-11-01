@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, RefObject } from "react";
+import type { ClipboardEvent, ReactNode, RefObject } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
@@ -82,6 +82,7 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   BotIcon,
+  BranchIcon,
   ChipIcon,
   CommandIcon,
   InfoIcon,
@@ -152,6 +153,10 @@ import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
 import { CloseButton, DialogHeader } from "./shell/DialogHeader.tsx";
 import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
+import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
+import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
+import { MenuSelect } from "./shell/MenuSelect.tsx";
+import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
 import { CommandPalette, type PaletteItem } from "./shell/CommandPalette.tsx";
 import { Kbd, chordLabel, isApplePlatform } from "./shell/Kbd.tsx";
 
@@ -468,9 +473,32 @@ export function SessionRowButton({
   const needsReconciliation = waiting && session.waitingType === "ambiguous-invocation";
   // A SEA-Forge escalation is an approval, decided by the external authority (P02).
   const otherWait = waiting && !needsReconciliation && session.waitingType && session.waitingType !== "tool-approval" && session.waitingType !== "governance-approval" ? session.waitingType : undefined;
+  const status = needsReconciliation || waiting ? "waiting" : session.lastStatus === "running" ? "running" : session.lastStatus === "failed" ? "failed" : undefined;
+  const statusLabel = status === "running" ? "Running" : status === "failed" ? "Last run failed" : status === "waiting" ? "Needs you" : undefined;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [menuOpen]);
   return (
-    <div role="treeitem" aria-selected={active} className={active ? "session-row-wrap active" : "session-row-wrap"}>
+    <div role="treeitem" aria-selected={active} className={`${active ? "session-row-wrap active" : "session-row-wrap"}${menuOpen ? " menu-open" : ""}`}>
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
+        <span className={`session-status-dot${status ? ` is-${status}` : ""}`} aria-hidden="true" title={statusLabel} />
         <span className="session-row-title">
           {planPending ? "Plan awaiting review " : needsReconciliation ? "Needs reconciliation " : otherWait ? `Waiting: ${otherWait} ` : waiting ? "Waiting for approval " : ""}
           {label}
@@ -488,18 +516,41 @@ export function SessionRowButton({
             {otherWait ? "Waiting" : "Approval"}
           </span>
         )}
+        {status === "running" && <span className="sr-only">Running</span>}
+        {status === "failed" && <span className="sr-only">Last run failed</span>}
         <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
       </button>
-      <button
-        type="button"
-        className="icon-btn session-row-archive"
-        aria-label={archived ? `Restore ${label} from the archive` : `Archive ${label}`}
-        title={archived ? "Restore from archive" : "Archive"}
-        aria-pressed={archived}
-        onClick={onToggleArchive}
-      >
-        {archived ? <UndoIcon /> : <ArchiveIcon />}
-      </button>
+      <div className="session-row-menu-wrap" ref={menuRef}>
+        <button
+          type="button"
+          className="icon-btn session-row-more"
+          aria-label={`Session actions for ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title="Session actions"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <MoreIcon />
+        </button>
+        {menuOpen && (
+          <div role="menu" className="workspace-actions-menu session-row-menu">
+            {/* Rename is not offered: sessions have no rename capability yet, and a menu item that
+                cannot act would be a lie. */}
+            <button
+              type="button"
+              role="menuitem"
+              aria-label={archived ? `Restore ${label} from the archive` : `Archive ${label}`}
+              onClick={() => {
+                setMenuOpen(false);
+                onToggleArchive();
+              }}
+            >
+              {archived ? <UndoIcon /> : <ArchiveIcon />}
+              {archived ? "Restore from archive" : "Archive"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -597,7 +648,6 @@ function FirstRunDialogs() {
 
 function WorkspaceChooser() {
   const client = useCognate();
-  const settings = useGeneralSettings();
   const [path, setPath] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -620,18 +670,10 @@ function WorkspaceChooser() {
   return (
     <div className="workspace-chooser">
       <div className="workspace-chooser-card">
-        <p role="alert" className="empty-state">
-          Unable to create default workspace. Use Choose workspace to select a folder.
-        </p>
-        {/* No session exists yet, so the badge reflects the durable DEFAULT preset for new sessions
-            (settings.changePreset) rather than a dead "Standard mode" label. */}
-        <PresetMenu
-          current={undefined}
-          fallback={settings.preset}
-          onPick={(preset) => {
-            void client.invoke("settings.changePreset", { preset } as never).catch((e) => console.error("settings.changePreset failed", e));
-          }}
-        />
+        <div className="workspace-chooser-intro">
+          <h1 className="workspace-chooser-title">Choose a folder to work in</h1>
+          <p className="workspace-chooser-hint">Cognate runs sessions inside a folder on this computer. Pick the project you want to work on; you can add more later.</p>
+        </div>
         {/* J-WS-directory-discovery: the same accessible folder type-ahead the Add-workspace
             dialog uses — the first-run chooser and the dialog share one picker, not two flows. */}
         <DirectoryField
@@ -2566,7 +2608,7 @@ export function SubagentTree({ rows, onOpen }: { readonly rows: readonly Subagen
  *  delegated prompt, its final answer) sourced entirely from its `subagents` projection row. */
 function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly onClose: () => void }) {
   return (
-    <aside className="right-panel" role="tabpanel" aria-label={row.title}>
+    <div className="inspector-pane" role="group" aria-label={row.title}>
       <div className="right-panel-tabs" role="tablist">
         <span role="tab" aria-selected="true" className="right-panel-tab">
           {row.title}
@@ -2587,7 +2629,7 @@ function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly 
           <p className="empty-state small">{row.status === "failed" ? "Subagent failed." : "Running…"}</p>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -2727,8 +2769,6 @@ export function ReviewPanel({
   const [activeKey, setActiveKey] = useState(initialTab.key);
   const [view, setView] = useState<"list" | "split" | "code">("split");
   const [lineWrap, setLineWrap] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
   const [showLocation, setShowLocation] = useState(false);
   const [addTabOpen, setAddTabOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<undefined | "more">(undefined);
@@ -2810,22 +2850,8 @@ export function ReviewPanel({
 
   const available = availableTabs.filter((t) => !tabs.some((open) => open.key === t.key));
 
-  const cls = ["right-panel", "review-right-panel"];
-  if (fullscreen) cls.push("review-fullscreen");
-  if (collapsed) cls.push("review-collapsed");
-
-  if (collapsed) {
-    return (
-      <aside className={cls.join(" ")} role="tabpanel" aria-label={`Review · turn ${active.turnNumber}`} aria-expanded="false">
-        <button type="button" className="review-expand-btn" aria-label="Expand right sidebar" title="Expand right sidebar" onClick={() => setCollapsed(false)}>
-          <PanelRightIcon />
-        </button>
-      </aside>
-    );
-  }
-
   return (
-    <aside className={cls.join(" ")} role="tabpanel" aria-label={`Review · turn ${active.turnNumber}`}>
+    <div className="inspector-pane review-right-panel" role="group" aria-label={`Review · turn ${active.turnNumber}`}>
       <div className="right-panel-tabs" role="tablist" ref={toolbarRef}>
         {tabs.map((tab) => (
           <span
@@ -2877,25 +2903,6 @@ export function ReviewPanel({
           onClick={() => setView((v) => (v === "split" ? "list" : "split"))}
         >
           <SplitViewIcon />
-        </button>
-        <button
-          type="button"
-          className="review-toolbar-btn icon-btn"
-          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-          aria-pressed={fullscreen}
-          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-          onClick={() => setFullscreen((v) => !v)}
-        >
-          <FullscreenIcon />
-        </button>
-        <button
-          type="button"
-          className="review-toolbar-btn icon-btn"
-          aria-label="Collapse right sidebar"
-          title="Collapse right sidebar"
-          onClick={() => setCollapsed(true)}
-        >
-          <PanelRightIcon />
         </button>
       </div>
       <div className="review-panel-toolbar" role="toolbar" aria-label="Review view">
@@ -3024,7 +3031,7 @@ export function ReviewPanel({
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -3090,7 +3097,10 @@ export function Composer({
   onCancelQueued,
   onSteerQueued,
   focusToken,
+  contextBar,
 }: {
+  /** The context bar (workspace, posture, task, focus, run status), drawn at the card's top edge. */
+  readonly contextBar?: ReactNode;
   readonly disabled: boolean;
   readonly sending: boolean;
   readonly modelLabel: string | undefined;
@@ -3194,6 +3204,7 @@ export function Composer({
   );
   return (
     <div className="composer-card">
+      {contextBar}
       <textarea
         ref={textareaRef}
         aria-label={planMode ? "describe your task to generate plan" : "Message or run a task, / commands, @ files or sessions"}
@@ -3284,7 +3295,7 @@ export function Composer({
         </div>
       )}
       <div className="composer-toolbar">
-        <SettingMenu
+        <MenuSelect
           ariaLabel={`Access mode, current: ${PERMISSION_LABELS[accessMode]}`}
           value={accessMode}
           disabled={disabled}
@@ -3813,7 +3824,17 @@ function PresetMenu({
   return (
     <div className="preset-menu-wrap" ref={ref}>
       <button type="button" className="mode-badge mode-badge-btn" aria-label={`Agent preset, current: ${AGENT_PRESET_LABELS[value]}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        {AGENT_PRESET_LABELS[value]}
+        {(() => {
+          const words = AGENT_PRESET_LABELS[value].split(" ");
+          return words.length > 1 ? (
+            <>
+              {words.slice(0, -1).join(" ")}
+              <span className="preset-label-suffix"> {words[words.length - 1]}</span>
+            </>
+          ) : (
+            AGENT_PRESET_LABELS[value]
+          );
+        })()}
       </button>
       {open && (
         <div role="menu" className="workspace-actions-menu preset-menu">
@@ -4438,7 +4459,7 @@ function TraceDetailsPanel({
     ? (["summary", "options", "timing", "ledger"] as const)
     : (["summary", "payload", "result", "schema", "timing", "ledger"] as const);
   return (
-    <aside className="right-panel trace-details" role="complementary" aria-label="Event details">
+    <div className="inspector-pane trace-details" role="group" aria-label="Event details">
       <div className="right-panel-tabs" role="tablist">
         <span className="trace-details-heading">{heading}</span>
         <div className="trace-details-tabs">
@@ -4586,7 +4607,7 @@ function TraceDetailsPanel({
           </div>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -4598,7 +4619,6 @@ function TraceDetailsPanel({
  *  tabs) only appears once the session has an actual message (06-user-message onward). */
 function HeroLanding({
   workspaceLabel,
-  modeLabel,
   composerDisabled,
   modelLabel,
   onSend,
@@ -4609,9 +4629,11 @@ function HeroLanding({
   onSwitchWorkspace,
   onAddWorkspace,
   composerFocusToken,
+  contextBar,
 }: {
+  readonly contextBar?: ReactNode;
   readonly workspaceLabel: string;
-  readonly modeLabel: string;
+  readonly modeLabel?: string;
   readonly composerDisabled: boolean;
   readonly modelLabel: string | undefined;
   readonly onSend: (message: string) => void;
@@ -4695,7 +4717,6 @@ function HeroLanding({
               </div>
             )}
           </div>
-          <span className="mode-badge">{modeLabel}</span>
         </div>
         <div className="hero-composer">
           <Composer
@@ -4711,6 +4732,7 @@ function HeroLanding({
             sendBehavior={sendBehavior}
             onBusySubmit={() => undefined}
             focusToken={composerFocusToken}
+            {...(contextBar ? { contextBar } : {})}
           />
         </div>
       </div>
@@ -4729,6 +4751,42 @@ function WorkbenchIcon() {
   );
 }
 
+/** Short, never-truncated posture word for chips, plus the full statement for the tooltip. */
+function workspacePosture(worldId: string | undefined, world: { readonly kind?: string; readonly label?: string } | undefined, root: string | undefined): { readonly short: string; readonly detail: string } {
+  if (!worldId || worldId === "local") {
+    return { short: "Local", detail: `Local · uncontained. Commands run directly on this computer with your user permissions${root ? ` in ${root}` : ""}.` };
+  }
+  const label = world?.label ?? worldId;
+  if (world?.kind === "linux-bubblewrap") return { short: "Contained", detail: `Linux child containment · ${label}. Commands run inside a restricted sandbox${root ? ` over ${root}` : ""}.` };
+  const kind = (world?.kind ?? "remote").toUpperCase();
+  return { short: kind, detail: `${kind} · ${label}. Commands run on a remote machine${root ? ` in ${root}` : ""}.` };
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const apply = () => setMatches(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [query]);
+  return matches;
+}
+
+const SIDEBAR_STORAGE_KEY = "cognate.sidebar.width";
+const SIDEBAR_DEFAULT = 280;
+const SIDEBAR_MIN = 220;
+const SIDEBAR_MAX = 420;
+function readSidebarWidth(): number {
+  try {
+    const n = Number(window.localStorage.getItem(SIDEBAR_STORAGE_KEY));
+    return Number.isFinite(n) && n > 0 ? clampWidth(n, SIDEBAR_MIN, SIDEBAR_MAX) : SIDEBAR_DEFAULT;
+  } catch {
+    return SIDEBAR_DEFAULT;
+  }
+}
+
 function AppShell() {
   const client = useCognate();
   const toast = useToast();
@@ -4745,7 +4803,18 @@ function AppShell() {
   const settings = useGeneralSettings();
   const theme = useTheme(settings.appearance);
   const workDetails = settings.workDetails;
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches);
+  const inspector = useInspector();
+  const isMobile = useMediaQuery("(max-width: 760px)");
+  const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
+  const setSidebarWidth = useCallback((w: number) => {
+    setSidebarWidthState(w);
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(w));
+    } catch {
+      /* storage unavailable — width is simply not remembered */
+    }
+  }, []);
   // Settings is a page (not a modal): `settingsSection` is both "is it open" and "which section".
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   const showSettings = settingsSection !== undefined;
@@ -4943,10 +5012,13 @@ function AppShell() {
         .filter((tab): tab is ReviewTab => tab !== undefined),
     [transcript],
   );
-  const openReviewPanel = useCallback((summary: EditSummary, turnNumber: number) => {
-    setOpenChildToolCallId(undefined);
-    setOpenReview({ summary, turnNumber });
-  }, []);
+  const openReviewPanel = useCallback(
+    (summary: EditSummary, turnNumber: number) => {
+      setOpenReview({ summary, turnNumber });
+      inspector.openInspector("changes");
+    },
+    [inspector.openInspector],
+  );
   const planReviewContinuation = openContinuations.find((c) => c.type === "plan-review");
   const decidePlanReview = useCallback(
     async (approved: boolean) => {
@@ -5186,6 +5258,7 @@ function AppShell() {
     "open-settings": () => (showSettings ? closeSettings() : openSettings()),
     "open-shortcuts": () => openSettings("shortcuts"),
     "toggle-sidebar": () => setCollapsed((c) => !c),
+    "toggle-inspector": () => inspector.toggleInspector(),
     "new-session": () => {
       closeSettings();
       newSession();
@@ -5193,8 +5266,8 @@ function AppShell() {
   };
   const shortcutOverridesRef = useRef(settings.shortcuts);
   shortcutOverridesRef.current = settings.shortcuts;
-  const escapeStateRef = useRef({ showSettings });
-  escapeStateRef.current = { showSettings };
+  const escapeStateRef = useRef({ showSettings, drawerOpen: false, closeDrawer: () => {} });
+  escapeStateRef.current = { showSettings, drawerOpen: isMobile && !collapsed, closeDrawer: () => setCollapsed(true) };
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -5203,6 +5276,11 @@ function AppShell() {
         // own Escape; the palette is a dialog; only then does it fall through to the Settings page.
         if (OPEN_MODAL_STACK.length > 0) return;
         if (document.querySelector('[aria-haspopup][aria-expanded="true"]')) return;
+        if (escapeStateRef.current.drawerOpen) {
+          e.preventDefault();
+          escapeStateRef.current.closeDrawer();
+          return;
+        }
         if (escapeStateRef.current.showSettings) {
           e.preventDefault();
           closeSettings();
@@ -5236,6 +5314,7 @@ function AppShell() {
     items.push({ id: "new-session", group: "Actions", label: "New session", icon: <PlusIcon />, chord: chordFor("new-session"), keywords: "chat conversation create", run: () => actionHandlers.current["new-session"]?.() });
     items.push({ id: "add-workspace", group: "Actions", label: "Add workspace", icon: <FolderIcon />, keywords: "open folder project directory", run: go(() => setAddWorkspaceOpen(true)) });
     items.push({ id: "toggle-sidebar", group: "Actions", label: "Toggle sidebar", icon: <CollapseIcon />, chord: chordFor("toggle-sidebar"), keywords: "collapse expand navigation", run: () => setCollapsed((c) => !c) });
+    items.push({ id: "toggle-inspector", group: "Actions", label: "Toggle inspector", icon: <PanelRightIcon />, chord: chordFor("toggle-inspector"), keywords: "right panel context changes details files config", run: () => inspector.toggleInspector() });
     items.push({
       id: "toggle-theme",
       group: "Actions",
@@ -5290,7 +5369,7 @@ function AppShell() {
       });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chordFor, theme, workspaces, sessions, currentWorkspaceId, client, toast, closeCenterPanels, openSession, openSettings, closeSettings]);
+  }, [chordFor, theme, workspaces, sessions, currentWorkspaceId, client, toast, closeCenterPanels, openSession, openSettings, closeSettings, inspector]);
 
   // Close the sidebar's floating menus on outside click / Escape (same pattern as SettingMenu).
   useEffect(() => {
@@ -5587,9 +5666,101 @@ function AppShell() {
   const sessionTurns = transcript.filter((m) => m.role === "assistant").length;
   const sessionSteps = transcript.reduce((sum, m) => sum + (m.stepCount ?? 0), 0);
 
+  // ---- One source of truth for the center view -------------------------------------------------
+  // The header's view switch and the sidebar entries both read `currentView` and write through
+  // `setView`; the underlying booleans stay private to this block.
+  const inSession = Boolean(currentWorkspaceId) && !showHero;
+  const currentView: CenterView = expertsPanelOpen
+    ? "experts"
+    : pluginsPanelOpen
+      ? "plugins"
+      : workbenchOpen && currentWorkspaceId
+        ? "workbench"
+        : sessionTab === "trajectory" && inSession && !expertsPanelOpen
+          ? "trajectory"
+          : "conversation";
+  const setView = useCallback(
+    (view: "conversation" | "trajectory" | "workbench" | "experts") => {
+      if (pluginsPanelOpen) closePluginsPanel();
+      setExpertsPanelOpen(view === "experts");
+      setWorkbenchOpen(view === "workbench");
+      if (view === "conversation") setSessionTab("chat");
+      if (view === "trajectory") setSessionTab("trajectory");
+    },
+    [pluginsPanelOpen, closePluginsPanel],
+  );
+  const viewLabel: Record<CenterView, string> = { conversation: "", trajectory: "Trajectory", workbench: "Workbench", experts: "Experts & Teams", plugins: "Plugins" };
+  const crumbs: string[] = [];
+  const workspaceCrumb = currentWorkspace?.title || currentWorkspace?.id;
+  if (workspaceCrumb) crumbs.push(workspaceCrumb);
+  if (currentView === "conversation" || currentView === "trajectory") {
+    crumbs.push(inSession ? breadcrumbTitle : currentWorkspaceId ? "Start a session" : "Get started");
+  } else {
+    crumbs.push(viewLabel[currentView]);
+  }
+  const postureOfCurrent = workspacePosture(currentWorkspace?.executionWorldId, currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId) : undefined, currentWorkspace?.root);
+
+  // Selecting something to inspect opens the inspector on the matching tab instead of replacing it.
+  const { openInspector } = inspector;
+  const selectTrace = useCallback(
+    (detail: typeof traceDetail) => {
+      setOpenChildToolCallId(undefined);
+      setTraceDetail(detail);
+      if (detail) openInspector("details");
+    },
+    [openInspector],
+  );
+  const openSubagent = useCallback(
+    (toolCallId: string) => {
+      setTraceDetail(undefined);
+      setOpenChildToolCallId(toolCallId);
+      openInspector("details");
+    },
+    [openInspector],
+  );
+
+  // The mobile drawer: Esc/scrim close it (see the key handler), focus moves in on open and back to
+  // the header's menu button on close, and picking where to go closes it.
+  const drawerWasOpen = useRef(false);
+  useEffect(() => {
+    const open = isMobile && !collapsed;
+    if (open && !drawerWasOpen.current) document.getElementById("sidebar-collapse-btn")?.focus();
+    if (!open && drawerWasOpen.current) requestAnimationFrame(() => document.querySelector<HTMLElement>(".main-header-toggle")?.focus());
+    drawerWasOpen.current = open;
+  }, [isMobile, collapsed]);
+  useEffect(() => {
+    if (isMobile) setCollapsed(true);
+  }, [isMobile, activeSessionId, currentView, settingsSection]);
+
+  const contextBar = currentWorkspaceId ? (
+    <ComposerBar
+      workspaceId={currentWorkspaceId}
+      {...(activeSessionId ? { sessionId: activeSessionId } : {})}
+      {...(activeTaskId ? { taskId: activeTaskId } : {})}
+      onTaskChange={(taskId) => void bindTask(taskId ?? null)}
+      bindError={taskBindError}
+      onOpenWorkbench={() => setView("workbench")}
+      state={showHero ? "idle" : pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
+      steps={showHero ? 0 : toolEntries.length + 1}
+      elapsedSeconds={showHero ? 0 : elapsedSeconds}
+      approvalsPending={!showHero && pendingApproval ? 1 : 0}
+      workspaceTitle={currentWorkspace?.title || currentWorkspace?.id || ""}
+      {...(currentWorkspace?.root ? { workspaceRoot: currentWorkspace.root } : {})}
+      posture={postureOfCurrent}
+      {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
+      onClearFocus={() => setFocusSelection(undefined)}
+    />
+  ) : undefined;
+
   return (
     <div className="app-shell" data-theme={theme}>
-      <aside className={`${collapsed ? "sidebar collapsed" : "sidebar"}${showSettings ? " shell-hidden" : ""}`}>
+      {isMobile && !collapsed && <div className="drawer-scrim" onClick={() => setCollapsed(true)} aria-hidden="true" />}
+      <aside
+        id="app-sidebar"
+        aria-label="Sidebar"
+        className={`${collapsed ? "sidebar collapsed" : "sidebar"}${isMobile ? " sidebar-drawer" : ""}${showSettings && !isMobile ? " shell-hidden" : ""}`}
+        style={isMobile ? undefined : { width: collapsed ? 0 : sidebarWidth }}
+      >
         <div className="sidebar-top">
           <div className="brand">
             <LogoIcon />
@@ -5600,7 +5771,7 @@ function AppShell() {
               </span>
             )}
           </div>
-          <button type="button" className="icon-btn" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={`${collapsed ? "Expand" : "Collapse"} sidebar (${chordLabel(chordFor("toggle-sidebar"))})`} aria-keyshortcuts={chordLabel(chordFor("toggle-sidebar"))} onClick={() => setCollapsed((c) => !c)}>
+          <button type="button" id="sidebar-collapse-btn" className="icon-btn" aria-controls="app-sidebar" aria-expanded={!collapsed} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={`${collapsed ? "Expand" : "Collapse"} sidebar (${chordLabel(chordFor("toggle-sidebar"))})`} aria-keyshortcuts={chordLabel(chordFor("toggle-sidebar"))} onClick={() => setCollapsed((c) => !c)}>
             <CollapseIcon />
           </button>
         </div>
@@ -5633,16 +5804,15 @@ function AppShell() {
           <nav className="global-panels" aria-label="Global panels">
             <button
               type="button"
-              className={expertsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
-              aria-label="Experts and Teams"
-              aria-pressed={expertsPanelOpen}
+              className={currentView === "experts" ? "global-panel-btn active" : "global-panel-btn"}
+              aria-label="Go to Experts & Teams"
+              aria-current={currentView === "experts" ? "page" : undefined}
               onClick={() => {
-                setExpertsPanelOpen((open) => !open);
-                setPluginsPanelOpen(false);
-                setWorkbenchOpen(false);
+                setView("experts");
                 if (window.matchMedia("(max-width: 1023px)").matches) setCollapsed(true);
               }}
             >
+              <BotIcon />
               Experts &amp; Teams
             </button>
             <button
@@ -5662,11 +5832,11 @@ function AppShell() {
             <RemoteButton onOpen={() => setRemoteOpen(true)} />
             <button
               type="button"
-              className={workbenchOpen ? "global-panel-btn active" : "global-panel-btn"}
-              aria-label="Workbench"
-              aria-pressed={workbenchOpen}
+              className={currentView === "workbench" ? "global-panel-btn active" : "global-panel-btn"}
+              aria-label="Go to Workbench"
+              aria-current={currentView === "workbench" ? "page" : undefined}
               disabled={!currentWorkspaceId}
-              onClick={() => { setWorkbenchOpen((v) => !v); setExpertsPanelOpen(false); setPluginsPanelOpen(false); }}
+              onClick={() => setView("workbench")}
             >
               <WorkbenchIcon />
               Workbench
@@ -5881,15 +6051,14 @@ function AppShell() {
                       >
                         <FolderIcon aria-hidden="true" />
                         {group.title}
-                        {group.executionWorldId ? (
-                          <span className="workspace-world-badge">
-                            {group.executionWorldId === "local"
-                              ? "LOCAL · UNCONTAINED"
-                              : worlds.get(group.executionWorldId)?.kind === "linux-bubblewrap"
-                                ? `LINUX CHILD CONTAINMENT · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`
-                                : `${(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`}
-                          </span>
-                        ) : null}
+                        {(() => {
+                          const posture = workspacePosture(group.executionWorldId, group.executionWorldId ? worlds.get(group.executionWorldId) : undefined, group.root);
+                          return (
+                            <span className="workspace-world-badge" title={posture.detail}>
+                              {posture.short}
+                            </span>
+                          );
+                        })()}
                         <button
                           type="button"
                           className="icon-btn workspace-new-session-btn"
@@ -5966,6 +6135,18 @@ function AppShell() {
             {!collapsed && <Kbd chord={chordFor("open-settings")} className="kbd-right" />}
           </button>
         </div>
+        {!collapsed && !isMobile && (
+          <ResizeHandle
+            edge="right"
+            label="Resize sidebar"
+            controls="app-sidebar"
+            value={sidebarWidth}
+            min={SIDEBAR_MIN}
+            max={SIDEBAR_MAX}
+            defaultValue={SIDEBAR_DEFAULT}
+            onChange={setSidebarWidth}
+          />
+        )}
       </aside>
 
       {showSettings && (
@@ -5978,9 +6159,46 @@ function AppShell() {
           onChangeShortcuts={(shortcuts) => client.invoke("settings.changeShortcuts", { shortcuts } as never) as unknown as Promise<void>}
         />
       )}
-      <main className={showSettings ? "center-column shell-hidden" : "center-column"}>
+      <main id="main-content" className={showSettings ? "center-column shell-hidden" : "center-column"}>
+        <MainHeader
+          sidebarHidden={collapsed}
+          onShowSidebar={() => setCollapsed(false)}
+          sidebarChord={chordFor("toggle-sidebar")}
+          crumbs={crumbs}
+          view={currentView}
+          views={[
+            { id: "conversation", label: "Conversation" },
+            { id: "trajectory", label: "Trajectory", hidden: !settings.codingTools, disabled: !inSession },
+            { id: "workbench", label: "Workbench", disabled: !currentWorkspaceId },
+            { id: "experts", label: "Experts & Teams", short: "Experts", ariaLabel: "Experts and Teams" },
+          ]}
+          onViewChange={setView}
+          mode={
+            <PresetMenu
+              current={currentSession?.mode === "ptc" ? "ptc" : currentSession?.mode === "minimal" ? "minimal" : currentSession?.mode === "standard" ? "standard" : undefined}
+              fallback={settings.preset}
+              onPick={(preset) => {
+                if (activeSessionId) setPresetOverrides((prev) => ({ ...prev, [activeSessionId]: preset }));
+                else void client.invoke("settings.changePreset", { preset } as never).catch((e) => console.error("settings.changePreset failed", e));
+              }}
+            />
+          }
+          trailing={
+            inSession && subagentRows.length > 0 ? (
+              <div className="subagent-count-wrap">
+                <button type="button" className="subagent-count-btn" aria-expanded={subagentsExpanded} onClick={() => setSubagentsExpanded((v) => !v)}>
+                  {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
+                </button>
+                {subagentsExpanded && <SubagentTree rows={subagentRows} onOpen={(row) => openSubagent(row.toolCallId)} />}
+              </div>
+            ) : undefined
+          }
+          inspectorOpen={inspector.open}
+          onToggleInspector={inspector.toggleInspector}
+          inspectorChord={chordFor("toggle-inspector")}
+        />
         {expertsPanelOpen ? (
-          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onClose={() => setExpertsPanelOpen(false)} onOpenNavigation={() => setCollapsed(false)} onOpenSettings={() => openSettings("models")} />
+          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onOpenSettings={() => openSettings("models")} />
         ) : pluginsPanelOpen ? (
           <PluginsPanel
             detailId={detailPluginId}
@@ -6011,20 +6229,6 @@ function AppShell() {
           <WorkspaceChooser />
         ) : showHero ? (
           <>
-          <ComposerBar
-            workspaceId={currentWorkspaceId}
-            {...(activeSessionId ? { sessionId: activeSessionId } : {})}
-            {...(activeTaskId ? { taskId: activeTaskId } : {})}
-            onTaskChange={(taskId) => void bindTask(taskId ?? null)}
-            bindError={taskBindError}
-            onOpenWorkbench={() => setWorkbenchOpen(true)}
-            state="idle"
-            steps={0}
-            elapsedSeconds={0}
-            approvalsPending={0}
-            {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
-            onClearFocus={() => setFocusSelection(undefined)}
-          />
           <HeroLanding
             workspaceLabel={currentWorkspace?.title || currentWorkspace?.id || ""}
             modeLabel={AGENT_PRESET_LABELS[settings.preset]}
@@ -6038,66 +6242,13 @@ function AppShell() {
             onSwitchWorkspace={(ws) => void newSessionIn(ws)}
             onAddWorkspace={() => setAddWorkspaceOpen(true)}
             composerFocusToken={composerFocusToken}
+            {...(contextBar ? { contextBar } : {})}
           />
           </>
         ) : (
           <>
-            <header className="session-header">
-              <nav aria-label="Session hierarchy" className="breadcrumb">
-                {breadcrumbTitle}
-              </nav>
-              {subagentRows.length > 0 && (
-                <div className="subagent-count-wrap">
-                  <button
-                    type="button"
-                    className="subagent-count-btn"
-                    aria-expanded={subagentsExpanded}
-                    onClick={() => setSubagentsExpanded((v) => !v)}
-                  >
-                    {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
-                  </button>
-                  {/* Anchored dropdown popover directly under the header badge (critic round-2
-                   *  batch B P1) — the reference renders this as a small floating card at the
-                   *  button's position, not a bottom banner above the composer. */}
-                  {subagentsExpanded && (
-                    <SubagentTree
-                      rows={subagentRows}
-                      onOpen={(row) => {
-                        setOpenReview(undefined);
-                        setOpenChildToolCallId(row.toolCallId);
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-              {settings.codingTools && (
-                <div role="tablist" aria-label="Session views" className="session-tabs">
-                  <button type="button" role="tab" aria-selected={sessionTab === "chat"} onClick={() => setSessionTab("chat")}>
-                    Chat
-                  </button>
-                  <button type="button" role="tab" aria-selected={sessionTab === "trajectory"} onClick={() => setSessionTab("trajectory")}>
-                    Trajectory
-                  </button>
-                </div>
-              )}
-              <PresetMenu
-                current={
-                  currentSession?.mode === "ptc"
-                    ? "ptc"
-                    : currentSession?.mode === "minimal"
-                      ? "minimal"
-                      : currentSession?.mode === "standard"
-                        ? "standard"
-                        : undefined
-                }
-                fallback={settings.preset}
-                onPick={(preset) => {
-                  if (activeSessionId) setPresetOverrides((prev) => ({ ...prev, [activeSessionId]: preset }));
-                }}
-              />
-            </header>
             {sessionTab === "trajectory" ? (
-              <TrajectoryView trace={trace} onSelect={setTraceDetail} />
+              <TrajectoryView trace={trace} onSelect={selectTrace} />
             ) : (
             <div
               className="messages"
@@ -6126,26 +6277,11 @@ function AppShell() {
               ) : null;
             })()}
             {planState && planState.todos.length > 0 && <TodoWidget todos={planState.todos} />}
-            {currentWorkspaceId && (
-              <ComposerBar
-                workspaceId={currentWorkspaceId}
-                {...(activeSessionId ? { sessionId: activeSessionId } : {})}
-                {...(activeTaskId ? { taskId: activeTaskId } : {})}
-                onTaskChange={(taskId) => void bindTask(taskId ?? null)}
-                bindError={taskBindError}
-                onOpenWorkbench={() => setWorkbenchOpen(true)}
-                state={pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
-                steps={toolEntries.length + 1}
-                elapsedSeconds={elapsedSeconds}
-                approvalsPending={pendingApproval ? 1 : 0}
-                {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
-                onClearFocus={() => setFocusSelection(undefined)}
-              />
-            )}
             {otherContinuation && (
               <p role="status" className="continuation-waiting">Waiting on {otherContinuation.type} ({otherContinuation.status.toLowerCase()})</p>
             )}
             <SettlementCard operations={settlementOperations} />
+            {(pendingApproval || governanceApproval || ambiguousContinuation || planReviewContinuation) && contextBar && <div className="context-bar-standalone">{contextBar}</div>}
             {pendingApproval ? (
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
             ) : governanceApproval ? (
@@ -6189,23 +6325,54 @@ function AppShell() {
                 onCancelQueued={cancelQueued}
                 onSteerQueued={steerQueued}
                 focusToken={composerFocusToken}
+                {...(contextBar ? { contextBar } : {})}
               />
             )}
           </>
         )}
       </main>
-      {openReview ? (
-        <ReviewPanel
-          initialTab={reviewTabKey(openReview.summary, openReview.turnNumber)}
-          availableTabs={availableReviewTabs}
-          workspaceRoot={currentWorkspace?.root}
-          onClose={() => setOpenReview(undefined)}
-        />
-      ) : traceDetail ? (
-        <TraceDetailsPanel trace={trace} detail={traceDetail} onClose={() => setTraceDetail(undefined)} />
-      ) : (
-        openChildRow ? <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} /> : <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
-      )}
+      <Inspector sidebarWidth={isMobile || collapsed ? 0 : sidebarWidth} />
+      <InspectorTab id="context" label="Context" icon={<InfoIcon />} order={10}>
+        <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
+      </InspectorTab>
+      <InspectorTab id="changes" label="Changes" icon={<BranchIcon />} order={20} {...(availableReviewTabs.length > 0 ? { badge: String(availableReviewTabs.length) } : {})}>
+        {openReview ? (
+          <ReviewPanel
+            initialTab={reviewTabKey(openReview.summary, openReview.turnNumber)}
+            availableTabs={availableReviewTabs}
+            workspaceRoot={currentWorkspace?.root}
+            onClose={() => setOpenReview(undefined)}
+          />
+        ) : availableReviewTabs.length > 0 ? (
+          <div className="inspector-pane">
+            <p className="cf-h">File changes in this session</p>
+            <ul className="inspector-list">
+              {transcript.flatMap((message, index) =>
+                message.editSummary ? [{ summary: message.editSummary, turn: index + 1 }] : [],
+              ).map(({ summary, turn }) => (
+                <li key={`${turn}-${summary.file_path}`}>
+                  <button type="button" className="inspector-list-row" onClick={() => setOpenReview({ summary, turnNumber: turn })}>
+                    <FileIcon aria-hidden="true" />
+                    <span className="inspector-list-main">{summary.file_path}</span>
+                    <span className="review-panel-stat">+{summary.additions} -{summary.deletions}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <InspectorEmpty title="No changes yet" hint="When the agent edits files in this session, each change opens here as a diff you can review." />
+        )}
+      </InspectorTab>
+      <InspectorTab id="details" label="Details" icon={<ListViewIcon />} order={30}>
+        {traceDetail ? (
+          <TraceDetailsPanel trace={trace} detail={traceDetail} onClose={() => setTraceDetail(undefined)} />
+        ) : openChildRow ? (
+          <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} />
+        ) : (
+          <InspectorEmpty title="Nothing selected" hint="Select a step in the Trajectory view or open a subagent to see its details here." />
+        )}
+      </InspectorTab>
       {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
@@ -6217,7 +6384,9 @@ function AppShell() {
 export function App() {
   return (
     <ToastProvider>
-      <AppShell />
+      <InspectorProvider>
+        <AppShell />
+      </InspectorProvider>
     </ToastProvider>
   );
 }

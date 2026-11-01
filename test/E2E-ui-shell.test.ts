@@ -46,7 +46,9 @@ describe("E2E ui shell", () => {
         // The close X is the right-most header control; section switches never move the page.
         const close = settings.getByRole("button", { name: "Close settings" });
         const closeBox = (await close.boundingBox())!;
-        expect(closeBox.x).toBeGreaterThan(1440 - 80);
+        // The Settings page covers sidebar + center only; the inspector column stays beside it.
+        const settingsBox = (await settings.boundingBox())!;
+        expect(closeBox.x + closeBox.width).toBeGreaterThan(settingsBox.x + settingsBox.width - 80);
         expect(closeBox.width).toBeGreaterThanOrEqual(28);
         const before = (await settings.locator("h2").first().boundingBox())!;
         await page.getByRole("tab", { name: "Governance & evidence" }).click();
@@ -93,7 +95,8 @@ describe("E2E ui shell", () => {
         // Archive shows a toast with Undo, and Undo restores the session.
         const row = page.locator(".session-row-wrap").first();
         await row.hover();
-        await row.getByRole("button", { name: /^Archive/ }).click();
+        await row.getByRole("button", { name: /^Session actions/ }).click();
+        await row.getByRole("menuitem", { name: /^Archive/ }).click();
         const toast = page.getByRole("status").filter({ hasText: "Session archived" });
         await toast.waitFor();
         await toast.getByRole("button", { name: "Undo" }).click();
@@ -101,6 +104,151 @@ describe("E2E ui shell", () => {
           const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "sessions" })).rows;
           return rows.every((r) => (r.value as { archived?: boolean }).archived !== true) || undefined;
         });
+        expect(errors).toEqual([]);
+      } finally {
+        await browser.close();
+        await client.close();
+        await app.stop();
+      }
+    });
+  }, 120_000);
+  test("main header, inspector (toggle, shortcut, resize, tabs) and the mobile drawer", async () => {
+    await withTempHome(async (home) => {
+      const repo = join(home, "project");
+      await mkdir(repo);
+      const { app, client } = await bootApp(home);
+      await inv(client, "model.configure", { providerId: "mock", baseURL: "http://127.0.0.1:59999/v1", protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
+      await inv(client, "onboarding.dismiss", { step: "notice" });
+      await inv(client, "onboarding.dismiss", { step: "apikey" });
+      const { workspaceId } = (await inv(client, "workspace.select", { path: repo })) as { workspaceId: string };
+      await inv(client, "session.create", { workspaceId, requestId: crypto.randomUUID() });
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+        const errors: string[] = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.goto(app.url);
+        await page.getByRole("textbox", { name: /Message or run a task|describe your task/i }).waitFor();
+
+        // Landmarks and one source of truth for the current view.
+        await page.getByRole("complementary", { name: "Sidebar" }).waitFor();
+        await page.getByRole("main").waitFor();
+        const views = page.getByRole("group", { name: "View" });
+        expect(await views.getByRole("button", { name: "Conversation" }).getAttribute("aria-pressed")).toBe("true");
+        await views.getByRole("button", { name: "Workbench", exact: true }).click();
+        expect(await views.getByRole("button", { name: "Workbench", exact: true }).getAttribute("aria-pressed")).toBe("true");
+        expect(await views.getByRole("button", { name: "Conversation" }).getAttribute("aria-pressed")).toBe("false");
+        await views.getByRole("button", { name: "Experts and Teams", exact: true }).click();
+        await page.getByRole("heading", { name: "Experts & Teams", exact: true }).waitFor();
+        expect(await views.getByRole("button", { name: "Workbench", exact: true }).getAttribute("aria-pressed")).toBe("false");
+        await views.getByRole("button", { name: "Conversation" }).click();
+        await page.getByRole("textbox", { name: /Message or run a task|describe your task/i }).waitFor();
+
+        // Inspector: open by default on a wide screen; toggle via button and Ctrl+Shift+B.
+        const inspector = page.getByRole("complementary", { name: "Inspector" });
+        const toggle = page.getByRole("button", { name: "Toggle inspector" });
+        await inspector.waitFor();
+        expect(await toggle.getAttribute("aria-pressed")).toBe("true");
+        expect(await page.getByRole("tab", { name: "Context" }).getAttribute("aria-selected")).toBe("true");
+        await inspector.getByRole("button", { name: "Hide inspector" }).click();
+        await inspector.waitFor({ state: "detached" });
+        expect(await toggle.getAttribute("aria-pressed")).toBe("false");
+        await toggle.click();
+        await inspector.waitFor();
+        await page.keyboard.press("Control+Shift+B");
+        await inspector.waitFor({ state: "detached" });
+        await page.keyboard.press("Control+Shift+B");
+        await inspector.waitFor();
+
+        // Tabs: Context, Changes (empty state), Details (empty state); the choice survives a reload.
+        await page.getByRole("tab", { name: "Changes" }).click();
+        await inspector.getByText("No changes yet").waitFor();
+        await page.getByRole("tab", { name: "Details" }).click();
+        await inspector.getByText("Nothing selected").waitFor();
+        await page.reload();
+        await inspector.waitFor();
+        expect(await page.getByRole("tab", { name: "Details" }).getAttribute("aria-selected")).toBe("true");
+        await page.getByRole("tab", { name: "Context" }).click();
+
+        // Resize with the keyboard: ArrowLeft widens by 8px (Shift: 32px), Home/End hit the limits,
+        // double-click restores the default.
+        const handle = page.getByRole("separator", { name: "Resize inspector" });
+        const startWidth = Number(await handle.getAttribute("aria-valuenow"));
+        expect(startWidth).toBe(340);
+        await handle.focus();
+        await page.keyboard.press("ArrowLeft");
+        expect(Number(await handle.getAttribute("aria-valuenow"))).toBe(startWidth + 8);
+        await page.keyboard.press("Shift+ArrowLeft");
+        expect(Number(await handle.getAttribute("aria-valuenow"))).toBe(startWidth + 8 + 32);
+        expect(Math.round((await inspector.boundingBox())!.width)).toBe(startWidth + 40);
+        await page.keyboard.press("Home");
+        expect(Number(await handle.getAttribute("aria-valuenow"))).toBe(Number(await handle.getAttribute("aria-valuemin")));
+        await page.keyboard.press("End");
+        expect(Number(await handle.getAttribute("aria-valuenow"))).toBe(Number(await handle.getAttribute("aria-valuemax")));
+        await handle.dblclick();
+        expect(Number(await handle.getAttribute("aria-valuenow"))).toBe(340);
+        // Dragging with the pointer resizes too.
+        const box = (await handle.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + 200);
+        await page.mouse.down();
+        await page.mouse.move(box.x - 60, box.y + 200, { steps: 4 });
+        await page.mouse.up();
+        expect(Number(await handle.getAttribute("aria-valuenow"))).toBeGreaterThan(380);
+
+        // Sidebar resize shares the same handle behaviour.
+        const sidebarHandle = page.getByRole("separator", { name: "Resize sidebar" });
+        const sidebarStart = Number(await sidebarHandle.getAttribute("aria-valuenow"));
+        await sidebarHandle.focus();
+        await page.keyboard.press("ArrowRight");
+        expect(Number(await sidebarHandle.getAttribute("aria-valuenow"))).toBe(sidebarStart + 8);
+
+        // The context bar replaces the old Task row: one compact row, IDLE is not painted.
+        const bar = page.locator(".wb-composerbar");
+        expect(await bar.locator(".ctx-chip").count()).toBeGreaterThanOrEqual(3);
+        expect(await page.getByText("Nothing is in focus").count()).toBe(0);
+        expect(await page.getByText("No tasks in this workspace yet.").count()).toBe(0);
+
+        // Narrow: the inspector is an overlay sheet with a scrim that Esc and a scrim click close.
+        await page.setViewportSize({ width: 820, height: 800 });
+        await inspector.waitFor({ state: "detached" });
+        await toggle.click();
+        await inspector.waitFor();
+        await page.locator(".inspector-scrim").waitFor();
+        await page.keyboard.press("Escape");
+        await inspector.waitFor({ state: "detached" });
+        await toggle.click();
+        await inspector.waitFor();
+        await page.mouse.click(40, 400);
+        await inspector.waitFor({ state: "detached" });
+
+        // Mobile: the sidebar is a drawer opened from the header, with a scrim and Esc; all nav reachable.
+        const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
+        mobile.on("pageerror", (e) => errors.push(e.message));
+        await mobile.goto(app.url);
+        const sidebar = mobile.getByRole("complementary", { name: "Sidebar" });
+        await mobile.getByRole("button", { name: "Toggle inspector" }).waitFor();
+        expect(await sidebar.isVisible()).toBe(false);
+        expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await mobile.getByRole("button", { name: "Expand sidebar" }).click();
+        await sidebar.waitFor();
+        await mobile.locator(".drawer-scrim").waitFor();
+        for (const name of ["New session", "Go to Experts & Teams", "Plugins", "Go to Workbench", "Settings", "Add workspace"]) {
+          await sidebar.getByRole("button", { name, exact: true }).waitFor();
+        }
+        await mobile.keyboard.press("Escape");
+        await sidebar.waitFor({ state: "hidden" });
+        await mobile.getByRole("button", { name: "Expand sidebar" }).click();
+        await sidebar.waitFor();
+        await mobile.mouse.click(370, 400);
+        await sidebar.waitFor({ state: "hidden" });
+        // The inspector is a full-screen sheet here.
+        await mobile.getByRole("button", { name: "Toggle inspector" }).click();
+        const sheet = mobile.getByRole("complementary", { name: "Inspector" });
+        await sheet.waitFor();
+        expect(Math.round((await sheet.boundingBox())!.width)).toBe(390);
+        await mobile.getByRole("button", { name: "Hide inspector" }).click();
+        await sheet.waitFor({ state: "detached" });
+        expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect(errors).toEqual([]);
       } finally {
         await browser.close();

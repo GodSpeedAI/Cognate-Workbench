@@ -53,10 +53,11 @@ export interface WorkbenchViewProps {
   readonly onTaskCreatedInSession?: (taskId: string) => void;
   /** The person's current selection, published so "this" resolves deterministically in the conversation. */
   readonly onFocus: (ref: FocusRef | undefined) => void;
-  readonly onClose: () => void;
+  /** Closing is the header view switch's job now; kept so callers need not change. */
+  readonly onClose?: () => void;
 }
 
-export function WorkbenchView({ workspaceId, workspaceLabel, sessionId, activeTaskId, onWorkOnTask, onTaskCreatedInSession, onFocus, onClose }: WorkbenchViewProps) {
+export function WorkbenchView({ workspaceId, workspaceLabel, sessionId, activeTaskId, onWorkOnTask, onTaskCreatedInSession, onFocus }: WorkbenchViewProps) {
   const [tab, setTab] = useState<Tab>("tasks");
   const [notice, setNotice] = useState<Notice>(undefined);
   const act = useWorkbenchActions(setNotice);
@@ -87,9 +88,6 @@ export function WorkbenchView({ workspaceId, workspaceLabel, sessionId, activeTa
             Governed work in <strong>{workspaceLabel}</strong>. Nothing here is accepted until the evidence says so.
           </p>
         </div>
-        <button type="button" className="wb-btn" onClick={onClose}>
-          Back to conversation
-        </button>
       </header>
       <div role="tablist" aria-label="Workbench sections" className="wb-cockpit-tabs">
         {TABS.map((t, i) => (

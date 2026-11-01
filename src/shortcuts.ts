@@ -28,6 +28,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   { id: "new-session", label: "New Session", defaultChord: "Ctrl+Alt+N" },
   { id: "toggle-sidebar", label: "Toggle left sidebar", defaultChord: "Ctrl+B" },
   { id: "open-settings", label: "Open settings", defaultChord: "Ctrl+," },
+  { id: "toggle-inspector", label: "Toggle right inspector", defaultChord: "Ctrl+Shift+B" },
 ];
 
 export function actionById(id: string): ShortcutAction | undefined {

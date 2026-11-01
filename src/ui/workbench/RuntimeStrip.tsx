@@ -14,6 +14,8 @@ export interface RuntimeStripProps {
   readonly budget?: "ok" | "warn" | "exceeded";
   readonly concurrency?: number;
   readonly approvalsPending?: number;
+  /** Quiet inline presentation for the composer context bar: idle is spoken, not painted. */
+  readonly compact?: boolean;
 }
 
 function formatElapsed(seconds: number | undefined): string {
@@ -78,18 +80,19 @@ export function RuntimeStrip({
   budget,
   concurrency,
   approvalsPending,
+  compact,
 }: RuntimeStripProps) {
   return (
     <div
-      className="wb-runtimeStrip"
+      className={compact ? "wb-runtimeStrip wb-runtimeStrip-compact" : "wb-runtimeStrip"}
       role="status"
       aria-label="Runtime"
     >
-      <span className={`wb-chip ${getStateChipClass(state)}`}>
+      <span className={compact && state === "idle" ? "sr-only" : `wb-chip ${getStateChipClass(state)}${compact ? " wb-chip-quiet" : ""}`}>
         {getStateText(state)}
       </span>
 
-      {taskTitle && (
+      {taskTitle && !compact && (
         <span className="wb-runtimeStrip-taskTitle">{taskTitle}</span>
       )}
 
@@ -100,7 +103,7 @@ export function RuntimeStrip({
       )}
 
       {steps !== undefined && (
-        <span className="wb-runtimeStrip-field">{steps} steps</span>
+        <span className="wb-runtimeStrip-field">{steps} {steps === 1 ? "step" : "steps"}</span>
       )}
 
       {tokens !== undefined && (

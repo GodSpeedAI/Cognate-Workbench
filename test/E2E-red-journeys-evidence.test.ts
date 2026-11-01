@@ -52,8 +52,8 @@ describe("RED journeys — UX evidence", () => {
         await page.locator(".session-row-wrap.active").getByRole("button", { name: /^New Session/ }).waitFor();
         await shot(page, "03-draft-survives-reload");
         // The new draft's task association is immediately understandable: an obvious "No task" state.
-        await page.getByRole("combobox", { name: "Task" }).waitFor();
-        expect(await page.getByRole("combobox", { name: "Task" }).inputValue()).toBe("");
+        await page.getByRole("button", { name: "Task: No task" }).waitFor();
+        expect(await page.getByRole("button", { name: /^Task:/ }).innerText()).toContain("No task");
         await shot(page, "04-no-task-is-obvious");
 
         // Task visibility choice at creation, then the bound conversation.
@@ -64,10 +64,10 @@ describe("RED journeys — UX evidence", () => {
         await shot(page, "05-task-visibility-choice");
         await form.getByRole("radiogroup", { name: "Task visibility" }).getByRole("radio", { name: "This session" }).check();
         await form.getByRole("button", { name: "Create task" }).click();
-        await page.getByRole("button", { name: "Back to conversation" }).click();
+        await page.getByRole("button", { name: "Conversation", exact: true }).click();
         await page.waitForFunction(() => {
-          const el = document.querySelector("select#wb-bind-task") as HTMLSelectElement | null;
-          return el !== null && el.value !== "" && el.selectedOptions[0]!.textContent.includes("this session");
+          const el = document.querySelector("button#wb-bind-task");
+          return el !== null && (el.getAttribute("aria-label") ?? "") !== "Task: No task" && (el.textContent ?? "").includes("this session");
         });
         await shot(page, "06-session-task-bound-in-composer");
       } finally {

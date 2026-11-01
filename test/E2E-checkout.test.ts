@@ -34,12 +34,20 @@ describe("E2E task checkout", () => {
 
         // A draft conversation is enough: no model turn is needed to isolate a checkout.
         await page.getByRole("button", { name: "New session", exact: true }).click();
-        const taskSelect = page.locator("#wb-bind-task");
-        await taskSelect.waitFor();
+        const taskChip = page.locator("button#wb-bind-task");
+        await taskChip.waitFor();
 
         const taskId = await createTask(app, client, workspaceId, "Tidy the greeting");
-        await page.locator(`#wb-bind-task option[value="${taskId}"]`).waitFor({ state: "attached", timeout: 10_000 });
-        await taskSelect.selectOption(taskId);
+        // The task appears in the chip's menu once its workbench row reaches the client.
+        const pick = page.getByRole("menuitemradio", { name: /Tidy the greeting/ });
+        for (let attempt = 0; ; attempt++) {
+          await taskChip.click();
+          if (await pick.isVisible()) break;
+          await page.keyboard.press("Escape");
+          if (attempt > 40) throw new Error("the created task never appeared in the task menu");
+          await page.waitForTimeout(250);
+        }
+        await pick.click();
 
         const isolate = page.getByRole("button", { name: "Isolate in a worktree…" });
         await isolate.waitFor();

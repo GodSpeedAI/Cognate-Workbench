@@ -23,8 +23,20 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 ## Interface
 
 - `./App.tsx:App` — root shell; composes sidebar, center column (hero landing / Experts &
-  Teams / Plugins / Workbench / conversation), right panel (ReviewPanel / TraceDetailsPanel /
-  RightPanel / CognitiveFrame) and the modal dialogs.
+  Teams / Plugins / Workbench / conversation), the tabbed right inspector (Context =
+  CognitiveFrame, Changes = ReviewPanel, Details = TraceDetailsPanel / RightPanel) and the modal
+  dialogs. The shell is a three-column grid; the header's view switch is the one source of truth
+  for the current center view.
+- `./shell/Inspector.tsx:InspectorProvider` / `Inspector` / `InspectorTab` / `useInspector` — the
+  generic right inspector. Register a tab anywhere under the provider with
+  `<InspectorTab id label icon order>…</InspectorTab>` (children are portalled into the body while
+  the tab is selected); open it from anywhere with `useInspector().openInspector("config")`.
+  Width, open state and tab persist in `localStorage` (`cognate.inspector.v1`).
+- `./shell/MainHeader.tsx:MainHeader` — breadcrumb, view switch, mode chip, inspector toggle.
+- `./shell/ResizeHandle.tsx:ResizeHandle` — the shared separator used by sidebar and inspector.
+- `./shell/MenuSelect.tsx:MenuSelect` — styled menu button standing in for a native select.
+- `./workbench/ComposerBar.tsx:ComposerBar` — the context bar at the composer card's top edge
+  (workspace, posture, task chip + menu, focus chip, run status).
 - `./App.tsx:ToolEntry` — one tool call in a run's timeline (`toolCallId`, `tool`, `args`,
   `status: "running" | "success" | "failed"`, optional `approval` with
   `status: "pending" | "approved" | "denied"`).

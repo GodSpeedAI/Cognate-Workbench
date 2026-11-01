@@ -50,7 +50,6 @@ test("native schedule controls and evidence usage work on desktop and mobile",as
       const mobile=await browser.newPage({viewport:{width:360,height:780}});
       mobile.on("pageerror",error=>errors.push(error.message));
       await mobile.goto(app.app.url,{waitUntil:"domcontentloaded"});
-      await mobile.getByRole("button",{name:"Expand sidebar",exact:true}).click();
       await mobile.getByRole("button",{name:"Experts and Teams",exact:true}).click();
       await mobile.getByRole("button",{name:"Schedules",exact:true}).click();
       await mobile.getByRole("button",{name:"Inspect occurrence",exact:true}).waitFor();

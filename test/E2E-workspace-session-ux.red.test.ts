@@ -82,7 +82,7 @@ describe("E2E J-SESSION-draft — + must visibly do something without a model ca
           .find(r => (r.value as { lastStatus?: string }).lastStatus === "draft");
         expect(active).toBeDefined();
         expect((active?.value as { workspaceId?: string }).workspaceId).not.toBe(second.workspaceId);
-        expect(await page.getByRole("combobox", { name: "Task" }).inputValue()).toBe("");
+        expect(await page.getByRole("button", { name: /^Task:/ }).getAttribute("aria-label")).toBe("Task: No task");
       } finally {
         await browser.close();
         await client.close();
@@ -146,8 +146,8 @@ describe("E2E J-WS-directory-discovery — usable picker, not a raw full-path de
         const visibility = form.getByRole("radiogroup", { name: "Task visibility" });
         await visibility.getByRole("radio", { name: "This session" }).check();
         await form.getByRole("button", { name: "Create task" }).click();
-        await page.getByRole("button", { name: "Back to conversation" }).click();
-        const binding = page.getByRole("combobox", { name: "Task" });
+        await page.getByRole("button", { name: "Conversation", exact: true }).click();
+        const binding = page.getByRole("button", { name: /^Task:/ });
         await binding.waitFor();
         // Test-API mapping (behavior unchanged): the durable create settles in a projection round
         // trip, so the read tolerates that settle while asserting the same fact — the conversation
@@ -155,9 +155,9 @@ describe("E2E J-WS-directory-discovery — usable picker, not a raw full-path de
         {
           const deadline = Date.now() + 10_000;
           for (;;) {
-            const value = await binding.inputValue();
-            if (value !== "") break;
-            if (Date.now() > deadline) throw new Error(`the session task never appeared in the Task combobox (last value: "${value}")`);
+            const value = (await binding.getAttribute("aria-label")) ?? "";
+            if (value !== "Task: No task" && value !== "") break;
+            if (Date.now() > deadline) throw new Error(`the session task never appeared in the Task chip (last label: "${value}")`);
             await Bun.sleep(50);
           }
         }
@@ -166,11 +166,17 @@ describe("E2E J-WS-directory-discovery — usable picker, not a raw full-path de
         // create settles in a round trip, so instead of racing it we wait for the state only the
         // NEW session can show — the just-created session task is not even *offered* in it (its
         // option list is exactly the "No task" entry) and nothing is selected.
-        await page.waitForFunction(() => {
-          const el = document.querySelector("select#wb-bind-task") as HTMLSelectElement | null;
-          return el !== null && el.options.length === 1 && el.value === "";
-        });
-        expect(await page.getByRole("combobox", { name: "Task" }).inputValue()).toBe("");
+        await page.getByRole("button", { name: "Task: No task" }).waitFor();
+        await page.getByRole("button", { name: "Task: No task" }).click();
+        {
+          const menu = page.getByRole("menu", { name: "Task" });
+          await menu.waitFor();
+          const radios = menu.getByRole("menuitemradio");
+          expect(await radios.count()).toBe(1);
+          expect(await radios.first().getAttribute("aria-checked")).toBe("true");
+          await page.keyboard.press("Escape");
+        }
+        expect(await page.getByRole("button", { name: /^Task:/ }).getAttribute("aria-label")).toBe("Task: No task");
       } finally {
         await browser.close();
         await client.close();

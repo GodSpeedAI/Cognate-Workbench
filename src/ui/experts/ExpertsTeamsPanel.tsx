@@ -33,7 +33,7 @@ function assignmentLabel(status: Assignment["status"]): string {
   }
 }
 
-export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOpenSettings }: { readonly workspaceId: string | undefined; readonly onClose: () => void; readonly onOpenNavigation: () => void; readonly onOpenSettings: () => void }) {
+export function ExpertsTeamsPanel({ workspaceId, onOpenSettings }: { readonly workspaceId: string | undefined; readonly onClose?: () => void; readonly onOpenNavigation?: () => void; readonly onOpenSettings: () => void }) {
   const client = useCognate();
   const rows = useProjection("experts");
   const configRows = useProjection("model-config");
@@ -253,13 +253,11 @@ export function ExpertsTeamsPanel({ workspaceId, onClose, onOpenNavigation, onOp
   return (
     <section className="experts-panel" aria-label="Experts and Teams">
       <header className="experts-panel-head">
-        <button type="button" className="global-panel-btn experts-nav-toggle" onClick={onOpenNavigation}>Navigation</button>
         <div>
           <p className="experts-eyebrow">Cognate Workbench</p>
           <h1>Experts &amp; Teams</h1>
           <p>Persistent Expert identities. Governed Team work. Each run remains inspectable.</p>
         </div>
-        <button type="button" className="global-panel-btn" onClick={onClose}>Back to conversation</button>
         <button type="button" className="global-panel-btn" aria-expanded={showSchedules} onClick={()=>setShowSchedules(value=>!value)}>Schedules</button>
       </header>
 

@@ -124,7 +124,6 @@ test("J-EXPERT-MODEL-PARALLEL: browser-visible capacity matches two real model-o
       mobile.on("pageerror", (error) => errors.push(error.message));
       mobile.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
       await mobile.goto(app.app.url, { waitUntil: "domcontentloaded" });
-      await mobile.getByRole("button", { name: "Expand sidebar", exact: true }).click();
       await mobile.getByRole("button", { name: "Experts and Teams", exact: true }).click();
       const status = mobile.getByRole("heading", { name: "Native execution capacity", exact: true });
       await status.waitFor();
