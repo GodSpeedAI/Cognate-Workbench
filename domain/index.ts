@@ -539,6 +539,31 @@ export function bindHarnessCapabilities(domain: Domain): Readonly<Record<string,
   >;
 }
 
+/**
+ * J-CFG-provider-switch / J-CFG-provider-test: stored-provider listing, activation and connection
+ * test. All three anchor on `ModelProvider`, like `model.configure`, `provider.delete` and
+ * `model.catalog`.
+ */
+export const PROVIDER_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "provider.list": "ModelProvider",
+  "provider.activate": "ModelProvider",
+  "provider.test": "ModelProvider",
+};
+
+export function bindProviderCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(PROVIDER_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} provider contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: provider capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
 /** Effective native capacity is inspection data, distinct from advisory parallelism plans. */
 export function bindRuntimeExecution(domain: Domain): CapabilityContract["semanticRef"] {
   const contracts = bindCapabilities(domain.projection, [{

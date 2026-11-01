@@ -113,3 +113,11 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: `test/J-HARNESS-*.test.ts`; proposal in `.agents/reports/ui-production-readiness/framework-gap-streaming-process.md`.
 - Confidence: high
 - Closure: an upstream streaming `process.spawn` port (stdin, line stream, pid, group kill) implemented for local/ssh/wsl/bubblewrap worlds, consumed here to replace `hostProcess.ts`; size M (upstream) + S (app).
+
+### Per-Expert model routes cannot carry auth or Azure options
+- Date: 2026-11-01
+- Location: src/experts/service.ts `route()` (allows only providerId, model, baseURL, protocol); src/capabilities/expertModel.ts (builds the provider from the route).
+- Debt: `model.configure` now supports `auth: "none"` and Azure OpenAI (`auth: "api-key"` + `apiVersion`) for the app's active route and stored providers, but an Expert route stores configuration only (four fields) and is rebuilt with default auth. A per-Expert route to a remote keyless gateway or to Azure therefore still fails to authenticate; local hosts work because keyless is inferred from the loopback address.
+- Evidence: `route()` rejects any other key ("Model routes contain configuration only"); `expertModelGenerateComponent` calls `buildProvider(route, secrets)` with that route.
+- Confidence: high
+- Closure: let Expert routes reference a stored `providerId` row (resolving auth/apiVersion from `provider-routes` at build time) instead of copying fields; keep the credentials-free rule. Files likely touched: src/experts/service.ts, src/capabilities/expertModel.ts, test/expert-model-routing.test.ts; size M.

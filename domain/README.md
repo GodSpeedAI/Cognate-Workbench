@@ -63,3 +63,5 @@ Exported from `domain/index.ts`:
 - Run (from repo root): `bun test test` (`bun test --timeout 15000 test`).
 - Targeted suite for this package's loader and cognitive bindings: `bun test test/cognitive-bindings.test.ts` (it imports `loadDomain`, `COGNITIVE_CAPABILITY_ANCHORS`, `bindCognitiveCapabilities` from `../domain/index.ts`).
 - Typecheck: `just typecheck`; full gate: `just verify`.
+
+- `PROVIDER_CAPABILITY_ANCHORS` / `bindProviderCapabilities` — `provider.list`, `provider.activate`, `provider.test` on `ModelProvider` (J-CFG-provider-switch, J-CFG-provider-test; `[domain/index.ts:PROVIDER_CAPABILITY_ANCHORS]`).

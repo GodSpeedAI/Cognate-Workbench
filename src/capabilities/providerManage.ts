@@ -1,22 +1,23 @@
 // `provider.delete` and `model.catalog` (T11): the two Settings -> Models actions that were inert.
 //
-// `provider.delete` (J-CFG-provider-delete) removes the single live provider configuration this
-// build supports. Order matters and is asserted by the journey test: the stored secret is removed
-// FIRST, so a failure there aborts with the configuration still intact (recoverable) rather than
-// leaving an orphaned secret behind a deleted config (not recoverable without file access). Only
-// then is the mounted provider dismounted and the durable `provider.deleted` fact recorded.
+// `provider.delete` (J-CFG-provider-delete) removes any stored provider: its secret and its route.
+// Deleting the active provider also clears the live route (back to unconfigured); deleting another
+// stored provider leaves the active route running. Order matters and is asserted by the journey
+// test: the stored secret is removed FIRST, so a failure there aborts with the configuration still
+// intact (recoverable) rather than leaving an orphaned secret behind a deleted config (not
+// recoverable without file access). Only then is the mounted provider dismounted (active case) and
+// the durable `provider.deleted` fact recorded.
 //
 // `model.catalog` (J-CFG-model-catalog) discovers real model ids from the provider. It is read-only
 // and records no event. It never fabricates a list: an empty base URL, an unsupported protocol, a
 // transport failure or an unparseable body each return a specific reason the UI shows verbatim.
 // The API key is read server-side only and is never echoed, logged, or placed in an event.
-import { randomUUID } from "node:crypto";
 import type { Component, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
-import type { ModelWireProtocol, ProviderRegistry } from "../components/providerRegistry.ts";
+import { isKeylessRoute, type ModelAuthKind, type ModelWireProtocol, type ProviderRegistry } from "../components/providerRegistry.ts";
 import type { SecretStore } from "../secrets.ts";
-import { AGENT_CONFIG } from "../agents/agentConfig.ts";
-import { authHeaderValue, catalogRequest, parseModelIds, storedKeyTarget } from "../modelCatalog.ts";
+import { catalogRequest, requestModelList, storedKeyTarget } from "../modelCatalog.ts";
+import { readStoredRoutes, recordProviderFact } from "./providerSwitch.ts";
 
 export interface ProviderDeleteInput {
   readonly providerId: string;
@@ -27,6 +28,11 @@ export interface ModelCatalogInput {
   readonly baseURL: string;
   /** Optional. When absent the configured provider's stored key is used. Never returned. */
   readonly apiKey?: string;
+  /** Route options so an Azure or keyless draft is discovered the way it will run. */
+  readonly auth?: ModelAuthKind;
+  readonly apiVersion?: string;
+  /** Use this stored provider's saved key (only sent to its own saved base URL). Default: the active provider. */
+  readonly providerId?: string;
 }
 
 const SECRET_KEY = "model-provider:";
@@ -50,69 +56,42 @@ export function providerManageComponent(options: {
         if (typeof input.providerId !== "string" || input.providerId.trim().length === 0) {
           throw new Error("provider.delete: a non-empty providerId is required");
         }
-        const rows = (await options.getService().readProjection(options.systemCaller, { name: "model-config" })).rows;
-        // `readProjection` returns tenant-relative keys ("current", "record/x"), so match both the
-        // bare and the qualified form rather than assuming a prefix.
-        const current = rows.find((r) => r.key === "current" || r.key.endsWith("/current"))?.value as { readonly providerId?: string } | undefined;
-        // This build holds exactly one live configuration; deleting a provider that is not the
-        // configured one would silently do nothing, which is exactly the no-op the product forbids.
-        if (!current?.providerId) throw new Error("provider.delete: no provider is configured");
-        if (current.providerId !== input.providerId) {
-          throw new Error(`provider.delete: ${input.providerId} is not the configured provider`);
+        const stored = await readStoredRoutes(options.getService(), options.systemCaller);
+        const isActive = options.registry.current?.providerId === input.providerId;
+        if (stored.length === 0 && !options.registry.current) throw new Error("provider.delete: no provider is configured");
+        if (!stored.some((r) => r.providerId === input.providerId) && !isActive) {
+          throw new Error(`provider.delete: ${input.providerId} is not a stored provider`);
         }
         // Secret first: a throw here leaves the configuration intact and the key still present, so
         // the operator can simply retry. The reverse order cannot be undone from the UI.
         await options.secrets.delete(`${SECRET_KEY}${input.providerId}`);
-        // Dismount the live provider so no later generate call can resolve to a deleted route.
-        await options.registry.clear(`provider.delete: ${input.providerId}`);
-        await options.getService().startRun(options.systemCaller, {
-          agent: AGENT_CONFIG,
-          input: { kind: "provider.deleted", providerId: input.providerId },
-          idempotencyKey: randomUUID(),
-        });
+        // Dismount the live provider only when it is the one being deleted, so no later generate call
+        // can resolve to a deleted route; another stored provider's deletion leaves the active one.
+        if (isActive) await options.registry.clear(`provider.delete: ${input.providerId}`);
+        await recordProviderFact(options.getService(), options.systemCaller, { kind: "provider.deleted", providerId: input.providerId });
         return { ok: true, providerId: input.providerId };
       });
 
       fiber.provide(catalogContract, async (rawInput) => {
         const input = rawInput as ModelCatalogInput;
-        const plan = catalogRequest(input.protocol, input.baseURL);
+        const plan = catalogRequest(input.protocol, input.baseURL, { ...(input.auth ? { auth: input.auth } : {}), ...(input.apiVersion ? { apiVersion: input.apiVersion } : {}) });
         if (!plan.ok) return { ok: false as const, reason: plan.reason, models: [] as readonly string[] };
         // Resolve the key server-side. A typed key goes where the caller says; the saved key goes only to
         // the saved provider, so a caller cannot redirect it to a URL of their choosing.
         const typed = typeof input.apiKey === "string" && input.apiKey.trim().length > 0;
+        let key = typed ? input.apiKey! : "";
         if (!typed) {
-          const target = storedKeyTarget(options.registry.current, { baseURL: input.baseURL, protocol: input.protocol });
-          if (!target.ok) return { ok: false as const, reason: target.reason, models: [] as readonly string[] };
+          const saved = typeof input.providerId === "string" && input.providerId
+            ? (await readStoredRoutes(options.getService(), options.systemCaller)).find((r) => r.providerId === input.providerId)
+            : options.registry.current;
+          // A route that can run keyless (local server, auth none) needs no saved key to be listed.
+          const target = storedKeyTarget(saved, { baseURL: input.baseURL, protocol: input.protocol });
+          if (target.ok && saved) key = (await options.secrets.get(`${SECRET_KEY}${saved.providerId}`)) ?? "";
+          else if (!isKeylessRoute({ auth: input.auth, baseURL: input.baseURL })) return { ok: false as const, reason: target.ok ? "No provider is saved yet. Enter an API key to fetch models." : target.reason, models: [] as readonly string[] };
         }
-        const key = typed ? input.apiKey : await options.secrets.get(`${SECRET_KEY}${options.registry.current?.providerId ?? ""}`);
-        const headers: Record<string, string> = { accept: "application/json" };
-        const auth = authHeaderValue(plan, key ?? "");
-        if (auth) headers[plan.authHeader] = auth;
-        let response: Response;
-        try {
-          response = await fetch(plan.url, { method: "GET", headers, signal: AbortSignal.timeout(15_000) });
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          return { ok: false as const, reason: `Could not reach ${plan.url}: ${detail}`, models: [] as readonly string[] };
-        }
-        if (!response.ok) {
-          return {
-            ok: false as const,
-            reason: `${plan.url} responded ${response.status} ${response.statusText}. Check the base URL and API key.`,
-            models: [] as readonly string[],
-          };
-        }
-        let body: unknown;
-        try {
-          body = await response.json();
-        } catch {
-          return { ok: false as const, reason: "The provider returned a body this app could not read as JSON.", models: [] as readonly string[] };
-        }
-        const parsed = parseModelIds(body);
-        if (!parsed.ok) {
-          return { ok: false as const, reason: parsed.error, models: [] as readonly string[] };
-        }
-        return { ok: true as const, models: parsed.models };
+        const outcome = await requestModelList(plan, input.auth === "none" ? "" : key);
+        if (!outcome.ok) return { ok: false as const, reason: outcome.reason, models: [] as readonly string[] };
+        return { ok: true as const, models: outcome.models };
       });
     },
   };

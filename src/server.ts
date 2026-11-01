@@ -19,7 +19,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindProviderCapabilities, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -80,6 +80,7 @@ import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts"
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
 import { providerManageComponent } from "./capabilities/providerManage.ts";
+import { providerSwitchComponent } from "./capabilities/providerSwitch.ts";
 import { configPathComponent } from "./capabilities/configPath.ts";
 import { configFileComponent } from "./capabilities/configFile.ts";
 import { pluginInstallComponent } from "./capabilities/pluginInstall.ts";
@@ -263,6 +264,9 @@ const GRANTED_CAPABILITIES = [
   "git.checkout.recreate",
   "task.checkout.resolve",
   "provider.delete",
+  "provider.list",
+  "provider.activate",
+  "provider.test",
   "model.catalog",
   "config.path",
   "config.file.read",
@@ -430,6 +434,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
+  const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const governanceRefs = bindGovernanceCapabilities(domain);
@@ -681,6 +686,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       catalogSemanticRef: t11["model.catalog"],
     }),
   );
+  await runtime.kernel.mount(
+    providerSwitchComponent({
+      registry,
+      secrets,
+      getService,
+      systemCaller: SYSTEM_CALLER,
+      listSemanticRef: providerRefs["provider.list"],
+      activateSemanticRef: providerRefs["provider.activate"],
+      testSemanticRef: providerRefs["provider.test"],
+    }),
+  );
 
   // Re-mount the last-configured provider on boot (survives restart): `model.generate` is not
   // itself durable state, only the fact `model.configured` is (via `model-config`) — a run resumed
@@ -688,11 +704,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // it can call `model.generate` again.
   const modelConfigRows = ((await runtime.service.readProjection(LOCAL_OPERATOR, { name: "model-config" }))).rows;
   const currentModelConfig = modelConfigRows.find((r) => r.key === "current")?.value as
-    | { readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible"; readonly model: string; readonly prices?: { inputUsdPerMillion: number; outputUsdPerMillion: number } }
+    | { readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible"; readonly model: string; readonly prices?: { inputUsdPerMillion: number; outputUsdPerMillion: number }; readonly auth?: "bearer" | "none" | "api-key"; readonly apiVersion?: string; readonly displayName?: string }
     | undefined;
   if (currentModelConfig) {
     await registry.swap(
-      { providerId: currentModelConfig.providerId, baseURL: currentModelConfig.baseURL, protocol: currentModelConfig.protocol, model: currentModelConfig.model, ...(currentModelConfig.prices ? { prices: currentModelConfig.prices } : {}) },
+      { providerId: currentModelConfig.providerId, baseURL: currentModelConfig.baseURL, protocol: currentModelConfig.protocol, model: currentModelConfig.model, ...(currentModelConfig.prices ? { prices: currentModelConfig.prices } : {}), ...(currentModelConfig.auth ? { auth: currentModelConfig.auth } : {}), ...(currentModelConfig.apiVersion ? { apiVersion: currentModelConfig.apiVersion } : {}), ...(currentModelConfig.displayName ? { displayName: currentModelConfig.displayName } : {}) },
       secrets,
     );
   }
