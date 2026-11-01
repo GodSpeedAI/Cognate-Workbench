@@ -38,7 +38,7 @@ function Parent() {
 describe("remote dialog focus", () => {
   test("a parent re-render does not move focus away from a control inside the dialog", async () => {
     const ui = render(<Parent />);
-    const close = ui.getByRole("button", { name: "Close" });
+    const close = ui.getByRole("button", { name: "Close remote control" });
     await act(async () => {
       close.focus();
     });
