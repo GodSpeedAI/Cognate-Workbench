@@ -4,6 +4,7 @@
 //
 // Output (under dist-package/): a folder `cognate-workbench-<version>-<tag>/` laid out as
 //   bin/cognate-workbench            the compiled server (Bun runtime included)
+//   bin/cognate-workbench-desktop.exe  Windows only: the windowed launcher (no console, app icon)
 //   share/cognate-workbench/...      read-only resources, mirroring the checkout's paths
 //   share/cognate-workbench/bin/pg0  the pinned, checksum-verified PostgreSQL manager
 //   share/cognate-workbench/MANIFEST.json  sha256 of every shipped file plus provenance
@@ -83,6 +84,31 @@ await copyInto(join(repo, ".sea/interaction/interaction-model.sea"), join(share,
 const exe = join(prefix, "bin", `cognate-workbench${platform.exeSuffix}`);
 const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
 if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile failed for ${bunTarget}`);
+
+// 4b. Desktop integration. Windows: a second, windowed (GUI-subsystem, icon-bearing) executable whose only job is
+// `launch`; the console exe stays the CLI. Linux: a freedesktop launcher and icon in the archive's share/ tree.
+const icons = join(repo, "assets", "icons");
+if (win) {
+  const desktopExe = join(prefix, "bin", "cognate-workbench-desktop.exe");
+  const parts = pkg.version.split(/[.+-]/).slice(0, 3).map((n) => (/^\d+$/.test(n) ? n : "0"));
+  while (parts.length < 4) parts.push("0");
+  // Icon and version resources can only be written when compiling on Windows (the release runner); a
+  // cross-compile on another host still gets the GUI subsystem, just without them.
+  const resources = process.platform === "win32"
+    ? [`--windows-icon=${join(icons, "cognate-workbench.ico")}`, "--windows-title=Cognate Workbench", "--windows-publisher=GodSpeedAI", `--windows-version=${parts.join(".")}`, "--windows-description=Cognate Workbench"]
+    : [];
+  const desktop = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/desktop.ts"), "--outfile", desktopExe, "--windows-hide-console", ...resources], { cwd: repo, stdout: "inherit", stderr: "inherit" });
+  if ((await desktop.exited) !== 0) throw new Error(`package: bun build --compile (desktop) failed for ${bunTarget}`);
+}
+if (tag.startsWith("linux")) {
+  await copyInto(join(icons, "cognate-workbench-256.png"), join(prefix, "share", "icons", "hicolor", "256x256", "apps", "cognate-workbench.png"));
+  await mkdir(join(prefix, "share", "applications"), { recursive: true });
+  await writeFile(join(prefix, "share", "applications", "cognate-workbench.desktop"), [
+    "[Desktop Entry]", "Type=Application", "Name=Cognate Workbench", "Comment=Local capability-native agent workbench",
+    "Exec=cognate-workbench launch", "Icon=cognate-workbench", "Terminal=false", "Categories=Development;", "StartupWMClass=CognateWorkbench", "",
+  ].join("\n"));
+}
+if (tag.startsWith("darwin")) await copyInto(join(icons, "cognate-workbench-256.png"), join(share, "icons", "cognate-workbench.png"));
 
 // 5. pg0, fetched from the pinned release and verified before it is staged.
 const pg0Digest = PG0_DIGESTS[platform.pg0];

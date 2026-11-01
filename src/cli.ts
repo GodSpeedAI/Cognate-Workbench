@@ -11,6 +11,7 @@ import { pg0Info, pg0Sha256, prepareBundledDatabase, readRecord, bundledInstance
 import { setBundledDatabaseUrl } from "./store.ts";
 import { parseDevAuth, startServer } from "./server.ts";
 import { EXECUTION_POSTURE_ENV } from "./executionPosture.ts";
+import { findAppBrowser, launchAppWindow, openDefaultBrowser } from "./desktopWindow.ts";
 
 const LOCK_FILE = "server.lock";
 
@@ -85,7 +86,9 @@ async function assertPortFree(port: number): Promise<void> {
   }
 }
 
-async function start(): Promise<void> {
+interface Running { readonly url: string; readonly shutdown: (signal: string) => Promise<void> }
+
+async function start(): Promise<Running> {
   // The packaged pg0 binary is used unless the operator names another one.
   if (packaged) process.env.COGNATE_PG0_BIN ??= pg0Path();
   const port = Number(process.env.PORT ?? 3180);
@@ -137,6 +140,74 @@ async function start(): Promise<void> {
   } else {
     console.warn(`[cognate-workbench] execution: UNCONTAINED LOCAL — agents run commands and write files on this host as this user; path checks are not a sandbox (${EXECUTION_POSTURE_ENV}=uncontained-local)`);
   }
+  return { url: app.url, shutdown };
+}
+
+// ---- launch / stop ----
+
+const homeOf = (): string => process.env.COGNATE_WORKBENCH_HOME ?? process.env.COGNATE_HARNESS_HOME ?? defaultHome();
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** A window that exits this fast handed itself to an already-running browser instance on the same profile. */
+const HANDOFF_MS = 1500;
+
+/** The live Workbench that holds this data home, if its /health answers on the recorded port. */
+async function runningInstance(home: string): Promise<string | undefined> {
+  const prior = await readJson<{ pid: number; port: number }>(join(home, LOCK_FILE)).catch(() => undefined);
+  if (!prior || prior.pid === process.pid || !alive(prior.pid)) return undefined;
+  const url = `http://127.0.0.1:${prior.port}`;
+  try {
+    const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) });
+    return response.ok ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The desktop entry: one server per home, shown in its own application window; closing the window quits the server. */
+async function launch(): Promise<number> {
+  const home = homeOf();
+  const noWindow = process.env.COGNATE_NO_WINDOW === "1";
+  const browser = noWindow ? undefined : findAppBrowser(process.platform, process.env);
+
+  const existing = noWindow ? undefined : await runningInstance(home);
+  if (existing) {
+    console.log(`[cognate-workbench] already running at ${existing}; opening a window`);
+    if (browser) {
+      const window = launchAppWindow(browser, existing, home);
+      await Promise.race([window.exited, sleep(3000)]);
+      window.unref();
+    } else openDefaultBrowser(existing);
+    return 0;
+  }
+
+  const running = await start();
+  if (noWindow) return 0;
+  if (!browser) {
+    console.log(`[cognate-workbench] no Chromium-family browser found for an app window; opened the default browser. Run "cognate-workbench stop" to quit.`);
+    openDefaultBrowser(running.url);
+    return 0;
+  }
+  const opened = Date.now();
+  const code = await launchAppWindow(browser, running.url, home).exited;
+  if (Date.now() - opened < HANDOFF_MS) {
+    console.log(`[cognate-workbench] the window process exited after ${Date.now() - opened}ms (exit ${code}); it likely handed off to a running browser, so the server keeps running. Run "cognate-workbench stop" to quit.`);
+    return 0;
+  }
+  await running.shutdown("app window closed");
+  return 0;
+}
+
+/** Ask the Workbench holding this data home to stop. SIGTERM runs its clean shutdown on POSIX; on Windows
+ *  process.kill is forceful (no cleanup; the next start recovers the interrupted owner and reuses the database). */
+async function stop(): Promise<number> {
+  const prior = await readJson<{ pid: number; port: number }>(join(homeOf(), LOCK_FILE));
+  if (!prior || !alive(prior.pid)) {
+    console.log("cognate-workbench: not running");
+    return 0;
+  }
+  process.kill(prior.pid);
+  console.log(`cognate-workbench: asked pid ${prior.pid} (port ${prior.port}) to stop`);
+  return 0;
 }
 
 // ---- doctor ----
@@ -248,6 +319,9 @@ const USAGE = `cognate-workbench — Cognate Workbench local application
 
 Usage:
   cognate-workbench [start]     start the Workbench server (default)
+  cognate-workbench launch      start (or reuse) the Workbench in its own app window; closing the window quits
+                                (COGNATE_NO_WINDOW=1: like start; COGNATE_APP_BROWSER=<path>: choose the browser)
+  cognate-workbench stop        ask the running Workbench for this data home to stop (forceful on Windows)
   cognate-workbench doctor      report installation, database, posture and integration status
   cognate-workbench --version   print the version and build identity
   cognate-workbench --help      show this help
@@ -273,6 +347,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (rest.length > 0) throw new Error(`start takes no arguments (got ${rest.join(" ")})`);
     await start();
     return 0;
+  }
+  if (command === "launch" || command === "stop") {
+    if (rest.length > 0) throw new Error(`${command} takes no arguments (got ${rest.join(" ")})`);
+    return command === "launch" ? launch() : stop();
   }
   if (command === "doctor") {
     if (rest.length > 0) throw new Error(`doctor takes no arguments (got ${rest.join(" ")})`);
