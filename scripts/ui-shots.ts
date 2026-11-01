@@ -36,6 +36,9 @@ export interface ShotContext {
   readonly home: string;
   readonly viewport: ViewportName;
   readonly theme: Theme;
+  /** The app's capability client, for harness-side data hygiene (human session titles). */
+  readonly client?: Parameters<typeof inv>[0];
+  readonly readSessions?: () => Promise<readonly { readonly id: string; readonly title: string }[]>;
 }
 
 export interface ShotState {
@@ -102,6 +105,20 @@ async function runEditTurn(page: Page, ctx: ShotContext): Promise<void> {
   await box.fill("[[scenario:edit]] change the greeting");
   await box.press("Enter");
   await page.getByText(/Updated the greeting/).first().waitFor({ timeout: 30_000 });
+}
+
+/** The aimock scenario marker is test plumbing, not something a person would type. Real session titles derive
+ *  from the person's first prompt (trimmed to 60 chars, src/projections/sessions.ts); the harness renames
+ *  marker-titled sessions through the real `session.rename` capability so evidence reads like real use.
+ *  Rename any session still carrying a harness scenario marker, so product screenshots show human titles. */
+async function humanizeSessionTitles(page: Page, ctx: ShotContext): Promise<void> {
+  if (!ctx.client || !ctx.readSessions) return;
+  for (const row of await ctx.readSessions()) {
+    if (!row.title.includes("[[scenario:")) continue;
+    const human = row.title.replace(/\[\[scenario:[^\]]*\]\]\s*/, "").replace(/^./, (c) => c.toUpperCase());
+    await inv(ctx.client, "session.rename", { sessionId: row.id, title: human });
+  }
+  await settle(page, 600);
 }
 
 /** First-run shots share one home across viewports/themes, so Welcome may already be dismissed. */
@@ -626,11 +643,15 @@ async function main(): Promise<void> {
             const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" })).rows;
             return rows.some((r) => r.key === `record/${workspaceId}`) || undefined;
           });
-          for (let i = 0; i < 3; i++) await inv(client, "session.create", { workspaceId, requestId: crypto.randomUUID() });
+          const seeded: string[] = [];
+          for (let i = 0; i < 3; i++) seeded.push(((await inv(client, "session.create", { workspaceId, requestId: crypto.randomUUID() })) as { sessionId: string }).sessionId);
           await waitUntil("sessions visible", async () => {
             const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "sessions" })).rows;
             return rows.length >= 3 || undefined;
           });
+          // Two named conversations and one untitled draft, like a workspace in real use.
+          await inv(client, "session.rename", { sessionId: seeded[0]!, title: "Refactor the greeting helper" });
+          await inv(client, "session.rename", { sessionId: seeded[1]!, title: "Add API docs to the guide" });
         }
         for (const name of opts.states) {
           const state = STATES[name]!;
@@ -643,7 +664,12 @@ async function main(): Promise<void> {
               try {
                 await page.goto(app.url, { waitUntil: "load" });
                 await page.getByRole("button", { name: "Settings" }).first().waitFor({ timeout: 15_000 }).catch(() => undefined);
-                await state.setup(page, { repo, home, viewport: vp, theme });
+                const shotCtx: ShotContext = {
+                  repo, home, viewport: vp, theme, client,
+                  readSessions: async () => (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "sessions" })).rows.map((r) => ({ id: (r.value as { id: string }).id, title: (r.value as { title: string }).title })),
+                };
+                await state.setup(page, shotCtx);
+                await humanizeSessionTitles(page, shotCtx);
                 const file = join(opts.out, `${name}.${vp}.${theme}.png`);
                 await page.screenshot({ path: file });
                 if (process.env.UI_SHOTS_EVAL) console.log(`  EVAL ${name}.${vp}.${theme}: ${JSON.stringify(await page.evaluate(process.env.UI_SHOTS_EVAL))}`);
