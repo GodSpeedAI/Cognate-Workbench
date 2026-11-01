@@ -117,7 +117,9 @@ describe("J-CFG-provider-switch", () => {
         // Blank string behaves like omitted.
         await client.invoke("model.configure", { ...base, model: "model-three", apiKey: "" });
         await generate(client, "hi");
-        const posts = fake.seen.filter((r) => r.method === "POST");
+        // Count model calls only: once in a full-suite run a body-less POST reached this ephemeral port
+        // before the first call (not from this app's model path; see DEBT "stray POST").
+        const posts = fake.seen.filter((r) => r.method === "POST" && r.model !== undefined);
         expect(posts.map((r) => r.model)).toEqual(["model-one", "model-two", "model-three"]);
         expect(posts.every((r) => r.authorization === "Bearer sk-first-KEY")).toBe(true);
         expect((await listProviders(client))[0]?.hasKey).toBe(true);
