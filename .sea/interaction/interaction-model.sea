@@ -941,6 +941,19 @@ Instance j_cfg_config_edit of "CanonicalJourney" {
     variants: "invalid JSON is refused with line and column; an unknown settings key is refused by name; an invalid value refuses the whole edit, including valid sibling keys; a stale version is refused as a conflict; edits to the informational fields (schema, note, home, environment) are ignored and listed; an edit with no change succeeds and applies nothing; secret values are never in the text"
 }
 
+Instance j_secrets_storage of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "secrets.backend.describe, secret.put",
+    evidence_class: "declared",
+    initiating_condition: "The operator saves a provider API key, or opens Settings to see where keys are kept",
+    journey_id: "J-SECRETS-storage",
+    precondition: "The app has started and chosen a secret storage backend",
+    purpose: "Keep API keys in the operating system's secret store (Windows Credential Manager, Linux Secret Service, macOS Keychain) instead of a file, and say plainly which store is in use and why",
+    settlement: "Keys written by secret.put live only in the selected backend, scoped per data home; Settings can state the backend and, for a fallback, the reason; no secret value is in any event, projection, configuration export or capability result",
+    steps: "app starts -> the native store is probed -> it is selected, or the owner-only file is selected with a reason -> keys left in secrets.json are copied to the native store, verified by read-back, then the file is overwritten and removed -> the operator saves a key -> Settings shows the backend label",
+    variants: "native store selected; no Secret Service or a locked keychain so the owner-only file is used with a stated reason; COGNATE_SECRET_STORE forces file or native; migration from secrets.json succeeds and removes the file; migration read-back mismatch keeps the file; two data homes on one machine never share keys"
+}
+
 Instance j_plg_install of "CanonicalJourney" {
     actor: "User",
     capabilities: "plugin.install, plugin.uninstall",

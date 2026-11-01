@@ -94,7 +94,8 @@ import { subagentsProjection } from "./projections/subagents.ts";
 import { onboardingProjection } from "./projections/onboarding.ts";
 import { settingsProjection } from "./projections/settings.ts";
 import { sessionTraceProjection } from "./projections/sessionTrace.ts";
-import { secretStore } from "./secrets.ts";
+import { openSecretStore, secretScope, SECRET_SERVICE, secretBackendLabel } from "./secrets.ts";
+import { secretsBackendDescribeComponent } from "./capabilities/secretsBackendDescribe.ts";
 
 export const LOCAL_OPERATOR = { actor: { id: "operator", kind: "user" as const }, tenant: "local" };
 const SYSTEM_CALLER = { actor: { id: "system", kind: "system" as const }, tenant: "local" };
@@ -253,6 +254,7 @@ const GRANTED_CAPABILITIES = [
   "model.catalog",
   "config.path",
   "config.file.read",
+  "secrets.backend.describe",
   "config.file.apply",
   "plugin.catalog",
   "plugin.install",
@@ -396,8 +398,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   if (containmentConfig) containmentConfig = validateContainmentConfig(structuredClone(containmentConfig));
   await mkdir(home, { recursive: true });
   const store = storeConfigFor(home, "harness");
-  const secretsPath = join(home, "secrets.json");
-  const secrets = secretStore(secretsPath);
+  const opened = await openSecretStore(home);
+  const secrets = opened.store;
+  const secretsBackend = {
+    backend: opened.backend,
+    label: secretBackendLabel(opened.backend),
+    ...(opened.reason ? { reason: opened.reason } : {}),
+    location: opened.backend === "file" ? join(home, "secrets.json") : `${SECRET_SERVICE} (scope ${secretScope(home)})`,
+  };
 
   const domain = await loadDomain();
   const cognitiveRefs = bindCognitiveCapabilities(domain);
@@ -540,6 +548,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
+      secretsBackendDescribeComponent({ describe: () => secretsBackend, semanticRef: t11["secrets.backend.describe"] }),
       configFileComponent({ home, getService, systemCaller: SYSTEM_CALLER, readSemanticRef: t11["config.file.read"], applySemanticRef: t11["config.file.apply"] }),
       pluginInstallComponent({
         getService,

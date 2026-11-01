@@ -9,6 +9,7 @@ import { PG0_VERSION, POSTGRES_VERSION } from "../scripts/pg0-pins.ts";
 import { defaultHome, packaged, resourcePath } from "./resources.ts";
 import { pg0Info, pg0Sha256, prepareBundledDatabase, readRecord, bundledInstanceName, stopBundledDatabase } from "./pg0Launch.ts";
 import { setBundledDatabaseUrl } from "./store.ts";
+import { describeSecretBackend } from "./secrets.ts";
 import { parseDevAuth, startServer } from "./server.ts";
 import { EXECUTION_POSTURE_ENV } from "./executionPosture.ts";
 import { findAppBrowser, launchAppWindow, openDefaultBrowser } from "./desktopWindow.ts";
@@ -301,6 +302,14 @@ async function doctor(): Promise<number> {
   add("containment", bwrap ? `bubblewrap available at ${bwrap}` : "bubblewrap not found: contained agent execution is refused on this host (reported, not a failed install)");
   add("RealityTrace (sxr)", process.env.SXR_BIN ?? (Bun.which("sxr") ?? "not installed (observations stay queued)"), true);
   add("SEA-Forge governance", process.env.COGNATE_GOVERNANCE ?? "off", true);
+
+  // Secret storage: probe only (never reads or migrates keys).
+  try {
+    const info = await describeSecretBackend(home);
+    add("secret storage", `${info.label}${info.reason ? ` (${info.reason})` : ""}`, true);
+  } catch (error) {
+    add("secret storage", error instanceof Error ? error.message : String(error), false);
+  }
 
   const width = Math.max(...checks.map((c) => c.label.length));
   for (const check of checks) console.log(`${check.ok ? "  ok " : "  FAIL"} ${check.label.padEnd(width)}  ${check.value}`);
