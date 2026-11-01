@@ -53,7 +53,7 @@ export function ToastProvider({ children }: { readonly children: ReactNode }) {
       const id = nextId.current++;
       const durationMs = options?.durationMs ?? TOAST_MS;
       // Keep at most three on screen; the oldest yields to the newest.
-      setToasts((prev) => [...prev.slice(-2), { id, message, durationMs, ...(options?.action ? { action: options.action } : {}) }]);
+      setToasts((prev) => [...prev.slice(-1), { id, message, durationMs, ...(options?.action ? { action: options.action } : {}) }]);
       timers.current.set(id, setTimeout(() => dismiss(id), durationMs));
     },
     [dismiss],

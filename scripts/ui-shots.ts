@@ -32,6 +32,8 @@ type Theme = "light" | "dark";
 export interface ShotContext {
   /** Absolute path of the primary temp workspace. */
   readonly repo: string | undefined;
+  /** The app's protected data home (the temp home the server runs on). */
+  readonly home: string;
   readonly viewport: ViewportName;
   readonly theme: Theme;
 }
@@ -260,6 +262,52 @@ export const STATES: Record<string, ShotState> = {
       await settle(page, 600);
     },
   },
+  "f1-add-workspace-protected": {
+    tag: "f1", describe: "Add workspace with a path inside the app's protected home: plain refusal, no raw error", themes: ["light"],
+    setup: async (page, ctx) => {
+      let bad = 0;
+      page.on("response", (r) => { if (r.status() >= 400 && r.url().includes("/cognate.v1.")) bad += 1; });
+      await page.getByRole("button", { name: "Add workspace" }).click();
+      const dialog = page.getByRole("dialog", { name: "Add workspace" });
+      await dialog.waitFor();
+      const input = dialog.getByRole("combobox").or(dialog.getByRole("textbox")).first();
+      await input.pressSequentially(`${ctx.home}/sub`, { delay: 15 });
+      await settle(page, 600);
+      await dialog.getByRole("button", { name: /Choose workspace|Add|Open/ }).last().click().catch(() => undefined);
+      await settle(page, 800);
+      console.log(`  HTTP error responses while typing and submitting: ${bad}`);
+    },
+  },
+  "f1-experts-form": {
+    tag: "f1", describe: "Experts and Teams: New Expert form alignment", themes: ["light"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: "Experts and Teams", exact: true }).click();
+      await page.getByRole("button", { name: "New Expert" }).click();
+      await settle(page, 600);
+    },
+  },
+  "f1-experts-spending": {
+    tag: "f1", describe: "Experts and Teams: spending status", themes: ["light"],
+    setup: async (page) => { await page.getByRole("button", { name: "Experts and Teams", exact: true }).click(); await page.getByTestId("spending-status").scrollIntoViewIfNeeded(); await settle(page, 600); },
+  },
+  "f1-workbench-workflows": {
+    tag: "f1", describe: "Workbench Workflows tab (DAG inside its card)", themes: ["light"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: "Workbench", exact: true }).first().click();
+      await page.getByRole("tab", { name: "Workflows" }).click();
+      await settle(page, 800);
+    },
+  },
+  "f1-plugin-detail": {
+    tag: "f1", describe: "Plugins page: a plugin opened for detail", themes: ["light"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: "Plugins", exact: true }).first().click();
+      await settle(page, 600);
+      const row = page.locator(".plugin-row").first();
+      if (await row.count()) await row.click().catch(() => undefined);
+      await settle(page, 500);
+    },
+  },
   "t1b-running-turn": {
     tag: "t1b", describe: "Session with a running turn: context bar shows RUNNING", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
     setup: async (page, ctx) => {
@@ -407,7 +455,7 @@ export const STATES: Record<string, ShotState> = {
     },
   },
   "model-picker": {
-    tag: "u5", describe: "Composer model picker with three providers", themes: ["light", "dark"],
+    tag: "u5", describe: "Composer model picker with three providers", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
     setup: async (page) => {
       await page.getByRole("button", { name: /^Model / }).click();
       await page.getByRole("dialog", { name: "Switch model" }).getByRole("group", { name: "Ollama" }).waitFor();
@@ -416,15 +464,15 @@ export const STATES: Record<string, ShotState> = {
   },
   "agents-settings": { tag: "u5", describe: "Settings > Agents", viewports: ["desktop", "mobile"], setup: async (page) => { await openSettings(page, "Agents"); await page.locator('[data-harness="claude"]').waitFor(); await settle(page); } },
   "agent-chip-menu": {
-    tag: "u5", describe: "Composer Agent chip menu with Claude Code selected", themes: ["light", "dark"],
+    tag: "u5", describe: "Composer Agent chip menu open (Claude Code listed with its status)", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
     setup: async (page) => {
       await page.getByRole("button", { name: /^Agent: / }).click();
-      await page.getByRole("menuitemradio", { name: /^Claude Code/ }).click();
+      await page.getByRole("menuitemradio", { name: /^Claude Code/ }).waitFor();
       await settle(page, 400);
     },
   },
   "harness-approval": {
-    tag: "u5", describe: "Harness session mid-approval", themes: ["light", "dark"],
+    tag: "u5", describe: "Harness session mid-approval", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
     setup: async (page) => {
       await page.getByRole("button", { name: /^Agent: / }).click();
       await page.getByRole("menuitemradio", { name: /^Claude Code/ }).click();
@@ -437,7 +485,7 @@ export const STATES: Record<string, ShotState> = {
     },
   },
   "harness-auth-error": {
-    tag: "u5", describe: "Harness turn failed: sign-in hint", themes: ["light"],
+    tag: "u5", describe: "Harness turn failed: sign-in hint", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
     setup: async (page) => {
       await page.getByRole("button", { name: /^Agent: / }).click();
       await page.getByRole("menuitemradio", { name: /^Claude Code/ }).click();
@@ -565,7 +613,7 @@ async function main(): Promise<void> {
               try {
                 await page.goto(app.url, { waitUntil: "load" });
                 await page.getByRole("button", { name: "Settings" }).first().waitFor({ timeout: 15_000 }).catch(() => undefined);
-                await state.setup(page, { repo, viewport: vp, theme });
+                await state.setup(page, { repo, home, viewport: vp, theme });
                 const file = join(opts.out, `${name}.${vp}.${theme}.png`);
                 await page.screenshot({ path: file });
                 if (process.env.UI_SHOTS_EVAL) console.log(`  EVAL ${name}.${vp}.${theme}: ${JSON.stringify(await page.evaluate(process.env.UI_SHOTS_EVAL))}`);

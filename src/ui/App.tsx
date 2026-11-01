@@ -587,6 +587,14 @@ function ConnectModelNotice({ onConnect }: { readonly onConnect: () => void }) {
   );
 }
 
+/** A refused `workspace.select` in plain words: no capability name, no JSON envelope. */
+function workspaceErrorText(err: unknown): string {
+  const text = capabilityErrorMessage(err).replace(/^workspace\.select:\s*/, "");
+  const missing = /^not a directory in world \w+:\s*(.+)$/.exec(text);
+  if (missing) return `There is no folder at ${missing[1]}. Check the path, or pick one from the suggestions.`;
+  return text;
+}
+
 function WorkspaceChooser({ onConnectModel }: { readonly onConnectModel?: () => void }) {
   const client = useCognate();
   const [path, setPath] = useState("");
@@ -602,7 +610,7 @@ function WorkspaceChooser({ onConnectModel }: { readonly onConnectModel?: () => 
       await client.invoke("workspace.select", { path });
       setPath("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -763,7 +771,7 @@ export function ShortcutsPanel({
         await onChangeShortcuts({ [editingId]: chord });
         cancelEditing();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(workspaceErrorText(err));
       } finally {
         setSaving(false);
       }
@@ -778,7 +786,7 @@ export function ShortcutsPanel({
       await onChangeShortcuts(restoreDefaults());
       cancelEditing();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     } finally {
       setSaving(false);
     }
@@ -2718,7 +2726,7 @@ export function Composer({
           </button>
         )}
         {modelControl ?? (
-          <span className="composer-info-label" title="Model configured in Settings → Models">
+          <span className="composer-info-label" title="Model configured in Settings → Providers">
             {modelLabel ?? "No model"}
           </span>
         )}
@@ -3024,7 +3032,7 @@ export function LocalWorkspaceForm({
       await selectWorkspaceForExecution(invoke, path, mode, inspection);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
       setBusy(false);
     }
   }, [inspection, invoke, mode, onClose, path]);
@@ -3170,7 +3178,7 @@ function DeleteWorkspaceDialog({
       onClose();
     } catch (err) {
       setBusy(false);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     }
   }, [client, toast, workspace, onClose]);
   return (
@@ -3178,7 +3186,7 @@ function DeleteWorkspaceDialog({
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-heading" tabIndex={-1} ref={dialogRef}>
         <DialogHeader title={`Delete workspace "${workspace.title}"?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
         <p className="dialog-copy">
-          This removes <strong>{workspace.title}</strong> and its {workspace.sessionCount === 1 ? "1 conversation" : `${workspace.sessionCount} conversations`} from the sidebar. Files in <code>{workspace.root}</code> are not touched, and you can add the folder again later.
+          This removes <strong>{workspace.title}</strong>{workspace.sessionCount > 0 ? <> and its {workspace.sessionCount === 1 ? "1 conversation" : `${workspace.sessionCount} conversations`}</> : null} from the sidebar. Files in <code>{workspace.root}</code> are not touched, and you can add the folder again later.
         </p>
         {error && <p role="alert" className="form-error">{error}</p>}
         <div className="modal-actions">
@@ -3211,7 +3219,7 @@ function RenameWorkspaceDialog({
       toast.show("Workspace renamed");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     }
   }, [client, toast, workspace.id, title, onClose]);
   return (
@@ -3436,7 +3444,7 @@ export function PluginsPanelBody({
           <div className="plugin-detail-actions">
             {detail.id === "model-provider" && onOpenModelSettings && (
               <button type="button" className="btn-primary" onClick={onOpenModelSettings}>
-                Configure in Settings → Models
+                Configure in Settings → Providers
               </button>
             )}
             {detail.lifecycle === "optional" &&
@@ -3547,7 +3555,7 @@ function PluginsPanel({
       setCatalog(result);
       setRefreshedAt(new Date().toLocaleTimeString());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     } finally {
       setLoading(false);
     }
