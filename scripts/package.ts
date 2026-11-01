@@ -82,6 +82,12 @@ await copyInto(join(repo, ".sea/interaction/interaction-model.sea"), join(share,
 
 // 4. Compiled executable.
 const exe = join(prefix, "bin", `cognate-workbench${platform.exeSuffix}`);
+// The DomainForge npm package ships only the linux-x64 binding; other targets need it built first (see
+// .github/workflows/package.yml). Without it the exe compiles but crashes at startup, so stop here.
+const bindingFile = join(repo, "node_modules", "@godspeedai", "domainforge", `domainforge-core.${platform.binding}.node`);
+if (!existsSync(bindingFile)) {
+  throw new Error(`package: missing DomainForge binding ${bindingFile}; build it for ${platform.binding} first (see .github/workflows/package.yml)`);
+}
 const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
 if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile failed for ${bunTarget}`);
 
