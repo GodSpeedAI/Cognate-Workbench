@@ -55,10 +55,17 @@ export function keyStoreLabel(b: SecretsBackendDescription | undefined): string 
   return b?.label ?? "your system's secret store";
 }
 
+/** Technical detail behind the storage note (file location, why no system store); shown on request only. */
+export function storageDetail(b: SecretsBackendDescription | undefined): string | undefined {
+  if (!b || b.backend !== "file") return undefined;
+  const parts = [b.location ? `File: ${b.location}` : "", b.reason ? `No system store: ${b.reason}` : ""].filter(Boolean);
+  return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
 export function storageNote(b: SecretsBackendDescription | undefined): string {
   if (!b) return "API keys are kept in your system's secret store, never in the event log. The agent never sees them.";
   if (b.backend === "file") {
-    return `API keys are stored in a protected file on this computer${b.location ? ` (${b.location})` : ""}, not in a system secret store${b.reason ? `: ${b.reason}` : ""}. The agent never sees them.`;
+    return "API keys are stored in a protected file on this computer, not in a system secret store. The agent never sees them.";
   }
   return `API keys go straight to ${b.label}. The agent never sees them.`;
 }

@@ -1424,6 +1424,7 @@ input:focus-visible {
   margin-bottom: 10px;
 }
 
+.message-body:empty { display: none; }
 .message-failed .message-body {
   color: var(--cg-danger);
   background: var(--cg-danger-bg);
@@ -4888,8 +4889,8 @@ body.is-col-resizing .resize-handle:active::after {
 @media (max-width: 640px) { .pw-preset-desc { display: none; } .pw-preset { padding: 8px; } .first-run-wide { padding: 16px; } .first-run-wide .pw-actions { margin: 0 -16px -16px; padding: 12px 16px; bottom: -16px; } }
 
 /* ---------- Provider error: retry card, retry disclosure, failure block (J-H-provider-error) ---------- */
-.retry-card, .failure-block { margin: 8px 0; padding: 12px 14px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-md, 10px); background: var(--cg-surface); display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
-.retry-card { border-left: 3px solid var(--cg-warning, #b7791f); }
+.retry-card, .failure-block { margin: 8px 0; padding: 12px 14px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-md, 10px); background: var(--cg-surface); display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+.retry-card { border-color: color-mix(in oklch, var(--cg-warning, #b7791f) 55%, var(--cg-border)); }
 .retry-card-title, .failure-title { margin: 0; font-weight: 600; font-size: 13.5px; color: var(--cg-text); }
 .retry-card-error, .failure-message { margin: 0; font-size: 13px; line-height: 1.5; color: var(--cg-text); overflow-wrap: anywhere; }
 .retry-card-code, .failure-code { font: 11px var(--cg-font-mono); color: var(--cg-text-muted); }
@@ -4898,7 +4899,8 @@ body.is-col-resizing .resize-handle:active::after {
 .retry-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .retry-card-btn, .failure-retry { padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); background: var(--cg-surface); color: var(--cg-text); font: inherit; font-size: 12.5px; cursor: pointer; }
 .retry-card-btn:hover, .failure-retry:hover { background: var(--cg-hover); }
-.failure-block { border-left: 3px solid var(--cg-danger); background: var(--cg-danger-bg); }
+.failure-block { border-color: color-mix(in oklch, var(--cg-danger) 40%, var(--cg-border)); background: var(--cg-danger-bg); }
+.failure-message code { font: 12px var(--cg-font-mono); padding: 0 4px; border-radius: 4px; background: color-mix(in oklch, var(--cg-danger) 10%, transparent); }
 .failure-title { color: var(--cg-danger); }
 .retry-disclosure { margin: 4px 0; }
 .retry-disclosure-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border: 0; background: none; color: var(--cg-text-muted); font: inherit; font-size: 12.5px; cursor: pointer; border-radius: var(--cg-radius-sm); }
@@ -5030,3 +5032,59 @@ body.is-col-resizing .resize-handle:active::after {
 .pw-actions button:disabled, .pw-model-row button:disabled { opacity: 0.55; cursor: not-allowed; }
 .pw-actions .pw-primary:not(:disabled) { background: var(--cg-accent-interactive); color: var(--cg-accent-interactive-contrast); border-color: var(--cg-accent-interactive); }
 .session-agent-tag { padding: 2px 4px; }
+
+/* ---------- "Files changed during this turn" card ---------- */
+.turn-changes {
+  margin-top: 10px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-sm, 8px);
+  background: var(--cg-surface-sunken);
+  overflow: hidden;
+  max-width: 100%;
+}
+.turn-changes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cg-border);
+  font-size: 13px;
+}
+.turn-changes-title { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-changes-stat { font-family: var(--cg-font-mono, ui-monospace, monospace); font-size: 12px; white-space: nowrap; }
+.turn-changes-open {
+  min-height: 32px; padding: 4px 12px; border: 1px solid var(--cg-border-strong, var(--cg-border)); border-radius: 8px;
+  background: var(--cg-surface-raised, transparent); color: var(--cg-text); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.turn-changes-open:hover { background: var(--cg-hover); }
+.turn-changes-open:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: 1px; }
+.turn-changes-tree { list-style: none; margin: 0; padding: 4px 0; }
+.turn-changes-dir {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px; font-size: 12px; color: var(--cg-text-muted);
+}
+.turn-changes-dir svg, .turn-changes-file svg { width: 14px; height: 14px; flex-shrink: 0; }
+.turn-changes-file {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 5px 12px; border: 0; background: transparent; color: var(--cg-text);
+  font-size: 13px; text-align: left; cursor: pointer; min-height: 30px;
+}
+.turn-changes-file:hover { background: var(--cg-hover); }
+.turn-changes-file:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: -2px; }
+.turn-changes-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-changes-when { font-weight: 400; color: var(--cg-text-muted); }
+.prov-storage-detail { margin-top: 4px; font-size: 12px; color: var(--cg-text-muted); }
+.prov-storage-detail summary { cursor: pointer; min-height: 24px; display: inline-flex; align-items: center; }
+.prov-storage-detail pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; font-family: var(--cg-font-mono, monospace); }
+.model-picker-retry { border: 0; background: none; padding: 0 2px; min-height: 24px; font-size: 12px; color: var(--cg-accent-interactive); text-decoration: underline; cursor: pointer; }
+/* One focus ring on the picker search: the border carries it, no second outline. */
+.model-picker-search:focus-visible { outline: none; border-color: var(--cg-accent-interactive, var(--cg-accent)); box-shadow: 0 0 0 2px color-mix(in oklch, var(--cg-accent-interactive, var(--cg-accent)) 30%, transparent); }
+/* The wizard footer is sticky: keep focused or scrolled-to controls clear of it. */
+.first-run-wide, .first-run-dialog { scroll-padding-bottom: 88px; }
+/* A row that needs you spends its width on the title and the badge: drop the timestamp and the
+ * agent glyph (the composer already names the agent) so the title keeps a readable minimum. */
+.session-row:has(.approval-badge) .session-row-time,
+.session-row:has(.approval-badge) .session-agent-tag { display: none; }
+.session-row .session-row-title { min-width: 9ch; }
+.settings-tech-details { margin-top: 4px; font-size: 12px; color: var(--cg-text-muted); }
+.settings-tech-details summary { cursor: pointer; min-height: 24px; display: inline-flex; align-items: center; }

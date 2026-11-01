@@ -186,6 +186,8 @@ interface ChatMessage {
   readonly retryCount?: number;
   /** The last successful `edit` tool call this turn made, if any (`10-file-change-*`). */
   readonly editSummary?: EditSummary;
+  /** Every file this turn changed (last successful edit per path): feeds the "Files changed" card. */
+  readonly editSummaries?: readonly EditSummary[];
   /** Step count for this turn — `useToolTimeline(activeRunId).length + 1` at finalize time (the
    *  `+1` is the model's own generation step, present even with zero tool calls or on a cancelled
    *  turn) — feeds the composer footer's "N turns M steps" counter. Critic round-2 batch A P1:
@@ -1774,11 +1776,15 @@ function HarnessFailureHint({ code, message }: { readonly code: string; readonly
 /** T11 (J-H-provider-error): the terminal failure block — exactly "This turn failed" / message /
  *  a `code` badge (reference-behavior-matrix.md §8). No manual "Retry"/"Dismiss" button; the composer
  *  stays available underneath to start a new message. */
-function FailureBlock({ code, message, onRetry }: { readonly code: string; readonly message: string; readonly onRetry?: () => void }) {
+function FailureBlock({ code, message: rawMessage, onRetry }: { readonly code: string; readonly message: string; readonly onRetry?: () => void }) {
+  const { harnesses } = useHarnessList();
+  // The sign-in hint is shown once, in its own line; do not also repeat it inside the failure message.
+  const hintOwner = code === "AUTH_REQUIRED" ? harnesses?.find((x) => rawMessage.includes(x.label)) : undefined;
+  const message = hintOwner && hintOwner.signInHint && rawMessage.includes(hintOwner.signInHint) ? rawMessage.replace(hintOwner.signInHint, "").trim() : rawMessage;
   return (
     <div className="failure-block" role="alert">
       <p className="failure-title">This turn failed</p>
-      <p className="failure-message">{message}</p>
+      <p className="failure-message">{message.split(/(`[^`]+`)/g).map((part, i) => part.startsWith("`") && part.endsWith("`") && part.length > 2 ? <code key={i}>{part.slice(1, -1)}</code> : part)}</p>
       {(code === "AUTH_REQUIRED" || code === "HARNESS_UNAVAILABLE") && <HarnessFailureHint code={code} message={message} />}
       <div className="retry-card-actions">
         {code && <span className="failure-code">{code}</span>}
@@ -2089,6 +2095,65 @@ function EditDiff({
   );
 }
 
+/** "Files changed during this turn": one card per agent turn that edited files, with the total
+ *  +/- counts, a folder tree of the changed files and "Open diff" (opens the inspector Changes tab on
+ *  that file). Built from the same edit summaries the transcript already folds. */
+function TurnChangesCard({
+  summaries,
+  turnNumber,
+  onOpenReview,
+}: {
+  readonly summaries: readonly EditSummary[];
+  readonly turnNumber: number;
+  readonly onOpenReview: (summary: EditSummary, turnNumber: number) => void;
+}) {
+  const additions = summaries.reduce((n, item) => n + item.additions, 0);
+  const deletions = summaries.reduce((n, item) => n + item.deletions, 0);
+  const sorted = [...summaries].sort((a, b) => a.file_path.localeCompare(b.file_path));
+  const rows: { readonly kind: "dir" | "file"; readonly depth: number; readonly name: string; readonly summary?: EditSummary }[] = [];
+  const seenDirs = new Set<string>();
+  for (const item of sorted) {
+    const parts = item.file_path.split("/").filter(Boolean);
+    for (let depth = 0; depth < parts.length - 1; depth += 1) {
+      const dir = parts.slice(0, depth + 1).join("/");
+      if (!seenDirs.has(dir)) { seenDirs.add(dir); rows.push({ kind: "dir", depth, name: parts[depth]! }); }
+    }
+    rows.push({ kind: "file", depth: parts.length - 1, name: parts[parts.length - 1] ?? item.file_path, summary: item });
+  }
+  return (
+    <section className="turn-changes" aria-label="Files changed during this turn">
+      <header className="turn-changes-head">
+        <span className="turn-changes-title">
+          {summaries.length === 1 ? "1 file changed" : `${summaries.length} files changed`}<span className="turn-changes-when"> this turn</span>
+        </span>
+        <span className="turn-changes-stat"><span className="diff-add">+{additions}</span> <span className="diff-del">-{deletions}</span></span>
+        <button type="button" className="turn-changes-open" onClick={() => onOpenReview(sorted[0]!, turnNumber)}>Open diff</button>
+      </header>
+      <ul className="turn-changes-tree">
+        {rows.map((row, index) => row.kind === "dir" ? (
+          <li key={`d${index}`} className="turn-changes-dir" style={{ paddingLeft: 12 + row.depth * 16 }}>
+            <FolderIcon aria-hidden="true" /><span>{row.name}</span>
+          </li>
+        ) : (
+          <li key={`f${index}`}>
+            <button
+              type="button"
+              className="turn-changes-file"
+              style={{ paddingLeft: 12 + row.depth * 16 }}
+              aria-label={`View changes to ${row.summary!.file_path}: +${row.summary!.additions} -${row.summary!.deletions}`}
+              onClick={() => onOpenReview(row.summary!, turnNumber)}
+            >
+              <FileIcon aria-hidden="true" />
+              <span className="turn-changes-name">{row.name}</span>
+              <span className="turn-changes-stat"><span className="diff-add">+{row.summary!.additions}</span> <span className="diff-del">-{row.summary!.deletions}</span></span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** The Review split-diff panel (critic round-2 batch B P0, `10-file-change-expanded`; layout and
  *  view controls completed in T11): a right-hand pane beside the chat with a real tab strip (open,
  *  switch and close file changes), layout controls (split / fullscreen / collapse), three view
@@ -2109,8 +2174,8 @@ export function ReviewPanel({
 }) {
   const [tabs, setTabs] = useState<readonly ReviewTab[]>([initialTab]);
   const [activeKey, setActiveKey] = useState(initialTab.key);
-  const [view, setView] = useState<"list" | "split" | "code">("split");
-  const [lineWrap, setLineWrap] = useState(false);
+  const [view, setView] = useState<"list" | "split" | "code">("list"); // unified reads in the narrow inspector; split is one click away
+  const [lineWrap, setLineWrap] = useState(true);
   const [showLocation, setShowLocation] = useState(false);
   const [addTabOpen, setAddTabOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<undefined | "more">(undefined);
@@ -2857,9 +2922,11 @@ function MessageBubble({
       <div className="message-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
       <CodeBlocks containerRef={bodyRef} />
       <AuthorityNotice steps={message.steps} />
-      {message.editSummary && onOpenReview && (
+      {onOpenReview && (message.editSummaries?.length ?? 0) > 0 ? (
+        <TurnChangesCard summaries={message.editSummaries!} turnNumber={turnNumber ?? 1} onOpenReview={onOpenReview} />
+      ) : message.editSummary && onOpenReview ? (
         <EditDiff summary={message.editSummary} turnNumber={turnNumber ?? 1} onOpenReview={onOpenReview} />
-      )}
+      ) : null}
       {message.failed && message.failureMessage && <FailureBlock code={message.failureCode ?? ""} message={message.failureMessage} {...(onRetry ? { onRetry } : {})} />}
       {!message.failed && !message.streaming && (
         <div className="message-actions">
@@ -4418,8 +4485,7 @@ function AppShell() {
   const availableReviewTabs = useMemo(
     () =>
       transcript
-        .map((message, index) => (message.editSummary ? reviewTabKey(message.editSummary, index + 1) : undefined))
-        .filter((tab): tab is ReviewTab => tab !== undefined),
+        .flatMap((message, index) => (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => reviewTabKey(summary, index + 1))),
     [transcript],
   );
   const openReviewPanel = useCallback(
@@ -5084,7 +5150,13 @@ function AppShell() {
       // The last successful `edit` this turn made, if any (`10-file-change-collapsed`/`-expanded`).
       const lastEdit = [...toolEntries].reverse().find((e) => e.tool === "edit" && e.status === "success");
       const editSummary = lastEdit ? (lastEdit.result as EditSummary | undefined) : undefined;
-      setTranscript((prev) => [...prev, { role: "assistant", content: streaming.text, at, tookMs, editSummary, stepCount: toolEntries.length + 1, steps: toolEntries }]);
+      const byPath = new Map<string, EditSummary>();
+      for (const entry of toolEntries) {
+        const result = entry.tool === "edit" && entry.status === "success" ? (entry.result as EditSummary | undefined) : undefined;
+        if (result?.file_path) byPath.set(result.file_path, result);
+      }
+      const editSummaries = [...byPath.values()];
+      setTranscript((prev) => [...prev, { role: "assistant", content: streaming.text, at, tookMs, editSummary, ...(editSummaries.length > 0 ? { editSummaries } : {}), stepCount: toolEntries.length + 1, steps: toolEntries }]);
       setActiveRunId(undefined);
     } else if (streaming.status === "cancelled") {
       // T11 (J-H-cancellation): the partial streamed text is kept, not discarded, with a "Stopped"
@@ -5863,7 +5935,7 @@ function AppShell() {
             <p className="cf-h">File changes in this session</p>
             <ul className="inspector-list">
               {transcript.flatMap((message, index) =>
-                message.editSummary ? [{ summary: message.editSummary, turn: index + 1 }] : [],
+                (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => ({ summary, turn: index + 1 })),
               ).map(({ summary, turn }) => (
                 <li key={`${turn}-${summary.file_path}`}>
                   <button type="button" className="inspector-list-row" onClick={() => setOpenReview({ summary, turnNumber: turn })}>

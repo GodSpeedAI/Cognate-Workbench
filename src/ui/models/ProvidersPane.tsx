@@ -7,7 +7,7 @@ import { CheckIcon, ChevronDownIcon, ChevronRightIcon, EditIcon, PlusIcon, Shiel
 import { useToast } from "../shell/Toast.tsx";
 import { ProviderWizard, type ProviderTestOutcome, type ProviderWizardInitial } from "./ProviderWizard.tsx";
 import { capabilityErrorMessage, wireToProtocol } from "./providerCatalog.ts";
-import { keyStoreLabel, storageNote, useProviderList, useSecretsBackend, type StoredProvider } from "./useProviders.ts";
+import { keyStoreLabel, storageDetail, storageNote, useProviderList, useSecretsBackend, type StoredProvider } from "./useProviders.ts";
 
 export interface ProvidersWizardRequest {
   /** Edit the active provider instead of adding a new one. */
@@ -133,7 +133,9 @@ export function ProvidersPane({ startWizard }: { readonly startWizard?: Provider
     <>
       <p className="prov-storage" data-storage-backend={backend?.backend ?? "unknown"}>
         <ShieldIcon aria-hidden="true" />
-        <span>{storageNote(backend)}</span>
+        <span>{storageNote(backend)}
+          {storageDetail(backend) && <details className="prov-storage-detail"><summary>Details</summary><pre>{storageDetail(backend)}</pre></details>}
+        </span>
       </p>
       {providers === undefined ? (
         <p className="empty-state small" role="status">Loading providers…</p>

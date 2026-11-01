@@ -63,3 +63,12 @@
 .cfg-btn:disabled { opacity: 0.5; cursor: default; }
 .cfg-btn-primary:disabled { opacity: .5; }
 .cfg-btn-primary { background: var(--cg-accent); border-color: var(--cg-accent); color: var(--cg-accent-contrast); }
+
+/* Long lines scroll sideways: keep the scrollbar always visible (not overlay) and fade the right
+ * edge so clipped values read as "more to the right", not as truncated content. */
+.cv-textarea, .cv { scrollbar-width: auto; scrollbar-color: color-mix(in oklch, var(--cg-graphite-ink) 40%, transparent) transparent; }
+.cv-textarea::-webkit-scrollbar, .cv::-webkit-scrollbar { height: 10px; width: 10px; }
+.cv-textarea::-webkit-scrollbar-thumb, .cv::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--cg-graphite-ink) 35%, transparent); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+.cv-textarea::-webkit-scrollbar-track, .cv::-webkit-scrollbar-track { background: transparent; }
+.cv-edit { position: relative; }
+.cv-edit::after { content: ""; position: absolute; top: 0; right: 0; bottom: 10px; width: 20px; pointer-events: none; background: linear-gradient(to right, transparent, color-mix(in oklch, var(--cg-graphite) 85%, transparent)); }

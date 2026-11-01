@@ -56,10 +56,56 @@ async function openSettings(page: Page, section?: string): Promise<void> {
   await settle(page);
 }
 
+/** WCAG contrast of every visible, enabled button/link/input text against its effective background. */
+async function auditContrast(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const cv = document.createElement("canvas"); cv.width = cv.height = 1;
+    const cx = cv.getContext("2d", { willReadFrequently: true })!;
+    const rgba = (c: string): [number, number, number, number] => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = "#000"; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; return [d[0]!, d[1]!, d[2]!, d[3]! / 255]; };
+    const lum = (r: number, g: number, b: number) => { const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    const bgOf = (el: Element): [number, number, number] => {
+      const layers: [number, number, number, number][] = [];
+      for (let e: Element | null = el; e; e = e.parentElement) { const a = rgba(getComputedStyle(e).backgroundColor); if (a[3] > 0) { layers.push(a); if (a[3] >= 1) break; } }
+      let base: [number, number, number] = rgba(getComputedStyle(document.body).backgroundColor).slice(0, 3) as [number, number, number];
+      if (layers.length && layers[layers.length - 1]![3] >= 1) base = layers.pop()!.slice(0, 3) as [number, number, number];
+      for (const l of layers.reverse()) base = [0, 1, 2].map((i) => l[i]! * l[3] + base[i]! * (1 - l[3])) as [number, number, number];
+      return base;
+    };
+    const out: string[] = [];
+    let checked = 0;
+    for (const el of document.querySelectorAll("button, a[href], [role=button], [role=tab], input:not([type=checkbox]):not([type=radio]), select")) {
+      const h = el as HTMLElement;
+      if ((h as HTMLButtonElement).disabled || h.getAttribute("aria-disabled") === "true") continue;
+      const r = h.getBoundingClientRect(); if (r.width < 4 || r.height < 4 || getComputedStyle(h).visibility === "hidden") continue;
+      const txt = (h.textContent ?? "").trim() || (h as HTMLInputElement).placeholder || ""; if (!txt) continue;
+      checked += 1;
+      const st = getComputedStyle(h); const fg = rgba(st.color); const bg = bgOf(h);
+      const fgc = [0, 1, 2].map((i) => fg[i]! * fg[3] + bg[i]! * (1 - fg[3])) as [number, number, number];
+      const L1 = lum(...fgc), L2 = lum(...bg); const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      if (ratio < 4.5) out.push(`${ratio.toFixed(2)}:1 "${txt.slice(0, 30)}" <${h.tagName.toLowerCase()} class="${h.className.toString().slice(0, 40)}"> at ${Math.round(r.x)},${Math.round(r.y)}`);
+    }
+    out.push(`(checked ${checked} controls)`);
+    return out;
+  });
+}
+
+async function runEditTurn(page: Page, ctx: ShotContext): Promise<void> {
+  // Every state edits the same file; restore it so each capture starts from the same content.
+  if (ctx.repo) await writeFile(join(ctx.repo, "src", "greet.ts"), "export const greet = () => 'Hello, world';\n");
+  if (ctx.viewport === "mobile") await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await page.getByRole("button", { name: "New Session" }).first().click();
+  await settle(page, 400);
+  if (ctx.viewport === "mobile") await page.keyboard.press("Escape");
+  const box = page.getByRole("textbox", { name: /Message or run a task/ });
+  await box.fill("[[scenario:edit]] change the greeting");
+  await box.press("Enter");
+  await page.getByText(/Updated the greeting/).first().waitFor({ timeout: 30_000 });
+}
+
 /** First-run shots share one home across viewports/themes, so Welcome may already be dismissed. */
 async function continueIfWelcome(page: Page): Promise<void> {
   await page.getByRole("dialog").waitFor({ timeout: 4000 }).catch(() => undefined);
-  const btn = page.getByRole("button", { name: "Continue" });
+  const btn = page.getByRole("button", { name: "Continue", exact: true });
   if (await btn.count()) await btn.click();
 }
 
@@ -198,6 +244,20 @@ export const STATES: Record<string, ShotState> = {
     setup: async (page) => {
       await page.getByRole("button", { name: /^Task:/ }).click();
       await settle(page, 200);
+    },
+  },
+  // f1: a real agent turn that edits a file (aimock `[[scenario:edit]]`: read, then edit src/greet.ts).
+  "f1-turn-changes": {
+    tag: "f1", describe: "After an edit turn: the 'Files changed during this turn' card in the conversation", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
+    setup: async (page, ctx) => { await runEditTurn(page, ctx); await page.getByRole("region", { name: "Files changed during this turn" }).waitFor(); await settle(page, 500); },
+  },
+  "f1-diff-view": {
+    tag: "f1", describe: "Inspector Changes tab populated: the diff opened from the card's Open diff", themes: ["light", "dark"],
+    setup: async (page, ctx) => {
+      await runEditTurn(page, ctx);
+      await page.getByRole("region", { name: "Files changed during this turn" }).getByRole("button", { name: "Open diff" }).click();
+      await page.locator(".review-right-panel, .review-panel").first().waitFor();
+      await settle(page, 600);
     },
   },
   "t1b-running-turn": {
@@ -432,6 +492,7 @@ async function makeRepo(parent: string, name: string): Promise<string> {
   const files: Record<string, string> = {
     "README.md": `# ${name}\n\nSample workspace for screenshots.\n`,
     "package.json": JSON.stringify({ name, version: "0.0.1" }, null, 2),
+    "src/greet.ts": "export const greet = () => 'Hello, world';\n",
     "src/index.ts": "export const hello = () => 'hello';\n",
     "src/ui/App.tsx": "export const App = () => null;\n",
     "src/ui/theme/tokens.css": ":root { --accent: #2f6feb; }\n",
@@ -458,11 +519,12 @@ async function main(): Promise<void> {
   if (unknown.length > 0) throw new Error(`unknown state(s): ${unknown.join(", ")}`);
   await mkdir(opts.out, { recursive: true });
   const scratch = await mkdtemp(join(tmpdir(), "ui-shots-"));
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] }); // real scrollbars show in evidence, as they do for users
   try {
     const u5 = opts.states.some((n) => STATES[n]!.tag === "u5");
+    const needsAimock = u5 || opts.states.some((n) => STATES[n]!.tag === "f1");
     const fake = u5 ? await makeFakeHost() : undefined;
-    const aimock = u5 ? await bootAimock() : undefined;
+    const aimock = needsAimock ? await bootAimock() : undefined;
     await withTempHome(async (home) => {
       const { app, client } = u5 ? await bootHarnessApp(home, fake!) : await bootApp(home);
       let repo: string | undefined;
@@ -472,7 +534,7 @@ async function main(): Promise<void> {
           await inv(client, "model.configure", { providerId: "openrouter", baseURL: "https://openrouter.ai/api/v1", protocol: "openai-compatible", model: "openai/gpt-4.1-mini", apiKey: "sk-or-demo", displayName: "OpenRouter" });
           await inv(client, "model.configure", { providerId: "ollama", baseURL: url, protocol: "openai-compatible", model: "qwen3-coder:30b", auth: "none", displayName: "Ollama" });
           await inv(client, "model.configure", { providerId: "work-gateway", baseURL: url, protocol: "openai-compatible", model: "gpt-4.1", apiKey: "sk-demo", displayName: "Work gateway" });
-        } else if (opts.model) await inv(client, "model.configure", { providerId: "mock", baseURL: "http://127.0.0.1:59999/v1", protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
+        } else if (opts.model) await inv(client, "model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock?.port ?? 59999}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
         if (opts.onboardingDismiss) {
           await inv(client, "onboarding.dismiss", { step: "notice" });
           await inv(client, "onboarding.dismiss", { step: "apikey" });
@@ -506,9 +568,11 @@ async function main(): Promise<void> {
                 await state.setup(page, { repo, viewport: vp, theme });
                 const file = join(opts.out, `${name}.${vp}.${theme}.png`);
                 await page.screenshot({ path: file });
+                if (process.env.UI_SHOTS_EVAL) console.log(`  EVAL ${name}.${vp}.${theme}: ${JSON.stringify(await page.evaluate(process.env.UI_SHOTS_EVAL))}`);
+                if (process.env.UI_SHOTS_CONTRAST) for (const line of await auditContrast(page)) console.log(`  CONTRAST ${name}.${vp}.${theme}: ${line}`);
                 console.log(`wrote ${file}${errors.length ? `  (page errors: ${errors.join(" | ")})` : ""}`);
               } catch (error) {
-                console.error(`FAILED ${name} ${vp} ${theme}: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
+                console.error(`FAILED ${name} ${vp} ${theme}: ${error instanceof Error ? error.message.split("\n").slice(0, 8).join(" | ") : String(error)}`);
                 await page.screenshot({ path: join(opts.out, `FAILED-${name}.${vp}.${theme}.png`) }).catch(() => undefined);
                 process.exitCode = 1;
               } finally {

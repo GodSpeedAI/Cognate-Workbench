@@ -166,7 +166,7 @@ export function CognitiveFrame({ awaitingDecision }: { readonly awaitingDecision
   };
 
   if (!caseId || !derived) {
-    return <InspectorEmpty title="No case in focus" hint="When a case is open, its destination, recorded checks, next move and settlement appear here." />;
+    return <InspectorEmpty title="Nothing in focus" hint="Pick a task to see its goal, checks and next step here." />;
   }
   const c = derived.case;
   const settledHash = derived.settledHead ?? c.baseWorldHash;

@@ -39,6 +39,7 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [catalogs, setCatalogs] = useState<Readonly<Record<string, Models>>>({});
+  const [retryTick, setRetryTick] = useState(0);
   const [switching, setSwitching] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const fetched = useRef<Set<string>>(new Set());
@@ -86,20 +87,29 @@ export function ModelPicker({
       setCatalogs((c) => ({ ...c, [p.providerId]: { state: "loading" } }));
       void (async () => {
         try {
-          const r = (await client.invoke("model.catalog", {
-            providerId: p.providerId,
-            protocol: p.protocol,
-            baseURL: p.baseURL,
-            ...(p.auth ? { auth: p.auth } : {}),
-            ...(p.apiVersion ? { apiVersion: p.apiVersion } : {}),
-          } as never)) as unknown as ModelCatalogResult;
+          // A host that never answers must not leave "Loading" up: give the lookup 8 seconds, then fail with a retry.
+          const r = (await Promise.race([
+            client.invoke("model.catalog", {
+              providerId: p.providerId,
+              protocol: p.protocol,
+              baseURL: p.baseURL,
+              ...(p.auth ? { auth: p.auth } : {}),
+              ...(p.apiVersion ? { apiVersion: p.apiVersion } : {}),
+            } as never),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("The provider did not answer in time.")), 8000)),
+          ])) as unknown as ModelCatalogResult;
           setCatalogs((c) => ({ ...c, [p.providerId]: r.ok ? { state: "ready", models: r.models } : { state: "failed", reason: r.reason } }));
         } catch (err) {
           setCatalogs((c) => ({ ...c, [p.providerId]: { state: "failed", reason: capabilityErrorMessage(err) } }));
         }
       })();
     }
-  }, [open, providers, client]);
+  }, [open, providers, client, retryTick]);
+
+  const retryCatalog = useCallback((p: StoredProvider) => {
+    fetched.current.delete(`${p.providerId}|${p.baseURL}|${p.protocol}`);
+    setRetryTick((n) => n + 1);
+  }, []);
 
   const q = query.trim().toLowerCase();
   const groups = useMemo(() => {
@@ -207,8 +217,15 @@ export function ModelPicker({
                       </button>
                     );
                   })}
-                  {cat?.state === "loading" && <p className="model-picker-empty">Loading models…</p>}
-                  {cat?.state === "failed" && <p className="model-picker-empty" title={cat.reason}>Couldn't list models. {models.length ? "Showing the saved one." : ""}</p>}
+                  {cat?.state === "loading" && (models.length > 0
+                    ? <p className="model-picker-empty model-picker-note">Checking for more models…</p>
+                    : <p className="model-picker-empty">Loading models…</p>)}
+                  {cat?.state === "failed" && (
+                    <p className="model-picker-empty" title={cat.reason}>
+                      Couldn't list this provider's models. {models.length ? "Showing the saved one. " : ""}
+                      <button type="button" className="model-picker-retry" onClick={() => retryCatalog(p)}>Retry</button>
+                    </p>
+                  )}
                   {!usable && <p className="model-picker-empty">No key stored. Add it in Providers.</p>}
                 </div>
               );

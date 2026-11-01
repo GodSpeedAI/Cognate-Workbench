@@ -128,7 +128,7 @@ function GovernanceAuthority() {
       ) : (
         <p className="settings-description">
           Workbench decides its own approvals. To let an external SEA-Forge service decide instead, enable it when the host starts.{" "}
-          <span className="settings-tech">COGNATE_GOVERNANCE=sea-forge · docs/sea-forge-authority.md</span>
+          <TechNote>COGNATE_GOVERNANCE=sea-forge · docs/sea-forge-authority.md</TechNote>
         </p>
       )}
     </section>
@@ -163,7 +163,7 @@ function GovernanceSettlement({ current, currentError }: { readonly current: Pro
       ) : (
         <p className="settings-description">
           Settlement is off: completed work is not being recorded with an outside reality check. Enable SEA-Forge governance and configure the RealityTrace tool when the host starts to turn it on.{" "}
-          <span className="settings-tech">COGNATE_GOVERNANCE=sea-forge · COGNATE_REALITYTRACE_BIN · COGNATE_REALITYTRACE_DATA_HOME · COGNATE_REALITYTRACE_STATE_HOME · docs/sea-forge-authority.md</span>
+          <TechNote>COGNATE_GOVERNANCE=sea-forge · COGNATE_REALITYTRACE_BIN · COGNATE_REALITYTRACE_DATA_HOME · COGNATE_REALITYTRACE_STATE_HOME · docs/sea-forge-authority.md</TechNote>
         </p>
       )}
     </section>
@@ -226,12 +226,12 @@ function ProofDeclaration({ workspaceId, current, onDeclared }: { readonly works
           </button>
         </div>
       ) : (
-        <p className="settings-subtitle">Command proofs are turned off: this host accepts only SWE_SEED contracts. <span className="settings-tech">COGNATE_PROOF_SOURCE=swe_seed</span></p>
+        <p className="settings-subtitle">Command proofs are turned off: this host accepts only SWE_SEED contracts. <TechNote>COGNATE_PROOF_SOURCE=swe_seed</TechNote></p>
       )}
       <div role="tabpanel" id="proof-panel" aria-labelledby={commandAllowed ? `proof-tab-${tab}` : undefined}>
         {tab === "contract" ? (
           <>
-            {!current.sweSeedConfigured && <p className="settings-subtitle">The SWE_SEED tool is not set up on this host, so a contract cannot be declared yet. <span className="settings-tech">COGNATE_SWE_SEED_BIN</span></p>}
+            {!current.sweSeedConfigured && <p className="settings-subtitle">The SWE_SEED tool is not set up on this host, so a contract cannot be declared yet. <TechNote>COGNATE_SWE_SEED_BIN</TechNote></p>}
             <label>
               Spec path (relative to the workspace)
               <input value={specPath} onChange={(e) => setSpecPath(e.currentTarget.value)} placeholder="eval/spec.toml" required />
@@ -402,5 +402,15 @@ export function GovernancePane({ workspaceId }: { readonly workspaceId: string |
       <GovernanceSettlement current={current} currentError={error} />
       <GovernanceProof workspaceId={workspaceId} current={current} error={error} onDeclared={onDeclared} />
     </>
+  );
+}
+
+/** Host setup names (environment variables, doc paths) stay out of the way until asked for. */
+function TechNote({ children }: { readonly children: React.ReactNode }) {
+  return (
+    <details className="settings-tech-details">
+      <summary>Host setup details</summary>
+      <span className="settings-tech">{children}</span>
+    </details>
   );
 }
