@@ -3038,10 +3038,11 @@ export function LocalWorkspaceForm({
       setModeState("contained");
     }
   }, [containmentAvailable, inspection?.executionPosture, modeChosen]);
-  const containmentReason = inspectionError ?? inspection?.reason ??
-    (inspection?.platformSupported === false ? "Linux child containment is unavailable on this platform." :
-      inspection?.configured === false ? "Linux child containment is not configured by the host." :
-        "Checking host support…");
+  // Plain words first: the host's own reason is for logs, not for this form.
+  const containmentReason = inspectionError ??
+    (inspection?.platformSupported === false ? "Contained mode needs Linux, so it isn't available on this computer." :
+      inspection?.configured === false ? "Contained mode isn't set up on this computer. Choose Local to open the folder." :
+        inspection?.reason ?? "Checking host support…");
   const containmentLimits = inspection?.limits
     ? ` Wall-time limit: ${Math.ceil(inspection.limits.timeoutMs / 1000)} seconds; output limit: ${(inspection.limits.maxOutputBytes / (1024 * 1024)).toFixed(1)} MiB.`
     : "";

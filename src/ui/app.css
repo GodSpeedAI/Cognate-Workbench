@@ -5159,7 +5159,8 @@ body.is-col-resizing .resize-handle:active::after {
 .remote-diag-events-title { margin: 4px 0 0; color: var(--cg-text-muted); }
 .remote-diag-events { list-style: none; margin: 0; padding: 0; max-height: 96px; overflow-y: auto; font-family: var(--cg-font-mono, monospace); font-size: 11.5px; }
 .remote-diag-events time { color: var(--cg-text-faint); }
-.remote-diag button { align-self: flex-start; }
+.remote-diag button { align-self: flex-start; min-height: 30px; padding: 0 12px; border-radius: var(--cg-radius-md); border: 1px solid var(--cg-border-strong); background: var(--cg-surface-raised); color: var(--cg-text); font: inherit; cursor: pointer; }
+.remote-diag button:hover { background: var(--cg-surface-hover, var(--cg-surface-raised)); border-color: var(--cg-accent, var(--cg-border-strong)); }
 
 /* Files: with a file open, a wide inspector shows the tree beside it (split); a narrow one shows the file alone. */
 .ft { container-type: inline-size; container-name: ft; }
