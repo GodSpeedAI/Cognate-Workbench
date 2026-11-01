@@ -62,7 +62,7 @@ settlement is still unsettled until the human acts.
 
 - **Actor/intention**: OperatorAgent records verification or world-lineage facts while observation
   delivery is enabled.
-- **Preconditions/affordance**: configured runtime outbox; `world.freeze`, `verification.run`.
+- **Preconditions/affordance**: configured runtime outbox; `world.freeze`, `verification.run`; read side `observation.status` (delivery state per event) and `observation.record` (the correlated record), both bound to the `VerificationObservation` resource.
 - **Transition/output**: durable event and observation intent are correlated, delivered, and queried
   through the existing RealityTrace adapter.
 - **Evidence/settlement**: accepted or duplicate observer status links back to the original durable
@@ -813,6 +813,26 @@ were added to the model before any implementation existed (model-first rule).
 - **Executable evidence**: `test/J-SESSION-draft-contract.red.test.ts`,
   `test/E2E-workspace-session-ux.red.test.ts`.
 
+### J-WS-delete (`j_ws_delete`)
+
+- **Actor/intention**: User. The operator removes a project from the sidebar without touching its files.
+- **Preconditions/affordance**: the workspace exists in the `workspaces` projection. Capability `workspace.delete` (bound to `WorkspaceRecord`); the sessions leave the list through `session.archived` events recorded by the same `agent.config` run.
+- **Steps**: workspace actions -> Delete workspace -> confirmation names the workspace and says its files are not touched -> Cancel keeps everything / Delete workspace records the deletion -> the workspace and its sessions leave the list -> toast names the removed workspace.
+- **Decision (model first)**: deleting a workspace archives its non-archived sessions. Archiving is reversible and deletes no turn, run or event, so history stays; without it the sessions would remain in the `sessions` projection pointing at a record that no longer exists.
+- **Evidence/settlement**: record gone, current pointer cleared if it was current, folder and files untouched, the workspace's sessions archived, other workspaces' sessions unchanged, unknown workspace refused.
+- **Known variants**: cancel keeps the workspace; deleting the current workspace; no sessions; mixed archived and active sessions; re-adding the same folder later creates a fresh record.
+- **Evidence class**: observed.
+- **Executable evidence**: `test/J-WS-delete.test.ts` (server), `test/E2E-ui-production.test.ts` ("J-WS-delete E2E ...", confirmation dialog).
+
+### J-H-provider-error (`j_h_provider_error`)
+
+- **Actor/intention**: User. A turn is sent while the model provider fails (HTTP error, refused connection, DNS failure, timeout).
+- **Preconditions/affordance**: a configured provider and a session with a workspace. The native agent owns the retry loop (the provider adapters do not retry), 1 attempt plus 5 retries, delay `MODEL_RETRY_BACKOFF_MS` (default 300 ms).
+- **Transition/output**: every failed attempt records `model.request.retried` at once with `{attempt, maxAttempts, maxRetries, delayMs, errorCode, message, baseURLHost, error:{code,message}}`. `errorCode` is one of `HTTP_<status>`, `TIMEOUT`, `CONNECTION_REFUSED`, `DNS_FAILED`, `NETWORK_ERROR`. `message` is fixed human text (no provider detail, no secret); `baseURLHost` is `host[:port]` of the provider base URL, empty when unknown. After the last attempt `turn.failed` carries `{code, message, baseURLHost?}` and the run ends `failed`.
+- **Evidence/settlement**: the planned delay and the wait are recorded steps, so a restart resumes without repeating events. Budget refusals fail at once without retries.
+- **Evidence class**: observed.
+- **Executable evidence**: `test/J-H-provider-error.test.ts` (HTTP 500, retry-then-recover, replay across restart, connection refused on three protocols with the first retry event inside 2 s), `test/J-AIM-aimock.test.ts`.
+
 ### J-WS-directory-discovery (`j_ws_directory_discovery`)
 
 - **Actor/intention**: User browses project directories without typing an entire absolute path.
@@ -1172,7 +1192,8 @@ New in this pass; `evidence_class: proposed` until the tests below are observed 
 - **Policy/authority**: Posture labels: `harness-own-sandbox`, `harness-bridged-approvals`, `harness-uncontained` (full access). GUARANTEE GAPS: per-tool `authority.check`, containment of the CLI's tool effects, protected-evidence blocking and settlement as `agent.coding` do NOT apply; evidence is what the CLI self-reports. The CLI process is launched by an explicit host-process runner on the local world only (framework gap: the execution port has no streaming/stdin); remote, contained, SSH and WSL workspaces are refused; SEA-Forge governance on refuses binding. The child environment is an allowlist, never the Workbench's provider credentials.
 - **Evidence/settlement**: Binding is a durable `session.harness.bound` event folded by the public `session-harness-bindings` projection; turns are ordinary runs correlated `session:<id>`.
 - **Failure/recovery/next**: Binding while a run is active is refused; a restart mid-turn ends the turn as session-lost.
-- **Executable evidence**: `test/J-HARNESS-session.test.ts`.
+- **Remote variant**: a turn sent from the paired phone to a harness-bound Session starts `agent.harness` (never `agent.coding`); a turn already running is refused with `harness-busy` and a readable message instead of being steered; the phone may answer the CLI's `tool-approval`. Evidence `test/J-HARNESS-remote.test.ts`.
+- **Executable evidence**: `test/J-HARNESS-session.test.ts`, `test/J-HARNESS-remote.test.ts`.
 
 ### J-HARNESS-approval (`j_harness_approval`)
 

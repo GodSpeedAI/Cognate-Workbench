@@ -332,6 +332,30 @@ export function bindTranche11(domain: Domain) {
 }
 
 /**
+ * Conformance gaps closed (2026-10-31 conformance record, items 9-11). Each capability that was
+ * registered and granted without a `semanticRef` is anchored explicitly:
+ * - `onboarding.dismiss` on `UserPreferences` (the durable first-run progress is an operator
+ *   preference) -- J-A-first-use
+ * - `execution.wsl.list` on `ExecutionWorld`, beside `process.exec` and `execution.world.connect`
+ *   (it enumerates the places a WSL world can be connected) -- J-RW-select-world
+ * - `observation.status` / `observation.record` on the `VerificationObservation` resource -- the
+ *   read side of J-COG-realitytrace (delivery status and the correlated record)
+ */
+export const CONFORMANCE_GAP_ANCHORS: Readonly<Record<string, string>> = {
+  "onboarding.dismiss": "UserPreferences",
+  "execution.wsl.list": "ExecutionWorld",
+  "observation.status": "VerificationObservation",
+  "observation.record": "VerificationObservation",
+};
+
+export function bindConformanceGaps(domain: Domain) {
+  const bindings = Object.entries(CONFORMANCE_GAP_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} conformance-gap contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}
+
+/**
  * Native Experts & Teams capability bindings. Each contract is explicitly published by the
  * Experts, model-routing or commitment component. Semantic policies do not grant authority;
  * the mutation boundary validates permissions and commits native shared thread state with CAS.

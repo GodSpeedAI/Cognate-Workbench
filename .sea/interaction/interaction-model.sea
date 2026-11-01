@@ -571,6 +571,19 @@ Instance j_h_cancellation of "CanonicalJourney" {
     variants: "user-initiated cancel vs injected provider-side failure (connection_reset, stream_disconnect, partial_disconnect, server_error, script_exhausted)"
 }
 
+Instance j_h_provider_error of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "model.generate, session.retry",
+    evidence_class: "observed",
+    initiating_condition: "A turn is sent while the configured model provider is failing: an HTTP error, a refused connection, an unresolvable host or a timeout",
+    journey_id: "J-H-provider-error",
+    precondition: "A model provider is configured and a session has a workspace",
+    purpose: "Make every failed model attempt visible at once with its cause and how long until the next attempt, and end the turn with a readable failure when attempts run out",
+    settlement: "Each failed attempt records a model.request.retried event immediately (attempt, maxAttempts, delayMs, errorCode, a human-readable message with no secret, and the provider host) and the wait before the next attempt is itself a recorded step; after the last attempt the turn ends with turn.failed carrying a readable message and the run is failed; a replayed or restarted run reports each attempt once; a cancelled run stops retrying",
+    steps: "operator sends a turn -> the agent calls the model -> the attempt fails -> the failure is classified into an error code and a readable message and recorded with the planned delay -> the agent waits the recorded delay and tries again -> after the last attempt the turn is recorded as failed",
+    variants: "HTTP 500 from the provider; connection refused; host name not resolved; request timed out; a transient failure that recovers on a later attempt completes the turn; a budget refusal fails at once without retries; an operator restart in the middle of the waits resumes the sequence without repeating events"
+}
+
 // ── Remote Workspaces (T1) ────────────────────────────────────────────────────────────────────
 // These ten journeys are the interaction model for the execution-world abstraction. They are
 // framework-level journeys (they apply to any Cognate app with workspaces), modeled here because
@@ -578,7 +591,7 @@ Instance j_h_cancellation of "CanonicalJourney" {
 // keep their meaning, and now settle against whichever world the selected workspace references.
 Instance j_rw_select_world of "CanonicalJourney" {
     actor: "User",
-    capabilities: "world.register, world.list, world.select",
+    capabilities: "world.register, world.list, world.select, execution.wsl.list",
     evidence_class: "proposed",
     initiating_condition: "The user wants a workspace that does not execute on the local machine",
     journey_id: "J-RW-select-world",
@@ -586,7 +599,7 @@ Instance j_rw_select_world of "CanonicalJourney" {
     purpose: "Make an execution location available to the app as a first-class, selectable world",
     settlement: "The world is registered, listed with a stable id and kind, and selectable; no workspace has been added yet",
     steps: "user declares a world (kind + provider configuration, including a secret reference rather than a secret) -> the provider validates what it can without performing work -> the world is registered and listed -> the user can select it when adding a workspace",
-    variants: "local world (always available, no configuration); ssh world (host, user, auth reference, host-key policy, optional jump chain); a world whose provider is missing fails closed and is listed as unavailable rather than silently falling back to local"
+    variants: "local world (always available, no configuration); ssh world (host, user, auth reference, host-key policy, optional jump chain); a world whose provider is missing fails closed and is listed as unavailable rather than silently falling back to local; wsl world (execution.wsl.list enumerates the distributions installed on this machine so one can be chosen)"
 }
 
 Instance j_rw_contained_workspace of "CanonicalJourney" {
@@ -1049,7 +1062,7 @@ Instance j_cog_search of "CanonicalJourney" {
 
 Instance j_cog_realitytrace of "CanonicalJourney" {
     actor: "OperatorAgent",
-    capabilities: "world.freeze, verification.run",
+    capabilities: "world.freeze, verification.run, observation.status, observation.record",
     evidence_class: "observed",
     initiating_condition: "RealityTrace observation delivery is enabled and a Case emits verification or world-lineage facts",
     precondition: "The runtime observation outbox is configured and the event has a durable identity",
@@ -1442,6 +1455,19 @@ Instance j_ws_files_browse of "CanonicalJourney" {
     variants: "binary file shows no text; large file shows the first 512 KiB flagged truncated; symlink entries are listed but not followed outside the root; an unreadable path explains itself"
 }
 
+Instance j_ws_delete of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.delete, session.setArchived",
+    evidence_class: "observed",
+    initiating_condition: "The operator no longer wants a project in the sidebar and chooses Delete workspace from its actions",
+    journey_id: "J-WS-delete",
+    precondition: "The workspace exists in the workspaces projection",
+    purpose: "Remove a workspace from the app without touching the project's files, and keep its conversations out of the working list",
+    settlement: "The workspace record is gone from the workspaces projection (and the current pointer is cleared if it was current); the project folder and its files on disk are untouched; the workspace's sessions are archived so they leave the working list while their turns, runs and events stay in history; the UI asked for confirmation first, said files are not touched, and confirmed the removal",
+    steps: "operator opens the workspace actions -> chooses Delete workspace -> a confirmation names the workspace and says its files are not touched -> Cancel keeps everything; Delete workspace records the deletion -> the workspace and its sessions leave the list -> a confirmation toast names the removed workspace",
+    variants: "cancel keeps the workspace; deleting the current workspace returns the app to the no-workspace state; a workspace with no sessions; a workspace with archived and active sessions archives only the active ones; an unknown workspace is refused; re-adding the same folder later creates a fresh record"
+}
+
 Instance j_ws_directory_discovery of "CanonicalJourney" {
     actor: "User",
     capabilities: "workspace.directory.suggest, workspace.select",
@@ -1715,7 +1741,7 @@ Instance j_harness_session of "CanonicalJourney" {
     purpose: "Run a turn through the CLI and fold what it reports into the same transcript, tool timeline and usage events the native agent produces, labelled with a truthful posture",
     settlement: "The binding is a durable explicit operator choice per Session, labelled harness-own-sandbox, harness-bridged-approvals or harness-uncontained; each turn runs the CLI process in the workspace folder with a minimal environment that carries no Workbench provider credentials; streamed text, tool calls (file edits with diffs when the CLI reports them), usage and the final message are recorded as the same domain events the native agent emits; the CLI's own session id is recorded so the next turn resumes it; a CLI failure ends the turn as a failed turn with a readable message; a binding to a remote, contained, SSH or WSL workspace is refused with the reason; binding is refused while a run is active; binding back to native is explicit and durable",
     steps: "operator binds the Session to a harness with a permission mode and optional model -> session.harness.bind validates the CLI, the world and idleness and records the binding -> the operator sends a turn to the harness agent -> the agent drives the CLI through recorded advance steps -> events fold into the transcript -> the CLI's session id is recorded",
-    variants: "binding back to native; changing the permission mode or model between turns; a second turn resumes the CLI's own session; replay of a recorded turn reuses recorded outputs and never respawns the CLI; a server restart in the middle of a turn ends the turn as session-lost rather than repeating the CLI's effects. Guarantee gaps stated: per-tool authority checks, containment of the CLI's tool effects, protected-evidence blocking and settlement as agent.coding do not apply; evidence is what the CLI self-reports; cost is unknown unless the CLI reports tokens"
+    variants: "binding back to native; changing the permission mode or model between turns; a turn sent from the paired phone to a bound Session starts the harness agent, never the native one, a turn already in progress is refused on the phone with a readable reason rather than steered, and the phone may answer the CLI's permission request; a second turn resumes the CLI's own session; replay of a recorded turn reuses recorded outputs and never respawns the CLI; a server restart in the middle of a turn ends the turn as session-lost rather than repeating the CLI's effects. Guarantee gaps stated: per-tool authority checks, containment of the CLI's tool effects, protected-evidence blocking and settlement as agent.coding do not apply; evidence is what the CLI self-reports; cost is unknown unless the CLI reports tokens"
 }
 
 Instance j_harness_approval of "CanonicalJourney" {

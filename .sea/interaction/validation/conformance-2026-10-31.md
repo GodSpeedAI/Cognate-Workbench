@@ -18,9 +18,9 @@ capability ids in `GRANTED_CAPABILITIES` (`src/server.ts`) and the 87 `journey_i
 | 6 | Handoff recorded bindings for only some capabilities; 49 of 82 granted ids absent | "Capability binding register" added to `handoff.md` listing every granted literal id, its anchor table and its journeys | fixed |
 | 7 | Source translation map had no record of the PandaCode UI adoption or divergences | donor mapping table and divergence list added | fixed |
 | 8 | `J-DESKTOP-launch`, palette and inspector tests not named after the journey id | `describe`/`test` titles prefixed with the journey id in `test/J-DESKTOP-launch.test.ts`, `test/ui-shell.test.tsx`, `test/ui-inspector-tabs.test.tsx` (naming only) | fixed |
-| 9 | `onboarding.dismiss` granted and registered, but no `semanticRef` and no anchor in `domain/index.ts` | recorded in handoff "Open binding gaps"; `domain/index.ts` and `src/server.ts` are outside this pass | OPEN |
-| 10 | `execution.wsl.list` has no binding (siblings `execution.world.*` do) | recorded | OPEN |
-| 11 | `observation.status`, `observation.record` have no binding and no journey | recorded | OPEN |
+| 9 | `onboarding.dismiss` granted and registered, but no `semanticRef` and no anchor in `domain/index.ts` | recorded in handoff "Open binding gaps"; `domain/index.ts` and `src/server.ts` are outside this pass | fixed 2026-11-01: bound in `CONFORMANCE_GAP_ANCHORS` (`domain/index.ts`), wired in `src/server.ts` |
+| 10 | `execution.wsl.list` has no binding (siblings `execution.world.*` do) | recorded | fixed 2026-11-01: bound in `CONFORMANCE_GAP_ANCHORS` (`domain/index.ts`), wired in `src/server.ts` |
+| 11 | `observation.status`, `observation.record` have no binding and no journey | recorded | fixed 2026-11-01: bound in `CONFORMANCE_GAP_ANCHORS` (`domain/index.ts`), wired in `src/server.ts` |
 | 12 | `J-A-first-use` has no test named after it; `test/E2E-onboarding.test.ts` covers it but belongs to the agent doing the onboarding rework | catalog cites the file and flags the naming; that agent should put `J-A-first-use` in the `describe` title | OPEN |
 | 13 | No test named after `J-WB-focus`, `J-TEAM-CONVERSE`, `J-TEAM-SETTLEMENT` (older, cited by other files, not renamed here) | recorded in assumptions | OPEN |
 | 14 | `J-PKG-*` (7 journeys) have no `test/` file | by design: evidence is installed-archive qualification (catalog states this); not an unmet claim | accepted |

@@ -442,7 +442,7 @@ semantic entity and the exported table in `domain/index.ts`.
 | `execution.world.connect` | named in (domain/index.ts:231) | none (support capability) |
 | `execution.world.disconnect` | named in (domain/index.ts:233) | none (support capability) |
 | `execution.world.probe` | named in (domain/index.ts:234) | none (support capability) |
-| `execution.wsl.list` | **UNBOUND** | none (support capability) |
+| `execution.wsl.list` | ExecutionWorld (CONFORMANCE_GAP_ANCHORS) | J-RW-select-world |
 | `experiment.round` | Experiment (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
 | `experiment.status` | Experiment (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
 | `git.branch.list` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-BIND |
@@ -461,9 +461,9 @@ semantic entity and the exported table in `domain/index.ts`.
 | `model.catalog` | ModelProvider (TRANCHE11_ANCHORS) | J-A-first-use, J-CFG-model-provider, J-CFG-model-catalog |
 | `model.configure` | named in (domain/index.ts:84) | J-A-first-use, J-CFG-model-provider |
 | `model.generate` | named in (domain/index.ts:82) | none (support capability) |
-| `observation.record` | **UNBOUND** | none (support capability) |
-| `observation.status` | **UNBOUND** | none (support capability) |
-| `onboarding.dismiss` | **UNBOUND** | J-A-first-use |
+| `observation.record` | VerificationObservation (CONFORMANCE_GAP_ANCHORS) | J-COG-realitytrace |
+| `observation.status` | VerificationObservation (CONFORMANCE_GAP_ANCHORS) | J-COG-realitytrace |
+| `onboarding.dismiss` | UserPreferences (CONFORMANCE_GAP_ANCHORS) | J-A-first-use |
 | `plan.state` | named in (domain/index.ts:141) | J-RUN-task-attribution |
 | `plugin.catalog` | shares the `Plugin` anchor of `plugin.install` (`catalogSemanticRef ?? installSemanticRef` in `src/capabilities/pluginInstall.ts`) | none (support capability) |
 | `plugin.install` | Plugin (TRANCHE11_ANCHORS) | J-PLG-install |
@@ -506,7 +506,7 @@ semantic entity and the exported table in `domain/index.ts`.
 | `ui.request` | AttentionFocus (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-attention |
 | `verification.run` | Verification (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup, J-COG-liveverify |
 | `workspace.contained.select` | named in (domain/index.ts:232) | J-RW-contained-workspace, J-RW-AGGREGATE-CONTAINMENT |
-| `workspace.delete` | named in (domain/index.ts:210) | none (support capability) |
+| `workspace.delete` | named in (domain/index.ts:210) | J-WS-delete |
 | `workspace.directory.suggest` | ExecutionWorld (RED_JOURNEY_ANCHORS) | J-WS-directory-discovery |
 | `workspace.file.read` | WorkspaceRecord (RED_JOURNEY_ANCHORS) | J-WS-files-browse, J-UI-inspector |
 | `workspace.files.list` | WorkspaceRecord (RED_JOURNEY_ANCHORS) | J-WS-files-browse, J-UI-inspector |
@@ -532,15 +532,18 @@ host-process runner (`src/agents/harness/hostProcess.ts`) exists because the Cog
 cannot stream or take stdin (`.agents/DEBT.md`, `framework-gap-streaming-process.md`).
 
 
-### Open binding gaps (not fixed here; `domain/index.ts` and `src/server.ts` are outside this pass)
+### Binding gaps closed (2026-11-01)
 
-- `onboarding.dismiss` is registered and granted but carries no `semanticRef`. Proposed anchor:
-  `UserPreferences` (or a `FirstRunProgress` resource) via `domain/index.ts`, passed to
-  `onboardingDismissComponent`.
-- `execution.wsl.list` is the only execution-world probe without a binding; propose the same
-  `ExecutionWorld` anchor as `execution.world.probe`.
-- `observation.status` and `observation.record` are read-side RealityTrace capabilities with no
-  journey and no binding; the nearest journey is `J-COG-realitytrace`.
+`CONFORMANCE_GAP_ANCHORS` in `domain/index.ts` (bound by `bindConformanceGaps`, wired in `src/server.ts`)
+now anchors `onboarding.dismiss` on `UserPreferences`, `execution.wsl.list` on `ExecutionWorld`, and
+`observation.status` / `observation.record` on the `VerificationObservation` resource. Journeys:
+`J-A-first-use` (dismiss), `J-RW-select-world` (wsl list variant), `J-COG-realitytrace` (read side).
+
+### Workspace delete, provider errors, remote harness (2026-11-01)
+
+- `workspace.delete` archives the workspace's non-archived sessions (J-WS-delete); files on disk are never touched.
+- `model.request.retried` payload is `{attempt, maxAttempts, maxRetries, delayMs, errorCode, message, baseURLHost, error}` and is emitted on every failed attempt (J-H-provider-error). The `delayMs` is the recorded wait before the next attempt.
+- Mobile remote: a turn for a harness-bound session starts `agent.harness`; a running harness turn is refused with `harness-busy` (HTTP 409, `message` readable). Evidence `test/J-HARNESS-remote.test.ts`.
 
 ## Provider parity, server side (J-CFG-provider-switch, J-CFG-provider-test)
 

@@ -113,8 +113,8 @@ export async function wireObservations(options: {
 }
 
 /** Read-side capability component (see the module doc): `observation.status` + `observation.record`.
- *  Unbound in `.sea` deliberately — same precedent as `onboarding.dismiss`: a diagnostic read over
- *  the adapter's receipt store, not a domain capability (see BINDINGS.md). */
+ *  Bound to the `VerificationObservation` resource (conformance gap closed): the read side of
+ *  J-COG-realitytrace. */
 export function observationCapabilityComponent(options: {
   readonly getService: () => RuntimeService;
   /** Absent when no SXR target is configured (dev machines without the pinned binary): the read
@@ -122,15 +122,15 @@ export function observationCapabilityComponent(options: {
   readonly delivery?: ObservationDelivery;
   readonly port?: { readCorrelation?: (targetRef: string) => Promise<Json | null> };
   readonly operatorCaller: Caller;
+  readonly semanticRefs?: { readonly status?: SemanticRef; readonly record?: SemanticRef };
 }): Component {
+  const statusContract = { id: "observation.status", version: "1.0.0", semanticRef: options.semanticRefs?.status };
+  const recordContract = { id: "observation.record", version: "1.0.0", semanticRef: options.semanticRefs?.record };
   return {
     id: "observation:read",
-    provides: [
-      { id: "observation.status", version: "1.0.0" },
-      { id: "observation.record", version: "1.0.0" },
-    ],
+    provides: [statusContract, recordContract],
     activate(fiber) {
-      fiber.provide({ id: "observation.status", version: "1.0.0" }, async (rawInput, ctx) => {
+      fiber.provide(statusContract, async (rawInput, ctx) => {
         const input = rawInput as { readonly sessionId?: string; readonly eventIds?: readonly string[] };
         const caller: Caller = { actor: ctx.actor, tenant: ctx.tenant ?? "local" };
         let eventIds: string[];
@@ -151,7 +151,7 @@ export function observationCapabilityComponent(options: {
         }
         return { statuses };
       });
-      fiber.provide({ id: "observation.record", version: "1.0.0" }, async (rawInput) => {
+      fiber.provide(recordContract, async (rawInput) => {
         const input = rawInput as { readonly targetRef?: string };
         if (typeof input.targetRef !== "string") throw new Error("observation.record: targetRef is required");
         if (!options.port?.readCorrelation) throw new Error("observation.record: no SXR target is configured on this deployment");

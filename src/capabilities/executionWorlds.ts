@@ -146,7 +146,7 @@ export interface ExecutionWorldsOptions {
   readonly wslBin?: string;
   /** Host-owned configuration. It is never copied to durable world records or events. */
   readonly containmentConfig?: ContainmentConfig;
-  readonly semanticRefs?: { readonly connect?: SemanticRef; readonly disconnect?: SemanticRef; readonly probe?: SemanticRef; readonly check?: SemanticRef };
+  readonly semanticRefs?: { readonly connect?: SemanticRef; readonly disconnect?: SemanticRef; readonly probe?: SemanticRef; readonly check?: SemanticRef; readonly wslList?: SemanticRef };
 }
 
 const MAX_WORLD_FAIL = new Map<string, string>();
@@ -196,7 +196,7 @@ export function executionWorldsManageComponent(options: ExecutionWorldsOptions):
   };
 
   const probe = contract("execution.world.probe", "probe");
-  const wslList = contract("execution.wsl.list", "probe");
+  const wslList = contract("execution.wsl.list", "wslList");
   const connect = contract("execution.world.connect", "connect");
   const check = contract("execution.world.check", "check");
   const disconnect = contract("execution.world.disconnect", "disconnect");
