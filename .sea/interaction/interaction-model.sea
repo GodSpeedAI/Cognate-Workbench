@@ -928,6 +928,19 @@ Instance j_cfg_config_path of "CanonicalJourney" {
     variants: "file exists; file absent, the default location is still reported; the host offers no filesystem handoff, so copy is the offered action; secret values are never returned"
 }
 
+Instance j_cfg_config_edit of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "config.file.read, config.file.apply",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants to view or change the configuration file from the Settings side panel",
+    journey_id: "J-CFG-config-edit",
+    precondition: "The app is running and the Settings panel is open",
+    purpose: "Let the operator edit the non-secret configuration as text, with every change validated by the same rules as the individual settings controls and applied all-or-nothing",
+    settlement: "A valid edit is recorded as the same durable settings events the controls write, the settings projection reflects it, and cognate.config.json mirrors the new rendering at mode 0600; any refusal leaves settings and file untouched and says why",
+    steps: "user opens the configuration file -> the current durable settings are rendered with a version token -> user edits the text and applies it -> the text is parsed and every changed key is validated -> all changes are recorded together -> the file on disk is rewritten atomically and a new version is returned",
+    variants: "invalid JSON is refused with line and column; an unknown settings key is refused by name; an invalid value refuses the whole edit, including valid sibling keys; a stale version is refused as a conflict; edits to the informational fields (schema, note, home, environment) are ignored and listed; an edit with no change succeeds and applies nothing; secret values are never in the text"
+}
+
 Instance j_plg_install of "CanonicalJourney" {
     actor: "User",
     capabilities: "plugin.install, plugin.uninstall",
@@ -1385,7 +1398,7 @@ Instance j_ws_directory_discovery of "CanonicalJourney" {
     journey_id: "J-WS-directory-discovery",
     precondition: "An execution world is selected and connected; browsing is read-only and pre-workspace",
     purpose: "Suggest matching directories in the chosen execution world as the operator types, so a full absolute path never has to be known or typed",
-    settlement: "Suggestions list only directories from the selected world's filesystem, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
+    settlement: "Suggestions list only directories (symlinks that resolve to directories included) from the selected world's filesystem, matched by prefix, word-boundary, substring then fuzzy tiers against absolute, ~/ or bare-fragment input, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
     steps: "operator types a partial path -> the picker debounces and queries workspace.directory.suggest for the selected world -> the world provider lists its own parent directory and the capability filters, orders and bounds directory matches -> keyboard and pointer complete the field -> an explicit Open confirms the exact destination through workspace.select",
     variants: "slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
 }

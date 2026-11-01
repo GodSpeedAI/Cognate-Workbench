@@ -75,6 +75,7 @@ import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
 import { providerManageComponent } from "./capabilities/providerManage.ts";
 import { configPathComponent } from "./capabilities/configPath.ts";
+import { configFileComponent } from "./capabilities/configFile.ts";
 import { pluginInstallComponent } from "./capabilities/pluginInstall.ts";
 import { pluginsProjection } from "./projections/plugins.ts";
 import { PluginRegistry } from "./components/pluginRegistry.ts";
@@ -248,6 +249,8 @@ const GRANTED_CAPABILITIES = [
   "provider.delete",
   "model.catalog",
   "config.path",
+  "config.file.read",
+  "config.file.apply",
   "plugin.catalog",
   "plugin.install",
   "plugin.uninstall",
@@ -533,6 +536,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
+      configFileComponent({ home, getService, systemCaller: SYSTEM_CALLER, readSemanticRef: t11["config.file.read"], applySemanticRef: t11["config.file.apply"] }),
       pluginInstallComponent({
         getService,
         systemCaller: SYSTEM_CALLER,

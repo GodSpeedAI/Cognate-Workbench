@@ -292,13 +292,14 @@ export function bindWorkbench(domain: Domain): Readonly<Record<string, Capabilit
 }
 
 /**
- * T11: the completion of the workbench's disabled controls. Six capabilities, each anchored on an
+ * T11: the completion of the workbench's disabled controls. Capabilities, each anchored on an
  * IDM entity that already described the concept (the `Plugin` entity was added to the model this
  * tranche; the rest predate it):
  *
  * - `session.setArchived` on `Session` — J-SESSION-archive
  * - `settings.changeShortcuts` and `config.path` on `UserPreferences` — J-PREFS-shortcuts,
- *   J-CFG-config-path (both are operator preference/config surfaces)
+ *   J-CFG-config-path (both are operator preference/config surfaces); `config.file.read` and
+ *   `config.file.apply` on `UserPreferences` — J-CFG-config-edit
  * - `provider.delete` and `model.catalog` on `ModelProvider` — J-CFG-provider-delete,
  *   J-CFG-model-catalog
  * - `plugin.install` and `plugin.uninstall` on `Plugin` — J-PLG-install
@@ -311,6 +312,8 @@ export const TRANCHE11_ANCHORS: readonly (readonly [string, string])[] = [
   ["provider.delete", "ModelProvider"],
   ["model.catalog", "ModelProvider"],
   ["config.path", "UserPreferences"],
+  ["config.file.read", "UserPreferences"],
+  ["config.file.apply", "UserPreferences"],
   ["plugin.install", "Plugin"],
   ["plugin.uninstall", "Plugin"],
 ];
