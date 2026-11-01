@@ -1090,6 +1090,16 @@ settlement, variants). Capabilities are bound explicitly in `domain/index.ts` an
 - **Evidence class**: declared.
 - **Executable evidence**: `test/J-PREFS-shortcuts.test.ts`.
 
+### J-SESSION-rename (`j_session_rename`)
+
+- **Actor/intention**: User. A conversation's automatic title does not say what it is about, or it is still an untitled draft. Purpose: Let the operator give a conversation a name of their own that survives restart and is not replaced by later prompts.
+- **Preconditions/affordance**: The session exists in the sessions projection. Capabilities: `session.rename`.
+- **Steps**: user chooses Rename on a session row -> types a title -> the title is recorded as an event -> the sessions projection folds it -> the sidebar and header show the new title.
+- **Evidence/settlement**: The new title is recorded as an event, the sessions projection folds it, the sidebar shows it immediately, a later first prompt does not overwrite it, and no history is deleted.
+- **Known variants**: rename an untitled draft; rename after the first prompt; rename then restart, still renamed; an empty or over-long title is refused; an unknown session id is refused.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-SESSION-rename.test.ts`.
+
 ### J-SESSION-archive (`j_session_archive`)
 
 - **Actor/intention**: User. A conversation is finished but the operator wants it out of the working list without losing it. Purpose: Let the operator set a session aside reversibly, and choose whether archived conversations are visible.

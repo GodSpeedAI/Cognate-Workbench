@@ -479,6 +479,7 @@ semantic entity and the exported table in `domain/index.ts`.
 | `session.harness.bind` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session, J-HARNESS-unavailable |
 | `session.harness.resolve` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session |
 | `session.history` | named in (domain/index.ts:86) | J-SESSION-draft, J-RUN-task-attribution |
+| `session.rename` | Session (TRANCHE11_ANCHORS) | J-SESSION-rename |
 | `session.setArchived` | Session (TRANCHE11_ANCHORS) | J-SESSION-archive |
 | `session.task.bind` | Session (RED_JOURNEY_ANCHORS) | J-TASK-scope, J-RUN-task-attribution |
 | `settings.changeAppearance` | named in (domain/index.ts:182) | none (support capability) |

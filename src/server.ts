@@ -79,6 +79,7 @@ import { subagentStartComponent } from "./capabilities/subagentStart.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
+import { sessionRenameComponent } from "./capabilities/sessionRename.ts";
 import { providerManageComponent } from "./capabilities/providerManage.ts";
 import { providerSwitchComponent } from "./capabilities/providerSwitch.ts";
 import { configPathComponent } from "./capabilities/configPath.ts";
@@ -244,6 +245,7 @@ const GRANTED_CAPABILITIES = [
   "identity.session.revoke",
   "identity.inspect",
   "session.setArchived",
+  "session.rename",
   "session.create",
   "session.task.bind",
   "agent.harness.list",
@@ -570,6 +572,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
+      sessionRenameComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.rename"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       secretsBackendDescribeComponent({ describe: () => secretsBackend, semanticRef: t11["secrets.backend.describe"] }),
       configFileComponent({ home, getService, systemCaller: SYSTEM_CALLER, readSemanticRef: t11["config.file.read"], applySemanticRef: t11["config.file.apply"] }),

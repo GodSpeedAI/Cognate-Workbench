@@ -448,6 +448,8 @@ export function SessionRowButton({
   harnessLabel,
   onOpen,
   onToggleArchive,
+  onRename,
+  onCopyPath,
 }: {
   readonly session: SessionRow;
   readonly active: boolean;
@@ -456,6 +458,10 @@ export function SessionRowButton({
   readonly harnessLabel?: string | undefined;
   readonly onOpen: () => void;
   readonly onToggleArchive: () => void;
+  /** Opens the rename dialog (J-SESSION-rename). Omitted: the menu simply has no Rename. */
+  readonly onRename?: () => void;
+  /** Copies the workspace folder path (client-only). Omitted: no Copy workspace path item. */
+  readonly onCopyPath?: () => void;
 }) {
   const archived = session.archived === true;
   const label = session.title || "New Session";
@@ -531,8 +537,32 @@ export function SessionRowButton({
         </button>
         {menuOpen && (
           <div role="menu" className="workspace-actions-menu session-row-menu">
-            {/* Rename is not offered: sessions have no rename capability yet, and a menu item that
-                cannot act would be a lie. */}
+            {onRename && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onRename();
+                }}
+              >
+                <EditIcon />
+                Rename
+              </button>
+            )}
+            {onCopyPath && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCopyPath();
+                }}
+              >
+                <CopyIcon />
+                Copy workspace path
+              </button>
+            )}
             <button
               type="button"
               role="menuitem"
@@ -3238,6 +3268,48 @@ function RenameWorkspaceDialog({
   );
 }
 
+/** J-SESSION-rename: the per-session "Rename" dialog — writes the durable `session.rename` capability. */
+function RenameSessionDialog({ session, onClose }: { readonly session: { readonly id: string; readonly title: string }; readonly onClose: () => void }) {
+  const client = useCognate();
+  const toast = useToast();
+  const [title, setTitle] = useState(session.title === "New Session" ? "" : session.title);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const submit = useCallback(async () => {
+    try {
+      await client.invoke("session.rename", { sessionId: session.id, title } as never);
+      toast.show("Session renamed");
+      onClose();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, [client, toast, session.id, title, onClose]);
+  return (
+    <div className="modal-backdrop modal-backdrop-stacked">
+      <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-session-heading" tabIndex={-1} ref={dialogRef}>
+        <DialogHeader title="Rename session" titleId="rename-session-heading" closeLabel="rename session" onClose={onClose} />
+        <input aria-label="Session name" value={title} maxLength={120} placeholder="Name this session" onChange={(e) => setTitle(e.currentTarget.value)} onKeyDown={(e) => {
+          if (e.key === "Enter" && title.trim()) void submit();
+        }} autoFocus />
+        {error && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn-primary" disabled={!title.trim()} onClick={() => void submit()}>
+            Rename
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** The session header's agent-preset selector (usage pass U4, §15): the mode badge is a menu button
  *  labelled with the session's current preset ("Standard mode" / "PTC mode" / "Minimal mode"); a
  *  pick applies to the session's NEXT turn (the composer sends `AgentCodingInput.preset`). The
@@ -4327,6 +4399,7 @@ function AppShell() {
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
   const [deleteFor, setDeleteFor] = useState<{ readonly id: string; readonly title: string; readonly root: string; readonly sessionCount: number } | undefined>(undefined);
   const [renameFor, setRenameFor] = useState<{ readonly id: string; readonly title: string } | undefined>(undefined);
+  const [renameSessionFor, setRenameSessionFor] = useState<{ readonly id: string; readonly title: string } | undefined>(undefined);
   const [chooseWsOpen, setChooseWsOpen] = useState(false);
   const chooseWsRef = useRef<HTMLDivElement>(null);
   // Usage pass U4 (§14): the sidebar "Plugins" global panel — a toggle that swaps the center
@@ -4666,6 +4739,17 @@ function AppShell() {
   const startNewSession = useCallback(
     async (workspaceId: string) => {
       if (newSessionPending) return;
+      // An empty draft (no prompt yet) already is "a new session": take the person to it instead of
+      // stacking identical untitled rows.
+      const emptyDraft = sessions.find((row) => row.workspaceId === workspaceId && row.lastStatus === "draft" && row.archived !== true);
+      if (emptyDraft) {
+        setExpertsPanelOpen(false);
+        setPluginsPanelOpen(false);
+        setWorkbenchOpen(false);
+        setNewSessionError(undefined);
+        await openSession(emptyDraft.id);
+        return;
+      }
       setNewSessionPending(true);
       setNewSessionError(undefined);
       // J-SESSION-draft: the + action means "take me to the conversation" — the center surface
@@ -4694,7 +4778,7 @@ function AppShell() {
         setNewSessionPending(false);
       }
     },
-    [client, newSessionPending, rememberSession],
+    [client, newSessionPending, rememberSession, sessions, openSession],
   );
 
   const newSession = useCallback(() => {
@@ -5554,6 +5638,15 @@ function AppShell() {
                     planPending={planReviewPendingSessions.has(session.id)}
                     {...(harnessBindings.get(session.id)?.harnessId ? { harnessLabel: agentLabel(harnessList.harnesses, harnessBindings.get(session.id)!.harnessId) } : {})}
                     onOpen={() => openSession(session.id)}
+                    onRename={() => setRenameSessionFor({ id: session.id, title: session.title })}
+                    {...(workspaces.find((w) => w.id === session.workspaceId)?.root
+                      ? {
+                          onCopyPath: () => {
+                            const root = workspaces.find((w) => w.id === session.workspaceId)?.root ?? "";
+                            void navigator.clipboard?.writeText(root).then(() => toast.show("Workspace path copied"), () => toast.show("Could not copy the path"));
+                          },
+                        }
+                      : {})}
                     onToggleArchive={() => {
                       const archived = session.archived !== true;
                       void client
@@ -5964,6 +6057,7 @@ function AppShell() {
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {deleteFor && <DeleteWorkspaceDialog workspace={deleteFor} onClose={() => setDeleteFor(undefined)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
+      {renameSessionFor && <RenameSessionDialog session={renameSessionFor} onClose={() => setRenameSessionFor(undefined)} />}
       <FirstRunDialogs onFinished={() => setComposerFocusToken((t) => t + 1)} />
     </div>
   );

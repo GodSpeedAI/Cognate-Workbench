@@ -71,6 +71,7 @@ export type AgentConfigInput =
   /** T11 (J-SESSION-archive): reversible, durable archiving of a conversation. The flag only changes
    *  sidebar visibility; no turn, run or event is ever deleted. */
   | { readonly kind: "session.archived"; readonly sessionId: string; readonly archived: boolean }
+  | { readonly kind: "session.renamed"; readonly sessionId: string; readonly title: string }
   /** J-SESSION-draft: durable creation of a conversation identity *before* any prompt. The
    *  capability layer already validated the workspace and derived the deterministic session id;
    *  this run only records the fact. `title` is the literal pre-turn sidebar label. */
@@ -174,6 +175,11 @@ export const agentConfigAgent: AgentDefinition = {
       case "session.archived": {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("session.archived", payload);
+        return { ok: true };
+      }
+      case "session.renamed": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.renamed", payload);
         return { ok: true };
       }
       case "session.created": {

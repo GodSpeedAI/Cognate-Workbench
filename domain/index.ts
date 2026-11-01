@@ -296,7 +296,7 @@ export function bindWorkbench(domain: Domain): Readonly<Record<string, Capabilit
  * IDM entity that already described the concept (the `Plugin` entity was added to the model this
  * tranche; the rest predate it):
  *
- * - `session.setArchived` on `Session` — J-SESSION-archive
+ * - `session.setArchived` on `Session` — J-SESSION-archive; `session.rename` on `Session` — J-SESSION-rename
  * - `settings.changeShortcuts` and `config.path` on `UserPreferences` — J-PREFS-shortcuts,
  *   J-CFG-config-path (both are operator preference/config surfaces); `config.file.read` and
  *   `config.file.apply` on `UserPreferences` — J-CFG-config-edit
@@ -309,6 +309,7 @@ export function bindWorkbench(domain: Domain): Readonly<Record<string, Capabilit
  */
 export const TRANCHE11_ANCHORS: readonly (readonly [string, string])[] = [
   ["session.setArchived", "Session"],
+  ["session.rename", "Session"],
   ["settings.changeShortcuts", "UserPreferences"],
   ["provider.delete", "ModelProvider"],
   ["model.catalog", "ModelProvider"],

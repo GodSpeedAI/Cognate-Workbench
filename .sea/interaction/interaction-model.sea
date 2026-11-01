@@ -876,6 +876,19 @@ Instance j_wb_focus of "CanonicalJourney" {
     variants: "explicit selection; fallback to the bound task; nothing in focus; a message that refers to nothing carries no focus line; a selection in another workspace is ignored"
 }
 
+Instance j_session_rename of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.rename",
+    evidence_class: "declared",
+    initiating_condition: "A conversation's automatic title does not say what it is about, or it is still an untitled draft",
+    journey_id: "J-SESSION-rename",
+    precondition: "The session exists in the sessions projection",
+    purpose: "Let the operator give a conversation a name of their own that survives restart and is not replaced by later prompts",
+    settlement: "The new title is recorded as an event, the sessions projection folds it, the sidebar shows it immediately, a later first prompt does not overwrite it, and no history is deleted",
+    steps: "user chooses Rename on a session row -> types a title -> the title is recorded as an event -> the sessions projection folds it -> the sidebar and header show the new title",
+    variants: "rename an untitled draft; rename after the first prompt; rename then restart, still renamed; an empty or over-long title is refused; an unknown session id is refused"
+}
+
 Instance j_session_archive of "CanonicalJourney" {
     actor: "User",
     capabilities: "session.setArchived",
