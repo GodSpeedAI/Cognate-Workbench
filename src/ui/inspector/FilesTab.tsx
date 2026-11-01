@@ -1,7 +1,7 @@
 // Files inspector tab: lazy workspace tree, small file tabs and a read-only CodeView.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, FolderIcon, XIcon } from "../icons.tsx";
-import { InspectorEmpty, InspectorTab } from "../shell/Inspector.tsx";
+import { InspectorEmpty, InspectorTab, useInspector } from "../shell/Inspector.tsx";
 import { CodeView } from "./CodeView.tsx";
 
 export type Invoke = (capability: string, input: unknown) => Promise<unknown>;
@@ -30,6 +30,11 @@ export function FilesTab({ invoke, workspaceId, workspaceName }: { readonly invo
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState(false);
   const wsRef = useRef(workspaceId);
+  // List only while this tab is actually on screen, so a hidden tab never calls the server (a workspace
+  // that is not ready, or whose world is not connected, would answer 400 into the console).
+  const inspector = useInspector();
+  const shown = inspector.open && inspector.tab === "files";
+  const rootLoadedFor = useRef<string | undefined>(undefined);
 
   const loadDir = useCallback(async (path: string) => {
     if (!workspaceId) return;
@@ -45,9 +50,15 @@ export function FilesTab({ invoke, workspaceId, workspaceName }: { readonly invo
 
   useEffect(() => {
     wsRef.current = workspaceId;
+    rootLoadedFor.current = undefined;
     setDirs({}); setExpanded(new Set()); setOpen([]); setCurrent(undefined); setFilter(""); setActive(0);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!shown || !workspaceId || rootLoadedFor.current === workspaceId) return;
+    rootLoadedFor.current = workspaceId;
     void loadDir("");
-  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown, workspaceId, loadDir]);
 
   const refresh = () => {
     const paths = ["", ...expanded];

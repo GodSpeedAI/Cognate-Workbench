@@ -1,7 +1,7 @@
 // Config inspector tab: edit the Cognate configuration file with a JSON pre-check and versioned apply.
 import { useCallback, useEffect, useState } from "react";
 import { CopyIcon, GearIcon } from "../icons.tsx";
-import { InspectorTab } from "../shell/Inspector.tsx";
+import { InspectorTab, useInspector } from "../shell/Inspector.tsx";
 import { CodeView } from "./CodeView.tsx";
 import type { Invoke } from "./FilesTab.tsx";
 
@@ -60,7 +60,10 @@ export function ConfigTab({ invoke }: { readonly invoke: Invoke }) {
       if (!keepNotice) setNotice(undefined);
     } catch (e) { setLoadError(refusalMessage(e)); }
   }, [invoke]);
-  useEffect(() => { void load(); }, [load]);
+  const inspector = useInspector();
+  const shown = inspector.open && inspector.tab === "config";
+  // Read the file only once the tab is shown (and keep the draft across tab switches afterwards).
+  useEffect(() => { if (shown && !file) void load(); }, [shown, file, load]);
 
   const dirty = file !== undefined && draft !== file.text;
   const save = async () => {

@@ -5926,7 +5926,7 @@ function AppShell() {
           <InspectorEmpty title="Nothing selected" hint="Select a step in the Trajectory view or open a subagent to see its details here." />
         )}
       </InspectorTab>
-      <InspectorExtraTabs workspaceId={currentWorkspaceId} workspaceName={currentWorkspace?.title} />
+      <InspectorExtraTabs workspaceId={currentWorkspace ? currentWorkspaceId : undefined} workspaceName={currentWorkspace?.title} />
       {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {deleteFor && <DeleteWorkspaceDialog workspace={deleteFor} onClose={() => setDeleteFor(undefined)} />}
