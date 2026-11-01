@@ -360,7 +360,8 @@ export class MobileRemote {
   /** Session list plus the decisions waiting on the human. Only what the phone shows is copied. */
   private async snapshot(device: RemoteDevice, caller: Caller) {
     const service = this.host.service;
-    const runs = await service.listRuns(caller, { agent: "agent.coding" });
+    // J-HARNESS-session (remote variant): harness-bound sessions run as `agent.harness`.
+    const runs = [...(await service.listRuns(caller, { agent: "agent.coding" })), ...(await service.listRuns(caller, { agent: "agent.harness" }))];
     // Runs come oldest first: the last one per session is its latest; a live one wins for status.
     const latest = new Map<string, { runId: string; status: string }>();
     for (const run of runs) {
@@ -470,7 +471,17 @@ export class MobileRemote {
       if (!text || text.length > MAX_TEXT) return json({ error: "invalid" }, 400);
       name = "turn";
       const sessionId = parts[1] as string;
-      const live = (await service.listRuns(caller, { agent: "agent.coding" })).find((r) => r.correlationId === `session:${sessionId}` && (r.status === "running" || r.status === "waiting"));
+      // J-HARNESS-session (remote variant): a session bound to an external harness CLI starts
+      // `agent.harness` (the same agent the desktop uses), never the native coding agent. The CLI
+      // runs on the server host, so a phone can drive it; its permission requests are ordinary
+      // `tool-approval` decisions the phone may answer. A running harness turn cannot be steered.
+      const bindingRow = (await this.rows("session-harness-bindings", caller)).find((r) => sessionIdOf(r) === sessionId);
+      const harnessBound = typeof (bindingRow?.value as { harnessId?: unknown } | undefined)?.harnessId === "string";
+      const agent = harnessBound ? "agent.harness" : "agent.coding";
+      const live = (await service.listRuns(caller, { agent })).find((r) => r.correlationId === `session:${sessionId}` && (r.status === "running" || r.status === "waiting"));
+      if (live && harnessBound) {
+        return json({ error: "harness-busy", message: "This session runs through an external harness and a turn is in progress. Wait for it to finish or stop it; follow-up messages cannot be added mid-turn." }, 409);
+      }
       if (live) {
         await service.updateState(caller, { runId: live.runId, update: { patch: [{ op: "add", path: "/steer/-", value: { id: commandId, text } }] } as never, idempotencyKey: commandId });
         outcome = { kind: "steer", runId: live.runId };
@@ -480,7 +491,12 @@ export class MobileRemote {
         if (!row) return json({ error: "not-found" }, 404);
         const workspaceId = (row.value as { workspaceId?: string }).workspaceId;
         const settings = ((await this.rows("settings", caller))[0]?.value ?? {}) as Record<string, Json>;
-        const run = await service.startRun(caller, {
+        const run = await service.startRun(caller, harnessBound ? {
+          agent: "agent.harness",
+          input: { sessionId, workspaceId, message: text } as Json,
+          idempotencyKey: commandId,
+          correlationId: `session:${sessionId}`,
+        } : {
           agent: "agent.coding",
           input: { sessionId, workspaceId, message: text, mode: settings.permission ?? DEFAULT_PERMISSION_MODE, preset: settings.preset ?? DEFAULT_AGENT_PRESET } as Json,
           idempotencyKey: commandId,

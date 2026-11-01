@@ -19,7 +19,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindProviderCapabilities, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -434,6 +434,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
+  const gapRefs = bindConformanceGaps(domain);
   const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
@@ -547,7 +548,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
       settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs, sweSeed }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
-      executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
+      executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: { ...worldBindings, wslList: gapRefs["execution.wsl.list"] }, containmentConfig }),
       containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, semanticRefs: worldBindings }),
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
@@ -563,7 +564,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),
       planStateComponent(getService, planBindings.planState.semanticRef),
       subagentStartComponent({ getService, systemActor: SYSTEM_CALLER.actor, semanticRef: subagentBindings.subagentStart.semanticRef }),
-      onboardingDismissComponent({ getService, systemCaller: SYSTEM_CALLER }),
+      onboardingDismissComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: gapRefs["onboarding.dismiss"] }),
       settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: [...usage2.settingsChange, t8.containment], shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
@@ -772,7 +773,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // The read side is mounted unconditionally: the inspector shows honest queued states when no SXR
   // target is configured, instead of erroring.
   await runtime.kernel.mount(
-    observationCapabilityComponent({ getService, delivery: observations?.delivery, port: observations?.port, operatorCaller: LOCAL_OPERATOR }),
+    observationCapabilityComponent({ getService, semanticRefs: { status: gapRefs["observation.status"], record: gapRefs["observation.record"] }, delivery: observations?.delivery, port: observations?.port, operatorCaller: LOCAL_OPERATOR }),
   );
 
   // Track newly added workspaces (so workspace.select can tell "add" from "reselect") by following

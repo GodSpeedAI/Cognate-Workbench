@@ -59,7 +59,7 @@ export type AgentConfigInput =
   | { readonly kind: "workspace.renamed"; readonly workspaceId: string; readonly title: string }
   /** Usage pass U3: the sidebar's Delete workspace action — removes the record (and a current
    *  pointer to it); the workspace's sessions' events stay in history. */
-  | { readonly kind: "workspace.deleted"; readonly workspaceId: string }
+  | { readonly kind: "workspace.deleted"; readonly workspaceId: string; readonly archiveSessionIds?: readonly string[] }
   /** T11 (J-CFG-provider-delete): removes a provider configuration. The handler removes the stored
    *  secret *before* this run records the deletion, so a secret is never orphaned by a crash. */
   | { readonly kind: "provider.deleted"; readonly providerId: string }
@@ -132,7 +132,9 @@ export const agentConfigAgent: AgentDefinition = {
         return { ok: true };
       }
       case "workspace.deleted": {
-        const { kind: _kind, ...payload } = command;
+        const { kind: _kind, archiveSessionIds, ...payload } = command;
+        // J-WS-delete: archive the workspace's sessions first so no moment shows them orphaned.
+        for (const sessionId of archiveSessionIds ?? []) await ctx.emit("session.archived", { sessionId, archived: true });
         await ctx.emit("workspace.deleted", payload);
         return { ok: true };
       }

@@ -4,7 +4,7 @@
 // against the live `workspaces` projection and starts a deterministic `agent.config` run whose
 // `workspace.renamed` / `workspace.deleted` event the projection folds — the durable event log, not
 // component memory, owns the workspace list. Deleting a workspace removes its record (and, if it was
-// current, the current pointer); its sessions' events stay in history untouched.
+// current, the current pointer) and archives its sessions (J-WS-delete); their events stay in history untouched.
 import { randomUUID } from "node:crypto";
 import type { Component, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
@@ -45,9 +45,18 @@ export function workspaceManageComponent(options: {
       fiber.provide(deleteContract, async (rawInput) => {
         const input = rawInput as WorkspaceManageInput;
         if (!(await knownWorkspaces()).has(input.workspaceId)) throw new Error(`workspace.delete: unknown workspace ${input.workspaceId}`);
+        // J-WS-delete: the workspace's live sessions are archived with it (reversible, nothing
+        // removed from history), so they leave the working list instead of lingering orphaned.
+        const sessions = (await options.getService().readProjection(options.systemCaller, { name: "sessions" })).rows;
+        const archiveSessionIds = sessions
+          .filter((r) => {
+            const v = r.value as { readonly workspaceId?: unknown; readonly archived?: unknown };
+            return v.workspaceId === input.workspaceId && v.archived !== true;
+          })
+          .map((r) => r.key.slice(r.key.indexOf("/") + 1));
         await options.getService().startRun(options.systemCaller, {
           agent: AGENT_CONFIG,
-          input: { kind: "workspace.deleted", workspaceId: input.workspaceId },
+          input: { kind: "workspace.deleted", workspaceId: input.workspaceId, archiveSessionIds },
           idempotencyKey: randomUUID(),
         });
         return { ok: true };
