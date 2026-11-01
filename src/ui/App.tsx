@@ -16,9 +16,12 @@ import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
 import { DirectoryField } from "./DirectoryField.tsx";
 import { FirstRunFlow } from "./onboarding/FirstRun.tsx";
-import { ProviderWizard } from "./models/ProviderWizard.tsx";
+import { capabilityErrorMessage } from "./models/providerCatalog.ts";
+import { ProvidersPane } from "./models/ProvidersPane.tsx";
+import { AgentsPane } from "./agents/AgentsPane.tsx";
+import { AgentChip, AgentNotice, agentLabel } from "./agents/AgentChip.tsx";
+import { useHarnessBindings, useHarnessList, type HarnessChoice, type HarnessInfo } from "./agents/useHarness.ts";
 import { ModelPicker } from "./models/ModelPicker.tsx";
-import { wireToProtocol } from "./models/providerCatalog.ts";
 import { errorText } from "./workbench/data.ts";
 import type { TraceRow, TraceRequest, TraceTool, TraceTurn } from "../projections/sessionTrace.ts";
 import { TOOL_DEFS } from "../agents/agentCoding.ts";
@@ -115,6 +118,7 @@ import {
   SendIcon,
   SplitViewIcon,
   StopIcon,
+  TerminalIcon,
   TrashIcon,
 } from "./icons.tsx";
 import {
@@ -439,12 +443,15 @@ export function SessionRowButton({
   session,
   active,
   planPending,
+  harnessLabel,
   onOpen,
   onToggleArchive,
 }: {
   readonly session: SessionRow;
   readonly active: boolean;
   readonly planPending: boolean;
+  /** The external agent CLI this session is bound to, when it is not the native agent. */
+  readonly harnessLabel?: string | undefined;
   readonly onOpen: () => void;
   readonly onToggleArchive: () => void;
 }) {
@@ -487,6 +494,12 @@ export function SessionRowButton({
           {label}
           {archived ? " (archived)" : ""}
         </span>
+        {harnessLabel && (
+          <span className="session-agent-tag" title={`Runs ${harnessLabel}`} aria-label={`Agent: ${harnessLabel}`}>
+            <TerminalIcon aria-hidden="true" />
+            {harnessLabel}
+          </span>
+        )}
         {needsReconciliation && (
           <span className="approval-badge" title="Needs reconciliation">
             <span className="approval-badge-dot" aria-hidden="true" />
@@ -1331,7 +1344,8 @@ function AboutPane() {
 export const SETTINGS_SECTIONS = [
   { id: "general", label: "General", description: "Defaults for new sessions and how the agent reports its work.", icon: <GearIcon /> },
   { id: "appearance", label: "Appearance", description: "Theme and the size of conversation text.", icon: <PaletteIcon /> },
-  { id: "models", label: "Models", description: "Model providers and the API keys they use.", icon: <ChipIcon /> },
+  { id: "models", label: "Providers", description: "Model providers, where their keys are stored, and which one is active.", icon: <ChipIcon /> },
+  { id: "agents", label: "Agents", description: "The built-in Cognate agent and external agent CLIs installed on this computer.", icon: <TerminalIcon /> },
   { id: "plugins", label: "Plugins", description: "Built-in tools this deployment ships and which sessions get them.", icon: <PluginIcon /> },
   { id: "presets", label: "Agent presets", description: "Choose the agent's tools and how it works. Standard suits everyday tasks.", icon: <BotIcon /> },
   { id: "governance", label: "Governance & evidence", description: "Who decides approvals, whether agent runs are settled, and the proof they are judged by.", icon: <ShieldIcon /> },
@@ -1375,80 +1389,11 @@ function SettingsPage({
   const setSection = onSectionChange;
   const toast = useToast();
   const client = useCognate();
-  const config = useModelConfig();
   // Full-access confirmation (checkpoint 22f): opened by selecting "Full access" in the Permission
   // menu; the Permission control stays disabled while it is open, and only the checked-state
   // "Enable Full access" button commits the durable change.
   const [fullAccessConfirm, setFullAccessConfirm] = useState(false);
-  const [view, setView] = useState<"list" | "wizard">(startWizard ? "wizard" : "list");
-  // Wizard prefill: editing the configured provider (optionally with another model) or a fresh add.
-  const [wizardEdit, setWizardEdit] = useState<{ readonly model?: string } | undefined>(startWizard?.edit ? { ...(startWizard.model ? { model: startWizard.model } : {}) } : undefined);
-  const [customizedOpen, setCustomizedOpen] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
-  // Quick "Apply" from the list-view row: just the API key, reusing the already-configured
-  // provider/base URL/model.
-  const [rowApiKey, setRowApiKey] = useState("");
-  // T11: "Open configuration file" (config.path), provider Delete (confirmed, secret-first) and
-  // "Fetch models" (model.catalog) — the three Settings -> Models actions that were inert.
   const inspector = useInspector();
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-
-  const openAddWizard = useCallback(() => {
-    setWizardEdit(undefined);
-    setView("wizard");
-  }, []);
-
-  const openEditWizard = useCallback(() => {
-    setWizardEdit({});
-    setView("wizard");
-  }, []);
-
-  const applyRowKey = useCallback(async () => {
-    if (!config) return;
-    setBusy(true);
-    setError(undefined);
-    setSaved(false);
-    try {
-      // Re-keying must not silently rewrite the wire protocol: reuse the configured one.
-      await client.invoke("model.configure", {
-        providerId: config.providerId,
-        baseURL: config.baseURL,
-        protocol: config.protocol,
-        model: config.model,
-        apiKey: rowApiKey,
-      });
-      setSaved(true);
-      toast.show("API key saved");
-      setRowApiKey("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [client, config, rowApiKey]);
-
-  /** Deletes the single live provider configuration. Destructive, so it is a two-step control:
-   *  the first press states exactly what will happen, the second commits. `provider.delete` removes
-   *  the stored secret first, so a failure leaves the configuration intact. */
-  const deleteProvider = useCallback(async () => {
-    if (!config) return;
-    setBusy(true);
-    setError(undefined);
-    setSaved(false);
-    try {
-      await client.invoke("provider.delete", { providerId: config.providerId } as never);
-      setDeleteConfirm(false);
-      setRowApiKey("");
-      setCustomizedOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setDeleteConfirm(false);
-    } finally {
-      setBusy(false);
-    }
-  }, [client, config]);
 
   const pageRef = useRef<HTMLElement>(null);
   // Page focus contract (it is not a modal, so no trap): land on the active tab when opened and
@@ -1524,113 +1469,10 @@ function SettingsPage({
               <AgentPresetsPane settings={settings} />
             ) : section === "governance" ? (
               <GovernancePane workspaceId={workspaceId} />
-            ) : view === "list" ? (
-              <>
-                <p className="settings-subtitle">Enter your API key to use models from the following provider.</p>
-                {config ? (
-                  <div className="provider-card provider-card-configured">
-                    <div className="provider-card-header">
-                      <span className="provider-card-name">
-                        <CheckIcon aria-hidden="true" />
-                        {config.providerId} — {config.model}
-                      </span>
-                      <span className="provider-card-protocol" title="Wire protocol">
-                        {wireToProtocol(config.protocol)}
-                      </span>
-                      <span className="provider-card-key-status" title="API key configured">
-                        <CheckIcon aria-hidden="true" /> API key configured
-                      </span>
-                      <div className="provider-card-actions">
-                        <button type="button" aria-label={`Edit ${config.providerId} (${config.providerId})`} onClick={openEditWizard}>
-                          <EditIcon /> Edit
-                        </button>
-                        {deleteConfirm ? (
-                          <span className="provider-delete-confirm">
-                            <span role="status" className="provider-delete-confirm-text">
-                              Delete {config.providerId} and its stored key? This cannot be undone.
-                            </span>
-                            <button type="button" className="danger-btn" disabled={busy} onClick={() => void deleteProvider()}>
-                              Yes, delete
-                            </button>
-                            <button type="button" disabled={busy} onClick={() => setDeleteConfirm(false)}>
-                              Cancel
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            aria-label={`Delete ${config.providerId} (${config.providerId})`}
-                            disabled={busy}
-                            onClick={() => {
-                              setError(undefined);
-                              setDeleteConfirm(true);
-                            }}
-                          >
-                            <TrashIcon /> Delete
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <label>
-                      API key
-                      <input
-                        type="password"
-                        value={rowApiKey}
-                        onChange={(e) => setRowApiKey(e.currentTarget.value)}
-                        placeholder="Configured — enter a new value to replace"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="disclosure-btn"
-                      aria-expanded={customizedOpen}
-                      onClick={() => setCustomizedOpen((v) => !v)}
-                    >
-                      Customized settings
-                    </button>
-                    {customizedOpen && (
-                      <div className="provider-customized">
-                        <div>
-                          Base URL: <code>{config.baseURL}</code>
-                        </div>
-                        <div>Model: {config.model}</div>
-                        <div>API protocol: {wireToProtocol(config.protocol)}</div>
-                      </div>
-                    )}
-                    {error && (
-                      <p role="alert" className="form-error">
-                        {error}
-                      </p>
-                    )}
-                    {saved && <p className="form-success">Saved. Model changes take effect on the next request.</p>}
-                    <div className="provider-card-row-actions">
-                      <button type="button" onClick={() => setRowApiKey("")}>
-                        Cancel
-                      </button>
-                      <button type="button" disabled={busy || rowApiKey.trim().length === 0} onClick={applyRowKey}>
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="empty-state small">No model provider configured yet.</p>
-                )}
-                <button type="button" className="add-provider-btn" onClick={openAddWizard}>
-                  <PlusIcon /> Add model provider
-                </button>
-              </>
+            ) : section === "agents" ? (
+              <AgentsPane />
             ) : (
-              <>
-                <h3>{wizardEdit ? "Edit model provider" : "Add model provider"}</h3>
-                <ProviderWizard
-                  {...(wizardEdit && config
-                    ? { initial: { providerId: config.providerId, baseURL: config.baseURL, protocol: config.protocol, model: wizardEdit.model ?? config.model } }
-                    : {})}
-                  submitLabel={wizardEdit ? "Save changes" : "Create provider"}
-                  onCancel={() => setView("list")}
-                  onSaved={() => setView("list")}
-                />
-              </>
+              <ProvidersPane startWizard={startWizard} />
             )}
           </div>
         </div>
@@ -1656,6 +1498,11 @@ interface RetryInfo {
   readonly maxRetries: number;
   readonly code: string;
   readonly message: string;
+  /** HTTP_<status> | TIMEOUT | CONNECTION_REFUSED | DNS_FAILED | NETWORK_ERROR (older events: absent). */
+  readonly errorCode?: string;
+  readonly delayMs?: number;
+  readonly baseURLHost?: string;
+  readonly receivedAt: number;
 }
 
 interface TurnFailure {
@@ -1700,14 +1547,18 @@ function useStreamingTurn(runId: string | undefined) {
         }
         // deltas from a superseded (lower) attempt are discarded
       } else if (event.eventType === "model.request.retried") {
-        const payload = event.payload as { readonly attempt?: number; readonly maxRetries?: number; readonly error?: { readonly code?: string; readonly message?: string } };
+        const payload = event.payload as { readonly attempt?: number; readonly maxRetries?: number; readonly errorCode?: string; readonly message?: string; readonly delayMs?: number; readonly baseURLHost?: string; readonly error?: { readonly code?: string; readonly message?: string } };
         setRetries((prev) => [
           ...prev,
           {
             attempt: payload.attempt ?? prev.length + 1,
             maxRetries: payload.maxRetries ?? 5,
-            code: payload.error?.code ?? "",
-            message: payload.error?.message ?? "",
+            code: payload.errorCode ?? payload.error?.code ?? "",
+            message: payload.message ?? payload.error?.message ?? "",
+            ...(payload.errorCode ? { errorCode: payload.errorCode } : {}),
+            ...(typeof payload.delayMs === "number" ? { delayMs: payload.delayMs } : {}),
+            ...(payload.baseURLHost ? { baseURLHost: payload.baseURLHost } : {}),
+            receivedAt: Date.now(),
           },
         ]);
       } else if (event.eventType === "turn.failed") {
@@ -1870,16 +1721,54 @@ function RetryCard({ retries, provider, onStop, onOpenSettings }: { readonly ret
   const since = useRef(Date.now());
   useEffect(() => { since.current = Date.now(); }, [retries.length]);
   const sinceSeconds = useElapsedSeconds(true, since.current);
+  const httpStatus = /^HTTP_(\d+)$/.exec(latest.errorCode ?? "")?.[1];
+  const nextIn = latest.delayMs !== undefined ? Math.max(0, Math.ceil((latest.delayMs - (Date.now() - latest.receivedAt)) / 1000)) : undefined;
   return (
     <div className="retry-card" role="status" data-retry-card>
-      <p className="retry-card-title">Can't reach {provider} — retrying ({latest.attempt}/{latest.maxRetries})</p>
+      <p className="retry-card-title">
+        {httpStatus
+          ? `${latest.baseURLHost ?? provider} returned an error (HTTP ${httpStatus}) — retrying (${latest.attempt}/${latest.maxRetries})`
+          : `Can't reach ${latest.baseURLHost ? `${provider.split(" (")[0]} (${latest.baseURLHost})` : provider} — retrying (${latest.attempt}/${latest.maxRetries})`}
+      </p>
       {latest.message && <p className="retry-card-error">{latest.message}{latest.code ? <span className="retry-card-code"> {latest.code}</span> : null}</p>}
-      <p className="retry-card-meta">Attempt {latest.attempt} failed {sinceSeconds}s ago. The next attempt starts automatically.</p>
+      <p className="retry-card-meta">
+        Attempt {latest.attempt} failed {sinceSeconds}s ago.{" "}
+        {nextIn !== undefined ? (nextIn > 0 ? `Next attempt in ${nextIn}s.` : "Trying again now.") : "The next attempt starts automatically."}
+      </p>
       <div className="retry-card-actions">
         <button type="button" className="retry-card-btn" onClick={onStop}>Stop</button>
         <button type="button" className="retry-card-btn" onClick={onOpenSettings}>Open model settings</button>
       </div>
     </div>
+  );
+}
+
+/** AUTH_REQUIRED shows the CLI's sign-in hint; HARNESS_UNAVAILABLE shows how to install it. The
+ *  failing CLI is the one whose label the server named in the message. */
+function HarnessFailureHint({ code, message }: { readonly code: string; readonly message: string }) {
+  const { harnesses } = useHarnessList();
+  const h: HarnessInfo | undefined = harnesses?.find((x) => message.includes(x.label));
+  if (!h) return null;
+  if (code === "AUTH_REQUIRED") {
+    return (
+      <p className="failure-hint" data-harness-hint="sign-in">
+        Sign in to {h.label}: {h.signInHint}
+      </p>
+    );
+  }
+  return (
+    <p className="failure-hint" data-harness-hint="install">
+      <a href={h.installHint.url} target="_blank" rel="noreferrer">
+        Install {h.label}
+      </a>
+      {h.installHint.command && (
+        <>
+          {" "}
+          or run <code>{h.installHint.command}</code>
+        </>
+      )}
+      , then refresh agents in Settings.
+    </p>
   );
 }
 
@@ -1891,6 +1780,7 @@ function FailureBlock({ code, message, onRetry }: { readonly code: string; reado
     <div className="failure-block" role="alert">
       <p className="failure-title">This turn failed</p>
       <p className="failure-message">{message}</p>
+      {(code === "AUTH_REQUIRED" || code === "HARNESS_UNAVAILABLE") && <HarnessFailureHint code={code} message={message} />}
       <div className="retry-card-actions">
         {code && <span className="failure-code">{code}</span>}
         {onRetry && <button type="button" className="failure-retry" onClick={onRetry}>Retry</button>}
@@ -2930,7 +2820,7 @@ function MessageBubble({
       )}
       {message.failed && message.retryCount !== undefined && (
         <RetryDisclosure
-          retries={[{ attempt: message.retryCount, maxRetries: 5, code: message.failureCode ?? "", message: message.failureMessage ?? "" }]}
+          retries={[{ attempt: message.retryCount, maxRetries: 5, code: message.failureCode ?? "", message: message.failureMessage ?? "", receivedAt: 0 }]}
           elapsedSeconds={Math.max(0, Math.round((message.tookMs ?? 0) / 1000))}
         />
       )}
@@ -4293,6 +4183,11 @@ function AppShell() {
   const worlds = useExecutionWorlds();
   const sessions = useSessions();
   const modelConfig = useModelConfig();
+  const harnessList = useHarnessList();
+  const harnessBindings = useHarnessBindings();
+  // The agent chosen before a session exists (hero composer); bound when the first send creates it.
+  const [pendingHarness, setPendingHarness] = useState<HarnessChoice>({ harnessId: null });
+  const [agentBindError, setAgentBindError] = useState<string | undefined>(undefined);
   const currentWorkspaceId = useCurrentWorkspaceId();
   // The open Case (if any) rides on each run so the agent gets the Case-scoped tools and mediation context.
   const activeCaseId = useProjection("cognitive")?.find((r) => r.key === "activeCase")?.value as string | undefined;
@@ -4844,6 +4739,28 @@ function AppShell() {
         else openSettings("models", modelConfig ? { edit: true } : { edit: false });
       }),
     });
+    items.push({
+      id: "choose-agent",
+      group: "Actions",
+      label: "Choose agent…",
+      icon: <TerminalIcon />,
+      keywords: "agent harness cli claude code codex opencode native cognate permission mode",
+      run: go(() => {
+        closeCenterPanels();
+        if (currentWorkspaceId) requestAnimationFrame(() => document.getElementById("agent-chip")?.click());
+        else openSettings("agents");
+      }),
+    });
+    items.push({
+      id: "refresh-agents",
+      group: "Actions",
+      label: "Refresh agent CLIs",
+      icon: <TerminalIcon />,
+      keywords: "agents harness detect installed rescan",
+      run: go(() => {
+        void harnessList.refresh().then(() => toast.show("Agent CLIs refreshed"));
+      }),
+    });
     items.push({ id: "experts", group: "Actions", label: "Experts & Teams", icon: <BotIcon />, keywords: "agents teams", run: go(() => { closeCenterPanels(); setExpertsPanelOpen(true); }) });
     if (currentWorkspaceId) items.push({ id: "workbench", group: "Actions", label: "Workbench", icon: <WorkbenchIcon />, keywords: "tasks workflows automations", run: go(() => { closeCenterPanels(); setWorkbenchOpen(true); }) });
     items.push({ id: "plugins", group: "Actions", label: "Plugins", icon: <PluginIcon />, keywords: "extensions", run: go(() => { setExpertsPanelOpen(false); setWorkbenchOpen(false); setPluginsPanelOpen(true); }) });
@@ -4927,6 +4844,7 @@ function AppShell() {
       // The task this turn serves: the active session's durable binding, or — on the session-
       // creating first send — the parked choice, bound durably below before the run freezes it.
       let runTaskId = activeTaskId;
+      let runHarnessId: string | null = activeSessionId ? (harnessBindings.get(activeSessionId)?.harnessId ?? null) : null;
       if (!sessionId) {
         // The hero composer's first send creates the conversation's durable identity first
         // (idempotent `session.create`), binds the parked task choice if any, and only then
@@ -4944,6 +4862,16 @@ function AppShell() {
         }
         setActiveSessionId(sessionId);
         rememberSession(sendWorkspaceId, sessionId);
+        if (pendingHarness.harnessId) {
+          const choice = pendingHarness;
+          try {
+            await client.invoke("session.harness.bind", { sessionId, harnessId: choice.harnessId, ...(choice.permissionMode ? { permissionMode: choice.permissionMode } : {}), ...(choice.model ? { model: choice.model } : {}) } as never);
+            runHarnessId = choice.harnessId;
+            setPendingHarness({ harnessId: null });
+          } catch (e) {
+            setAgentBindError(capabilityErrorMessage(e));
+          }
+        }
         if (pendingTaskId) {
           const taskId = pendingTaskId;
           setPendingTaskId(undefined);
@@ -4980,15 +4908,19 @@ function AppShell() {
         { role: "user", content: message, at },
       ]);
       runStartedAtRef.current = Date.now();
+      // A session bound to an external agent CLI runs `agent.harness` (same input shape); every other
+      // session runs the native `agent.coding`.
       const view = await client.startRun(
-        "agent.coding",
-        { sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message), mode, preset, ...(activeCaseId ? { caseId: activeCaseId } : {}), ...(runTaskId ? { taskId: runTaskId } : {}) } as unknown as Json,
+        runHarnessId ? "agent.harness" : "agent.coding",
+        runHarnessId
+          ? ({ sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message) } as unknown as Json)
+          : { sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message), mode, preset, ...(activeCaseId ? { caseId: activeCaseId } : {}), ...(runTaskId ? { taskId: runTaskId } : {}) } as unknown as Json,
         // The run's shared state is seeded with an empty steering list: "Steer now" appends to it.
         { idempotencyKey: crypto.randomUUID(), correlationId: `session:${sessionId}`, state: { steer: [] } as unknown as Json },
       );
       setActiveRunId(view.runId);
     },
-    [client, currentWorkspaceId, currentSession, activeSessionId, activeTaskId, rememberSession, pendingTaskId, planState?.on, accessModeOverrides, pendingAccessMode, settings.permission, presetOverrides, settings.preset, activeCaseId, messageWithFocus],
+    [client, harnessBindings, pendingHarness, currentWorkspaceId, currentSession, activeSessionId, activeTaskId, rememberSession, pendingTaskId, planState?.on, accessModeOverrides, pendingAccessMode, settings.permission, presetOverrides, settings.preset, activeCaseId, messageWithFocus],
   );
 
   const stop = useCallback(async () => {
@@ -5183,7 +5115,7 @@ function AppShell() {
       config={modelConfig}
       openRequest={pickerRequest}
       onOpened={clearPickerRequest}
-      onManage={(model) => openSettings("models", modelConfig ? { edit: true, ...(model ? { model } : {}) } : { edit: false })}
+      onManage={() => openSettings("models")}
     />
   );
   const sessionTitle = currentSession?.title || "New Session";
@@ -5220,10 +5152,13 @@ function AppShell() {
   );
   const viewLabel: Record<CenterView, string> = { conversation: "", trajectory: "Trajectory", workbench: "Workbench", experts: "Experts & Teams", plugins: "Plugins" };
   const crumbs: string[] = [];
+  const boundHarnessId = activeSessionId ? harnessBindings.get(activeSessionId)?.harnessId : null;
+  const boundHarnessLabel = boundHarnessId ? agentLabel(harnessList.harnesses, boundHarnessId) : undefined;
   const workspaceCrumb = currentWorkspace?.title || currentWorkspace?.id;
   if (workspaceCrumb) crumbs.push(workspaceCrumb);
   if (currentView === "conversation" || currentView === "trajectory") {
     crumbs.push(inSession ? breadcrumbTitle : currentWorkspaceId ? "Start a session" : "Get started");
+    if (inSession && boundHarnessLabel) crumbs.push(boundHarnessLabel);
   } else {
     crumbs.push(viewLabel[currentView]);
   }
@@ -5261,8 +5196,28 @@ function AppShell() {
     if (isMobile) setCollapsed(true);
   }, [isMobile, activeSessionId, currentView, settingsSection]);
 
+  const boundRow = activeSessionId ? harnessBindings.get(activeSessionId) : undefined;
+  const agentChoice: HarnessChoice = activeSessionId
+    ? { harnessId: boundRow?.harnessId ?? null, ...(boundRow?.permissionMode ? { permissionMode: boundRow.permissionMode } : {}), ...(boundRow?.model ? { model: boundRow.model } : {}) }
+    : pendingHarness;
+  const changeAgent = useCallback(
+    (next: HarnessChoice) => {
+      setAgentBindError(undefined);
+      if (!activeSessionId) {
+        setPendingHarness(next);
+        return;
+      }
+      void client
+        .invoke("session.harness.bind", { sessionId: activeSessionId, harnessId: next.harnessId, ...(next.permissionMode ? { permissionMode: next.permissionMode } : {}), ...(next.model ? { model: next.model } : {}) } as never)
+        .catch((e) => setAgentBindError(capabilityErrorMessage(e)));
+    },
+    [client, activeSessionId],
+  );
+  const agentLocked = Boolean(activeRunId) || streaming.status === "streaming" || Boolean(pendingApproval);
   const contextBar = currentWorkspaceId ? (
     <ComposerBar
+      agentChip={<AgentChip harnesses={harnessList.harnesses} choice={agentChoice} locked={agentLocked} error={agentBindError} onChange={changeAgent} onOpenSettings={() => openSettings("agents")} />}
+      agentNotice={<AgentNotice harnesses={harnessList.harnesses} choice={agentChoice} />}
       workspaceId={currentWorkspaceId}
       {...(activeSessionId ? { sessionId: activeSessionId } : {})}
       {...(activeTaskId ? { taskId: activeTaskId } : {})}
@@ -5520,6 +5475,7 @@ function AppShell() {
                     session={session}
                     active={session.id === activeSessionId}
                     planPending={planReviewPendingSessions.has(session.id)}
+                    {...(harnessBindings.get(session.id)?.harnessId ? { harnessLabel: agentLabel(harnessList.harnesses, harnessBindings.get(session.id)!.harnessId) } : {})}
                     onOpen={() => openSession(session.id)}
                     onToggleArchive={() => {
                       const archived = session.archived !== true;

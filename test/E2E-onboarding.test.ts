@@ -174,7 +174,7 @@ describe("J-A-first-use E2E first-run onboarding", () => {
           await pop.waitFor({ state: "detached" });
           await page.getByRole("button", { name: /^Model mock-model-1/ }).click();
           await pop.getByRole("button", { name: "Manage providers…" }).click();
-          await page.getByRole("tab", { name: "Models", selected: true }).waitFor();
+          await page.getByRole("tab", { name: "Providers", selected: true }).waitFor();
         } finally {
           await browser.close();
           await client.close();

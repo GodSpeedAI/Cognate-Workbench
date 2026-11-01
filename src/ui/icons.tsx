@@ -344,3 +344,13 @@ export const SessionIcon = (props: IconProps) =>
   base(<path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5a1.5 1.5 0 0 1-1.5 1.5H7L4 13v-2.5H4A1.5 1.5 0 0 1 2.5 9z" />, props);
 
 export const ArrowLeftIcon = (props: IconProps) => base(<path d="M13 8H3M7 4L3 8l4 4" />, props);
+
+/** An external agent CLI (prompt chevron in a terminal frame). */
+export const TerminalIcon = (props: IconProps) =>
+  base(
+    <>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+      <path d="M4.75 6.25 6.75 8l-2 1.75M8.25 10h3" />
+    </>,
+    props,
+  );

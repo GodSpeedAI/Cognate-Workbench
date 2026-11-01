@@ -5,7 +5,7 @@
 // J-TASK-scope: the control shows this session's durable binding, "No task" is an obvious,
 // valid state, and changing the value writes the binding through `session.task.bind` — never a
 // silent global switch.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon, FolderIcon, ListViewIcon, ShieldIcon } from "../icons.tsx";
 import { budgetState, provenanceLine, rollupUsage } from "../../workbench/economics.ts";
 import type { TaskRecord, UsageRow } from "../../workbench/state.ts";
@@ -34,6 +34,9 @@ export interface ComposerBarProps {
   readonly workspaceTitle?: string;
   readonly workspaceRoot?: string;
   readonly posture?: { readonly short: string; readonly detail: string };
+  /** Which agent runs this session (chip + menu) and the one-line posture notice for a bound CLI. */
+  readonly agentChip?: ReactNode;
+  readonly agentNotice?: ReactNode;
 }
 
 const LEVEL_WORDS: Readonly<Record<AttentionLevel, string>> = {
@@ -155,7 +158,7 @@ function TaskChip({
   );
 }
 
-export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bindError, onOpenWorkbench, state, steps, elapsedSeconds, approvalsPending, referent, onClearFocus, workspaceTitle, workspaceRoot, posture }: ComposerBarProps) {
+export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bindError, onOpenWorkbench, state, steps, elapsedSeconds, approvalsPending, referent, onClearFocus, workspaceTitle, workspaceRoot, posture, agentChip, agentNotice }: ComposerBarProps) {
   const tasks = useBindableTasks(workspaceId, sessionId);
   const bound = tasks.find((t) => t.id === taskId);
   const usage = useWbRow<UsageRow>(`usage/${taskId ?? `session:${sessionId ?? "none"}`}`);
@@ -177,6 +180,7 @@ export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bind
             <span className="ctx-chip-text">{posture.short}</span>
           </span>
         )}
+        {agentChip}
         <TaskChip tasks={tasks} taskId={taskId} locked={state !== "idle"} onTaskChange={onTaskChange} onOpenWorkbench={onOpenWorkbench} />
         {referent && (
           <span className="ctx-chip ctx-chip-focus" role="status" aria-label="Focus" title={`"this" means ${describeFocusRef(referent.ref)} (${LEVEL_WORDS[referent.level]})`}>
@@ -201,6 +205,7 @@ export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bind
           {...(approvalsPending > 0 ? { approvalsPending } : {})}
         />
       </div>
+      {agentNotice}
       {bindError && (
         <span className="wb-error" role="alert">
           {bindError}

@@ -8,7 +8,9 @@ import { CheckIcon } from "../icons.tsx";
 import { useToast } from "../shell/Toast.tsx";
 import {
   API_PROTOCOL_OPTIONS,
+  DEFAULT_AZURE_API_VERSION,
   PROVIDER_CATALOG,
+  PROVIDER_GROUPS,
   PROVIDER_ID_PATTERN,
   capabilityErrorMessage,
   protocolToWire,
@@ -18,12 +20,30 @@ import {
   type ProviderPreset,
 } from "./providerCatalog.ts";
 
+/** The shape `provider.test` answers with (see src/capabilities/providerSwitch.ts). */
+export interface ProviderTestOutcome {
+  readonly ok: boolean;
+  readonly latencyMs: number;
+  readonly modelCount?: number;
+  readonly message: string;
+}
+
 export interface ProviderWizardInitial {
   readonly providerId: string;
+  readonly displayName?: string;
+  /** A key is already stored: leaving the key field blank keeps it. */
+  readonly hasKey?: boolean;
+  readonly keyless?: boolean;
+  readonly auth?: "bearer" | "none" | "api-key";
+  readonly apiVersion?: string;
   readonly baseURL: string;
   /** Wire protocol value as stored. */
   readonly protocol: string;
   readonly model: string;
+}
+
+function wireProtocolOf(wire: string): string {
+  return protocolToWire(wireToProtocol(wire));
 }
 
 export interface ProviderWizardProps {
@@ -55,7 +75,7 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
   const uid = useId();
   const editing = initial !== undefined;
   const [presetId, setPresetId] = useState<string>(editing ? "" : "");
-  const [displayName, setDisplayName] = useState(initial?.providerId ?? "");
+  const [displayName, setDisplayName] = useState(initial?.displayName ?? initial?.providerId ?? "");
   const [providerId, setProviderId] = useState(initial?.providerId ?? "");
   const [idTouched, setIdTouched] = useState(editing);
   const [baseURL, setBaseURL] = useState(initial?.baseURL ?? "");
@@ -63,6 +83,10 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [model, setModel] = useState(initial?.model ?? "");
+  const [apiVersion, setApiVersion] = useState(initial?.apiVersion ?? "");
+  const [azureFlag, setAzureFlag] = useState(initial?.auth === "api-key");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ProviderTestOutcome | undefined>(undefined);
   const [touched, setTouched] = useState<Readonly<Record<string, boolean>>>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -74,13 +98,18 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
   const modelWrapRef = useRef<HTMLDivElement>(null);
 
   const preset: ProviderPreset | undefined = PROVIDER_CATALOG.find((p) => p.id === presetId);
-  const keyOptional = preset?.auth === "none";
+  const azure = azureFlag || preset?.azure === true;
+  const keyStored = editing && initial?.hasKey === true;
+  const keyOptional = preset?.auth === "none" || (editing && !preset && initial?.keyless === true);
   const touch = (k: string) => setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
 
   const choosePreset = useCallback((p: ProviderPreset) => {
     setPresetId(p.id);
+    setAzureFlag(p.azure === true);
+    setApiVersion(p.azure ? DEFAULT_AZURE_API_VERSION : "");
+    setTestResult(undefined);
     setBaseURL(p.baseURL);
-    setProtocol(p.protocol);
+    setProtocol(p.azure ? "OpenAI Chat Completions" : p.protocol);
     setCatalog(undefined);
     setError(undefined);
     if (p.id !== "custom") {
@@ -101,7 +130,8 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
     displayName: displayName.trim() ? undefined : "Name is required.",
     providerId: !providerId.trim() ? "Provider ID is required." : PROVIDER_ID_PATTERN.test(providerId) ? undefined : "Use lowercase letters, digits, - or _, starting with a letter.",
     baseURL: validUrl(baseURL),
-    apiKey: keyOptional || apiKey.trim() ? undefined : "API key is required.",
+    apiKey: keyOptional || keyStored || apiKey.trim() ? undefined : "API key is required.",
+    apiVersion: azure && !apiVersion.trim() ? "Azure needs an api-version, for example 2024-10-21." : undefined,
     model: model.trim() ? undefined : "Choose or type a model ID.",
   };
   const valid = Object.values(errors).every((e) => e === undefined);
@@ -114,7 +144,8 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
       const result = (await client.invoke("model.catalog", {
         protocol: protocolToWire(protocol),
         baseURL,
-        ...(apiKey.trim() ? { apiKey } : {}),
+        ...(apiKey.trim() ? { apiKey } : keyStored ? { providerId: initial!.providerId } : {}),
+        ...(azure ? { auth: "api-key", apiVersion: apiVersion.trim() } : keyOptional ? { auth: "none" } : {}),
       } as never)) as unknown as ModelCatalogResult;
       setCatalog(result);
       if (result.ok && result.models.length > 0) {
@@ -126,7 +157,28 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
     } finally {
       setCatalogBusy(false);
     }
-  }, [client, protocol, baseURL, apiKey]);
+  }, [client, protocol, baseURL, apiKey, azure, apiVersion, keyOptional, keyStored, initial]);
+
+  const testConnection = useCallback(async () => {
+    setTesting(true);
+    setTestResult(undefined);
+    try {
+      const unchanged = keyStored && !apiKey.trim() && baseURL.trim() === initial!.baseURL && protocolToWire(protocol) === wireProtocolOf(initial!.protocol);
+      const input = unchanged
+        ? { providerId: initial!.providerId }
+        : {
+            baseURL: baseURL.trim(),
+            protocol: protocolToWire(protocol),
+            ...(apiKey.trim() ? { apiKey } : keyStored ? { providerId: initial!.providerId } : {}),
+            ...(azure ? { auth: "api-key", apiVersion: apiVersion.trim() } : keyOptional ? { auth: "none" } : {}),
+          };
+      setTestResult((await client.invoke("provider.test", input as never)) as unknown as ProviderTestOutcome);
+    } catch (err) {
+      setTestResult({ ok: false, latencyMs: 0, message: capabilityErrorMessage(err) });
+    } finally {
+      setTesting(false);
+    }
+  }, [client, keyStored, apiKey, baseURL, protocol, initial, azure, apiVersion, keyOptional]);
 
   const filtered = useMemo(() => {
     if (!catalog?.ok) return [] as readonly string[];
@@ -154,8 +206,10 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
         baseURL: baseURL.trim(),
         protocol: protocolToWire(protocol),
         model: model.trim(),
-        apiKey,
-      });
+        ...(apiKey.trim() ? { apiKey } : {}),
+        ...(azure ? { auth: "api-key", apiVersion: apiVersion.trim() } : keyOptional ? { auth: "none" } : {}),
+        ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
+      } as never);
       toast.show("Model provider saved");
       onSaved();
     } catch (err) {
@@ -163,14 +217,10 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
     } finally {
       setBusy(false);
     }
-  }, [valid, busy, client, providerId, baseURL, protocol, model, apiKey, toast, onSaved]);
+  }, [valid, busy, client, providerId, baseURL, protocol, model, apiKey, azure, apiVersion, keyOptional, displayName, toast, onSaved]);
 
   const fid = (n: string) => `${uid}-${n}`;
-  const groups: readonly { readonly title: string; readonly key: ProviderPreset["group"] }[] = [
-    { title: "Hosted", key: "hosted" },
-    { title: "On this computer", key: "local" },
-    { title: "Other", key: "custom" },
-  ];
+  const groups = PROVIDER_GROUPS;
 
   return (
     <form
@@ -199,6 +249,7 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
                     className={presetId === p.id ? "pw-preset selected" : "pw-preset"}
                     onClick={() => choosePreset(p)}
                     data-autofocus={autoFocus && p === PROVIDER_CATALOG[0] ? "" : undefined}
+                    data-preset={p.id}
                   >
                     <span className="pw-preset-name">
                       {p.label}
@@ -211,6 +262,12 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
             </div>
           ))}
         </div>
+        {preset && !preset.verified && (
+          <p className="pw-hint pw-unverified" role="note">
+            {preset.baseURL ? "This address comes from the provider's published docs and has not been checked by Workbench. Use Test connection before saving." : (preset.guidance ?? "Enter the endpoint from your provider's docs.")}
+            {preset.baseURL && preset.guidance ? ` ${preset.guidance}` : ""}
+          </p>
+        )}
         {editing && !preset && <p className="pw-hint">Editing the configured provider. Pick a preset to start from different defaults.</p>}
       </div>
 
@@ -244,7 +301,7 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
         </Field>
       </div>
 
-      <Field id={fid("url")} label="Base URL" hint={preset?.id === "azure-openai" ? "Replace your-resource and your-deployment with your own." : "Where requests are sent, usually ending in /v1."} error={show("baseURL")}>
+      <Field id={fid("url")} label="Base URL" hint={azure ? "The deployment URL, ending in /deployments/your-deployment-name. Replace your-resource and your-deployment." : "Where requests are sent, usually ending in /v1."} error={show("baseURL")}>
         <input
           id={fid("url")}
           type="url"
@@ -259,10 +316,17 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
         />
       </Field>
 
+      {azure && (
+        <Field id={fid("apiver")} label="API version" hint="Azure requires an api-version query. Azure OpenAI works with the Chat Completions protocol only." error={show("apiVersion")}>
+          <input id={fid("apiver")} value={apiVersion} aria-invalid={show("apiVersion") ? true : undefined} onChange={(e) => { setApiVersion(e.currentTarget.value); setTestResult(undefined); }} onBlur={() => touch("apiVersion")} placeholder={DEFAULT_AZURE_API_VERSION} />
+        </Field>
+      )}
+
       <div className="pw-grid">
-        <Field id={fid("proto")} label="API protocol" hint="The wire format this provider speaks.">
+        <Field id={fid("proto")} label="API protocol" hint={azure ? "Azure uses Chat Completions." : "The wire format this provider speaks."}>
           <select
             id={fid("proto")}
+            disabled={azure}
             value={protocol}
             onChange={(e) => {
               setProtocol(e.currentTarget.value as ApiProtocolLabel);
@@ -282,8 +346,10 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
           hint={
             keyOptional
               ? "Optional. Local servers usually need no key."
-              : editing
-                ? "Re-enter the key to save changes; it is stored on this computer, never in the event log."
+              : keyStored
+                ? "A key is stored for this provider. Leave blank to keep it, or paste a new one to replace it."
+                : editing
+                ? "Stored in your system's secret store, never in the event log."
                 : (preset?.keyHint ?? "Stored on this computer, never in the event log.")
           }
           error={show("apiKey")}
@@ -300,7 +366,11 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
             spellCheck={false}
             value={apiKey}
             aria-invalid={show("apiKey") ? true : undefined}
-            onChange={(e) => setApiKey(e.currentTarget.value)}
+            placeholder={keyStored ? "Stored — leave blank to keep" : undefined}
+            onChange={(e) => {
+              setApiKey(e.currentTarget.value);
+              setTestResult(undefined);
+            }}
             onBlur={() => touch("apiKey")}
           />
         </Field>
@@ -380,12 +450,24 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
         )}
       </Field>
 
+      {testResult && (
+        <p role={testResult.ok ? "status" : "alert"} className={testResult.ok ? "pw-test pw-test-ok" : "pw-test pw-test-fail"} data-test-result={testResult.ok ? "ok" : "failed"}>
+          {testResult.ok ? <CheckIcon aria-hidden="true" /> : null}
+          <span>
+            {testResult.message}
+          </span>
+        </p>
+      )}
       {error && (
         <p role="alert" className="form-error pw-submit-error">
           {error}
         </p>
       )}
       <div className="pw-actions">
+        <button type="button" className="pw-test-btn" disabled={testing || validUrl(baseURL) !== undefined || (azure && !apiVersion.trim())} onClick={() => void testConnection()}>
+          {testing ? "Testing…" : "Test connection"}
+        </button>
+        <span className="pw-actions-spacer" />
         {onCancel && (
           <button type="button" onClick={onCancel}>
             {cancelLabel}

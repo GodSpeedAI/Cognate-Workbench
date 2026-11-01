@@ -41,20 +41,23 @@ describe("J-H-provider-error E2E retry card", () => {
   test("an unreachable provider shows 'Can't reach ... retrying' with the error within 10s, then a readable failure with Retry", async () => {
     process.env.MODEL_RETRY_BACKOFF_MS = "1500";
     await withTempHome(async (home) => {
-      // aimock's `error` scenario answers HTTP 500 at once, so the retry events are deterministic.
-      const aimock = await bootAimock();
-      const { app, client, root } = await configured(home, `http://127.0.0.1:${aimock.port}/v1`, ["proj-a"]);
+      // A real unreachable endpoint: a listener that drops every connection (this environment hangs on
+      // closed loopback ports instead of refusing, so a dropped connection is the deterministic stand-in).
+      const dropper = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { open(sock) { sock.terminate(); }, data() {} } });
+      const { app, client, root } = await configured(home, `http://127.0.0.1:${dropper.port}/v1`, ["proj-a"]);
       const browser = await chromium.launch();
       try {
         const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
         await page.goto(app.url);
         const composer = page.getByRole("textbox", { name: /Message or run a task|describe your task/i });
-        await composer.fill("[[scenario:error]] hello");
+        await composer.fill("hello");
         await composer.press("Enter");
         const card = page.locator("[data-retry-card].retry-card");
-        await card.waitFor({ timeout: 10_000 });
+        await card.waitFor({ timeout: 10_000 }).catch(async (e) => { console.log("BODY", (await page.locator("main").innerText()).slice(-600)); throw e; });
         expect(await card.textContent()).toMatch(/Can't reach mock .*127\.0\.0\.1:\d+.* retrying \(\d\/5\)/);
         expect((await card.locator(".retry-card-error").textContent())?.length ?? 0).toBeGreaterThan(5);
+        expect(await card.textContent()).toMatch(/Next attempt in \d+s|Trying again now/);
+        expect(await card.locator(".retry-card-code").textContent()).toMatch(/CONNECTION_REFUSED|NETWORK_ERROR/);
         await card.getByRole("button", { name: "Stop" }).waitFor();
         await card.getByRole("button", { name: "Open model settings" }).waitFor();
         await shot(page, "t4-retry-card");
@@ -66,7 +69,7 @@ describe("J-H-provider-error E2E retry card", () => {
         await client.close();
         await app.stop();
         await rm(root, { recursive: true, force: true });
-        await aimock.stop();
+        dropper.stop(true);
       }
     });
     delete process.env.MODEL_RETRY_BACKOFF_MS;
