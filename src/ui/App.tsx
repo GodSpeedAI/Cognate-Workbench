@@ -15,6 +15,10 @@ import { interruptedCapability, isModelGeneration } from "../capabilities/ambigu
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
 import { DirectoryField } from "./DirectoryField.tsx";
+import { FirstRunFlow } from "./onboarding/FirstRun.tsx";
+import { ProviderWizard } from "./models/ProviderWizard.tsx";
+import { ModelPicker } from "./models/ModelPicker.tsx";
+import { wireToProtocol } from "./models/providerCatalog.ts";
 import { errorText } from "./workbench/data.ts";
 import type { TraceRow, TraceRequest, TraceTool, TraceTurn } from "../projections/sessionTrace.ts";
 import { TOOL_DEFS } from "../agents/agentCoding.ts";
@@ -144,7 +148,6 @@ import {
 } from "../shortcuts.ts";
 import type { ConfigPathResult } from "../capabilities/configPath.ts";
 import { copyToClipboard, downloadTextFile } from "./download.ts";
-import type { ModelCatalogResult } from "../modelCatalog.ts";
 import type { PluginCatalogResult } from "../capabilities/pluginInstall.ts";
 import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView } from "../plugins.ts";
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
@@ -415,18 +418,6 @@ function useTheme(appearance: AppearanceMode): string {
   return theme;
 }
 
-/** Whether the given first-run step (`"notice"` | `"apikey"`) has already been dismissed for this
- *  `COGNATE_HARNESS_HOME` — folded from durable `onboarding.dismissed` events (`onboarding`
- *  projection). Absence of a row is what makes the first-run dialog pair reappear on a fresh home,
- *  same mechanism the reference uses per-`DSH_HOME` (critic round-1 P0-1). */
-function useOnboardingDismissed(step: "notice" | "apikey"): boolean {
-  const rows = useProjection("onboarding");
-  // `ReadProjection` strips the tenant prefix the projection stores keys with (same convention as
-  // `model-config`'s "current" / `workspaces`'s "record/<id>" rows) — the row key here is the bare
-  // step name, not `${tenant}/${step}`.
-  return useMemo(() => rows?.some((r) => r.key === step) ?? false, [rows, step]);
-}
-
 /** "just now" / "2m" / "3h" / "5d" — same rough granularity as the reference's session-tree
  * relative-time suffix (see reference/observations/aria/15-completed-session.desktop.txt: a
  * session row name ends in a relative-time word like "now"). */
@@ -557,96 +548,40 @@ export function SessionRowButton({
 
 // The modal focus trap / Escape stack lives in ./shell/useModalFocus.ts (shared with the palette).
 
-/** First-run dialog #1 (critic round-1 P0-1): same structure/roles as the reference's "Internal
- *  Testing Notice" (`dialog`, `heading[level=2]`, single "Continue" button; reference-behavior-
- *  matrix.md §1) — Cognate-branded wording, not DeepSeek's copy (spec: brand/copy may be swapped,
- *  the control itself may not be dropped). */
-function FirstRunNotice({ onContinue }: { readonly onContinue: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef);
-  return (
-    <div className="modal-backdrop">
-      <div
-        className="modal first-run-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="first-run-notice-heading"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <h2 id="first-run-notice-heading">Welcome to Cognate Console</h2>
-        <p>
-          Cognate Console runs a coding agent against your own workspace: it can read and edit
-          files, run shell commands, and execute code on your behalf. Every one of those actions is
-          visible in the transcript as it happens, and anything irreversible — like running
-          arbitrary code — pauses for your explicit approval first.
-        </p>
-        <p>This build is under active development; expect rough edges and changing behavior.</p>
-        <div className="modal-actions">
-          <button type="button" onClick={onContinue}>
-            Continue
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** First-run dialog #2 (critic round-1 P0-1): same structure as the reference's "Add an API key to
- *  get started" (API-key textbox, "Configure later"/"Save and continue", the latter disabled until a
- *  key is entered; reference-behavior-matrix.md §1). This tranche has no default/preset provider to
- *  key-only configure (no DeepSeek-branded "official" provider) — "Save and continue" dismisses this
- *  step the same as "Configure later"; the entered key is not persisted here (an assumption, not an
- *  observed reference behavior — see docs/known-gaps.md). Full provider setup happens in Settings →
- *  Models afterward. */
-function FirstRunApiKey({ onDismiss }: { readonly onDismiss: () => void }) {
-  const [key, setKey] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef);
-  return (
-    <div className="modal-backdrop">
-      <div
-        className="modal first-run-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="first-run-apikey-heading"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <h2 id="first-run-apikey-heading">Add an API key to get started</h2>
-        <p>Configure a model provider to start building.</p>
-        <label>
-          API key
-          <input type="password" aria-label="API key" value={key} onChange={(e) => setKey(e.currentTarget.value)} />
-        </label>
-        <div className="modal-actions">
-          <button type="button" onClick={onDismiss}>
-            Configure later
-          </button>
-          <button type="button" disabled={key.trim().length === 0} onClick={onDismiss}>
-            Save and continue
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Sequences the two first-run dialogs, gated by the `onboarding` projection — renders nothing once
- *  both steps are dismissed (or the apikey step is moot because a model is already configured, e.g.
- *  a home reused from an older build of this app). */
-function FirstRunDialogs() {
-  const client = useCognate();
-  const noticeDismissed = useOnboardingDismissed("notice");
-  const apikeyDismissed = useOnboardingDismissed("apikey");
+/** Gates the first-run flow on the durable `onboarding` projection (steps "notice" and "apikey"),
+ *  the model config and the workspaces; the flow itself lives in ./onboarding/FirstRun.tsx. */
+function FirstRunDialogs({ onFinished }: { readonly onFinished: () => void }) {
+  const rows = useProjection("onboarding");
   const modelConfig = useModelConfig();
-  const dismiss = useCallback((step: "notice" | "apikey") => void client.invoke("onboarding.dismiss", { step }), [client]);
-  if (!noticeDismissed) return <FirstRunNotice onContinue={() => dismiss("notice")} />;
-  if (!apikeyDismissed && !modelConfig) return <FirstRunApiKey onDismiss={() => dismiss("apikey")} />;
-  return null;
+  const workspaces = useWorkspaces();
+  const has = (step: string) => rows?.some((r) => r.key === step) ?? false;
+  return (
+    <FirstRunFlow
+      noticeDismissed={rows === undefined ? undefined : has("notice")}
+      apikeyDismissed={has("apikey")}
+      hasModel={modelConfig !== undefined}
+      hasWorkspace={workspaces.length > 0}
+      onFinished={onFinished}
+    />
+  );
 }
 
-function WorkspaceChooser() {
+/** Shown on the empty states while no model is configured: one clear way forward. */
+function ConnectModelNotice({ onConnect }: { readonly onConnect: () => void }) {
+  return (
+    <div className="connect-model-notice" role="status">
+      <div>
+        <strong>No model provider connected</strong>
+        <span>Connect one to start a conversation.</span>
+      </div>
+      <button type="button" className="pw-primary" onClick={onConnect}>
+        Connect a model provider
+      </button>
+    </div>
+  );
+}
+
+function WorkspaceChooser({ onConnectModel }: { readonly onConnectModel?: () => void }) {
   const client = useCognate();
   const [path, setPath] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
@@ -670,6 +605,7 @@ function WorkspaceChooser() {
   return (
     <div className="workspace-chooser">
       <div className="workspace-chooser-card">
+        {onConnectModel && <ConnectModelNotice onConnect={onConnectModel} />}
         <div className="workspace-chooser-intro">
           <h1 className="workspace-chooser-title">Choose a folder to work in</h1>
           <p className="workspace-chooser-hint">Cognate runs sessions inside a folder on this computer. Pick the project you want to work on; you can add more later.</p>
@@ -699,56 +635,6 @@ function WorkspaceChooser() {
       </div>
     </div>
   );
-}
-
-/** A small, original list of generic OpenAI-compatible provider presets for the "Third-party model
- *  provider" combobox (critic round-1 P0-4) — deliberately not a copy of the reference's ~35-entry
- *  DeepSeek-branded provider list (that list mixes in DeepSeek's own brand assets); this is a short
- *  placeholder set of well-known OpenAI-compatible endpoints, sufficient to exercise the tab/combobox
- *  control itself. Picking one pre-fills the Custom model API form's Base URL/Provider ID/Display
- *  name fields (this app has no live per-provider defaults database beyond this).
- */
-const THIRD_PARTY_PRESETS: readonly {
-  readonly id: string;
-  readonly label: string;
-  readonly baseURL: string;
-  /** Sensible wire default for the preset; the operator can still change it in the form. */
-  readonly protocol: (typeof API_PROTOCOL_OPTIONS)[number];
-}[] = [
-  { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", protocol: "OpenAI Responses" },
-  { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", protocol: "OpenAI Chat Completions" },
-  { id: "azure-openai", label: "Azure OpenAI", baseURL: "https://your-resource.openai.azure.com/openai/deployments/your-deployment", protocol: "OpenAI Chat Completions" },
-  { id: "groq", label: "Groq", baseURL: "https://api.groq.com/openai/v1", protocol: "OpenAI Chat Completions" },
-  { id: "mistral", label: "Mistral", baseURL: "https://api.mistral.ai/v1", protocol: "OpenAI Chat Completions" },
-  { id: "together", label: "Together AI", baseURL: "https://api.together.xyz/v1", protocol: "OpenAI Chat Completions" },
-  { id: "fireworks", label: "Fireworks AI", baseURL: "https://api.fireworks.ai/inference/v1", protocol: "OpenAI Chat Completions" },
-  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com/v1", protocol: "Anthropic Messages" },
-];
-
-const API_PROTOCOL_OPTIONS = ["OpenAI Chat Completions", "OpenAI Responses", "Anthropic Messages"] as const;
-
-/** UI display name ↔ wire protocol value persisted by `model.configure`. "openai-compatible" is a
- *  legacy wire value that only arrives from old persisted configs; it edits as OpenAI Chat
- *  Completions (its actual semantics) and stays valid until the operator changes protocol. */
-const PROTOCOL_WIRE_VALUES = {
-  "OpenAI Chat Completions": "openai-completions",
-  "OpenAI Responses": "openai-responses",
-  "Anthropic Messages": "anthropic-messages",
-} as const satisfies Readonly<Record<(typeof API_PROTOCOL_OPTIONS)[number], WireProtocolValue>>;
-type WireProtocolValue = "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages";
-function protocolToWire(display: (typeof API_PROTOCOL_OPTIONS)[number]): Exclude<WireProtocolValue, "openai-compatible"> {
-  return PROTOCOL_WIRE_VALUES[display];
-}
-function wireToProtocol(wire: string): (typeof API_PROTOCOL_OPTIONS)[number] {
-  if (wire === "openai-responses") return "OpenAI Responses";
-  if (wire === "anthropic-messages") return "Anthropic Messages";
-  return "OpenAI Chat Completions";
-}
-
-interface ModelRow {
-  readonly id: string;
-  readonly modelId: string;
-  readonly displayName: string;
 }
 
 /** A shared dropdown-menu control (usage pass U2): a trigger button labelled with the current
@@ -1682,6 +1568,13 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
  *  beside it). Left: a vertical tablist. Right: one section at a time in a fixed-width column that
  *  scrolls inside the page, so switching sections never moves the page. The close control is the
  *  top-right X (and Esc, handled by the App's global key listener). */
+export interface SettingsWizardRequest {
+  /** Edit the configured provider instead of adding a new one. */
+  readonly edit?: boolean;
+  /** Prefill this model when editing. */
+  readonly model?: string;
+}
+
 function SettingsPage({
   onClose,
   section,
@@ -1689,8 +1582,11 @@ function SettingsPage({
   settings,
   workspaceId,
   onChangeShortcuts,
+  startWizard,
 }: {
   readonly onClose: () => void;
+  /** Open Models straight into the provider wizard (empty state, composer model picker). */
+  readonly startWizard?: SettingsWizardRequest | undefined;
   /** Writes one whole-value shortcut patch through `settings.changeShortcuts`. */
   readonly onChangeShortcuts: (shortcuts: ShortcutOverrides) => Promise<void>;
   readonly section: SettingsSection;
@@ -1708,16 +1604,9 @@ function SettingsPage({
   // menu; the Permission control stays disabled while it is open, and only the checked-state
   // "Enable Full access" button commits the durable change.
   const [fullAccessConfirm, setFullAccessConfirm] = useState(false);
-  const [view, setView] = useState<"list" | "wizard">("list");
-  const [addTab, setAddTab] = useState<"third-party" | "custom">("custom");
-  const [thirdParty, setThirdParty] = useState("");
-  const [providerId, setProviderId] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [baseURL, setBaseURL] = useState("");
-  const [protocol, setProtocol] = useState<(typeof API_PROTOCOL_OPTIONS)[number]>(API_PROTOCOL_OPTIONS[0]);
-  const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState<readonly ModelRow[]>([]);
-  const [modelError, setModelError] = useState<string | undefined>(undefined);
+  const [view, setView] = useState<"list" | "wizard">(startWizard ? "wizard" : "list");
+  // Wizard prefill: editing the configured provider (optionally with another model) or a fresh add.
+  const [wizardEdit, setWizardEdit] = useState<{ readonly model?: string } | undefined>(startWizard?.edit ? { ...(startWizard.model ? { model: startWizard.model } : {}) } : undefined);
   const [customizedOpen, setCustomizedOpen] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [saved, setSaved] = useState(false);
@@ -1729,99 +1618,16 @@ function SettingsPage({
   // "Fetch models" (model.catalog) — the three Settings -> Models actions that were inert.
   const [configFileOpen, setConfigFileOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [catalog, setCatalog] = useState<ModelCatalogResult | undefined>(undefined);
-  const [catalogBusy, setCatalogBusy] = useState(false);
-
-  const resetWizard = useCallback((prefillFromConfig: boolean) => {
-    setAddTab("custom");
-    setThirdParty("");
-    setModelError(undefined);
-    setError(undefined);
-    if (prefillFromConfig && config) {
-      setProviderId(config.providerId);
-      setDisplayName(config.providerId);
-      setBaseURL(config.baseURL);
-      // Editing preserves the provider's actual protocol; only an explicit operator change alters it.
-      setProtocol(wireToProtocol(config.protocol));
-      setApiKey("");
-      setModels([{ id: crypto.randomUUID(), modelId: config.model, displayName: config.model }]);
-    } else {
-      setProviderId("");
-      setDisplayName("");
-      setBaseURL("");
-      setProtocol(API_PROTOCOL_OPTIONS[0]);
-      setApiKey("");
-      setModels([]);
-    }
-  }, [config]);
 
   const openAddWizard = useCallback(() => {
-    resetWizard(false);
+    setWizardEdit(undefined);
     setView("wizard");
-  }, [resetWizard]);
+  }, []);
 
   const openEditWizard = useCallback(() => {
-    resetWizard(true);
+    setWizardEdit({});
     setView("wizard");
-  }, [resetWizard]);
-
-  const applyPreset = useCallback((id: string) => {
-    setThirdParty(id);
-    const preset = THIRD_PARTY_PRESETS.find((p) => p.id === id);
-    if (preset) {
-      setProviderId(preset.id);
-      setDisplayName(preset.label);
-      setBaseURL(preset.baseURL);
-      setProtocol(preset.protocol);
-      setAddTab("custom");
-    }
   }, []);
-
-  const addModelRow = useCallback(() => {
-    setModels((prev) => [...prev, { id: crypto.randomUUID(), modelId: "", displayName: "" }]);
-  }, []);
-
-  const updateModelRow = useCallback((id: string, patch: Partial<ModelRow>) => {
-    setModels((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-  }, []);
-
-  const createProviderValid =
-    providerId.trim().length > 0 &&
-    displayName.trim().length > 0 &&
-    baseURL.trim().length > 0 &&
-    apiKey.trim().length > 0 &&
-    models.length > 0 &&
-    models.every((m) => m.modelId.trim().length > 0);
-
-  const createProvider = useCallback(async () => {
-    setBusy(true);
-    setError(undefined);
-    setModelError(undefined);
-    try {
-      if (models.length === 0 || models.some((m) => m.modelId.trim().length === 0)) {
-        const badIndex = models.findIndex((m) => m.modelId.trim().length === 0);
-        setModelError(`Model ${badIndex === -1 ? models.length + 1 : badIndex + 1}: Model ID is required.`);
-        return;
-      }
-      if (!providerId || !displayName || !baseURL) throw new Error("Provider ID, display name, and base URL are required.");
-      // This tranche's `model.configure` capability holds exactly one live provider config; a
-      // Models sub-list with several rows is structurally supported (Fetch/Add), but only the first
-      // configured model is actually wired through to the backend — see docs/known-gaps.md.
-      await client.invoke("model.configure", {
-        providerId,
-        baseURL,
-        protocol: protocolToWire(protocol),
-        model: models[0]!.modelId,
-        apiKey,
-      });
-      setView("list");
-      toast.show("Model provider saved");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [client, toast, providerId, displayName, baseURL, apiKey, models, protocol]);
 
   const applyRowKey = useCallback(async () => {
     if (!config) return;
@@ -1860,7 +1666,6 @@ function SettingsPage({
       setDeleteConfirm(false);
       setRowApiKey("");
       setCustomizedOpen(false);
-      setCatalog(undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDeleteConfirm(false);
@@ -1868,36 +1673,6 @@ function SettingsPage({
       setBusy(false);
     }
   }, [client, config]);
-
-  /** Discovers real model ids for the provider being added. Read-only: nothing is configured or
-   *  recorded until the operator chooses a row and saves. */
-  const fetchModels = useCallback(async () => {
-    setCatalogBusy(true);
-    setCatalog(undefined);
-    setModelError(undefined);
-    try {
-      const result = (await client.invoke("model.catalog", {
-        protocol: protocolToWire(protocol),
-        baseURL,
-        ...(apiKey.trim().length > 0 ? { apiKey } : {}),
-      } as never)) as unknown as ModelCatalogResult;
-      setCatalog(result);
-      if (result.ok) {
-        // Append only: fetching must never discard ids the operator typed by hand.
-        setModels((prev) => {
-          const have = new Set(prev.map((m) => m.modelId.trim()).filter((v) => v.length > 0));
-          const added = result.models
-            .filter((id) => !have.has(id))
-            .map((modelId) => ({ id: crypto.randomUUID(), modelId, displayName: "" }));
-          return [...prev, ...added];
-        });
-      }
-    } catch (err) {
-      setCatalog({ ok: false, reason: err instanceof Error ? err.message : String(err), models: [] });
-    } finally {
-      setCatalogBusy(false);
-    }
-  }, [client, protocol, baseURL, apiKey]);
 
   const pageRef = useRef<HTMLElement>(null);
   // Page focus contract (it is not a modal, so no trap): land on the active tab when opened and
@@ -2075,141 +1850,18 @@ function SettingsPage({
               </>
             ) : (
               <>
-                <h3>Add model provider</h3>
-                <div role="tablist" aria-label="How to add" className="add-provider-tabs">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={addTab === "third-party"}
-                    className={addTab === "third-party" ? "tab active" : "tab"}
-                    onClick={() => setAddTab("third-party")}
-                  >
-                    Third-party model provider
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={addTab === "custom"}
-                    className={addTab === "custom" ? "tab active" : "tab"}
-                    onClick={() => setAddTab("custom")}
-                  >
-                    Custom model API
-                  </button>
-                </div>
-                {addTab === "third-party" ? (
-                  <div className="third-party-panel">
-                    <label>
-                      Provider
-                      <select aria-label="Third-party model provider" value={thirdParty} onChange={(e) => applyPreset(e.currentTarget.value)}>
-                        <option value="" disabled>
-                          Choose a provider…
-                        </option>
-                        {THIRD_PARTY_PRESETS.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <p className="settings-subtitle">Selecting a provider fills in its details on the Custom model API tab.</p>
-                  </div>
-                ) : (
-                  <div className="provider-card">
-                    <label>
-                      Provider ID
-                      <input value={providerId} onChange={(e) => setProviderId(e.currentTarget.value)} placeholder="acme-gateway" />
-                    </label>
-                    <p className="field-hint">Lowercase identifier, starting with a letter, that uniquely names this provider in requests and as its credential name.</p>
-                    <label>
-                      Display name
-                      <input value={displayName} onChange={(e) => setDisplayName(e.currentTarget.value)} />
-                    </label>
-                    <label>
-                      Base URL
-                      <input value={baseURL} onChange={(e) => setBaseURL(e.currentTarget.value)} placeholder="https://gateway.example/v1" />
-                    </label>
-                    <label>
-                      API protocol
-                      <select value={protocol} onChange={(e) => setProtocol(e.currentTarget.value as (typeof API_PROTOCOL_OPTIONS)[number])}>
-                        {API_PROTOCOL_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      API key
-                      <input type="password" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
-                    </label>
-                    <div role="region" aria-label="Models" className="models-region">
-                      <div className="models-region-header">
-                        <span>Models</span>
-                        <div>
-                          <button
-                            type="button"
-                            disabled={baseURL.trim().length === 0 || catalogBusy}
-                            onClick={() => void fetchModels()}
-                          >
-                            {catalogBusy ? "Fetching…" : "Fetch available models"}
-                          </button>
-                          <button type="button" onClick={addModelRow}>
-                            Add model
-                          </button>
-                        </div>
-                      </div>
-                      {catalog !== undefined && !catalog.ok && (
-                        <p role="alert" className="form-error">
-                          {catalog.reason}
-                        </p>
-                      )}
-                      {catalog !== undefined && catalog.ok && (
-                        <p role="status" className="settings-subtitle catalog-status">
-                          Found {catalog.models.length} model{catalog.models.length === 1 ? "" : "s"} — added below, unrecognised duplicates were skipped.
-                        </p>
-                      )}
-                      {models.map((m, i) => (
-                        <div key={m.id} className="model-row">
-                          <input
-                            aria-label={`Model ${i + 1} ID`}
-                            value={m.modelId}
-                            onChange={(e) => updateModelRow(m.id, { modelId: e.currentTarget.value })}
-                            placeholder="Model ID"
-                          />
-                          <input
-                            aria-label={`Model ${i + 1} display name`}
-                            value={m.displayName}
-                            onChange={(e) => updateModelRow(m.id, { displayName: e.currentTarget.value })}
-                            placeholder="Display name"
-                          />
-                        </div>
-                      ))}
-                      {modelError && (
-                        <p role="alert" className="form-error">
-                          {modelError}
-                        </p>
-                      )}
-                    </div>
-                    {error && (
-                      <p role="alert" className="form-error">
-                        {error}
-                      </p>
-                    )}
-                  </div>
-                )}
+                <h3>{wizardEdit ? "Edit model provider" : "Add model provider"}</h3>
+                <ProviderWizard
+                  {...(wizardEdit && config
+                    ? { initial: { providerId: config.providerId, baseURL: config.baseURL, protocol: config.protocol, model: wizardEdit.model ?? config.model } }
+                    : {})}
+                  submitLabel={wizardEdit ? "Save changes" : "Create provider"}
+                  onCancel={() => setView("list")}
+                  onSaved={() => setView("list")}
+                />
               </>
             )}
           </div>
-          {section === "models" && view === "wizard" && (
-            <div className="modal-actions settings-actions">
-              <button type="button" onClick={() => setView("list")}>
-                Cancel
-              </button>
-              <button type="button" disabled={busy || !createProviderValid} onClick={createProvider}>
-                Create provider
-              </button>
-            </div>
-          )}
         </div>
       </div>
       {fullAccessConfirm && (
@@ -3083,6 +2735,7 @@ export function Composer({
   disabled,
   sending,
   modelLabel,
+  modelControl,
   planMode,
   onSend,
   onStop,
@@ -3104,6 +2757,8 @@ export function Composer({
   readonly disabled: boolean;
   readonly sending: boolean;
   readonly modelLabel: string | undefined;
+  /** Replaces the plain model label (the shell passes the model picker). */
+  readonly modelControl?: ReactNode;
   /** J-E-plan: whether the active session is currently in plan mode — swaps the composer
    *  placeholder and shows the "Plan mode on, press to turn off" toggle (reference-behavior-matrix.md
    *  §6.3, `13-plan-active`). */
@@ -3307,9 +2962,11 @@ export function Composer({
             Plan
           </button>
         )}
-        <span className="composer-info-label" title="Model configured in Settings → Models">
-          {modelLabel ?? "No model"}
-        </span>
+        {modelControl ?? (
+          <span className="composer-info-label" title="Model configured in Settings → Models">
+            {modelLabel ?? "No model"}
+          </span>
+        )}
         <div className="composer-spacer" />
         {sending ? (
           <button type="button" className="send-btn stop" aria-label="Stop generating" onClick={onStop}>
@@ -4621,6 +4278,8 @@ function HeroLanding({
   workspaceLabel,
   composerDisabled,
   modelLabel,
+  modelControl,
+  noModelNotice,
   onSend,
   accessMode,
   onAccessModeChange,
@@ -4636,6 +4295,9 @@ function HeroLanding({
   readonly modeLabel?: string;
   readonly composerDisabled: boolean;
   readonly modelLabel: string | undefined;
+  readonly modelControl?: ReactNode;
+  /** Shown above the composer while no model is connected. */
+  readonly noModelNotice?: ReactNode;
   readonly onSend: (message: string) => void;
   /** Usage pass U2: the hero composer's access-mode dropdown edits the pending choice the
    *  session-creating send() consumes (no session id exists yet to key an override onto). */
@@ -4718,11 +4380,13 @@ function HeroLanding({
             )}
           </div>
         </div>
+        {noModelNotice}
         <div className="hero-composer">
           <Composer
             disabled={composerDisabled}
             sending={false}
             modelLabel={modelLabel}
+            {...(modelControl ? { modelControl } : {})}
             planMode={false}
             onSend={onSend}
             onStop={() => undefined}
@@ -4818,8 +4482,17 @@ function AppShell() {
   // Settings is a page (not a modal): `settingsSection` is both "is it open" and "which section".
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   const showSettings = settingsSection !== undefined;
-  const openSettings = useCallback((section: SettingsSection = "general") => setSettingsSection(section), []);
-  const closeSettings = useCallback(() => setSettingsSection(undefined), []);
+  const [settingsWizard, setSettingsWizard] = useState<SettingsWizardRequest | undefined>(undefined);
+  const openSettings = useCallback((section: SettingsSection = "general", wizard?: SettingsWizardRequest) => {
+    setSettingsWizard(wizard);
+    setSettingsSection(section);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsSection(undefined);
+    setSettingsWizard(undefined);
+  }, []);
+  const [pickerRequest, setPickerRequest] = useState(false);
+  const clearPickerRequest = useCallback(() => setPickerRequest(false), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Usage pass U2: per-session access mode (the composer dropdown) — an override map keyed by
   // session id, seeded from the settings default for new sessions (`pendingAccessMode` carries a
@@ -5323,6 +4996,18 @@ function AppShell() {
       keywords: "appearance dark light mode",
       run: () => void client.invoke("settings.changeAppearance", { appearance: theme === "dark" ? "light" : "dark" } as never).then(() => toast.show("Settings saved")).catch(() => toast.show("Could not save that setting")),
     });
+    items.push({
+      id: "switch-model",
+      group: "Actions",
+      label: "Switch model",
+      icon: <BotIcon />,
+      keywords: "model provider change llm manage providers",
+      run: go(() => {
+        closeCenterPanels();
+        if (currentWorkspaceId) setPickerRequest(true);
+        else openSettings("models", modelConfig ? { edit: true } : { edit: false });
+      }),
+    });
     items.push({ id: "experts", group: "Actions", label: "Experts & Teams", icon: <BotIcon />, keywords: "agents teams", run: go(() => { closeCenterPanels(); setExpertsPanelOpen(true); }) });
     if (currentWorkspaceId) items.push({ id: "workbench", group: "Actions", label: "Workbench", icon: <WorkbenchIcon />, keywords: "tasks workflows automations", run: go(() => { closeCenterPanels(); setWorkbenchOpen(true); }) });
     items.push({ id: "plugins", group: "Actions", label: "Plugins", icon: <PluginIcon />, keywords: "extensions", run: go(() => { setExpertsPanelOpen(false); setWorkbenchOpen(false); setPluginsPanelOpen(true); }) });
@@ -5369,7 +5054,7 @@ function AppShell() {
       });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chordFor, theme, workspaces, sessions, currentWorkspaceId, client, toast, closeCenterPanels, openSession, openSettings, closeSettings, inspector]);
+  }, [chordFor, theme, workspaces, sessions, currentWorkspaceId, modelConfig, client, toast, closeCenterPanels, openSession, openSettings, closeSettings, inspector]);
 
   // Close the sidebar's floating menus on outside click / Escape (same pattern as SettingMenu).
   useEffect(() => {
@@ -5657,6 +5342,14 @@ function AppShell() {
   }, [streaming.status, streaming.text, streaming.retries, streaming.failure, toolEntries]);
 
   const modelLabel = modelConfig ? `${modelConfig.model}` : undefined;
+  const modelPicker = (
+    <ModelPicker
+      config={modelConfig}
+      openRequest={pickerRequest}
+      onOpened={clearPickerRequest}
+      onManage={(model) => openSettings("models", modelConfig ? { edit: true, ...(model ? { model } : {}) } : { edit: false })}
+    />
+  );
   const sessionTitle = currentSession?.title || "New Session";
   const breadcrumbTitle = sessionTitle.length > 64 ? `${sessionTitle.slice(0, 63)}…` : sessionTitle;
   // 04/05 hero landing (see HeroLanding's doc comment above): a workspace is chosen but no turn has
@@ -6153,6 +5846,7 @@ function AppShell() {
         <SettingsPage
           onClose={closeSettings}
           section={settingsSection}
+          startWizard={settingsWizard}
           onSectionChange={setSettingsSection}
           settings={settings}
           workspaceId={currentWorkspaceId}
@@ -6226,7 +5920,7 @@ function AppShell() {
             onClose={() => setWorkbenchOpen(false)}
           />
         ) : !currentWorkspaceId ? (
-          <WorkspaceChooser />
+          <WorkspaceChooser {...(modelConfig ? {} : { onConnectModel: () => openSettings("models", { edit: false }) })} />
         ) : showHero ? (
           <>
           <HeroLanding
@@ -6234,6 +5928,8 @@ function AppShell() {
             modeLabel={AGENT_PRESET_LABELS[settings.preset]}
             composerDisabled={composerDisabled}
             modelLabel={modelLabel}
+            {...(modelPicker ? { modelControl: modelPicker } : {})}
+            noModelNotice={modelConfig ? undefined : <ConnectModelNotice onConnect={() => openSettings("models", { edit: false })} />}
             onSend={send}
             accessMode={effectiveAccessMode}
             onAccessModeChange={changeAccessMode}
@@ -6311,6 +6007,7 @@ function AppShell() {
                 disabled={composerDisabled}
                 sending={streaming.status === "streaming"}
                 modelLabel={modelLabel}
+                {...(modelPicker ? { modelControl: modelPicker } : {})}
                 planMode={Boolean(planState?.on)}
                 onSend={send}
                 onStop={stop}
@@ -6376,7 +6073,7 @@ function AppShell() {
       {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
-      <FirstRunDialogs />
+      <FirstRunDialogs onFinished={() => setComposerFocusToken((t) => t + 1)} />
     </div>
   );
 }

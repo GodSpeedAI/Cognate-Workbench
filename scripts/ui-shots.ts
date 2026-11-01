@@ -53,6 +53,13 @@ async function openSettings(page: Page, section?: string): Promise<void> {
   await settle(page);
 }
 
+/** First-run shots share one home across viewports/themes, so Welcome may already be dismissed. */
+async function continueIfWelcome(page: Page): Promise<void> {
+  await page.getByRole("dialog").waitFor();
+  const btn = page.getByRole("button", { name: "Continue" });
+  if (await btn.count()) await btn.click();
+}
+
 async function ensureInspector(page: Page, tab: string): Promise<void> {
   const toggle = page.getByRole("button", { name: "Toggle inspector" });
   if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
@@ -212,6 +219,47 @@ export const STATES: Record<string, ShotState> = {
   "t1b-view-workbench": { tag: "t1b", describe: "Header view switch on Workbench", themes: ["light"], setup: async (page) => { await page.getByRole("button", { name: "Workbench", exact: true }).click(); await settle(page, 500); } },
   "t1b-view-experts": { tag: "t1b", describe: "Header view switch on Experts & Teams", themes: ["light"], setup: async (page) => { await page.getByRole("button", { name: "Experts and Teams", exact: true }).click(); await settle(page, 500); } },
   "t1b-first-run": { tag: "t1b", describe: "No workspace: Choose a folder to work in", themes: ["light"], setup: async (page) => { await settle(page, 400); } },
+  // t2: first-run flow (run with --fresh) and the composer model picker (default home).
+  "t2-welcome": { tag: "t2", describe: "First run: Welcome step (--fresh)", viewports: ["desktop", "mobile"], setup: async (page) => { await page.getByRole("dialog").waitFor(); await settle(page, 400); } },
+  "t2-provider-step": {
+    tag: "t2", describe: "First run: Connect a model provider (--fresh)", viewports: ["desktop", "mobile"],
+    setup: async (page) => {
+      await continueIfWelcome(page);
+      await page.getByRole("heading", { name: "Connect a model provider" }).waitFor();
+      await page.getByRole("radio", { name: /Custom OpenAI-compatible/ }).click();
+      await page.getByLabel("Display name").fill("Acme gateway");
+      await page.getByLabel("Base URL", { exact: true }).fill("https://gateway.example/v1");
+      await settle(page, 400);
+    },
+  },
+  "t2-folder-step": {
+    tag: "t2", describe: "First run: Choose a folder (--fresh)", themes: ["light"],
+    setup: async (page) => {
+      await continueIfWelcome(page);
+      await page.getByRole("radio", { name: /Ollama/ }).click();
+      await page.getByLabel("Model", { exact: true }).fill("llama3.1");
+      await page.getByRole("button", { name: "Save and continue" }).click();
+      await page.getByRole("heading", { name: "Choose a folder to work in" }).waitFor();
+      await settle(page, 400);
+    },
+  },
+  "t2-empty-state": {
+    tag: "t2", describe: "Configure later: friendly empty state (--fresh)", themes: ["light"], viewports: ["desktop", "mobile"],
+    setup: async (page) => {
+      await continueIfWelcome(page);
+      await page.getByRole("button", { name: "Configure later" }).click();
+      await page.getByText("No model provider connected").waitFor();
+      await settle(page, 400);
+    },
+  },
+  "t2-model-picker": {
+    tag: "t2", describe: "Composer model picker open", themes: ["light", "dark"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: /^Model / }).click();
+      await page.getByRole("dialog", { name: "Switch model" }).waitFor();
+      await settle(page, 500);
+    },
+  },
 };
 
 interface Options {
