@@ -202,10 +202,10 @@ describe("E2E ui shell", () => {
         await page.keyboard.press("ArrowRight");
         expect(Number(await sidebarHandle.getAttribute("aria-valuenow"))).toBe(sidebarStart + 8);
 
-        // The context bar replaces the old Task row: one compact row, IDLE is not painted.
+        // The context bar replaces the old Task row: one compact row, IDLE is not painted. (on the hero the workspace is the pill above the composer, so the bar carries no duplicate workspace chip)
         const bar = page.locator(".wb-composerbar");
         await bar.locator(".ctx-chip").first().waitFor();
-        expect(await bar.locator(".ctx-chip").count()).toBeGreaterThanOrEqual(3);
+        expect(await bar.locator(".ctx-chip").count()).toBeGreaterThanOrEqual(2);
         expect(await page.getByText("Nothing is in focus").count()).toBe(0);
         expect(await page.getByText("No tasks in this workspace yet.").count()).toBe(0);
 

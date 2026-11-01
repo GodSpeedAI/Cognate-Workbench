@@ -280,6 +280,37 @@ export const STATES: Record<string, ShotState> = {
       await settle(page, 400);
     },
   },
+  // t4: robustness + polish.
+  "t4-inspector-tabs": {
+    tag: "t4", describe: "Inspector with all five tabs at 340px (icon-only except the selected)", themes: ["light", "dark"], viewports: ["desktop"],
+    setup: async (page) => { await ensureInspector(page, "Files"); },
+  },
+  "t4-config-tab": {
+    tag: "t4", describe: "Config tab: header path, status chip, framed editor, sticky footer", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
+    setup: async (page) => { await ensureInspector(page, "Config"); },
+  },
+  "t4-view-options": {
+    tag: "t4", describe: "Sidebar view options popover", themes: ["light", "dark"], viewports: ["desktop"],
+    setup: async (page) => { await page.getByRole("button", { name: "View options" }).click(); await settle(page, 300); },
+  },
+  "t4-delete-workspace": {
+    tag: "t4", describe: "Delete workspace confirmation", themes: ["light", "dark"], viewports: ["desktop"],
+    setup: async (page) => {
+      await page.locator(".workspace-row-label").first().hover();
+      await page.getByRole("button", { name: /^Workspace actions for/ }).first().click();
+      await page.getByRole("menuitem", { name: "Delete workspace" }).click();
+      await page.getByRole("dialog").waitFor();
+      await settle(page, 300);
+    },
+  },
+  "t4-experts": {
+    tag: "t4", describe: "Experts and Teams", themes: ["light", "dark"], viewports: ["desktop"],
+    setup: async (page) => { await page.getByRole("button", { name: /Experts/ }).first().click(); await settle(page, 600); },
+  },
+  "t4-governance": {
+    tag: "t4", describe: "Settings > Governance with plain-language copy", themes: ["light"], viewports: ["desktop"],
+    setup: (page) => openSettings(page, "Governance & evidence"),
+  },
 };
 
 interface Options {
