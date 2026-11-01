@@ -4739,9 +4739,9 @@ function AppShell() {
   const startNewSession = useCallback(
     async (workspaceId: string) => {
       if (newSessionPending) return;
-      // An empty draft (no prompt yet) already is "a new session": take the person to it instead of
-      // stacking identical untitled rows.
-      const emptyDraft = sessions.find((row) => row.workspaceId === workspaceId && row.lastStatus === "draft" && row.archived !== true);
+      // An empty draft (no prompt yet) elsewhere in the list already is "a new session": take the person to it
+      // instead of stacking identical untitled rows. (Pressing + while already on one still starts a fresh one.)
+      const emptyDraft = sessions.find((row) => row.workspaceId === workspaceId && row.lastStatus === "draft" && row.archived !== true && row.id !== activeSessionId);
       if (emptyDraft) {
         setExpertsPanelOpen(false);
         setPluginsPanelOpen(false);
@@ -4778,7 +4778,7 @@ function AppShell() {
         setNewSessionPending(false);
       }
     },
-    [client, newSessionPending, rememberSession, sessions, openSession],
+    [client, newSessionPending, rememberSession, sessions, openSession, activeSessionId],
   );
 
   const newSession = useCallback(() => {
