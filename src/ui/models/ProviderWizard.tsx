@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useCognate } from "@godspeedai/cognate-react";
 import type { ModelCatalogResult } from "../../modelCatalog.ts";
 import { CheckIcon } from "../icons.tsx";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 import { useToast } from "../shell/Toast.tsx";
 import {
   API_PROTOCOL_OPTIONS,
@@ -324,21 +325,18 @@ export function ProviderWizard({ initial, submitLabel = "Save provider", cancelL
 
       <div className="pw-grid">
         <Field id={fid("proto")} label="API protocol" hint={azure ? "Azure uses Chat Completions." : "The wire format this provider speaks."}>
-          <select
-            id={fid("proto")}
+          <MenuSelect
+            ariaLabel="API protocol"
+            placement="down"
+            variant="field"
             disabled={azure}
             value={protocol}
-            onChange={(e) => {
-              setProtocol(e.currentTarget.value as ApiProtocolLabel);
+            options={API_PROTOCOL_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
+            onPick={(v) => {
+              setProtocol(v as ApiProtocolLabel);
               setCatalog(undefined);
             }}
-          >
-            {API_PROTOCOL_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
         <Field
           id={fid("key")}

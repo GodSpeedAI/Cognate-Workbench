@@ -12,6 +12,7 @@ export function MenuSelect<T extends string>({
   disabled,
   ariaLabel,
   placement = "up",
+  variant = "toolbar",
 }: {
   readonly value: T;
   readonly options: readonly { readonly value: T; readonly label: string; readonly hint?: string }[];
@@ -19,6 +20,8 @@ export function MenuSelect<T extends string>({
   readonly disabled?: boolean;
   readonly ariaLabel: string;
   readonly placement?: "up" | "down";
+  /** "field" draws like a form input (bordered, full width) instead of a quiet toolbar button. */
+  readonly variant?: "toolbar" | "field";
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -55,7 +58,7 @@ export function MenuSelect<T extends string>({
     e.preventDefault();
   };
   return (
-    <div className="menu-select" ref={wrapRef}>
+    <div className={variant === "field" ? "menu-select menu-select-field" : "menu-select"} ref={wrapRef}>
       <button ref={btnRef} type="button" className="menu-select-btn" aria-label={ariaLabel} aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((v) => !v)}>
         <span>{current?.label ?? value}</span>
         <ChevronDownIcon aria-hidden="true" />

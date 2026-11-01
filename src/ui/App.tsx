@@ -930,9 +930,8 @@ export function ShortcutsPanel({
   );
 }
 
-/** One select control of the General pane. A native <select> (free keyboard, type-ahead and
- *  screen-reader behaviour) restyled by the design system's `select` rule — consistent height, border,
- *  radius and chevron in both themes. */
+/** One select control of the General pane, drawn with the shell's own menu (MenuSelect) so it matches
+ *  the rest of the app in both themes and is fully keyboard operable. */
 function SettingMenu<T extends string>({
   value,
   options,
@@ -946,15 +945,7 @@ function SettingMenu<T extends string>({
   readonly disabled?: boolean;
   readonly ariaLabel: string;
 }) {
-  return (
-    <select aria-label={ariaLabel} value={value} disabled={disabled} onChange={(e) => onPick(e.currentTarget.value as T)}>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
+  return <MenuSelect variant="field" placement="down" ariaLabel={ariaLabel} value={value} options={options} onPick={onPick} {...(disabled === undefined ? {} : { disabled })} />;
 }
 
 /** One row of a settings card: label + description on the left, the control on the right. */

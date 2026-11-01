@@ -5115,3 +5115,20 @@ body.is-col-resizing .resize-handle:active::after {
 }
 /* Phone: the first-folder card keeps a 16px gutter instead of touching the screen edges. */
 @media (max-width: 640px) { .workspace-chooser { padding: 0 16px; box-sizing: border-box; } }
+
+/* MenuSelect in form-field form: looks like the styled native select it replaces. */
+.menu-select-field { display: flex; width: 100%; max-width: 100%; }
+.menu-select-field .menu-select-btn {
+  width: 100%;
+  height: 34px;
+  justify-content: space-between;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--cg-text);
+  background: var(--cg-surface);
+  border-color: var(--cg-border-strong);
+  border-radius: var(--cg-radius-md);
+}
+.menu-select-field .menu-select-btn:hover:not(:disabled) { background: var(--cg-hover); }
+.menu-select-field .menu-select-list { min-width: 100%; max-height: 280px; overflow-y: auto; }
+.settings-row-control .menu-select-field { min-width: 180px; }

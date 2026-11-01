@@ -135,7 +135,7 @@ describe("E2E remote workspaces", () => {
         await page.getByRole("button", { name: "Add workspace", exact: true }).first().click();
         const wsl = page.getByRole("dialog", { name: "Add workspace" });
         await wsl.getByRole("tab", { name: "WSL" }).click();
-        await wsl.locator('select[aria-label="WSL distribution"], :text("isn\'t available")').first().waitFor({ timeout: 15_000 });
+        await wsl.locator('[aria-label="WSL distribution"], :text("isn\'t available")').first().waitFor({ timeout: 15_000 });
         await wsl.getByRole("button", { name: "Close" }).click();
 
         // when the remote goes away the failure is loud, explained, and never runs anything locally
