@@ -175,7 +175,7 @@ describe("E2E workbench cockpit", () => {
         await page.getByRole("tab", { name: "Capabilities" }).click();
         // The starter catalog was loaded when the cockpit first opened; nothing to click.
         await page.getByRole("heading", { name: "Verify" }).first().waitFor();
-        expect(await page.getByText("Built is not installed. Installed is not enabled. Enabled is not verified.").count()).toBeGreaterThan(0);
+        expect(await page.getByText("A capability goes through four steps: built, installed, enabled, then verified. Finishing one step does not complete the next.").count()).toBeGreaterThan(0);
         const advance = page.getByRole("button", { name: /Advance to reviewed/i }).first();
         await advance.click();
         await waitUntil("a binding reached REVIEWED", async () => [...(await wbRows(app))].some(([k, v]) => k.startsWith("binding/") && (v as BindingRecord).state === "REVIEWED"));

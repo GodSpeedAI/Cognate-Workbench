@@ -1,6 +1,6 @@
 // Config inspector tab: edit the Cognate configuration file with a JSON pre-check and versioned apply.
 import { useCallback, useEffect, useState } from "react";
-import { GearIcon } from "../icons.tsx";
+import { CopyIcon, GearIcon } from "../icons.tsx";
 import { InspectorTab } from "../shell/Inspector.tsx";
 import { CodeView } from "./CodeView.tsx";
 import type { Invoke } from "./FilesTab.tsx";
@@ -37,12 +37,20 @@ export function jsonProblem(text: string): { message: string; line: number; colu
   }
 }
 
+/** Shorten a long path in the middle ("/home/me/…/cognate.config.json") so both ends stay readable. */
+export function middleEllipsis(path: string, max = 38): string {
+  if (path.length <= max) return path;
+  const tail = Math.ceil((max - 1) * 0.6);
+  return `${path.slice(0, max - 1 - tail)}…${path.slice(path.length - tail)}`;
+}
+
 export function ConfigTab({ invoke }: { readonly invoke: Invoke }) {
   const [file, setFile] = useState<ConfigFile | undefined>(undefined);
   const [draft, setDraft] = useState("");
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async (keepNotice = false) => {
     setLoadError(undefined);
@@ -81,8 +89,9 @@ export function ConfigTab({ invoke }: { readonly invoke: Invoke }) {
     body = (
       <div className="cfg">
         <div className="cfg-head">
-          <span className="cfg-path" title={file.path}>{file.path}</span>
-          <span className={`cfg-status${file.exists ? "" : " cfg-status-new"}`}>{file.exists ? "exists" : "not yet written"}</span>
+          <span className="cfg-path" title={file.path}>{middleEllipsis(file.path)}</span>
+          <button type="button" className="icon-btn" aria-label="Copy configuration path" title={copied ? "Copied" : "Copy path"} onClick={() => { void navigator.clipboard?.writeText(file.path).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined); }}><CopyIcon width="14" height="14" /></button>
+          <span className={`cfg-status${file.exists ? "" : " cfg-status-new"}`}>{file.exists ? "On disk" : "Not yet written"}</span>
         </div>
         <CodeView label="Configuration JSON" text={draft} onChange={(t) => { setDraft(t); if (notice?.kind === "error") setNotice(undefined); }} onSave={() => void save()} errorLine={notice?.kind === "error" ? notice.line : undefined} />
         {notice && (
@@ -92,12 +101,12 @@ export function ConfigTab({ invoke }: { readonly invoke: Invoke }) {
             {notice.conflict && <button type="button" className="ci-link" onClick={() => void load()}>Reload (discards edits)</button>}
           </div>
         )}
+        <p className="ci-note cfg-hint">{file.readOnlyKeys.length ? `${file.readOnlyKeys.join(", ")} are shown for reference and are not applied when you save. ` : ""}Ctrl/Cmd+S saves.</p>
         <div className="cfg-actions">
           <span className="cfg-dirty" aria-live="polite">{dirty ? "Unsaved changes" : ""}</span>
           <button type="button" className="cfg-btn" disabled={!dirty || saving} onClick={() => { setDraft(file.text); setNotice(undefined); }}>Revert</button>
           <button type="button" className="cfg-btn cfg-btn-primary" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
         </div>
-        <p className="ci-note">{file.readOnlyKeys.length ? `${file.readOnlyKeys.join(", ")} are informational and not applied.` : ""} Ctrl/Cmd+S saves.</p>
       </div>
     );
   }

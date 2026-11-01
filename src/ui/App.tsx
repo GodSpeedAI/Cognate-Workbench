@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, ReactNode, RefObject } from "react";
+import type { ClipboardEvent, ReactNode } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
@@ -55,7 +55,6 @@ import {
   DEFAULT_WORK_DETAILS_MODE,
   WORK_DETAILS_LABELS,
   WORK_DETAILS_MODES,
-  isWorkDetailsMode,
   showsLiveProcessDetail,
   type WorkDetailsMode,
 } from "../workDetails.ts";
@@ -72,7 +71,6 @@ import {
   PERMISSION_MODES,
   SEND_BEHAVIOR_LABELS,
   SEND_BEHAVIORS,
-  isAppearanceMode,
   isPermissionMode,
   pluginEnabled,
   resolveGeneralSettings,
@@ -84,7 +82,6 @@ import {
 } from "../settings.ts";
 import {
   ArchiveIcon,
-  ArrowLeftIcon,
   BotIcon,
   BranchIcon,
   ChipIcon,
@@ -110,7 +107,6 @@ import {
   EditIcon,
   FileIcon,
   FolderIcon,
-  FullscreenIcon,
   GearIcon,
   ListViewIcon,
   LogoIcon,
@@ -124,16 +120,12 @@ import {
 import {
   ARCHIVE_FILTER_LABELS,
   GROUP_BY_LABELS,
-  applyArchiveFilter,
   groupSessions,
   hiddenArchiveCount,
-  orderSessions,
-  sessionMatchesSearch,
   type ArchiveFilter,
   type GroupBy,
   type OrderBy,
   type SessionRow,
-  type SessionGroup,
 } from "../sidebarView.ts";
 import {
   SHORTCUT_ACTIONS,
@@ -146,7 +138,6 @@ import {
   restoreDefaults,
   validateAssignment,
 } from "../shortcuts.ts";
-import type { ConfigPathResult } from "../capabilities/configPath.ts";
 import { copyToClipboard, downloadTextFile } from "./download.ts";
 import type { PluginCatalogResult } from "../capabilities/pluginInstall.ts";
 import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView } from "../plugins.ts";
@@ -634,112 +625,6 @@ function WorkspaceChooser({ onConnectModel }: { readonly onConnectModel?: () => 
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-/** A shared dropdown-menu control (usage pass U2): a trigger button labelled with the current
- *  value, a `role="menu"` popover of `menuitem` buttons, outside-click/Escape to close, and
- *  ↑/↓ focus movement between items — the Work-details dropdown's behavior generalized so every
- *  General-pane menu (Permission, Language, Performance & usage, Send behavior) and the composer's
- *  access-mode menu share one implementation ("Move menu selection ↑ ↓" / "Select menu item Enter"
- *  in the Keyboard shortcuts dialog are real because of this). */
-interface DropdownMenuItem {
-  readonly label: string;
-  readonly value: string;
-  readonly disabled?: boolean;
-  readonly title?: string;
-}
-
-function DropdownMenu({
-  label,
-  items,
-  onSelect,
-  triggerAriaLabel,
-  triggerClassName,
-  dropup = false,
-  disabled = false,
-}: {
-  readonly label: string;
-  readonly items: readonly DropdownMenuItem[];
-  readonly onSelect: (value: string) => void;
-  readonly triggerAriaLabel?: string;
-  readonly triggerClassName?: string;
-  readonly dropup?: boolean;
-  readonly disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [open]);
-
-  const menuButtons = (): HTMLButtonElement[] =>
-    Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? []);
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const buttons = menuButtons();
-    if (buttons.length === 0) return;
-    const index = buttons.findIndex((b) => b === document.activeElement);
-    if (index === -1) {
-      buttons[e.key === "ArrowDown" ? 0 : buttons.length - 1]!.focus();
-    } else {
-      const delta = e.key === "ArrowDown" ? 1 : -1;
-      buttons[(index + delta + buttons.length) % buttons.length]!.focus();
-    }
-  };
-
-  return (
-    <div className="work-details-dropdown" ref={rootRef} onKeyDown={handleKeyDown}>
-      <button
-        type="button"
-        className={triggerClassName}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={triggerAriaLabel}
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-      >
-        {label}
-        <svg className="dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
-      </button>
-      {open && (
-        <div role="menu" className={dropup ? "work-details-menu dropup" : "work-details-menu"} ref={menuRef}>
-          {items.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                setOpen(false);
-                onSelect(item.value);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1441,116 +1326,6 @@ function AboutPane() {
   );
 }
 
-/** Settings → Models: a provider list (row + Cancel/Apply for the configured provider's API key,
- *  Edit/Delete) plus a two-tab "Add model provider" wizard (Third-party combobox / Custom model API
- *  form with a Models sub-list and Cancel/Create provider) — critic round-1 P0-4/P1-4. This tranche's
- *  backend (`model.configure`) holds one live provider config (`model-config` projection's single
- *  `"current"` row), so "Edit" reopens the wizard prefilled with the current config. Delete is a
- *  real two-step action that removes the configured provider and its stored secret. */
-/** "Open configuration file" (T11, J-CFG-config-path): the browser cannot open a local file, so the
- *  button resolves where configuration lives and hands over the real, non-secret bytes — the path to
- *  copy, the recognised environment variables with sensitive values already redacted, and a
- *  download of the exact file. Nothing secret is ever fetched or rendered. */
-export function ConfigFileDialog({
-  onResolve,
-  onClose,
-}: {
-  /** Resolves the configuration facts (`config.path`). Injected so this dialog is testable. */
-  readonly onResolve: () => Promise<ConfigPathResult>;
-  readonly onClose: () => void;
-}) {
-  const [info, setInfo] = useState<ConfigPathResult | undefined>(undefined);
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [copied, setCopied] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef, onClose);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await onResolve();
-        if (!cancelled) setInfo(result);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setBusy(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [onResolve]);
-
-  return (
-    <div className="modal-backdrop modal-backdrop-stacked">
-      <div className="modal config-file-dialog" role="dialog" aria-modal="true" aria-labelledby="config-file-heading" tabIndex={-1} ref={dialogRef}>
-        <DialogHeader title="Configuration file" titleId="config-file-heading" closeLabel="configuration file" onClose={onClose} />
-        {busy && <p className="empty-state small">Resolving configuration location…</p>}
-        {!busy && error && (
-          <p role="alert" className="form-error">
-            {error}
-          </p>
-        )}
-        {!busy && info && (
-          <div className="config-file-body">
-            <dl className="config-file-facts">
-              <dt>Home directory</dt>
-              <dd>
-                <code>{info.home}</code>
-              </dd>
-              <dt>Configuration file</dt>
-              <dd>
-                <code>{info.configFile}</code>
-                <span className={info.configFileExists ? "config-file-exists" : "config-file-missing"}>
-                  {info.configFileExists ? "Exists" : "Not present yet — the download below creates it"}
-                </span>
-              </dd>
-            </dl>
-            <div className="config-file-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  void copyToClipboard(info.configFile).then((ok) => setCopied(ok));
-                }}
-              >
-                {copied ? "Path copied" : "Copy path"}
-              </button>
-              <button type="button" onClick={() => downloadTextFile("cognate.config.json", info.export)}>
-                Download configuration
-              </button>
-            </div>
-            <h3>Settings in effect</h3>
-            <pre className="config-file-pre">{JSON.stringify(info.settings, null, 2)}</pre>
-            <h3>Environment</h3>
-            <table className="config-file-env">
-              <thead>
-                <tr>
-                  <th scope="col">Variable</th>
-                  <th scope="col">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {info.environment.map((entry) => (
-                  <tr key={entry.name}>
-                    <td>
-                      <code>{entry.name}</code>
-                    </td>
-                    <td>
-                      <code>{entry.value}</code>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="settings-description">Secrets are never included in this view or in the download.</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /** Settings sections, in nav order. `description` is the muted line under each section's h2. */
 export const SETTINGS_SECTIONS = [
@@ -2072,8 +1847,8 @@ function RetryDisclosure({ retries, elapsedSeconds }: { readonly retries: readon
   return (
     <div className="retry-disclosure" data-retry-card>
       <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="retry-disclosure-btn">
-        Retried model request ({latest.attempt}/{latest.maxRetries}) · {elapsedSeconds}s
-        <ChevronDownIcon />
+        <ChevronDownIcon className={expanded ? "retry-chev open" : "retry-chev"} />
+        <span>Retried model request ({latest.attempt}/{latest.maxRetries}) · {elapsedSeconds}s</span>
       </button>
       {expanded && (
         <ul className="retry-list">
@@ -2088,15 +1863,38 @@ function RetryDisclosure({ retries, elapsedSeconds }: { readonly retries: readon
   );
 }
 
+/** J-H-provider-error: while the model request is being retried, say so plainly in the transcript, with
+ *  the underlying error, how long since the last failed attempt, and the two useful ways out. */
+function RetryCard({ retries, provider, onStop, onOpenSettings }: { readonly retries: readonly RetryInfo[]; readonly provider: string; readonly onStop: () => void; readonly onOpenSettings: () => void }) {
+  const latest = retries[retries.length - 1]!;
+  const since = useRef(Date.now());
+  useEffect(() => { since.current = Date.now(); }, [retries.length]);
+  const sinceSeconds = useElapsedSeconds(true, since.current);
+  return (
+    <div className="retry-card" role="status" data-retry-card>
+      <p className="retry-card-title">Can't reach {provider} — retrying ({latest.attempt}/{latest.maxRetries})</p>
+      {latest.message && <p className="retry-card-error">{latest.message}{latest.code ? <span className="retry-card-code"> {latest.code}</span> : null}</p>}
+      <p className="retry-card-meta">Attempt {latest.attempt} failed {sinceSeconds}s ago. The next attempt starts automatically.</p>
+      <div className="retry-card-actions">
+        <button type="button" className="retry-card-btn" onClick={onStop}>Stop</button>
+        <button type="button" className="retry-card-btn" onClick={onOpenSettings}>Open model settings</button>
+      </div>
+    </div>
+  );
+}
+
 /** T11 (J-H-provider-error): the terminal failure block — exactly "This turn failed" / message /
  *  a `code` badge (reference-behavior-matrix.md §8). No manual "Retry"/"Dismiss" button; the composer
  *  stays available underneath to start a new message. */
-function FailureBlock({ code, message }: { readonly code: string; readonly message: string }) {
+function FailureBlock({ code, message, onRetry }: { readonly code: string; readonly message: string; readonly onRetry?: () => void }) {
   return (
     <div className="failure-block" role="alert">
       <p className="failure-title">This turn failed</p>
       <p className="failure-message">{message}</p>
-      <span className="failure-code">{code}</span>
+      <div className="retry-card-actions">
+        {code && <span className="failure-code">{code}</span>}
+        {onRetry && <button type="button" className="failure-retry" onClick={onRetry}>Retry</button>}
+      </div>
     </div>
   );
 }
@@ -3040,14 +2838,6 @@ export function ToolGroup({
   );
 }
 
-/** A settled turn's individual-step line for "Verbose" Work details (reference-behavior-matrix.md
- *  §10a) — short noun label + "· <detail>", matching the reference's own ungrouped verbose list
- *  (`21-work-details-verbose`: "Read · <path>", "Bash · <description>", "Edit · <path>").
- *  Table-driven via `toolStepLabelFor` (`src/toolGroups.ts`). */
-function verboseStepLabel(entry: ToolEntry): string {
-  return toolStepLabelFor(entry.tool, entry.args);
-}
-
 /** Reality over narrative: a call the task's authority refused is always shown, whatever the
  *  Work details verbosity, because the agent's own summary may say otherwise. */
 function AuthorityNotice({ steps }: { readonly steps?: readonly ToolEntry[] }) {
@@ -3074,10 +2864,13 @@ function MessageBubble({
   turnNumber,
   onOpenReview,
   workDetails,
+  onRetry,
 }: {
   readonly message: ChatMessage;
   readonly elapsedSeconds?: number;
   readonly turnNumber?: number;
+  /** Offered on the latest failed turn: resend the preceding user message. */
+  readonly onRetry?: () => void;
   readonly onOpenReview?: (summary: EditSummary, turnNumber: number) => void;
   readonly workDetails?: WorkDetailsMode;
 }) {
@@ -3171,7 +2964,7 @@ function MessageBubble({
       {message.editSummary && onOpenReview && (
         <EditDiff summary={message.editSummary} turnNumber={turnNumber ?? 1} onOpenReview={onOpenReview} />
       )}
-      {message.failed && message.failureMessage && <FailureBlock code={message.failureCode ?? ""} message={message.failureMessage} />}
+      {message.failed && message.failureMessage && <FailureBlock code={message.failureCode ?? ""} message={message.failureMessage} {...(onRetry ? { onRetry } : {})} />}
       {!message.failed && !message.streaming && (
         <div className="message-actions">
           {message.cancelled && <span className="cancelled-tag">Stopped</span>}
@@ -3392,6 +3185,48 @@ function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
   );
 }
 
+/** Delete-workspace confirmation: names the workspace, states what is and is not touched. */
+function DeleteWorkspaceDialog({
+  workspace,
+  onClose,
+}: {
+  readonly workspace: { readonly id: string; readonly title: string; readonly root: string; readonly sessionCount: number };
+  readonly onClose: () => void;
+}) {
+  const client = useCognate();
+  const toast = useToast();
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const confirm = useCallback(async () => {
+    setBusy(true);
+    try {
+      await client.invoke("workspace.delete", { workspaceId: workspace.id } as never);
+      toast.show(`Removed workspace "${workspace.title}"`);
+      onClose();
+    } catch (err) {
+      setBusy(false);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [client, toast, workspace, onClose]);
+  return (
+    <div className="modal-backdrop modal-backdrop-stacked">
+      <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-heading" tabIndex={-1} ref={dialogRef}>
+        <DialogHeader title={`Delete workspace "${workspace.title}"?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
+        <p className="dialog-copy">
+          This removes <strong>{workspace.title}</strong> and its {workspace.sessionCount === 1 ? "1 conversation" : `${workspace.sessionCount} conversations`} from the sidebar. Files in <code>{workspace.root}</code> are not touched, and you can add the folder again later.
+        </p>
+        {error && <p role="alert" className="form-error">{error}</p>}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-danger" disabled={busy} onClick={() => void confirm()}>Delete workspace</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Usage pass U3 (§12): the per-workspace "Rename" dialog — writes the durable `workspace.rename`
  *  capability; the `workspaces` projection round trip updates the sidebar row. */
 function RenameWorkspaceDialog({
@@ -3533,7 +3368,10 @@ export function PluginsPanelBody({
   onCloseAdd,
   onInstall,
   onToggle,
+  onOpenModelSettings,
 }: {
+  /** Opens Settings > Models; offered on the model-provider plugin's detail. */
+  readonly onOpenModelSettings?: () => void;
   readonly detail: PluginView | undefined;
   readonly catalog: PluginCatalogResult | undefined;
   readonly loading: boolean;
@@ -3633,6 +3471,11 @@ export function PluginsPanelBody({
           </dl>
           {detail.reason && <p className="plugin-detail-reason">{detail.reason}</p>}
           <div className="plugin-detail-actions">
+            {detail.id === "model-provider" && onOpenModelSettings && (
+              <button type="button" className="btn-primary" onClick={onOpenModelSettings}>
+                Configure in Settings → Models
+              </button>
+            )}
             {detail.lifecycle === "optional" &&
               (detail.status === "installed" ? (
                 <button type="button" disabled={pending !== undefined} onClick={() => onInstall(detail.id, false)}>
@@ -3709,7 +3552,9 @@ function PluginsPanel({
   onClose,
   onOpenDetail,
   onCloseDetail,
+  onOpenModelSettings,
 }: {
+  readonly onOpenModelSettings?: () => void;
   /** From the `#plugins/<id>` hash route. `undefined` is the list view. */
   readonly detailId: string | undefined;
   readonly onClose: () => void;
@@ -3785,6 +3630,7 @@ function PluginsPanel({
       onClose={onClose}
       onOpenDetail={onOpenDetail}
       onCloseDetail={onCloseDetail}
+      {...(onOpenModelSettings ? { onOpenModelSettings } : {})}
       onRefresh={() => void load()}
       onOpenAdd={() => setAddOpen(true)}
       onCloseAdd={() => setAddOpen(false)}
@@ -3885,13 +3731,6 @@ function requestDurationMs(request: TraceRequest, turn: TraceTurn): number | und
   const end = after.find((t) => t > start);
   return end === undefined ? undefined : end - start;
 }
-
-const TRACE_ROLE_LABELS: Readonly<Record<string, string>> = {
-  system: "SYSTEM",
-  user: "USER",
-  assistant: "ASSISTANT",
-  tool: "TOOL",
-};
 
 /** Format a duration the way the reference's trajectory rows show it ("1,408 ms"). */
 function formatDurationMs(ms: number): string {
@@ -4519,6 +4358,7 @@ function AppShell() {
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<ReadonlySet<string>>(new Set());
   const [wsMenuFor, setWsMenuFor] = useState<string | undefined>(undefined);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
+  const [deleteFor, setDeleteFor] = useState<{ readonly id: string; readonly title: string; readonly root: string; readonly sessionCount: number } | undefined>(undefined);
   const [renameFor, setRenameFor] = useState<{ readonly id: string; readonly title: string } | undefined>(undefined);
   const [chooseWsOpen, setChooseWsOpen] = useState(false);
   const chooseWsRef = useRef<HTMLDivElement>(null);
@@ -5433,8 +5273,8 @@ function AppShell() {
       steps={showHero ? 0 : toolEntries.length + 1}
       elapsedSeconds={showHero ? 0 : elapsedSeconds}
       approvalsPending={!showHero && pendingApproval ? 1 : 0}
-      workspaceTitle={currentWorkspace?.title || currentWorkspace?.id || ""}
-      {...(currentWorkspace?.root ? { workspaceRoot: currentWorkspace.root } : {})}
+      {...(showHero ? {} : { workspaceTitle: currentWorkspace?.title || currentWorkspace?.id || "" })}
+      {...(!showHero && currentWorkspace?.root ? { workspaceRoot: currentWorkspace.root } : {})}
       posture={postureOfCurrent}
       {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
       onClearFocus={() => setFocusSelection(undefined)}
@@ -5669,8 +5509,11 @@ function AppShell() {
               {workspaces.length === 0 ? (
                 <p className="empty-state small">No workspace selected</p>
               ) : (() => {
-                const grouped = groupSessions({ workspaces, sessions, groupBy, orderBy, archiveFilter, search: sessionSearch });
-                const hiddenCount = hiddenArchiveCount(sessions, archiveFilter);
+                // Sessions of a deleted workspace stay in the event history but leave the list (no raw-id rows).
+                const knownWorkspaceIds = new Set(workspaces.map((w) => w.id));
+                const visibleSessions = sessions.filter((s) => knownWorkspaceIds.has(s.workspaceId));
+                const grouped = groupSessions({ workspaces, sessions: visibleSessions, groupBy, orderBy, archiveFilter, search: sessionSearch });
+                const hiddenCount = hiddenArchiveCount(visibleSessions, archiveFilter);
                 const renderRow = (session: SessionRow) => (
                   <SessionRowButton
                     key={session.id}
@@ -5787,7 +5630,7 @@ function AppShell() {
                               role="menuitem"
                               onClick={() => {
                                 setWsMenuFor(undefined);
-                                void client.invoke("workspace.delete", { workspaceId: group.workspaceId } as never).catch((e) => console.error("workspace.delete failed", e));
+                                setDeleteFor({ id: group.workspaceId, title: group.title, root: group.root, sessionCount: visibleSessions.filter((x) => x.workspaceId === group.workspaceId).length });
                               }}
                             >
                               Delete workspace
@@ -5895,6 +5738,7 @@ function AppShell() {
             onClose={closePluginsPanel}
             onOpenDetail={openPluginDetail}
             onCloseDetail={closePluginDetail}
+            onOpenModelSettings={() => openSettings("models", modelConfig ? { edit: true } : { edit: false })}
           />
         ) : workbenchOpen && currentWorkspaceId ? (
           <WorkbenchView
@@ -5951,12 +5795,28 @@ function AppShell() {
             >
               {transcript.length === 0 && streaming.status === "idle" && <p className="empty-state">Start the conversation below.</p>}
               {transcript.map((message, index) => (
-                <MessageBubble key={index} message={message} turnNumber={index + 1} onOpenReview={openReviewPanel} workDetails={workDetails} />
+                <MessageBubble
+                  key={index}
+                  message={message}
+                  turnNumber={index + 1}
+                  onOpenReview={openReviewPanel}
+                  workDetails={workDetails}
+                  {...(message.failed && index === transcript.length - 1 && streaming.status !== "streaming"
+                    ? { onRetry: () => { const prior = transcript.slice(0, index).reverse().find((m) => m.role === "user"); if (prior) void send(prior.content); } }
+                    : {})}
+                />
               ))}
               {streaming.status === "streaming" && (
                 <>
                   <MessageBubble message={{ role: "assistant", content: streaming.text, streaming: true }} elapsedSeconds={elapsedSeconds} />
-                  {streaming.retries.length > 0 && <RetryDisclosure retries={streaming.retries} elapsedSeconds={elapsedSeconds} />}
+                  {streaming.retries.length > 0 && (
+                    <RetryCard
+                      retries={streaming.retries}
+                      provider={modelConfig ? (modelConfig.baseURL ? `${modelConfig.providerId} (${modelConfig.baseURL})` : modelConfig.providerId) : "the model provider"}
+                      onStop={() => void stop()}
+                      onOpenSettings={() => openSettings("models", modelConfig ? { edit: true } : { edit: false })}
+                    />
+                  )}
                   <ToolActivity entries={toolEntries} elapsedSeconds={elapsedSeconds} workDetails={workDetails} />
                 </>
               )}
@@ -6069,6 +5929,7 @@ function AppShell() {
       <InspectorExtraTabs workspaceId={currentWorkspaceId} workspaceName={currentWorkspace?.title} />
       {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
+      {deleteFor && <DeleteWorkspaceDialog workspace={deleteFor} onClose={() => setDeleteFor(undefined)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
       <FirstRunDialogs onFinished={() => setComposerFocusToken((t) => t + 1)} />
     </div>

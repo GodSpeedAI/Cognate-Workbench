@@ -321,10 +321,12 @@ export function Inspector({ sidebarWidth }: { readonly sidebarWidth: number }) {
                 aria-controls="inspector-panel"
                 tabIndex={t.id === tab ? 0 : -1}
                 className="inspector-tab"
+                title={t.label}
+                aria-label={t.badge ? `${t.label} (${t.badge})` : t.label}
                 onClick={() => selectTab(t.id)}
               >
                 {t.icon}
-                <span>{t.label}</span>
+                <span className="inspector-tab-label">{t.label}</span>
                 {t.badge && <span className="inspector-tab-badge">{t.badge}</span>}
               </button>
             ))}

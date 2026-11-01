@@ -99,7 +99,7 @@ export const CapabilityList: React.FC<CapabilityListProps> = ({
       {/* Note about lifecycle */}
       <div className="wb-section">
         <div className="wb-hint">
-          Built is not installed. Installed is not enabled. Enabled is not verified.
+          A capability goes through four steps: built, installed, enabled, then verified. Finishing one step does not complete the next.
         </div>
       </div>
 

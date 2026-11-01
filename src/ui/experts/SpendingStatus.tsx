@@ -27,6 +27,12 @@ function currentValue<T>(rows: readonly { readonly key: string; readonly value: 
   return row?.value as T | undefined;
 }
 
+/** Dollar amounts with precision that fits their size: tiny model costs keep six places, bigger ones fewer. */
+export function formatUsd(value: number): string {
+  const digits = value >= 1 ? 2 : value >= 0.01 ? 4 : 6;
+  return `USD ${value.toFixed(digits)}`;
+}
+
 export function SpendingStatus() {
   const billingRows = useProjection("experts-billing");
   const settingsRows = useProjection("settings");
@@ -39,13 +45,15 @@ export function SpendingStatus() {
       <h3 id="spending-heading">Spending and billing</h3>
       <p className="experts-muted">Durable pre-dispatch reservations with operator ceilings. Unknown prices are never treated as zero.</p>
     </div></div>
-    <p data-testid="spending-summary">Booked cost at operator-configured prices: {billing ? `USD ${billing.knownCostUsd.toFixed(6)}` : "unknown"}.{billing && billing.unknownPriceCount > 0 ? ` ${billing.unknownPriceCount} reservation(s) have unknown prices; the spending ceilings cannot be verified while they stand.` : ""}</p>
+    <p data-testid="spending-summary">{billing && billing.unknownPriceCount > 0 && billing.knownCostUsd === 0
+      ? "Cost unknown (no price configured)."
+      : `Booked cost at operator-configured prices: ${billing ? formatUsd(billing.knownCostUsd) : "unknown"}.`}{billing && billing.unknownPriceCount > 0 ? ` ${billing.unknownPriceCount} ${billing.unknownPriceCount === 1 ? "reservation has" : "reservations have"} no price, so spending ceilings cannot be verified until prices are set on the Expert.` : ""}</p>
     <p data-testid="spending-ceilings">{spending?.globalUsd !== undefined || spending?.sessionUsd !== undefined
       ? `Ceilings: global USD ${spending?.globalUsd ?? "not set"}, per session USD ${spending?.sessionUsd ?? "not set"}.`
       : "No spending ceilings are configured; dispatch is bounded only by Assignment budgets."}</p>
     {active.length === 0 ? <p data-testid="spending-reservations">No active billing reservations.</p> : <ol data-testid="spending-reservations">{active.slice(-10).map(reservation => <li key={reservation.id}>
       <strong>{reservation.model}</strong> — {reservation.status}{reservation.usage ? ` (usage ${reservation.usage.inputTokens} in / ${reservation.usage.outputTokens} out, ${reservation.usage.source})` : ` (reserved ${reservation.inputTokens} in / ${reservation.reservedOutputTokens} out)`}
-      <p>{reservation.costUsd === null || reservation.costUsd === undefined ? "Cost unknown: explicit prices are required." : `Booked cost: USD ${reservation.costUsd.toFixed(6)}.`}{reservation.cause ? ` ${reservation.cause}.` : ""}</p>
+      <p>{reservation.costUsd === null || reservation.costUsd === undefined ? "Cost unknown (no price configured)." : `Booked cost: ${formatUsd(reservation.costUsd)}.`}{reservation.cause ? ` ${reservation.cause}.` : ""}</p>
     </li>)}</ol>}
   </section>;
 }

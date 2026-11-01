@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import type { ModelConfig } from "../../components/providerRegistry.ts";
 import { SurfaceView } from "../CognitiveFrame.tsx";
-import { EXPERT_TOOLS, type Assignment, type Conversation, type Expert, type ExpertMemory, type ExpertState, type ExpertTool, type Team } from "../../experts/types.ts";
+import { type Assignment, type Conversation, type Expert, type ExpertMemory, type ExpertState, type ExpertTool, type Team } from "../../experts/types.ts";
 import { ExpertEditor } from "./ExpertEditor.tsx";
 import { TeamEditor, type TeamDraft } from "./TeamEditor.tsx";
 import { SchedulesSurface } from "./SchedulesSurface.tsx";

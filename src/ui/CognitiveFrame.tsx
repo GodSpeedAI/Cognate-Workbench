@@ -6,7 +6,7 @@ import { InspectorEmpty } from "./shell/Inspector.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCognate, useProjection } from "@godspeedai/cognate-react";
 import { shortHash } from "../cognitive/canonical.ts";
-import { parseRef, type FocusContext } from "../cognitive/focus.ts";
+import { type FocusContext } from "../cognitive/focus.ts";
 import { validateSurface, type Block, type Surface } from "../cognitive/surface.ts";
 import { publishToWebMcp, toolsForFocus, type AttentionBackend } from "./webmcp.ts";
 

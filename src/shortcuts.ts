@@ -74,8 +74,15 @@ export function chordFromKeyboardEvent(event: {
   readonly shiftKey: boolean;
   readonly altKey: boolean;
   readonly metaKey: boolean;
+  /** Physical key ("KeyN", "Digit1"). With Alt held, macOS reports a composed `key` ("˜" for Alt+N). */
+  readonly code?: string;
 }): string | undefined {
-  const key = event.key;
+  let key = event.key;
+  if (event.altKey && event.code) {
+    const letter = /^Key([A-Z])$/.exec(event.code);
+    const digit = /^Digit([0-9])$/.exec(event.code);
+    if (letter?.[1] ?? digit?.[1]) key = (letter?.[1] ?? digit?.[1])!;
+  }
   if (key === "Control" || key === "Shift" || key === "Alt" || key === "Meta") return undefined;
   const mods: string[] = [];
   if (event.ctrlKey) mods.push("Ctrl");
@@ -200,7 +207,7 @@ export function isTypingTarget(target: { readonly tagName?: string; readonly isC
  * A chord fires only when the event was not produced inside a text-entry target.
  */
 export function resolveKeypress(
-  event: { readonly key: string; readonly ctrlKey: boolean; readonly shiftKey: boolean; readonly altKey: boolean; readonly metaKey: boolean },
+  event: { readonly key: string; readonly ctrlKey: boolean; readonly shiftKey: boolean; readonly altKey: boolean; readonly metaKey: boolean; readonly code?: string },
   overrides: ShortcutOverrides,
   target: { readonly tagName?: string; readonly isContentEditable?: boolean } | null,
 ): string | undefined {

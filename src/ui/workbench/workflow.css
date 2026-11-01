@@ -18,6 +18,13 @@
   background: var(--cg-surface);
   padding: 12px;
   margin-bottom: 12px;
+  /* Edge fades that appear only where more content is scrolled out of view. */
+  background:
+    linear-gradient(to right, var(--cg-surface) 30%, transparent) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--cg-surface) 30%, transparent) right center / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .18), transparent) left center / 10px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, .18), transparent) right center / 10px 100% no-repeat scroll,
+    var(--cg-surface);
 }
 
 /* SVG styling for nodes and edges */

@@ -1,3 +1,4 @@
+import { formatUsd } from "./SpendingStatus.tsx";
 import { useEffect,useState } from "react";
 import { useCognate } from "@godspeedai/cognate-react";
 import type { ModelResponse } from "@godspeedai/cognate-capabilities";
@@ -27,7 +28,7 @@ export function AssignmentUsage({assignment}:{readonly assignment:Assignment}){
     {rows.length===0 ? <p>No model usage has been reported.</p>:<ol>{rows.map(row=><li key={row.id}><strong>{row.model}</strong>
       <p>{row.usage && Number.isSafeInteger(row.usage.inputTokens) && row.usage.inputTokens>=0 && Number.isSafeInteger(row.usage.outputTokens) && row.usage.outputTokens>=0 ? `Provider-reported usage: ${row.usage.inputTokens} input / ${row.usage.outputTokens} output tokens.`:"Provider token usage is unreported or invalid."}</p>
       {row.accounting && <p>Conservative visible-input estimate: {row.accounting.inputEstimate} tokens. Output reserve: {row.accounting.reservedOutputTokens ?? "unknown"}. Provider-added framing is unmeasured.</p>}
-      <p>{row.accounting?.configuredCostUsd!==null && row.accounting?.configuredCostUsd!==undefined ? `Cost at operator-configured prices: USD ${row.accounting.configuredCostUsd.toFixed(6)}.`:"Cost unknown: reported usage and explicit prices are required."}</p>
+      <p>{row.accounting?.configuredCostUsd!==null && row.accounting?.configuredCostUsd!==undefined ? `Cost at operator-configured prices: ${formatUsd(row.accounting.configuredCostUsd)}.`:"Cost unknown (no price configured)."}</p>
     </li>)}</ol>}
   </details>;
 }

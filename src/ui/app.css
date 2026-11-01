@@ -1184,9 +1184,11 @@ input:focus-visible {
 .workspaces-view-options button:hover:not([disabled]) {
   background: var(--cg-active, rgba(27, 29, 34, 0.08));
 }
-.workspaces-view-options button[aria-checked="true"] {
-  font-weight: 600;
-}
+.workspaces-view-options button { display: flex; align-items: center; gap: 8px; }
+.workspaces-view-options button::before { content: ""; flex: none; width: 14px; text-align: center; color: var(--cg-accent); }
+.workspaces-view-options button[aria-checked="true"] { font-weight: 600; }
+.workspaces-view-options button[aria-checked="true"]::before { content: "\2713"; }
+.view-options-group-label { text-transform: uppercase; letter-spacing: .04em; font-size: 10.5px; padding-top: 8px; }
 .hero-pill-choice {
   position: relative;
   display: inline-flex;
@@ -4411,6 +4413,13 @@ body.is-col-resizing .resize-handle:active::after {
   cursor: pointer;
   position: relative;
 }
+.inspector-head { container-type: inline-size; container-name: inspector-head; }
+.inspector-tab-label { white-space: nowrap; }
+/* Narrow inspector: only the selected tab keeps its label; the rest are icon-only (title shows the name). */
+@container inspector-head (max-width: 460px) {
+  .inspector-tab:not([aria-selected="true"]) .inspector-tab-label { display: none; }
+  .inspector-tab:not([aria-selected="true"]) { padding: 6px 8px; }
+}
 .inspector-tab svg { width: 14px; height: 14px; }
 .inspector-tab:hover { background: var(--cg-hover); color: var(--cg-text); }
 .inspector-tab[aria-selected="true"] { color: var(--cg-text); font-weight: 600; background: var(--cg-active); }
@@ -4877,3 +4886,30 @@ body.is-col-resizing .resize-handle:active::after {
 .first-run-wide .pw-preset-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 640px) { .first-run-wide .pw-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .pw-preset-desc { display: none; } .pw-preset { padding: 8px; } .first-run-wide { padding: 16px; } .first-run-wide .pw-actions { margin: 0 -16px -16px; padding: 12px 16px; bottom: -16px; } }
+
+/* ---------- Provider error: retry card, retry disclosure, failure block (J-H-provider-error) ---------- */
+.retry-card, .failure-block { margin: 8px 0; padding: 12px 14px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-md, 10px); background: var(--cg-surface); display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+.retry-card { border-left: 3px solid var(--cg-warning, #b7791f); }
+.retry-card-title, .failure-title { margin: 0; font-weight: 600; font-size: 13.5px; color: var(--cg-text); }
+.retry-card-error, .failure-message { margin: 0; font-size: 13px; line-height: 1.5; color: var(--cg-text); overflow-wrap: anywhere; }
+.retry-card-code, .failure-code { font: 11px var(--cg-font-mono); color: var(--cg-text-muted); }
+.failure-code { align-self: flex-start; padding: 1px 8px; border: 1px solid var(--cg-border); border-radius: 999px; }
+.retry-card-meta { margin: 0; font-size: 12px; color: var(--cg-text-muted); }
+.retry-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.retry-card-btn, .failure-retry { padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-sm); background: var(--cg-surface); color: var(--cg-text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.retry-card-btn:hover, .failure-retry:hover { background: var(--cg-hover); }
+.failure-block { border-left: 3px solid var(--cg-danger); background: var(--cg-danger-bg); }
+.failure-title { color: var(--cg-danger); }
+.retry-disclosure { margin: 4px 0; }
+.retry-disclosure-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border: 0; background: none; color: var(--cg-text-muted); font: inherit; font-size: 12.5px; cursor: pointer; border-radius: var(--cg-radius-sm); }
+.retry-disclosure-btn:hover { background: var(--cg-hover); color: var(--cg-text); }
+.retry-chev { width: 12px; height: 12px; transform: rotate(-90deg); transition: transform .12s; }
+.retry-chev.open { transform: none; }
+.retry-list { margin: 4px 0 0 22px; padding: 0; list-style: none; font-size: 12px; color: var(--cg-text-muted); display: flex; flex-direction: column; gap: 3px; }
+
+.dialog-copy { margin: 0 0 12px; font-size: 13.5px; line-height: 1.55; color: var(--cg-text-muted); overflow-wrap: anywhere; }
+.dialog-copy strong { color: var(--cg-text); }
+.btn-danger { background: var(--cg-danger); border-color: var(--cg-danger); color: var(--cg-accent-contrast); }
+
+/* Technical names (env vars, doc paths) sit beside human copy as a muted mono aside. */
+.settings-tech { display: block; margin-top: 4px; font: 11px/1.5 var(--cg-font-mono); color: var(--cg-text-faint); overflow-wrap: anywhere; }

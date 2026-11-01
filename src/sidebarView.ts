@@ -74,9 +74,9 @@ export const GROUP_BY_OPTIONS = ["workspace-tree", "workspace-sections", "in-one
 export type GroupBy = (typeof GROUP_BY_OPTIONS)[number];
 
 export const GROUP_BY_LABELS: Readonly<Record<GroupBy, string>> = {
-  "workspace-tree": "Workspace Tree",
-  "workspace-sections": "WorkSpace",
-  "in-one-list": "In one list",
+  "workspace-tree": "Folder tree",
+  "workspace-sections": "Workspace",
+  "in-one-list": "Single list",
 };
 
 export function isGroupBy(value: unknown): value is GroupBy {

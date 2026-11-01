@@ -56,9 +56,8 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 - `./App.tsx:ShortcutsPanel` — keyboard-shortcuts editor (Settings → Keyboard shortcuts; formerly a dialog; shell primitives live in `./shell/`: DialogHeader, CommandPalette, Toast, Kbd, useModalFocus); props
   `{ overrides, onChangeShortcuts, onClose }` (the callback writes through
   `settings.changeShortcuts`).
-- `./App.tsx:ConfigFileDialog` — "Configuration file" dialog; props
-  `{ onResolve, onClose }` where `onResolve` returns a `ConfigPathResult` (injected for
-  testability).
+- `./inspector/ConfigTab.tsx:ConfigTab` — Config inspector tab (edit the configuration file;
+  "Open configuration file" in Settings opens it). Replaces the old stacked ConfigFileDialog.
 - `./App.tsx:selectWorkspaceForExecution` — shared workspace-open path:
   `mode === "contained"` requires `inspection.configured && inspection.platformSupported`
   (throws `inspection.reason` otherwise) and invokes `workspace.contained.select`; local mode
@@ -196,7 +195,7 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
   `session.history`, `session.setArchived`, `session.task.bind`, `workspace.select`,
   `workspace.contained.select`, `workspace.rename`, `workspace.delete`,
   `execution.containment.inspect`, `model.configure`, `model.catalog`, `provider.delete`,
-  `config.path` (Settings' ConfigFileDialog), `settings.changePermission`,
+  `config.path`, `settings.changePermission`,
   `settings.changePreset`, `settings.changePlugin`, `settings.changeShortcuts`,
   `onboarding.dismiss`, `plugin.catalog`, `plugin.install`, `plugin.uninstall`,
   `observation.status`, `observation.record` (TraceDetailsPanel ledger), `run.invocation.reconcile`,
@@ -261,7 +260,7 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 - `test/E2E-cognitive-console.test.ts` — verified to exercise `CognitiveFrame` (its
   `data-testid="cognitive-frame"`) and the WebMCP tool registration end to end.
 - The `App()` shell itself, `GovernancePane`, `DirectoryField`, `ReviewPanel`,
-  `PluginsPanelBody`, `ShortcutsPanel`, `ConfigFileDialog`, `download.ts`, `markdown.ts` and
+  `PluginsPanelBody`, `ShortcutsPanel`, `download.ts`, `markdown.ts` and
   `icons.tsx` have no direct component test (covered indirectly through the journey/E2E suites);
   for those, run the full suite.
 - Full suite: Run (from repo root): `bun run test` (type checking separately: `just typecheck`).

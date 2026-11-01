@@ -51,6 +51,16 @@ describe("chord capture", () => {
     expect(a).toBe("Ctrl+Shift+Alt+Meta+K");
   });
 
+  test("Alt on macOS: the composed key is ignored, the physical letter/digit wins", () => {
+    // Option+N yields e.key "˜" on macOS; the chord must still be Ctrl+Alt+N.
+    const mac = { key: "˜", code: "KeyN", ctrlKey: true, altKey: true, shiftKey: false, metaKey: false };
+    expect(chordFromKeyboardEvent(mac)).toBe("Ctrl+Alt+N");
+    expect(chordFromKeyboardEvent({ ...mac, key: "¡", code: "Digit1" })).toBe("Ctrl+Alt+1");
+    // Without Alt, `key` (layout-aware) stays authoritative; punctuation keeps its key name.
+    expect(chordFromKeyboardEvent({ ...mac, altKey: false, key: "z", code: "KeyY" })).toBe("Ctrl+Z");
+    expect(chordFromKeyboardEvent({ ...mac, key: "/", code: "Slash" })).toBe("Ctrl+Alt+/");
+  });
+
   test("a non-character key with a modifier keeps its name", () => {
     expect(chordFromKeyboardEvent(key({ key: "ArrowUp", ctrlKey: true }))).toBe("Ctrl+ArrowUp");
     expect(chordFromKeyboardEvent(key({ key: "/", ctrlKey: true }))).toBe("Ctrl+/");

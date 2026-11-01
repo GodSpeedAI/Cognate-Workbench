@@ -277,7 +277,7 @@
 
 .experts-editor {
   width: min(100%, 850px);
-  margin-inline: auto;
+  margin-inline: 0; /* share the left axis with the page header and roster */
 }
 
 .experts-form {
