@@ -105,14 +105,15 @@ describe("E2E J-WS-directory-discovery — usable picker, not a raw full-path de
         await page.goto(app.url);
         await page.getByRole("button", { name: "Add workspace", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Add workspace" });
-        const field = dialog.getByRole("textbox", { name: "Workspace directory path" });
+        const field = dialog.getByRole("combobox", { name: "Workspace directory path" });
         await field.fill(join(root, "pro"));
         const list = dialog.getByRole("listbox", { name: "Suggested folders" });
         await list.getByRole("option", { name: /projects/i }).waitFor();
         await list.getByRole("option", { name: /prototypes/i }).waitFor();
         await field.press("ArrowDown");
         await field.press("Tab");
-        expect(await field.inputValue()).toBe(join(root, "projects"));
+        // Completion appends a separator so the operator can keep drilling down; Open accepts it as is.
+        expect(await field.inputValue()).toBe(`${join(root, "projects")}/`);
         await dialog.getByRole("button", { name: "Open", exact: true }).click();
         await waitUntil("picked workspace added", async () => {
           const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" })).rows;

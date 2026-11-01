@@ -92,13 +92,13 @@ describe("RED journeys — UX evidence", () => {
         await page.goto(app.url);
         await page.getByRole("button", { name: "Add workspace", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Add workspace" });
-        const field = dialog.getByRole("textbox", { name: "Workspace directory path" });
+        const field = dialog.getByRole("combobox", { name: "Workspace directory path" });
         await field.fill(join(browseRoot, "pro"));
         await dialog.getByRole("listbox", { name: "Suggested folders" }).getByRole("option", { name: /projects/i }).waitFor();
         await shot(page, "07-directory-suggestions");
         await field.press("ArrowDown");
         await field.press("Tab");
-        expect(await field.inputValue()).toBe(join(browseRoot, "projects"));
+        expect(await field.inputValue()).toBe(`${join(browseRoot, "projects")}/`);
         await shot(page, "08-keyboard-completion");
         await dialog.getByRole("button", { name: "Open", exact: true }).click();
         await waitUntil("picked workspace added", async () => {

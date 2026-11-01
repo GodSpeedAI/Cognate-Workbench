@@ -815,7 +815,7 @@ were added to the model before any implementation existed (model-first rule).
   pointer selection, loading/empty/error states, stale-response discard).
 - **Policy/authority**: unknown or disconnected worlds fail closed — no local fallback; browsing
   never creates a workspace and never bypasses host filesystem authorization; the server enforces
-  path normalization, symlink and protected application-home guards; responses carry no file
+  home expansion and path normalization, symlink-following (links to directories only) and protected application-home guards (empty result with a notice); responses carry no file
   contents, secrets or stack traces.
 - **Evidence/settlement**: type a prefix, complete by keyboard, open the exact chosen workspace;
   repeat for a connected world and for denied/unknown locations; typing stays responsive on slow
