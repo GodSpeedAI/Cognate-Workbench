@@ -91,7 +91,10 @@ describe("E2E remote workspaces", () => {
         // the sidebar marks it as remote, with the connection's name
         const row = page.locator(".workspace-row", { hasText: "remote-project" });
         await row.waitFor();
-        expect(await row.locator(".workspace-world-badge").innerText()).toMatch(/^SSH · dev@127\.0\.0\.1/);
+        // A short, never-truncated chip; the connection's name is in the tooltip.
+        const badge = row.locator(".workspace-world-badge");
+        expect(await badge.innerText()).toBe("SSH");
+        expect(await badge.getAttribute("title")).toMatch(/^SSH · dev@127\.0\.0\.1/);
         // a healthy remote world is quiet
         await page.waitForTimeout(500);
         expect(await page.locator(".world-banner").count()).toBe(0);

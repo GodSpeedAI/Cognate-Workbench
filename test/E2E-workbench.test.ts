@@ -38,7 +38,7 @@ describe("E2E workbench cockpit", () => {
         await page.getByRole("button", { name: "Workbench", exact: true }).click();
         await page.getByRole("heading", { name: "Workbench", exact: true }).waitFor();
         expect(await page.getByRole("button", { name: "Workbench", exact: true }).getAttribute("aria-pressed")).toBe("true");
-        expect(await page.getByRole("tab").allInnerTexts()).toEqual(["Tasks", "Workflows", "Capabilities", "Automations"]);
+        expect(await page.getByRole("tablist", { name: "Workbench sections" }).getByRole("tab").allInnerTexts()).toEqual(["Tasks", "Workflows", "Capabilities", "Automations"]);
 
         // Empty state teaches, and there is exactly one way to begin.
         await page.getByText(/A task is the unit of governed work/).waitFor();
