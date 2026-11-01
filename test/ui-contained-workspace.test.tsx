@@ -89,7 +89,9 @@ describe("contained workspace picker", () => {
     const ui = render(<LocalWorkspaceForm invoke={invoke} onClose={() => {}} />);
 
     await waitFor(() => expect((ui.getByLabelText("Linux child containment") as HTMLInputElement).disabled).toBe(true));
-    expect(ui.getByRole("status").textContent).toContain("Host containment setup is missing.");
+    // Plain words in the form; the host's own reason stays available on hover.
+    expect(ui.getByRole("status").textContent).toContain("Contained mode isn't set up on this computer.");
+    expect(ui.getByLabelText("Linux child containment").closest("label")?.getAttribute("title")).toBe("Host containment setup is missing.");
   });
 
   test("uses only the path-only contained capability and never falls back on preflight failure", async () => {

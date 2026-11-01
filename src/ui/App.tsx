@@ -3085,7 +3085,7 @@ export function LocalWorkspaceForm({
             ? "Local · uncontained — agents run commands and write files on this computer as you"
             : "Local · read-only to agents — commands and writes need a contained workspace"}
         </label>
-        <label title={containmentAvailable ? undefined : containmentReason}>
+        <label title={containmentAvailable ? undefined : (inspection?.reason ?? containmentReason)}>
           <input
             type="radio"
             name="workspace-execution-mode"
