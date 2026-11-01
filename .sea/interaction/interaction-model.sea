@@ -1390,6 +1390,19 @@ Instance j_session_draft of "CanonicalJourney" {
     variants: "double-click or repeated create with the same request identity yields one Session; a draft survives full app restart; a new draft carries no previous Session's active Task, approval, focus or conversation; legacy sessions without session.created remain readable"
 }
 
+Instance j_ws_files_browse of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.files.list, workspace.file.read",
+    evidence_class: "declared",
+    initiating_condition: "The operator opens the Files tab of the inspector for the current workspace",
+    journey_id: "J-WS-files-browse",
+    precondition: "A workspace is selected and its execution world is connected; browsing is read-only",
+    purpose: "Let the operator browse the workspace file tree and read a file without leaving the app",
+    settlement: "Listings and reads come from the workspace's own execution world, are relative to and contained in the workspace root, bounded (500 entries, 512 KiB of text), hide .git, flag binary and truncated content, and refuse parent traversal, absolute paths, symbolic links that leave the root, the protected application home and unknown workspaces with a readable reason; nothing is ever written and agent runs cannot use these capabilities",
+    steps: "operator opens the Files tab -> the root is listed directories first -> operator expands a folder -> the folder is listed -> operator selects a file -> the file is read and shown read-only with its language",
+    variants: "binary file shows no text; large file shows the first 512 KiB flagged truncated; symlink entries are listed but not followed outside the root; an unreadable path explains itself"
+}
+
 Instance j_ws_directory_discovery of "CanonicalJourney" {
     actor: "User",
     capabilities: "workspace.directory.suggest, workspace.select",

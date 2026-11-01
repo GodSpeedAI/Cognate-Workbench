@@ -65,6 +65,7 @@ import { cognitiveComponent } from "./capabilities/cognitive.ts";
 import { agentCognitiveAgent } from "./agents/agentCognitive.ts";
 import type { MediatorSpec } from "./cognitive/mediation.ts";
 import { workspaceSelectComponent } from "./capabilities/workspaceSelect.ts";
+import { workspaceFilesComponent } from "./capabilities/workspaceFiles.ts";
 import { workspaceDirectorySuggestComponent } from "./capabilities/workspaceDirectorySuggest.ts";
 import { workspacePathComponent } from "./capabilities/workspacePath.ts";
 import { toolCapabilitiesComponent } from "./capabilities/tools.ts";
@@ -236,6 +237,8 @@ const GRANTED_CAPABILITIES = [
   "session.create",
   "session.task.bind",
   "workspace.directory.suggest",
+  "workspace.files.list",
+  "workspace.file.read",
   // J-CHECKOUT (PandaCode worktree affordance): task-scoped Git checkouts. The mutating
   // capabilities are operator-only inside the component; `task.checkout.resolve` is the read the
   // agent loop needs as a recorded step, so it is granted to the system actor as well.
@@ -525,6 +528,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
       sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
       taskCheckoutComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, semanticRefs: checkoutRefs }),
+      workspaceFilesComponent({ registry: executionWorlds, getService, systemCaller: SYSTEM_CALLER, protectedHome: home, listSemanticRef: redRefs["workspace.files.list"], readSemanticRef: redRefs["workspace.file.read"] }),
       workspaceDirectorySuggestComponent({ registry: executionWorlds, protectedHome: home, semanticRef: redRefs["workspace.directory.suggest"] }),
       workspacePathComponent(getService, toolBindings.workspacePath.semanticRef),
       toolCapabilitiesComponent(toolBindings.toolRead.semanticRef),

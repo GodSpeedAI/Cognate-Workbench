@@ -443,11 +443,15 @@ export function bindAmbiguousCapabilities(domain: Domain): Readonly<Record<strin
  * - `session.task.bind` on `Session` — the governed Task↔Session binding mutation (J-TASK-scope).
  * - `workspace.directory.suggest` on `ExecutionWorld` — read-only directory completion in the
  *   selected execution world (J-WS-directory-discovery).
+ * - `workspace.files.list` and `workspace.file.read` on `WorkspaceRecord` - read-only file
+ *   browsing of a workspace for the inspector's Files tab (J-WS-files-browse).
  */
 export const RED_JOURNEY_ANCHORS: Readonly<Record<string, string>> = {
   "session.create": "Session",
   "session.task.bind": "Session",
   "workspace.directory.suggest": "ExecutionWorld",
+  "workspace.files.list": "WorkspaceRecord",
+  "workspace.file.read": "WorkspaceRecord",
 };
 
 export function redJourneyBindings(domain: Domain): readonly CapabilityBinding[] {
