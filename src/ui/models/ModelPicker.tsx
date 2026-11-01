@@ -9,7 +9,34 @@ import { useToast } from "../shell/Toast.tsx";
 import { capabilityErrorMessage } from "./providerCatalog.ts";
 import { useProviderList, type StoredProvider } from "./useProviders.ts";
 
-type Models = { readonly state: "loading" } | { readonly state: "ready"; readonly models: readonly string[] } | { readonly state: "failed"; readonly reason: string };
+export type Models = { readonly state: "loading" } | { readonly state: "ready"; readonly models: readonly string[] } | { readonly state: "failed"; readonly reason: string };
+
+const CATALOG_TIMEOUT_MS = 8000;
+
+/** Runs one catalog lookup and always settles to "ready" or "failed" — never stays "loading". A host
+ *  that never answers fails after `timeoutMs` (the timer is cleared as soon as the lookup settles). */
+export async function settleCatalog(lookup: () => Promise<ModelCatalogResult>, timeoutMs: number): Promise<Models> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const r = await Promise.race([
+      lookup(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("The provider did not answer in time.")), timeoutMs);
+      }),
+    ]);
+    return r.ok ? { state: "ready", models: r.models } : { state: "failed", reason: r.reason };
+  } catch (err) {
+    return { state: "failed", reason: capabilityErrorMessage(err) };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** The status line under a provider's models: shown only while the lookup is actually in flight. */
+export function catalogNote(cat: Models | undefined, hasModels: boolean): string | undefined {
+  if (cat?.state !== "loading") return undefined;
+  return hasModels ? "Checking for more models…" : "Loading models…";
+}
 
 export interface ModelPickerConfig {
   readonly providerId: string;
@@ -85,24 +112,17 @@ export function ModelPicker({
       if (fetched.current.has(key)) continue;
       fetched.current.add(key);
       setCatalogs((c) => ({ ...c, [p.providerId]: { state: "loading" } }));
-      void (async () => {
-        try {
-          // A host that never answers must not leave "Loading" up: give the lookup 8 seconds, then fail with a retry.
-          const r = (await Promise.race([
-            client.invoke("model.catalog", {
-              providerId: p.providerId,
-              protocol: p.protocol,
-              baseURL: p.baseURL,
-              ...(p.auth ? { auth: p.auth } : {}),
-              ...(p.apiVersion ? { apiVersion: p.apiVersion } : {}),
-            } as never),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("The provider did not answer in time.")), 8000)),
-          ])) as unknown as ModelCatalogResult;
-          setCatalogs((c) => ({ ...c, [p.providerId]: r.ok ? { state: "ready", models: r.models } : { state: "failed", reason: r.reason } }));
-        } catch (err) {
-          setCatalogs((c) => ({ ...c, [p.providerId]: { state: "failed", reason: capabilityErrorMessage(err) } }));
-        }
-      })();
+      void settleCatalog(
+        () =>
+          client.invoke("model.catalog", {
+            providerId: p.providerId,
+            protocol: p.protocol,
+            baseURL: p.baseURL,
+            ...(p.auth ? { auth: p.auth } : {}),
+            ...(p.apiVersion ? { apiVersion: p.apiVersion } : {}),
+          } as never) as unknown as Promise<ModelCatalogResult>,
+        CATALOG_TIMEOUT_MS,
+      ).then((next) => setCatalogs((c) => ({ ...c, [p.providerId]: next })));
     }
   }, [open, providers, client, retryTick]);
 
@@ -217,9 +237,11 @@ export function ModelPicker({
                       </button>
                     );
                   })}
-                  {cat?.state === "loading" && (models.length > 0
-                    ? <p className="model-picker-empty model-picker-note">Checking for more models…</p>
-                    : <p className="model-picker-empty">Loading models…</p>)}
+                  {catalogNote(cat, models.length > 0) && (
+                    <p className={models.length > 0 ? "model-picker-empty model-picker-note" : "model-picker-empty"} role="status">
+                      {catalogNote(cat, models.length > 0)}
+                    </p>
+                  )}
                   {cat?.state === "failed" && (
                     <p className="model-picker-empty" title={cat.reason}>
                       Couldn't list this provider's models. {models.length ? "Showing the saved one. " : ""}
