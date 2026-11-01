@@ -5132,3 +5132,20 @@ body.is-col-resizing .resize-handle:active::after {
 .menu-select-field .menu-select-btn:hover:not(:disabled) { background: var(--cg-hover); }
 .menu-select-field .menu-select-list { min-width: 100%; max-height: 280px; overflow-y: auto; }
 .settings-row-control .menu-select-field { min-width: 180px; }
+
+/* First-run header (steps, title, back) stays pinned while the form body scrolls, so focusing a lower
+   field never leaves the dialog without its title or stepper. */
+.first-run-dialog .fr-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: -20px -24px 0;
+  padding: 20px 24px 10px;
+  background: var(--cg-surface);
+}
+.first-run-wide .fr-head { border-bottom: 1px solid var(--cg-border); }
+.first-run-dialog, .first-run-wide { scroll-padding-top: 130px; }
+@media (max-width: 640px) { .first-run-dialog .fr-head { margin: -16px -16px 0; padding: 16px 16px 10px; } .first-run-dialog, .first-run-wide { scroll-padding-top: 110px; } }

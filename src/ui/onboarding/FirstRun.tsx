@@ -154,13 +154,15 @@ function FirstRunFrame({
         tabIndex={-1}
         ref={dialogRef}
       >
-        <StepIndicator current={step} />
-        <DialogHeader title={title} titleId="first-run-heading" closeLabel="setup" onClose={onClose} />
-        {onBack && (
-          <button type="button" className="fr-back" onClick={onBack}>
-            ← Back
-          </button>
-        )}
+        <div className="fr-head">
+          <StepIndicator current={step} />
+          <DialogHeader title={title} titleId="first-run-heading" closeLabel="setup" onClose={onClose} />
+          {onBack && (
+            <button type="button" className="fr-back" onClick={onBack}>
+              ← Back
+            </button>
+          )}
+        </div>
         {children}
       </div>
     </div>
