@@ -1,0 +1,9 @@
+[cognate-workbench] data home: /tmp/claude-1000/-home-sprime01-projects-cognate-workbench/d3716090-fd73-45cd-a4b7-a5539e33a75a/scratchpad/pkg/home (packaged: true, resources: /home/sprime01/projects/cognate-workbench/dist-package/cognate-workbench-0.1.0-linux-x64/share/cognate-workbench)
+[cognate-workbench] database: bundled pg0 "cognate-workbench-64884db0185d" (PostgreSQL 18.1.0, port 5434), data /tmp/claude-1000/-home-sprime01-projects-cognate-workbench/d3716090-fd73-45cd-a4b7-a5539e33a75a/scratchpad/pkg/home/database/data
+[domain] loaded 281 semantic objects (digest sha256:2e26b87b348fdcd3e9f0e52f282ecdcda13b89c5966b091f919feff32edd0818) from /home/sprime01/projects/cognate-workbench/dist-package/cognate-workbench-0.1.0-linux-x64/share/cognate-workbench/.sea/interaction/interaction-model.sea
+[cognate-workbench] realitytrace: SXR binary not found; observations stay queued (dev tools unaffected)
+[cognate-workbench] listening on http://127.0.0.1:3197 (home: /tmp/claude-1000/-home-sprime01-projects-cognate-workbench/d3716090-fd73-45cd-a4b7-a5539e33a75a/scratchpad/pkg/home)
+[cognate-workbench] auth: durable session posture (browser entry holds this boot's revocable session); dev auth is off
+[cognate-workbench] execution: contained — agent commands and writes run only in Linux-contained or explicitly connected remote workspaces; local workspaces are read-only to agents (COGNATE_EXECUTION_POSTURE=uncontained-local to opt out)
+[cognate-workbench] app window closed: closing the application
+[cognate-workbench] bundled database "cognate-workbench-64884db0185d" stopped (owned by this data home)

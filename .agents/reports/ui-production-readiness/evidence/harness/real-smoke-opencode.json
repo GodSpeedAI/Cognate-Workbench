@@ -1,0 +1,25 @@
+{
+  "at": "2026-11-01T07:20:18.268Z",
+  "results": [
+    {
+      "id": "opencode",
+      "version": "opencode v2.2.0",
+      "mode": "ask",
+      "status": "failed",
+      "ms": 4100,
+      "reply": "",
+      "failure": {
+        "code": "AUTH_REQUIRED",
+        "message": "OpenCode is not signed in. Run `opencode auth login` in a terminal, then retry."
+      },
+      "eventTypes": [
+        "run.started",
+        "run.invocation",
+        "session.turn.started",
+        "harness.session.recorded",
+        "turn.failed",
+        "run.failed"
+      ]
+    }
+  ]
+}

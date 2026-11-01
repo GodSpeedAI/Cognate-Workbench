@@ -1,0 +1,40 @@
+aim: ui-production-readiness
+created: 2026-10-31
+branch: feat/ui-production-readiness
+goal: >
+  Make the Workbench UI production ready and at UX parity with PandaCode
+  (.tmp/donor/pandacode), adapted to the Cobalt identity in DESIGN.md, proven by
+  real-browser E2E journeys with screenshots.
+inputs:
+  - .agents/reports/ui-production-readiness/recon/R1-pandacode-ux-inventory.md
+  - .agents/reports/ui-production-readiness/recon/R2-pandacode-screens.md
+  - .agents/reports/ui-production-readiness/recon/R3-cognate-live-audit.md
+  - .agents/reports/ui-production-readiness/recon/R4-cognate-code-map.md
+done:
+  - D1 desktop launch: `launch` command, app window (Edge/Chrome --app), GUI exe on Windows, .desktop on Linux, .app on macOS (6069da4, 20b9110)
+  - C1 config.file.read / config.file.apply capabilities (0f4c12d)
+  - S1 folder autocomplete: ~, bare fragments, tiers, fuzzy, symlinks, drill-down (f138304)
+tranches:
+  - id: A1
+    what: read-only workspace.files.list / workspace.file.read capabilities for the inspector Files tab
+  - id: T1a
+    what: dialog header primitive (X right everywhere), full-page Settings (left nav, X top-right, Esc, no height jump, styled controls), global shortcuts wired, command palette (Ctrl+K), toasts with undo
+  - id: T1b
+    what: main header bar, tabbed resizable right inspector (Context, Changes, Files, Config), compact context bar replacing the task/focus clutter, mobile overlay sidebar
+  - id: T2
+    what: first-run flow uses the full provider wizard; friendly fresh-home state; composer model picker
+  - id: T3
+    what: config editor in the inspector (Settings > Open configuration file), Files tab with read-only viewer
+  - id: T4
+    what: R3 issue list (failing-run surfacing, delete confirm, sidebar polish, governance clipping, cost copy, DAG overflow, jargon)
+  - id: E
+    what: E2E journeys with screenshots (test/E2E-ui-production.test.ts), Haiku audits against donor screens, fix loop, impeccable/hallmark polish
+  - id: R
+    what: report at .agents/reports/ui-production-readiness/REPORT.md
+status: complete (2026-11-01)
+completed:
+  - A1, T1a, T1b, T2, T3, T4 as planned
+  - added during the run, at operator request: providers parity (P1, U5), OS secret store (9c644ed), external agent CLIs (H1), building-with-cognate conformance (M1)
+  - E: A1 and A2 Haiku audits; F1 and F2 fix passes; full gate clean at 04f648d (1551 pass, 13 skip, 0 fail)
+  - R: .agents/reports/ui-production-readiness/REPORT.md
+open: see .agents/DEBT.md entries dated 2026-11-01
