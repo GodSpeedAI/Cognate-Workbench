@@ -131,7 +131,8 @@ describe("validateAssignment", () => {
 describe("effective chord and defaults", () => {
   test("an absent override falls back to the shipped default", () => {
     expect(effectiveChord("open-shortcuts", {})).toBe("Ctrl+/");
-    expect(effectiveChord("new-session", {})).toBeUndefined();
+    expect(effectiveChord("new-session", {})).toBe("Ctrl+Alt+N");
+    expect(effectiveChord("new-session", { "new-session": null })).toBeUndefined();
   });
 
   test("an explicit null unbinds a defaulted action", () => {
@@ -149,10 +150,12 @@ describe("effective chord and defaults", () => {
     expect(isDefault({ "open-shortcuts": null })).toBe(false);
   });
 
-  test("restoreDefaults writes every action explicitly, null when it had no default", () => {
+  test("restoreDefaults writes every action explicitly, the shipped chord for every action", () => {
     const restored = restoreDefaults();
     expect(restored["open-shortcuts"]).toBe("Ctrl+/");
-    expect(restored["new-session"]).toBeNull();
+    // Every shipped action has a default chord now; restoring writes that chord back explicitly.
+    expect(restored["new-session"]).toBe("Ctrl+Alt+N");
+    expect(restored["open-command-palette"]).toBe("Ctrl+K");
     expect(Object.keys(restored).sort()).toEqual(SHORTCUT_ACTIONS.map((a) => a.id).sort());
   });
 

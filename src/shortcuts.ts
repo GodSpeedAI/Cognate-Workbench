@@ -16,12 +16,18 @@ export interface ShortcutAction {
   readonly defaultChord: string | undefined;
 }
 
-/** The "Application" region of the shortcuts dialog — the editable set. */
+/** The "Application" region of the shortcuts dialog — the editable set.
+ *
+ *  Defaults are chosen so none is browser-reserved (see RESERVED_EXACT): Ctrl+N would open a new
+ *  window in Chromium (and in an installed app window) and can never be intercepted, so "New
+ *  Session" ships as Ctrl+Alt+N instead. Ctrl+K / Ctrl+, / Ctrl+B / Ctrl+/ are not reserved. On
+ *  Apple platforms the app treats Cmd as Ctrl when matching, so the same chords read Cmd+K etc. */
 export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
+  { id: "open-command-palette", label: "Open command palette", defaultChord: "Ctrl+K" },
   { id: "open-shortcuts", label: "Open keyboard shortcuts", defaultChord: "Ctrl+/" },
-  { id: "new-session", label: "New Session", defaultChord: undefined },
-  { id: "toggle-sidebar", label: "Toggle left sidebar", defaultChord: undefined },
-  { id: "open-settings", label: "Open settings", defaultChord: undefined },
+  { id: "new-session", label: "New Session", defaultChord: "Ctrl+Alt+N" },
+  { id: "toggle-sidebar", label: "Toggle left sidebar", defaultChord: "Ctrl+B" },
+  { id: "open-settings", label: "Open settings", defaultChord: "Ctrl+," },
 ];
 
 export function actionById(id: string): ShortcutAction | undefined {

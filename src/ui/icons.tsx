@@ -258,3 +258,89 @@ export const PhoneIcon = (props: IconProps) =>
     </>,
     props,
   );
+
+export const XIcon = (props: IconProps) => base(<path d="M4 4l8 8M12 4l-8 8" />, props);
+
+/** Archive box: lid, body and a pull slot (replaces the former backspace glyph). */
+export const ArchiveIcon = (props: IconProps) =>
+  base(
+    <>
+      <rect x="2" y="2.75" width="12" height="3" rx="0.75" />
+      <path d="M3 5.75V12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.75M6.5 8.5h3" />
+    </>,
+    props,
+  );
+
+/** Restore from archive: a counter-clockwise arrow. */
+export const UndoIcon = (props: IconProps) =>
+  base(
+    <>
+      <path d="M3 6.5h6.25a3.25 3.25 0 0 1 0 6.5H6" />
+      <path d="M5.5 3.75L3 6.5l2.5 2.75" />
+    </>,
+    props,
+  );
+
+export const PaletteIcon = (props: IconProps) =>
+  base(
+    <>
+      <path d="M8 2a6 6 0 1 0 0 12c1 0 1.5-.7 1.5-1.4 0-.9-.7-1.1-.7-1.9 0-.7.6-1.2 1.3-1.2H12a2 2 0 0 0 2-2C14 4.7 11.3 2 8 2z" />
+      <circle cx="5" cy="7.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="7.5" cy="4.9" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10.8" cy="5.6" r="0.9" fill="currentColor" stroke="none" />
+    </>,
+    props,
+  );
+
+export const ChipIcon = (props: IconProps) =>
+  base(
+    <>
+      <rect x="4" y="4" width="8" height="8" rx="1.5" />
+      <path d="M6.5 1.75v2.25M9.5 1.75v2.25M6.5 12v2.25M9.5 12v2.25M1.75 6.5H4M1.75 9.5H4M12 6.5h2.25M12 9.5h2.25" />
+    </>,
+    props,
+  );
+
+export const BotIcon = (props: IconProps) =>
+  base(
+    <>
+      <rect x="2.5" y="5.25" width="11" height="7.5" rx="2" />
+      <path d="M8 5.25V2.75M5.75 9v.5M10.25 9v.5" />
+    </>,
+    props,
+  );
+
+export const ShieldIcon = (props: IconProps) =>
+  base(
+    <>
+      <path d="M8 1.75l5 1.75v4.1c0 3-2.1 5-5 6.65-2.9-1.65-5-3.65-5-6.65V3.5z" />
+      <path d="M5.9 8l1.5 1.5 2.7-3" />
+    </>,
+    props,
+  );
+
+export const KeyboardIcon = (props: IconProps) =>
+  base(
+    <>
+      <rect x="1.75" y="3.75" width="12.5" height="8.5" rx="1.5" />
+      <path d="M4.5 6.5h.01M7 6.5h.01M9.5 6.5h.01M12 6.5h.01M4.5 9.5h7" />
+    </>,
+    props,
+  );
+
+export const InfoIcon = (props: IconProps) =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 7.25V11M8 5h.01" />
+    </>,
+    props,
+  );
+
+export const CommandIcon = (props: IconProps) =>
+  base(<path d="M5.5 2.5a1.75 1.75 0 1 0 0 3.5H10.5a1.75 1.75 0 1 0-1.75-1.75v7.5a1.75 1.75 0 1 0 1.75-1.75H5.5a1.75 1.75 0 1 0 1.75 1.75v-7.5A1.75 1.75 0 0 0 5.5 2.5z" />, props);
+
+export const SessionIcon = (props: IconProps) =>
+  base(<path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5a1.5 1.5 0 0 1-1.5 1.5H7L4 13v-2.5H4A1.5 1.5 0 0 1 2.5 9z" />, props);
+
+export const ArrowLeftIcon = (props: IconProps) => base(<path d="M13 8H3M7 4L3 8l4 4" />, props);

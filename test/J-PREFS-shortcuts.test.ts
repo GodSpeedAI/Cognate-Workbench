@@ -120,7 +120,7 @@ describe("J-PREFS-shortcuts", () => {
         const shortcuts = (await readShortcuts(app)) ?? {};
         expect(isDefault(shortcuts as never)).toBe(true);
         expect(shortcuts["open-shortcuts"]).toBe("Ctrl+/");
-        expect(shortcuts["new-session"]).toBeNull();
+        expect(shortcuts["new-session"]).toBe("Ctrl+Alt+N");
       } finally {
         await app.stop();
       }
