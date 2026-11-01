@@ -26,7 +26,7 @@ describe("DialogHeader", () => {
   });
 });
 
-describe("palette fuzzy search", () => {
+describe("J-UI-command-palette palette fuzzy search", () => {
   test("a non-subsequence does not match; empty query matches everything", () => {
     expect(fuzzyScore("zzz", "New session")).toBeUndefined();
     expect(fuzzyScore("", "anything")).toBe(0);

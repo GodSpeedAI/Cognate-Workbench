@@ -8,7 +8,7 @@ import { appWindowArgs, findAppBrowser } from "../src/desktopWindow.ts";
 
 const set = (...paths: string[]) => (p: string) => paths.includes(p);
 
-describe("findAppBrowser", () => {
+describe("J-DESKTOP-launch findAppBrowser", () => {
   test("windows prefers Edge over Chrome and checks each root", () => {
     const env = { "ProgramFiles(x86)": "C:\\PF86", ProgramFiles: "C:\\PF", LOCALAPPDATA: "C:\\L" };
     const edge = "C:\\PF86\\Microsoft\\Edge\\Application\\msedge.exe";
@@ -38,7 +38,7 @@ describe("findAppBrowser", () => {
   });
 });
 
-test("appWindowArgs", () => {
+test("J-DESKTOP-launch appWindowArgs", () => {
   expect(appWindowArgs("http://127.0.0.1:3180", "/h/app-window")).toEqual([
     "--app=http://127.0.0.1:3180", "--user-data-dir=/h/app-window", "--no-first-run", "--no-default-browser-check", "--window-size=1440,920", "--class=CognateWorkbench",
   ]);
@@ -62,7 +62,7 @@ async function portOpen(port: number): Promise<boolean> {
   }
 }
 
-describe.skipIf(process.platform === "win32")("launch (fake browser)", () => {
+describe.skipIf(process.platform === "win32")("J-DESKTOP-launch launch (fake browser)", () => {
   test("opens the app window, quits with it, and a second launch reuses the running instance", async () => {
     const dir = await mkdtemp(join(tmpdir(), "launch-"));
     const port = await freePort();

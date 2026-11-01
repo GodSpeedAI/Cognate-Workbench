@@ -79,24 +79,33 @@ settlement is still unsettled until the human acts.
   a routable model.
 - **Preconditions**: none (this is the entry journey); default-workspace init is attempted
   automatically at boot and may fail.
-- **Steps**: launch → initial UI → configure a model (delegates to `J-CFG-model-provider`) →
-  choose workspace (delegates to `J-WS-select`) → composer becomes available.
-- **Capabilities/actions (proposed)**: `model.configure`, `workspace.select`, `composer.enable`.
-- **Policy/authority**: none beyond the workspace/model preconditions gating the composer.
+- **Steps (revised 2026-10-31)**: launch → first-run flow opens on Welcome → Connect a model
+  provider with the full provider form (delegates to `J-CFG-model-provider`: `model.configure`,
+  key through `secret.put`, `model.catalog`) → Choose a folder (delegates to `J-WS-select`:
+  `workspace.select`) → the flow ends and the composer is available.
+- **Capabilities/actions**: `model.configure`, `workspace.select`, `composer.enable`,
+  `onboarding.dismiss` (durable steps `notice` and `apikey`), `secret.put`, `model.catalog`.
+- **Policy/authority**: none beyond the workspace/model preconditions gating the composer. The
+  flow's current step is derived from durable state (dismissals plus the model-config and
+  workspace projections), not stored as its own state.
 - **Artifacts/resources**: `ModelConfig`, `WorkspaceSelection`, `ComposerAvailability`.
 - **Outcome**: composer accepts input.
-- **Evidence**: `product-characterization.md` §2 ("The session composer remains unavailable until
-  a workspace is selected" — actually sourced from §4, cross-referenced in §2 empty-states) and
-  §4 workspace gating; spec Journey A (Phase 6, lines ~588-595).
+- **Evidence**: `product-characterization.md` §2/§4; spec Journey A (Phase 6, lines ~588-595);
+  `test/E2E-onboarding.test.ts` (Welcome → provider form → folder → working conversation; reload
+  shows no onboarding; Configure later → friendly empty state).
 - **Settlement criteria**: composer's disabled state clears; `modelCatalog()` lists ≥1 usable
   route.
 - **Failure/recovery**: default-workspace auto-init failure shows `defaultWorkspace.failed` copy
-  ("Unable to create default workspace. Use Choose workspace to select a folder.") — recovery path
-  is the manual `J-WS-select` journey.
+  and the Folder step is the manual `J-WS-select`; a rejected provider form keeps the operator on
+  the Model step with the reason.
 - **Next decisions/affordances**: `J-B-basic-session` (create first session).
-- **Known variants**: auto-init succeeds (skips explicit workspace step) vs. auto-init fails
-  (explicit Choose workspace required).
-- **Evidence class**: declared.
+- **Known variants**: auto-init succeeds (skips explicit workspace step) vs. auto-init fails;
+  **Configure later** (or X / Esc) dismisses the remaining steps and lands on a friendly empty
+  state from which Settings → Models and Add workspace still reach the same journeys; Back keeps
+  entered values; the earlier DeepSeek credential-only mode is superseded by the full provider
+  form.
+- **Evidence class**: declared (flow observed by `test/E2E-onboarding.test.ts`; that test is not
+  yet named after the journey id, see `validation/conformance-2026-10-31.md`).
 
 ## J-CFG-model-provider (`j_cfg_model_provider`)
 
@@ -952,3 +961,176 @@ recorded results in `validation/`. Their status changes only when that evidence 
 | `J-PKG-fail-closed` | Each of the failure cases in the mission's Test E exits non-zero with a named condition and creates no store |
 | `J-PKG-upgrade-uninstall` | Earlier state reads back after a package replacement; uninstall leaves the data home and instance |
 | `J-PKG-doctor` | `cognate-workbench doctor` reports every required field and exits non-zero on an unusable installation |
+
+## Observed settings, workspace, host and identity journeys (conformance pass 2026-10-31)
+
+Each entry mirrors the `Instance ... of "CanonicalJourney"` record of the same `journey_id` in
+`interaction-model.sea` (fields: actor, initiating condition, purpose, precondition, steps,
+settlement, variants). Capabilities are bound explicitly in `domain/index.ts` and recorded in
+`handoff.md` ("Capability binding register").
+
+### J-CFG-config-path (`j_cfg_config_path`)
+
+- **Actor/intention**: User. The operator wants to read or edit the configuration outside the app. Purpose: Give the operator a working way to reach the configuration file, respecting the browser/server filesystem boundary and never exposing secret values.
+- **Preconditions/affordance**: The app is running. Capabilities: `config.path`.
+- **Steps**: user asks to open the configuration -> the file location is resolved -> the path and a non-secret view of the contents are offered -> a missing or unwritable file reports that state instead of failing silently.
+- **Evidence/settlement**: The operator can obtain the configuration file's location and its non-secret contents, with a stated reason where the environment offers no safe path.
+- **Known variants**: file exists; file absent, the default location is still reported; the host offers no filesystem handoff, so copy is the offered action; secret values are never returned.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-CFG-config-path.test.ts`.
+
+### J-CFG-config-edit (`j_cfg_config_edit`)
+
+- **Actor/intention**: User. The operator wants to view or change the configuration file from the Settings side panel. Purpose: Let the operator edit the non-secret configuration as text, with every change validated by the same rules as the individual settings controls and applied all-or-nothing.
+- **Preconditions/affordance**: The app is running and the Settings panel is open. Capabilities: `config.file.read, config.file.apply`.
+- **Steps**: user opens the configuration file -> the current durable settings are rendered with a version token -> user edits the text and applies it -> the text is parsed and every changed key is validated -> all changes are recorded together -> the file on disk is rewritten atomically and a new version is returned.
+- **Evidence/settlement**: A valid edit is recorded as the same durable settings events the controls write, the settings projection reflects it, and cognate.config.json mirrors the new rendering at mode 0600; any refusal leaves settings and file untouched and says why.
+- **Known variants**: invalid JSON is refused with line and column; an unknown settings key is refused by name; an invalid value refuses the whole edit, including valid sibling keys; a stale version is refused as a conflict; edits to the informational fields (schema, note, home, environment) are ignored and listed; an edit with no change succeeds and applies nothing; secret values are never in the text.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-CFG-config-edit.test.ts`.
+
+### J-CFG-model-catalog (`j_cfg_model_catalog`)
+
+- **Actor/intention**: User. A base URL is entered and the operator wants the provider's real model list instead of typing one. Purpose: Discover models from the provider where discovery is supported, and say so plainly where it is not.
+- **Preconditions/affordance**: A protocol and base URL are present. Capabilities: `model.catalog`.
+- **Steps**: user requests the catalog -> the provider's discovery endpoint is queried -> real ids populate the list -> a discovery failure or an unsupported protocol reports a specific reason.
+- **Evidence/settlement**: Supported providers return their real model ids into the editor; unsupported providers report that discovery is unavailable and offer manual entry; no model list is ever invented.
+- **Known variants**: openai-compatible list endpoint supported; provider returns an error; protocol has no discovery; base URL empty refuses before any request.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-CFG-model-catalog.test.ts`.
+
+### J-CFG-provider-delete (`j_cfg_provider_delete`)
+
+- **Actor/intention**: User. The configured model provider is no longer wanted. Purpose: Remove a provider and everything that was stored for it, without leaving an orphaned secret or a dangling active route.
+- **Preconditions/affordance**: A provider configuration exists. Capabilities: `provider.delete`.
+- **Steps**: user confirms deletion -> the provider's secret is removed -> the configuration is removed -> the active route is cleared -> Settings shows no configured provider.
+- **Evidence/settlement**: The provider configuration and its stored secret are gone, the active route is cleared so the UI returns to the unconfigured state, and nothing later resolves to the deleted provider.
+- **Known variants**: deleting the active provider; deleting when already unconfigured refuses; a failure while removing the secret aborts before the configuration is removed.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-CFG-provider-delete.test.ts`.
+
+### J-SECRETS-storage (`j_secrets_storage`)
+
+- **Actor/intention**: User. The operator saves a provider API key, or opens Settings to see where keys are kept. Purpose: Keep API keys in the operating system's secret store (Windows Credential Manager, Linux Secret Service, macOS Keychain) instead of a file, and say plainly which store is in use and why.
+- **Preconditions/affordance**: The app has started and chosen a secret storage backend. Capabilities: `secrets.backend.describe, secret.put`.
+- **Steps**: app starts -> the native store is probed -> it is selected, or the owner-only file is selected with a reason -> keys left in secrets.json are copied to the native store, verified by read-back, then the file is overwritten and removed -> the operator saves a key -> Settings shows the backend label.
+- **Evidence/settlement**: Keys written by secret.put live only in the selected backend, scoped per data home; Settings can state the backend and, for a fallback, the reason; no secret value is in any event, projection, configuration export or capability result.
+- **Known variants**: native store selected; no Secret Service or a locked keychain so the owner-only file is used with a stated reason; COGNATE_SECRET_STORE forces file or native; migration from secrets.json succeeds and removes the file; migration read-back mismatch keeps the file; two data homes on one machine never share keys.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-SECRETS-storage.test.ts`.
+
+### J-WS-files-browse (`j_ws_files_browse`)
+
+- **Actor/intention**: User. The operator opens the Files tab of the inspector for the current workspace. Purpose: Let the operator browse the workspace file tree and read a file without leaving the app.
+- **Preconditions/affordance**: A workspace is selected and its execution world is connected; browsing is read-only. Capabilities: `workspace.files.list, workspace.file.read`.
+- **Steps**: operator opens the Files tab -> the root is listed directories first -> operator expands a folder -> the folder is listed -> operator selects a file -> the file is read and shown read-only with its language.
+- **Evidence/settlement**: Listings and reads come from the workspace's own execution world, are relative to and contained in the workspace root, bounded (500 entries, 512 KiB of text), hide .git, flag binary and truncated content, and refuse parent traversal, absolute paths, symbolic links that leave the root, the protected application home and unknown workspaces with a readable reason; nothing is ever written and agent runs cannot use these capabilities.
+- **Known variants**: binary file shows no text; large file shows the first 512 KiB flagged truncated; symlink entries are listed but not followed outside the root; an unreadable path explains itself.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-WS-files-browse.test.ts`.
+
+### J-PLG-install (`j_plg_install`)
+
+- **Actor/intention**: User. The operator wants a catalogued plugin active in this deployment. Purpose: Make installation a real lifecycle step: register, activate what the catalog declares, and be honest about what cannot run.
+- **Preconditions/affordance**: The Plugins panel is open. Capabilities: `plugin.install, plugin.uninstall`.
+- **Steps**: operator chooses a catalog entry -> installs -> the plugin is registered and its declared implementation activated -> its enable switch now drives real behavior -> uninstalling reverses registration.
+- **Evidence/settlement**: An installed plugin is durable, its enable state is honoured by whatever it actually drives, and a catalog entry with no executable implementation installs as inert and says so.
+- **Known variants**: entry with an executable implementation becomes toggleable; entry without one installs inert with a stated reason; installing an already-installed plugin is refused; arbitrary downloaded code is never executed.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-PLG-install.test.ts`.
+
+### J-PREFS-shortcuts (`j_prefs_shortcuts`)
+
+- **Actor/intention**: User. The operator wants a keyboard shortcut to mean something different, or to restore the defaults. Purpose: Make shortcut editing real, durable and conflict-aware without intercepting typing or overriding browser-reserved chords.
+- **Preconditions/affordance**: The Keyboard shortcuts dialog is open. Capabilities: `settings.changeShortcuts`.
+- **Steps**: user edits a shortcut -> the chord is captured -> conflicts and reserved chords are refused with a reason -> the binding is recorded -> the chord fires the action -> restore defaults rewrites them all.
+- **Evidence/settlement**: The edited chord is durable across restart, fires its action, conflicts are reported before they are accepted, and Restore all defaults returns every editable action to its shipped chord.
+- **Known variants**: global application shortcuts (command palette, keyboard shortcuts, new session, toggle sidebar, open settings, toggle inspector) fire from anywhere outside text entry and show their chord as a key hint wherever the action is offered; Apple platforms treat Cmd as Ctrl; New Session ships as Ctrl+Alt+N because Ctrl+N is browser-reserved; conflict with another action; browser-reserved chord refused; a chord that types into a text field must not fire; restore defaults with no overrides still succeeds.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-PREFS-shortcuts.test.ts`.
+
+### J-SESSION-archive (`j_session_archive`)
+
+- **Actor/intention**: User. A conversation is finished but the operator wants it out of the working list without losing it. Purpose: Let the operator set a session aside reversibly, and choose whether archived conversations are visible.
+- **Preconditions/affordance**: The session exists in the sessions projection. Capabilities: `session.setArchived`.
+- **Steps**: user archives a session -> the archived flag is recorded as an event -> the sessions projection folds it -> Hide archived removes it from the sidebar and All conversations restores it -> unarchive reverses it.
+- **Evidence/settlement**: The session's archived flag is durable across restart, the filter immediately changes what the sidebar lists, and no history is deleted.
+- **Known variants**: archive then restart, still archived; archive the currently open session; unarchive while hidden behind the filter; archiving never deletes turns or events.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-SESSION-archive.test.ts`.
+
+### J-TEAM-ADMISSION (`j_team_admission`)
+
+- **Actor/intention**: User or OperatorAgent. An active Team admits new Expert work while other runs of the same Team are unfinished. Purpose: Bound how many of a Team's own runs may overlap from the Team's authoritative policy, independently of process capacity, and dispatch queued roots in the Team's configured batch.
+- **Preconditions/affordance**: The Team is active with an authoritative limits policy (maximum concurrent runs and admission batch); each admitted root resolves to a canonical workspace identity. Capabilities: `team.converse, expert.converse, team.retry, team.handoff, execution.runtime.inspect`.
+- **Steps**: operator saves authoritative Team limits -> a Team turn admits work through the native admission boundary -> per-Team lane keys serialize the Team's runs beyond its policy -> queued roots dispatch in the Team's batch -> operator inspects run and admission evidence.
+- **Evidence/settlement**: Admission lane count derives only from authoritative Team metadata; a Team exceeding its maxConcurrentRuns waits even when process capacity is free; disjoint roots overlap only up to the policy; queued roots dispatch in the configured batch; client-supplied policy is refused before any effect; unknown or inactive Teams and invalid policy fail closed to full Team serialization; a recovered run may re-enter a different lane, which can only serialize more and never admits beyond the policy.
+- **Known variants**: forged or stale client-supplied maxConcurrentRuns or admissionBatch is refused before any effect; raising the authoritative policy permits genuine overlap without changing process capacity; process restart preserves the policy and never widens it; solo model-only work keeps its overlap semantics.
+- **Evidence class**: observed.
+- **Executable evidence**: `test/J-TEAM-admission.test.ts`.
+
+### J-AUTH-SESSION (`j_auth_session`)
+
+- **Actor/intention**: Operator. The operator replaces client-claimed identities with server-issued durable sessions. Purpose: Make the effective caller a durable, revocable server-side fact instead of a client-supplied string.
+- **Preconditions/affordance**: A durable identity ledger exists; the browser entry and every remote request must present a session the server itself issued. Capabilities: `identity.session.issue, identity.session.revoke, identity.inspect`.
+- **Steps**: boot seeds the operator identity and issues one session for this browser entry -> every request authenticates against the durable session ledger -> operator may issue further sessions for provisioned identities -> operator revokes a session -> the revoked session's replayed request is refused before any capability or service mutation -> boot reconciles expired sessions.
+- **Evidence/settlement**: Every admitted request resolves to a live unexpired unrevoked session bound to one identity; a revoked or expired session is refused with no durable effect; a captured token replayed after revocation produces no durable write anywhere in the store.
+- **Known variants**: the raw development bearer format is refused in the production posture unless an explicit dev opt-in is armed; revocation takes effect without restart; session tokens exist in cleartext only in the issued entry and the holder's memory, the ledger stores verified hashes; an unknown token, an altered token or a session for a missing identity is refused.
+- **Evidence class**: proposed.
+- **Executable evidence**: `test/J-AUTH-SESSION.test.ts`.
+
+### J-AUTH-TENANT-ISOLATION (`j_auth_tenant_isolation`)
+
+- **Actor/intention**: Operator. The operator provisions an identity in a second tenant on one shared store. Purpose: Prove one tenant's session cannot observe or mutate another tenant's work on a shared store.
+- **Preconditions/affordance**: Sessions bind each caller to the tenant of its durable identity; public projections and run, artifact and stream reads are tenant-partitioned by the framework. Capabilities: `identity.session.issue`.
+- **Steps**: operator issues a session for a second-tenant identity -> both sessions drive the same shared store -> each caller's projection reads stay inside its tenant prefix -> cross-tenant run, artifact and event reads are refused as not found -> a client-claimed tenant string without a session is refused -> operator inspects both partitions.
+- **Evidence/settlement**: Each authenticated caller sees only its own tenant's partition: its projections, runs, artifacts and streams; a cross-tenant replay or a forged tenant claim is refused with no durable effect; an empty foreign partition is indistinguishable from an absent one.
+- **Known variants**: a session token from one tenant cannot be replayed into another tenant's context; the framework's tenant partitioning is observed end to end, not assumed; multi-tenant application seeding (per-tenant Experts and schedules) is out of scope and not claimed.
+- **Evidence class**: proposed.
+- **Executable evidence**: `test/J-AUTH-TENANT-ISOLATION.test.ts`.
+
+### J-RW-AGGREGATE-CONTAINMENT (`j_rw_aggregate_containment`)
+
+- **Actor/intention**: Operator. The operator configures aggregate resource ceilings for contained executions. Purpose: Bound aggregate contained resource consumption across processes so exhaustion of a configured quota refuses new work instead of silently widening it.
+- **Preconditions/affordance**: A contained workspace is selected and its provider owns the OS boundary; the aggregate containment ledger is the durable admission truth across processes. Capabilities: `settings.changeContainment, workspace.contained.select, process.exec`.
+- **Steps**: operator configures aggregate containment quotas -> every contained execution acquires a durable aggregate slot under the quota before launch -> admitted executions run under kernel per-execution CPU and address-space limits -> completion, cancellation and crash release or reap the slot durably -> exhausted quota fails closed for new work across processes -> operator inspects the aggregate ledger.
+- **Evidence/settlement**: New contained work that would exceed the aggregate concurrent-execution ceiling or the aggregate CPU-second window budget is refused before any child process is launched, from any process sharing the store; each admitted execution runs under its kernel CPU and address-space caps; a cancelled or completed execution releases its aggregate slot; a crashed holder's stale slot is reaped after its lease and accounted conservatively.
+- **Known variants**: an unconfigured quota keeps historical uncontained-aggregate behavior; a configured quota with kernel limit tooling unavailable inside the world refuses the execution rather than running uncapped; a CPU-capped execution is recorded as capped and booked conservatively; per-process memory accounting is bounded by the kernel address-space cap and the aggregate concurrency ceiling, not measured; local uncontained workspaces are not aggregate-contained and never were.
+- **Evidence class**: proposed.
+- **Executable evidence**: `test/J-RW-AGGREGATE-CONTAINMENT.test.ts`.
+
+### J-DESKTOP-launch (`j_desktop_launch`)
+
+- **Actor/intention**: User. The operator opens the installed Workbench from its shortcut, or runs cognate-workbench launch. Purpose: Open the Workbench like a desktop application, with one server per data home, one dedicated app window and a server whose lifetime is the window's lifetime.
+- **Preconditions/affordance**: The Workbench is installed; at most one Workbench owns a data home at a time. Capabilities: none (host-surface journey: CLI commands launch and stop; no Cognate capability).
+- **Steps**: operator launches -> the data home is checked for a running instance -> none: the server starts and the app window opens on its URL; running: the app window opens on the existing URL and the launcher exits -> the operator closes the launching window -> the launcher shuts the server down and removes the lock -> or the operator runs stop at any time.
+- **Evidence/settlement**: A launch with no running instance starts the server and opens a Chromium-family browser in app mode with a dedicated profile under the data home; a second launch reuses the running instance and only opens another window; closing the launching window shuts the server down cleanly and releases the data-home lock; stop asks the running instance to stop; with no suitable browser the default browser is opened and the server keeps running until stop.
+- **Known variants**: second launch while the first window is open reuses the instance; no Chromium-family browser found opens the default browser and the server stays up until stop; a window process that exits within seconds is treated as a hand-off to an already-running browser and the server stays up; COGNATE_NO_WINDOW starts the server without a window; COGNATE_APP_BROWSER overrides browser discovery; stop on a data home with no instance reports that; another instance holding the data home refuses a plain start by naming it.
+- **Evidence class**: observed.
+- **Executable evidence**: `test/J-DESKTOP-launch.test.ts` (fake-browser launch suite; host-surface journey).
+
+### J-UI-command-palette (`j_ui_command_palette`)
+
+- **Actor/intention**: User. The operator wants to reach an action, a Settings section, a workspace or a session without hunting through the interface. Purpose: Offer one fuzzy-searchable go-to-anything surface over the affordances that already exist, owning no mutation of its own.
+- **Preconditions/affordance**: The application shell is rendered; no capability is needed to open the palette itself. Capabilities: `settings.changeShortcuts, session.create, workspace.select`.
+- **Steps**: operator presses the palette chord or chooses it from the interface -> items are assembled from actions, Settings sections, workspaces and sessions -> operator types and the list is ranked fuzzily -> operator selects with the keyboard or pointer -> the underlying affordance runs.
+- **Evidence/settlement**: Choosing an item runs exactly the handler the rest of the interface runs for that affordance, so every effect and refusal is the one the underlying journey defines; items unavailable in the current condition are not offered; the palette closes and returns focus.
+- **Known variants**: empty query shows actions first and only the most recent sessions; no match says so; Escape or the close control dismisses without effect; the chord is the user-editable open-command-palette shortcut; Workbench appears only with a workspace selected.
+- **Evidence class**: observed.
+- **Executable evidence**: test/ui-shell.test.tsx (palette fuzzy search); `test/E2E-ui-shell.test.ts`.
+
+### J-UI-inspector (`j_ui_inspector`)
+
+- **Actor/intention**: User. The operator wants context, changes, details, files or configuration for the current work beside the conversation. Purpose: Give the current work a right-hand inspector whose tabs are projections of other journeys, so inspecting never becomes a second source of truth.
+- **Preconditions/affordance**: The shell is rendered; each tab declares its own precondition (Files needs a connected workspace). Capabilities: `workspace.files.list, workspace.file.read, config.file.read, config.file.apply`.
+- **Steps**: operator toggles the inspector or opens a named tab -> tabs register by identity and the selected tab renders -> the tab reads through its journey (Files through J-WS-files-browse, Config through J-CFG-config-edit) -> operator switches tabs or closes the inspector.
+- **Evidence/settlement**: Tabs Context, Changes, Details, Files and Config each show only data their own journey authorizes; the open state, width and selected tab survive reload; a tab with nothing to show explains why; mobile presents the inspector as an overlay.
+- **Known variants**: opening a tab before it has registered still selects it once it appears; Changes shows a count of reviewable items; Files and Config are read through read-only or all-or-nothing capabilities and do not widen authority; narrow screens use an overlay instead of a docked panel.
+- **Evidence class**: observed.
+- **Executable evidence**: test/ui-inspector-tabs.test.tsx (Files and Config tabs); `test/E2E-ui-shell.test.ts`.
+
+Notes: `J-DESKTOP-launch` is a host-surface journey: it governs the process around the server
+(launcher, app window, lock, stop), has no Cognate capability and no event; `J-UI-command-palette`
+and `J-UI-inspector` are UI-surface journeys that are pure projections of other journeys (no
+capability of their own, no authority). They exist so a downstream agent can see which surfaces
+are contractually thin.

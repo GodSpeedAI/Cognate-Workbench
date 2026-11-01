@@ -79,3 +79,39 @@ donor checkout is removed, with provenance and behavior classifications retained
 | `test/J-COG-search.test.ts` | bounded isolated experiments rank candidates; recommendations do not silently change the active method | Experiment, MethodRecommendation | J-COG-search | represented | observed | `experiment.*` and `method.*` bindings; round budget, parent isolation, no auto-settlement, and human-only method acceptance are asserted. |
 | `test/J-COG-realitytrace.test.ts` | verification and world-lineage facts reach the existing RealityTrace observer with correlation | WorldSnapshot, Verification | J-COG-realitytrace | represented | observed | Uses the existing observation outbox; no parallel evidence system or new containment claim is introduced. |
 | §7 Cockpit UX; §14 preview fidelity; §27 navigation; §20 substrate | Cockpit surfaces | none (UI projection) | all J-WB-* | represented (partially) | declared | `src/ui/workbench/*`; `E2E-workbench.test.ts`. Preview fidelity, the global Board and Evidence/Reviews navigation, and variant experimentation are not built. |
+
+## PandaCode donor to Workbench affordance mapping (2026-10-31)
+
+Donor: PandaCode v0.3.56 (Tauri 2 + Vite + vanilla TypeScript), studied statically in
+`.agents/reports/ui-production-readiness/recon/R1-pandacode-ux-inventory.md` and `R2-pandacode-screens.md`.
+The donor defines affordances to adopt, never domain meaning: each adopted item is a projection of an
+existing journey, and none created a capability.
+
+| Source | Source statement | Extracted concepts | Canonical journey | Status | Evidence class | Notes |
+|---|---|---|---|---|---|---|
+| R1 s1.3, s9.1 | Search trigger and `Cmd/Ctrl+K` "Go to anything" palette | CommandPalette surface over actions, Settings sections, workspaces, sessions | J-UI-command-palette | represented (adopted) | observed | `src/ui/shell/CommandPalette.tsx`; runs the same handlers as the rest of the UI, so no palette-owned mutation |
+| R1 s1, global keydown | Global shortcuts (palette, settings `Ctrl+,`, sidebar, inspector `Ctrl+Shift+B`) | editable chords, conflict and reserved-chord rules | J-PREFS-shortcuts | represented (adopted) | observed | edits flow through `settings.changeShortcuts`; New Session ships as `Ctrl+Alt+N` because `Ctrl+N` is browser-reserved |
+| R1 s2 | Right inspector with a tab strip; `openInspector(id)` from anywhere | Inspector tabs Context, Changes, Details, Files, Config | J-UI-inspector, J-WS-files-browse, J-CFG-config-edit | represented (adopted) | observed | tabs register by id; Files and Config read through their own journeys |
+| R1 s1.9 | Toast with undo | transient confirmation of reversible actions | J-SESSION-archive | represented (adopted) | observed | undoable archive toast; the durable flag is the settlement, the toast is only a projection |
+| R1 s1.6 | Resizable sidebar and inspector, widths persisted | per-viewer layout state | none (UI projection) | represented | observed | stored in browser storage only; never a domain fact |
+| R1 s1.1 | Narrow viewports turn the inspector into an overlay; mobile drawer | responsive projection | J-UI-inspector | represented (adopted) | observed | same journeys, different presentation |
+| R1 s1.3 | Projects and tasks sidebar, Settings entry | WorkspaceRecord, Session lists | J-WS-select, J-SESSION-draft | represented | observed | Workbench keeps its own Session/Workspace/Task semantics |
+| R1 s1.7 | Settings as a full page opened from the sidebar | Settings surface reachable independent of workspace state | J-CFG-model-provider, J-PREFS-shortcuts | represented (adopted with divergence) | observed | see divergences |
+| R1 (browser preview / `__TAURI_INTERNALS__`) | Tauri desktop shell | desktop host | J-DESKTOP-launch | represented (diverged) | observed | Workbench opens an Edge/Chrome/Brave `--app` window with a dedicated profile under the data home; no Tauri, no webview dependency |
+
+Deliberate divergences from the donor (operator decisions, recorded so a later pass does not
+"correct" them back):
+
+- **Settings close control**: the donor uses a Back button at the top-left of the settings nav. Workbench
+  puts a close X on the right of every dialog and the Settings page, through the shared `DialogHeader`,
+  with `Esc` and `Ctrl+,` also closing it. Operator preference.
+- **Identity**: the Cobalt visual identity and the Cognate Workbench name are kept; the donor's colors,
+  brand and iconography are not adopted.
+- **No Tauri**: the desktop surface is a Chromium-family app window launched by `cognate-workbench launch`
+  (`src/desktopWindow.ts`), whose lifetime owns the server. The donor's drag regions, traffic-light gutter
+  and native title bar handling are not reproduced. Without a suitable browser the default browser is
+  used and `stop` ends the server.
+- **Donor features not adopted**: moodboards, embedded browser tab and terminal drawer are out of scope;
+  they have no journey in this model and were not added.
+- **First run**: the donor has no equivalent. The Workbench flow Welcome -> Connect a model provider ->
+  Choose a folder is derived from `J-A-first-use`, `J-CFG-model-provider` and `J-WS-select`.

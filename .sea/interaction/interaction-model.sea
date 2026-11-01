@@ -443,15 +443,15 @@ Flow "ExpertMemoryRecord" from "Expert" to "ExpertMemory" quantity 1
 
 Instance j_a_first_use of "CanonicalJourney" {
     actor: "User",
-    capabilities: "model.configure, workspace.select, composer.enable",
+    capabilities: "model.configure, workspace.select, composer.enable, onboarding.dismiss, secret.put, model.catalog",
     evidence_class: "declared",
     initiating_condition: "User launches dsh web / opens the Cognate reconstruction for the first time",
     journey_id: "J-A-first-use",
     precondition: "No workspace selected yet; default workspace init may fail",
     purpose: "Get a first-time user from a cold launch to a usable composer",
     settlement: "Composer is enabled (no longer disabled-pending-workspace) and a routable model exists",
-    steps: "launch -> initial UI renders -> user configures a model provider (Settings -> Models) -> user chooses a workspace -> composer becomes available",
-    variants: "default-workspace auto-init succeeds (skips explicit Choose workspace step); default-workspace auto-init fails and shows defaultWorkspace.failed copy directing the user to Choose workspace"
+    steps: "launch -> initial UI renders the first-run flow (Welcome) -> Connect a model provider through the full provider form (model.configure; the key goes through secret.put, never into events) -> Choose a folder (workspace.select) -> the flow ends and the composer is available",
+    variants: "default-workspace auto-init succeeds (skips explicit Choose workspace step); default-workspace auto-init fails and shows defaultWorkspace.failed copy directing the user to Choose workspace; Configure later (or closing the flow) dismisses the remaining steps via onboarding.dismiss and lands on a friendly empty state, from which Settings -> Models and Add workspace still reach the same journeys; a reload after completion or dismissal shows no onboarding; Back returns to the previous step without losing entered values; a rejected provider form keeps the operator on the Model step with the reason"
 }
 
 Instance j_cfg_model_provider of "CanonicalJourney" {
@@ -886,7 +886,7 @@ Instance j_prefs_shortcuts of "CanonicalJourney" {
     purpose: "Make shortcut editing real, durable and conflict-aware without intercepting typing or overriding browser-reserved chords",
     settlement: "The edited chord is durable across restart, fires its action, conflicts are reported before they are accepted, and Restore all defaults returns every editable action to its shipped chord",
     steps: "user edits a shortcut -> the chord is captured -> conflicts and reserved chords are refused with a reason -> the binding is recorded -> the chord fires the action -> restore defaults rewrites them all",
-    variants: "conflict with another action; browser-reserved chord refused; a chord that types into a text field must not fire; restore defaults with no overrides still succeeds"
+    variants: "global application shortcuts (command palette, keyboard shortcuts, new session, toggle sidebar, open settings, toggle inspector) fire from anywhere outside text entry and show their chord as a key hint wherever the action is offered; Apple platforms treat Cmd as Ctrl; New Session ships as Ctrl+Alt+N because Ctrl+N is browser-reserved; conflict with another action; browser-reserved chord refused; a chord that types into a text field must not fire; restore defaults with no overrides still succeeds"
 }
 
 Instance j_cfg_provider_delete of "CanonicalJourney" {
@@ -1426,7 +1426,7 @@ Instance j_ws_directory_discovery of "CanonicalJourney" {
     purpose: "Suggest matching directories in the chosen execution world as the operator types, so a full absolute path never has to be known or typed",
     settlement: "Suggestions list only directories (symlinks that resolve to directories included) from the selected world's filesystem, matched by prefix, word-boundary, substring then fuzzy tiers against absolute, ~/ or bare-fragment input, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
     steps: "operator types a partial path -> the picker debounces and queries workspace.directory.suggest for the selected world -> the world provider lists its own parent directory and the capability filters, orders and bounds directory matches -> keyboard and pointer complete the field -> an explicit Open confirms the exact destination through workspace.select",
-    variants: "slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
+    variants: "partial, home-relative (~) and fuzzy input match folders, with an exact-prefix match ranked before a fuzzy one; slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
 }
 
 Instance j_task_scope of "CanonicalJourney" {
@@ -1613,4 +1613,46 @@ Instance j_pkg_doctor of "CanonicalJourney" {
     settlement: "Diagnostics print every required field; exit status is non-zero when the executable identity, the semantic model or the database is not usable",
     steps: "cognate-workbench doctor -> identity and integrity -> database mode and probe -> semantic model -> posture -> integrations",
     variants: "a stopped bundled instance is reported as stopped, not started; credentials are never printed"
+}
+
+// Host-surface, palette and inspector journeys (feat/ui-production-readiness). The desktop launch
+// journey has no Cognate capability: it is the host process lifecycle around the Workbench
+// server, so its settlement is evidenced by test/J-DESKTOP-launch.test.ts, not by an event.
+Instance j_desktop_launch of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "none (host-surface journey: CLI commands launch and stop; no Cognate capability)",
+    evidence_class: "observed",
+    initiating_condition: "The operator opens the installed Workbench from its shortcut, or runs cognate-workbench launch",
+    journey_id: "J-DESKTOP-launch",
+    precondition: "The Workbench is installed; at most one Workbench owns a data home at a time",
+    purpose: "Open the Workbench like a desktop application, with one server per data home, one dedicated app window and a server whose lifetime is the window's lifetime",
+    settlement: "A launch with no running instance starts the server and opens a Chromium-family browser in app mode with a dedicated profile under the data home; a second launch reuses the running instance and only opens another window; closing the launching window shuts the server down cleanly and releases the data-home lock; stop asks the running instance to stop; with no suitable browser the default browser is opened and the server keeps running until stop",
+    steps: "operator launches -> the data home is checked for a running instance -> none: the server starts and the app window opens on its URL; running: the app window opens on the existing URL and the launcher exits -> the operator closes the launching window -> the launcher shuts the server down and removes the lock -> or the operator runs stop at any time",
+    variants: "second launch while the first window is open reuses the instance; no Chromium-family browser found opens the default browser and the server stays up until stop; a window process that exits within seconds is treated as a hand-off to an already-running browser and the server stays up; COGNATE_NO_WINDOW starts the server without a window; COGNATE_APP_BROWSER overrides browser discovery; stop on a data home with no instance reports that; another instance holding the data home refuses a plain start by naming it"
+}
+
+Instance j_ui_command_palette of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "settings.changeShortcuts, session.create, workspace.select",
+    evidence_class: "observed",
+    initiating_condition: "The operator wants to reach an action, a Settings section, a workspace or a session without hunting through the interface",
+    journey_id: "J-UI-command-palette",
+    precondition: "The application shell is rendered; no capability is needed to open the palette itself",
+    purpose: "Offer one fuzzy-searchable go-to-anything surface over the affordances that already exist, owning no mutation of its own",
+    settlement: "Choosing an item runs exactly the handler the rest of the interface runs for that affordance, so every effect and refusal is the one the underlying journey defines; items unavailable in the current condition are not offered; the palette closes and returns focus",
+    steps: "operator presses the palette chord or chooses it from the interface -> items are assembled from actions, Settings sections, workspaces and sessions -> operator types and the list is ranked fuzzily -> operator selects with the keyboard or pointer -> the underlying affordance runs",
+    variants: "empty query shows actions first and only the most recent sessions; no match says so; Escape or the close control dismisses without effect; the chord is the user-editable open-command-palette shortcut; Workbench appears only with a workspace selected"
+}
+
+Instance j_ui_inspector of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.files.list, workspace.file.read, config.file.read, config.file.apply",
+    evidence_class: "observed",
+    initiating_condition: "The operator wants context, changes, details, files or configuration for the current work beside the conversation",
+    journey_id: "J-UI-inspector",
+    precondition: "The shell is rendered; each tab declares its own precondition (Files needs a connected workspace)",
+    purpose: "Give the current work a right-hand inspector whose tabs are projections of other journeys, so inspecting never becomes a second source of truth",
+    settlement: "Tabs Context, Changes, Details, Files and Config each show only data their own journey authorizes; the open state, width and selected tab survive reload; a tab with nothing to show explains why; mobile presents the inspector as an overlay",
+    steps: "operator toggles the inspector or opens a named tab -> tabs register by identity and the selected tab renders -> the tab reads through its journey (Files through J-WS-files-browse, Config through J-CFG-config-edit) -> operator switches tabs or closes the inspector",
+    variants: "opening a tab before it has registered still selects it once it appears; Changes shows a count of reviewable items; Files and Config are read through read-only or all-or-nothing capabilities and do not widen authority; narrow screens use an overlay instead of a docked panel"
 }

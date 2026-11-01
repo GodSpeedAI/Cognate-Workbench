@@ -49,7 +49,7 @@ function mount(tab: string, inner: (c: string, i: unknown) => Promise<unknown>, 
   );
 }
 
-describe("Files tab", () => {
+describe("J-UI-inspector Files tab", () => {
   test("tree expands lazily and opens a file in a viewer with line numbers", async () => {
     const calls: string[] = [];
     const invoke = async (cap: string, input: unknown) => {
@@ -95,7 +95,7 @@ describe("Files tab", () => {
   });
 });
 
-describe("Config tab", () => {
+describe("J-UI-inspector Config tab", () => {
   const base = { ok: true, path: "/h/.cognate/config.json", home: "/h", exists: true, text: '{\n  "appearance": "dark"\n}', version: "v1", readOnlyKeys: ["$schema"] };
   const edit = async (ui: ReturnType<typeof mount>, value: string) => {
     const ta = ui.getByLabelText("Configuration JSON") as HTMLTextAreaElement;
