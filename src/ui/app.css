@@ -5137,7 +5137,7 @@ body.is-col-resizing .resize-handle:active::after {
    field never leaves the dialog without its title or stepper. */
 .first-run-dialog .fr-head {
   position: sticky;
-  top: 0;
+  top: -20px;
   z-index: 3;
   display: flex;
   flex-direction: column;
@@ -5147,8 +5147,8 @@ body.is-col-resizing .resize-handle:active::after {
   background: var(--cg-surface);
 }
 .first-run-wide .fr-head { border-bottom: 1px solid var(--cg-border); }
-.first-run-dialog, .first-run-wide { scroll-padding-top: 130px; }
-@media (max-width: 640px) { .first-run-dialog .fr-head { margin: -16px -16px 0; padding: 16px 16px 10px; } .first-run-dialog, .first-run-wide { scroll-padding-top: 110px; } }
+.first-run-dialog, .first-run-wide { scroll-padding-top: 0; }
+@media (max-width: 640px) { .first-run-dialog .fr-head { top: -16px; margin: -16px -16px 0; padding: 16px 16px 10px; } }
 
 /* Remote access diagnostics */
 .remote-diag { border-top: 1px solid var(--cg-border); margin-top: 6px; padding-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
@@ -5170,3 +5170,5 @@ body.is-col-resizing .resize-handle:active::after {
   .ft-body.ft-split { display: block; }
   .ft-body.ft-split > .ft-tree-pane { display: none; }
 }
+.remote-diag button { padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-md); background: var(--cg-surface); color: var(--cg-text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.remote-diag button:hover { background: var(--cg-hover); }

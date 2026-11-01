@@ -438,6 +438,17 @@ export const STATES: Record<string, ShotState> = {
       await settle(page, 400);
     },
   },
+  "t3-files-split": {
+    tag: "t3", describe: "Files tab with the inspector widened: the tree stays beside the open file (D-14)", themes: ["light"], viewports: ["desktop"],
+    setup: async (page) => {
+      await ensureInspector(page, "Files");
+      await page.getByRole("separator", { name: "Resize inspector" }).focus();
+      for (let i = 0; i < 12; i++) await page.keyboard.press("Shift+ArrowLeft");
+      await page.getByRole("treeitem", { name: /src/ }).first().click();
+      await page.getByRole("treeitem", { name: /index\.ts/ }).first().click();
+      await settle(page, 500);
+    },
+  },
   // t4: robustness + polish.
   "t4-inspector-tabs": {
     tag: "t4", describe: "Inspector with all five tabs at 340px (icon-only except the selected)", themes: ["light", "dark"], viewports: ["desktop"],
