@@ -338,13 +338,14 @@ import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { App } from "../src/ui/App.tsx";
 import { setRemoteFetch } from "../src/ui/remoteFetch.ts";
+import { coalesceProjectionReads } from "../src/ui/coalesceReads.ts";
 
 const caller = { tenant: ${JSON.stringify(caller.tenant)}, actor: { id: ${JSON.stringify(caller.actorId)}, kind: "user" } };
 // T8: the browser presents the server-issued session token for this boot; the server resolves it
 // against the durable session ledger on every request and never trusts this string as an identity.
 const authToken = ${JSON.stringify(authToken)};
 const transport = connectTransport(window.location.origin);
-const service = createRemoteRuntimeService(transport, () => authToken);
+const service = coalesceProjectionReads(createRemoteRuntimeService(transport, () => authToken));
 const client = createClient({ service, caller });
 // Mobile remote control: the desktop's own loopback calls to /remote/* carry this boot session bearer.
 setRemoteFetch((path, init) => fetch(path, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), authorization: "Bearer " + authToken } }));
