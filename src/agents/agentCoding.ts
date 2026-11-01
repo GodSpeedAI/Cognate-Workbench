@@ -102,6 +102,21 @@ const MAX_TOOL_STEPS = 20;
 const MAX_MODEL_RETRIES = 5;
 const DEFAULT_RETRY_BACKOFF_MS = 300;
 
+const NETWORK_CODES = new Set(["CONNECTION_REFUSED", "DNS_FAILED", "NETWORK_ERROR"]);
+
+/** Host (with port) of the mounted provider's base URL, recorded once per failed call; "" when unknown. */
+async function providerHost(ctx: RunContext, callIndex: number, attempt: number): Promise<string> {
+  return ctx.step(`provider-host:${callIndex}:${attempt}`, async () => {
+    try {
+      const out = (await ctx.invoke("provider.list", {} as unknown as Json)) as unknown as { readonly providers?: readonly { readonly baseURL?: string; readonly isCurrent?: boolean }[] };
+      const current = out.providers?.find((p) => p.isCurrent);
+      return current?.baseURL ? new URL(current.baseURL).host : "";
+    } catch {
+      return "";
+    }
+  });
+}
+
 function retryBackoffMs(): number {
   const raw = Number(process.env.MODEL_RETRY_BACKOFF_MS);
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_RETRY_BACKOFF_MS;
@@ -133,7 +148,12 @@ function classifyModelFailure(error: InvocationFailedError): { readonly code: st
   // Fallback: message regex (backward compatibility)
   const failureMessage = failure?.message;
   const raw = typeof failureMessage === "string" ? failureMessage : error.message;
-  if (/timed out/i.test(raw)) return { code: "TIMEOUT", message: "Request timed out." };
+  if (/timed out|timeout/i.test(raw)) return { code: "TIMEOUT", message: "Request timed out." };
+  // Transport failures (no HTTP status): the provider adapters surface them as `unavailable` with
+  // "network error: <cause>" or "model request aborted or unavailable".
+  if (/ECONNREFUSED|ConnectionRefused|Unable to connect|connection refused/i.test(raw)) return { code: "CONNECTION_REFUSED", message: "The connection was refused." };
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|DNS|FailedToOpenSocket/i.test(raw)) return { code: "DNS_FAILED", message: "The provider host name could not be resolved." };
+  if (/ECONNRESET|socket|network error|aborted or unavailable|interrupted/i.test(raw) || details?.kind === "unavailable") return { code: "NETWORK_ERROR", message: "The provider could not be reached." };
   return { code: "HTTP_500", message: "Internal server error" };
 }
 
@@ -168,20 +188,38 @@ async function invokeModelGenerate(
       if (ctx.signal.aborted) throw error;
       if (!(error instanceof InvocationFailedError)) throw error;
 
-      const classified = classifyModelFailure(error);
+      let classified = classifyModelFailure(error);
+      let baseURLHost = "";
+      if (NETWORK_CODES.has(classified.code) || classified.code === "TIMEOUT") {
+        baseURLHost = await providerHost(ctx, callIndex, attempt);
+        if (baseURLHost && NETWORK_CODES.has(classified.code)) {
+          classified = { code: classified.code, message: `${classified.message.replace(/\.$/, "")} (${baseURLHost}).` };
+        }
+      }
       if(classified.code==="BUDGET_EXCEEDED"){
         await ctx.emit("turn.failed",classified as unknown as Json);
         throw new Error(classified.message);
       }
       if (attempt > MAX_MODEL_RETRIES) {
-        await ctx.emit("turn.failed", classified as unknown as Json);
+        await ctx.emit("turn.failed", { ...classified, ...(baseURLHost ? { baseURLHost } : {}) } as unknown as Json);
         throw new Error(classified.message);
       }
-      await ctx.emit("model.request.retried", { attempt, maxRetries: MAX_MODEL_RETRIES, error: classified } as unknown as Json);
+      // J-H-provider-error: every failed attempt is reported at once, with the delay before the next
+      // one. The delay is recorded first so a resumed run reports (and waits) the same value.
+      const delayMs = await ctx.step(`backoff-plan:${callIndex}:${attempt}`, async () => retryBackoffMs());
+      await ctx.emit("model.request.retried", {
+        attempt,
+        maxAttempts: MAX_MODEL_RETRIES + 1,
+        maxRetries: MAX_MODEL_RETRIES,
+        delayMs,
+        errorCode: classified.code,
+        message: classified.message,
+        baseURLHost,
+        error: classified,
+      } as unknown as Json);
       await ctx.step(`backoff:${callIndex}:${attempt}`, async () => {
-        const ms = retryBackoffMs();
-        await Bun.sleep(ms);
-        return ms;
+        await Bun.sleep(delayMs);
+        return delayMs;
       });
     }
   }
