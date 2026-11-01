@@ -1,10 +1,22 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react/pure";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom, releaseDom } from "./dom-env.ts";
 import React from "react";
-import { LocalWorkspaceForm, selectWorkspaceForExecution } from "../src/ui/App.tsx";
 
-beforeAll(() => GlobalRegistrator.register());
+// react-dom probes `window` when first imported; importing it before the DOM exists disables its input
+// events for every ui-* file that later shares this process. So everything DOM-bound loads after register().
+let act: typeof import("@testing-library/react/pure").act;
+let cleanup: typeof import("@testing-library/react/pure").cleanup;
+let fireEvent: typeof import("@testing-library/react/pure").fireEvent;
+let render: typeof import("@testing-library/react/pure").render;
+let waitFor: typeof import("@testing-library/react/pure").waitFor;
+let LocalWorkspaceForm: typeof import("../src/ui/App.tsx").LocalWorkspaceForm;
+let selectWorkspaceForExecution: typeof import("../src/ui/App.tsx").selectWorkspaceForExecution;
+
+beforeAll(async () => {
+  registerDom();
+  ({ act, cleanup, fireEvent, render, waitFor } = await import("@testing-library/react/pure"));
+  ({ LocalWorkspaceForm, selectWorkspaceForExecution } = await import("../src/ui/App.tsx"));
+});
 afterEach(async () => {
   await act(async () => {
     cleanup();
@@ -16,7 +28,7 @@ afterAll(async () => {
     cleanup();
     await Promise.resolve();
   });
-  await GlobalRegistrator.unregister();
+  await releaseDom();
 });
 
 describe("contained workspace picker", () => {

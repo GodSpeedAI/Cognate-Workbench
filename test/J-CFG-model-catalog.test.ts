@@ -17,7 +17,7 @@ interface CatalogResult {
 /** A local model-discovery endpoint that records the last request's auth header. */
 async function serveModels(handler: (path: string, headers: Record<string, string | string[] | undefined>) => { readonly status: number; readonly body: unknown }): Promise<{
   readonly port: number;
-  readonly seen: { readonly path?: string; readonly auth?: string };
+  readonly seen: { path?: string; auth?: string };
   stop(): Promise<void>;
 }> {
   const seen: { path?: string; auth?: string } = {};
@@ -77,6 +77,31 @@ describe("J-CFG-model-catalog", () => {
         expect(result.models).toEqual(["claude-3-5-sonnet"]);
         expect(provider.seen.path).toBe("/v1/models");
         expect(provider.seen.auth).toBe("sk-ant-key");
+      } finally {
+        await app.stop();
+        await provider.stop();
+      }
+    });
+  });
+
+  test("a base URL already ending in /v1 reaches /v1/models once (Anthropic preset), and a keyless local server gets no auth header", async () => {
+    const provider = await serveModels(() => ({ status: 200, body: { data: [{ id: "claude-x" }] } }));
+    await withTempHome(async (home) => {
+      const { app, client } = await bootApp(home);
+      try {
+        const withV1 = (await client.invoke("model.catalog", { protocol: "anthropic-messages", baseURL: `http://127.0.0.1:${provider.port}/v1`, apiKey: "sk-ant-key" })) as unknown as CatalogResult;
+        expect(withV1.models).toEqual(["claude-x"]);
+        expect(provider.seen.path).toBe("/v1/models");
+        const without = (await client.invoke("model.catalog", { protocol: "anthropic-messages", baseURL: `http://127.0.0.1:${provider.port}`, apiKey: "sk-ant-key" })) as unknown as CatalogResult;
+        expect(without.models).toEqual(["claude-x"]);
+        expect(provider.seen.path).toBe("/v1/models");
+        // Keyless local route: no typed key, no saved provider, still lists, and nothing is sent.
+        for (const protocol of ["openai-compatible", "openai-responses", "anthropic-messages"] as const) {
+          provider.seen.auth = undefined;
+          const local = (await client.invoke("model.catalog", { protocol, baseURL: `http://127.0.0.1:${provider.port}/v1` })) as unknown as CatalogResult;
+          expect(local.ok).toBe(true);
+          expect(provider.seen.auth).toBeUndefined();
+        }
       } finally {
         await app.stop();
         await provider.stop();
@@ -163,22 +188,32 @@ describe("J-CFG-model-catalog", () => {
           model: "m-saved",
           apiKey: "sk-saved-secret",
         });
-        // No key typed, foreign URL: refused before any request, so the foreign server sees nothing.
+        // No key typed, foreign URL: the saved key is never sent. A loopback server is listed as a
+        // keyless route (no credential at all); a remote foreign URL is refused before any request.
+        const remote = (await client.invoke("model.catalog", { protocol: "openai-compatible", baseURL: "https://foreign.example.invalid/v1" })) as unknown as CatalogResult;
+        expect(remote.ok).toBe(false);
+        expect(remote.reason).toContain("only sent to the saved provider");
+        const keyless = (await client.invoke("model.catalog", {
+          protocol: "openai-compatible",
+          baseURL: `http://127.0.0.1:${foreign.port}/v1`,
+        })) as unknown as CatalogResult;
+        expect(keyless.ok).toBe(true);
+        expect(foreign.seen.auth).toBeUndefined();
+        foreign.seen.path = undefined;
         const refused = (await client.invoke("model.catalog", {
           protocol: "openai-compatible",
           baseURL: `http://127.0.0.1:${foreign.port}/v1`,
         })) as unknown as CatalogResult;
-        expect(refused.ok).toBe(false);
-        expect(refused.reason).toContain("only sent to the saved provider");
-        expect(foreign.seen.path).toBeUndefined();
+        expect(refused.ok).toBe(true);
         expect(foreign.seen.auth).toBeUndefined();
-        // Same saved URL with a different protocol is also refused.
+        // Same saved URL with a different protocol never receives the saved key either.
         const otherProtocol = (await client.invoke("model.catalog", {
           protocol: "anthropic-messages",
           baseURL: `http://127.0.0.1:${saved.port}/v1`,
         })) as unknown as CatalogResult;
-        expect(otherProtocol.ok).toBe(false);
-        expect(saved.seen.path).toBeUndefined();
+        expect(saved.seen.auth).toBeUndefined();
+        void otherProtocol;
+        saved.seen.path = undefined;
         // Positive control: the saved URL (trailing slash ignored) receives the saved key.
         const ok = (await client.invoke("model.catalog", {
           protocol: "openai-compatible",

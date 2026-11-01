@@ -1,6 +1,6 @@
 // Inspector Files and Config tabs against a fake client.
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom, releaseDom } from "./dom-env.ts";
 import React from "react";
 
 let act: typeof import("@testing-library/react/pure").act;
@@ -13,15 +13,15 @@ let useInspector: typeof import("../src/ui/shell/Inspector.tsx").useInspector;
 let FilesTab: typeof import("../src/ui/inspector/FilesTab.tsx").FilesTab;
 let ConfigTab: typeof import("../src/ui/inspector/ConfigTab.tsx").ConfigTab;
 beforeAll(async () => {
-  GlobalRegistrator.register();
+  registerDom();
   window.innerWidth = 1400;
   ({ act, cleanup, fireEvent, render } = await import("@testing-library/react/pure"));
   ({ Inspector, InspectorProvider, useInspector } = await import("../src/ui/shell/Inspector.tsx"));
   ({ FilesTab } = await import("../src/ui/inspector/FilesTab.tsx"));
   ({ ConfigTab } = await import("../src/ui/inspector/ConfigTab.tsx"));
 });
+afterAll(async () => { await releaseDom(); });
 afterEach(async () => { await act(async () => { cleanup(); await Promise.resolve(); }); });
-afterAll(async () => { await GlobalRegistrator.unregister(); });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const flush = () => act(async () => { await sleep(20); });
@@ -99,8 +99,9 @@ describe("J-UI-inspector Config tab", () => {
   const base = { ok: true, path: "/h/.cognate/config.json", home: "/h", exists: true, text: '{\n  "appearance": "dark"\n}', version: "v1", readOnlyKeys: ["$schema"] };
   const edit = async (ui: ReturnType<typeof mount>, value: string) => {
     const ta = ui.getByLabelText("Configuration JSON") as HTMLTextAreaElement;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!;
-    await act(async () => { setter.call(ta, value); ta.dispatchEvent(new window.Event("input", { bubbles: true })); await sleep(5); });
+    // fireEvent.change resolves the value setter from the element's own realm, so it keeps working when
+    // several ui-* files share one process (each registers its own happy-dom window).
+    await act(async () => { fireEvent.change(ta, { target: { value } }); await sleep(5); });
   };
 
   test("dirty edit saves via apply with expectedVersion and reports applied keys", async () => {
@@ -113,7 +114,7 @@ describe("J-UI-inspector Config tab", () => {
     };
     const ui = mount("config", invoke);
     await flush();
-    expect(ui.getByText("exists")).toBeTruthy();
+    expect(ui.getByText("On disk")).toBeTruthy();
     await edit(ui, '{ "appearance": "light" }');
     expect(ui.getByText("Unsaved changes")).toBeTruthy();
     await act(async () => { fireEvent.click(ui.getByText("Save")); await sleep(30); });

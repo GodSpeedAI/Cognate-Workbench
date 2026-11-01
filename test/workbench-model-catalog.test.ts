@@ -30,6 +30,36 @@ describe("catalogRequest", () => {
     expect(plan.authScheme).toBe("none");
   });
 
+  test("J-CFG-model-catalog: a base URL ending in /v1 or not reaches the same /models endpoint on every protocol", () => {
+    // Regression (R5 3.5): the Anthropic preset's https://api.anthropic.com/v1 used to become /v1/v1/models.
+    expect(okPlan("anthropic-messages", "https://api.anthropic.com/v1").url).toBe("https://api.anthropic.com/v1/models");
+    expect(okPlan("anthropic-messages", "https://api.anthropic.com/v1/").url).toBe("https://api.anthropic.com/v1/models");
+    expect(okPlan("anthropic-messages", "https://api.anthropic.com").url).toBe("https://api.anthropic.com/v1/models");
+    expect(okPlan("anthropic-messages", "https://api.z.ai/api/anthropic/v1").url).toBe("https://api.z.ai/api/anthropic/v1/models");
+    expect(okPlan("anthropic-messages", "https://api.z.ai/api/anthropic").url).toBe("https://api.z.ai/api/anthropic/v1/models");
+    for (const protocol of ["openai-compatible", "openai-completions", "openai-responses"] as const) {
+      expect(okPlan(protocol, "https://api.openai.com/v1").url).toBe("https://api.openai.com/v1/models");
+      expect(okPlan(protocol, "https://api.openai.com/v1/").url).toBe("https://api.openai.com/v1/models");
+      expect(okPlan(protocol, "https://api.openai.com/v1?x=1#frag").url).toBe("https://api.openai.com/v1/models");
+    }
+  });
+
+  test("an empty key never produces an auth header (no 'Bearer ' with nothing after it)", () => {
+    const bearer = okPlan("openai-compatible", "http://127.0.0.1:1234/v1");
+    expect(authHeaderValue(bearer, "")).toBeUndefined();
+    expect(authHeaderValue(bearer, "   ")).toBeUndefined();
+    expect(authHeaderValue(bearer, "k")).toBe("Bearer k");
+    expect(authHeaderValue(okPlan("anthropic-messages", "http://127.0.0.1:1"), "")).toBeUndefined();
+  });
+
+  test("Azure OpenAI lists models one level above the deployment with the api-version and api-key header", () => {
+    const plan = catalogRequest("openai-compatible", "https://res.openai.azure.com/openai/deployments/gpt4", { auth: "api-key", apiVersion: "2024-10-21" });
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.url).toBe("https://res.openai.azure.com/openai/models?api-version=2024-10-21");
+    expect(plan.authHeader).toBe("api-key");
+    expect(catalogRequest("openai-compatible", "https://res.openai.azure.com", { auth: "api-key" }).ok).toBe(false);
+  });
+
   test("every OpenAI variant supports discovery", () => {
     for (const protocol of ["openai-compatible", "openai-completions", "openai-responses"] as const) {
       const plan = catalogRequest(protocol, "https://h.example");
@@ -100,7 +130,7 @@ describe("authHeaderValue", () => {
 
   test("an empty key on the raw scheme yields undefined rather than a header with nothing in it", () => {
     expect(authHeaderValue(raw, "   ")).toBeUndefined();
-    expect(authHeaderValue(bearer, "")).toBe("Bearer ");
+    expect(authHeaderValue(bearer, "")).toBeUndefined();
   });
 
   test("the plan never carries the key", () => {
