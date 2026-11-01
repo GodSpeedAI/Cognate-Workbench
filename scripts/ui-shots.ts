@@ -19,7 +19,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type Page } from "playwright-core";
-import { LOCAL_OPERATOR, bootApp, inv, waitUntil, withTempHome } from "../test/wb-helpers.ts";
+import { LOCAL_OPERATOR, bootApp, bootAimock, inv, waitUntil, withTempHome } from "../test/wb-helpers.ts";
+import { bootHarnessApp, makeFakeHost } from "../test/harness-helpers.ts";
 
 export const VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -47,7 +48,9 @@ export interface ShotState {
 const settle = (page: Page, ms = 250) => page.waitForTimeout(ms);
 
 async function openSettings(page: Page, section?: string): Promise<void> {
-  await page.getByRole("button", { name: "Settings", exact: false }).first().click();
+  const settingsBtn = page.getByRole("button", { name: "Settings", exact: false }).first();
+  if (!(await settingsBtn.isVisible())) await page.getByRole("button", { name: "Expand sidebar" }).click(); // phone: sidebar is a drawer
+  await settingsBtn.click();
   await page.getByRole("region", { name: "Settings" }).or(page.locator("section.settings-page")).first().waitFor();
   if (section) await page.getByRole("tab", { name: section, exact: true }).click();
   await settle(page);
@@ -71,12 +74,12 @@ export const STATES: Record<string, ShotState> = {
   shell: { tag: "t1a", describe: "Main shell, workspace with sessions", viewports: ["desktop", "mobile"], setup: async (page) => { await page.locator(".session-row-wrap").first().waitFor().catch(() => undefined); await settle(page); } },
   "settings-general": { tag: "t1a", describe: "Settings > General", viewports: ["desktop", "mobile"], setup: (page) => openSettings(page, "General") },
   "settings-appearance": { tag: "t1a", describe: "Settings > Appearance", setup: (page) => openSettings(page, "Appearance") },
-  "settings-models": { tag: "t1a", describe: "Settings > Models", setup: (page) => openSettings(page, "Models") },
+  "settings-models": { tag: "t1a", describe: "Settings > Models", setup: (page) => openSettings(page, "Providers") },
   "settings-models-wizard": {
     tag: "t1a", describe: "Settings > Models > Add model provider (custom)", viewports: ["desktop", "mobile"], themes: ["light"],
     setup: async (page) => {
-      await openSettings(page, "Models");
-      await page.getByRole("button", { name: "Add model provider" }).click();
+      await openSettings(page, "Providers");
+      await page.getByRole("button", { name: "Add provider" }).click();
       await settle(page);
     },
   },
@@ -311,6 +314,81 @@ export const STATES: Record<string, ShotState> = {
     tag: "t4", describe: "Settings > Governance with plain-language copy", themes: ["light"], viewports: ["desktop"],
     setup: (page) => openSettings(page, "Governance & evidence"),
   },
+  // ---- U5: providers and agent CLIs (booted with three providers on aimock and fake harness CLIs on PATH) ----
+  "providers-list": { tag: "u5", describe: "Settings > Providers list", viewports: ["desktop", "mobile"], setup: async (page) => { await openSettings(page, "Providers"); await page.locator("[data-provider]").first().waitFor(); await settle(page); } },
+  "providers-card-test": {
+    tag: "u5", describe: "Providers: active card expanded with a passing test", themes: ["light"],
+    setup: async (page) => {
+      await openSettings(page, "Providers");
+      const card = page.locator('[data-provider="work-gateway"]');
+      await card.getByRole("button").first().click();
+      await card.getByRole("button", { name: /Test connection/ }).click();
+      await card.locator('[data-test-result="ok"]').waitFor({ timeout: 20_000 });
+      await settle(page);
+    },
+  },
+  "providers-wizard": {
+    tag: "u5", describe: "Add provider: grouped presets", viewports: ["desktop", "mobile"], themes: ["light"],
+    setup: async (page) => {
+      await openSettings(page, "Providers");
+      await page.getByRole("button", { name: "Add provider" }).click();
+      await page.getByRole("radio", { name: /^DeepSeek/ }).click();
+      await settle(page);
+    },
+  },
+  "providers-azure": {
+    tag: "u5", describe: "Add provider: Azure fields", themes: ["light"],
+    setup: async (page) => {
+      await openSettings(page, "Providers");
+      await page.getByRole("button", { name: "Add provider" }).click();
+      await page.getByRole("radio", { name: /^Azure OpenAI/ }).click();
+      await page.getByLabel("API version").scrollIntoViewIfNeeded();
+      await settle(page);
+    },
+  },
+  "model-picker": {
+    tag: "u5", describe: "Composer model picker with three providers", themes: ["light", "dark"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: /^Model / }).click();
+      await page.getByRole("dialog", { name: "Switch model" }).getByRole("group", { name: "Ollama" }).waitFor();
+      await settle(page, 600);
+    },
+  },
+  "agents-settings": { tag: "u5", describe: "Settings > Agents", viewports: ["desktop", "mobile"], setup: async (page) => { await openSettings(page, "Agents"); await page.locator('[data-harness="claude"]').waitFor(); await settle(page); } },
+  "agent-chip-menu": {
+    tag: "u5", describe: "Composer Agent chip menu with Claude Code selected", themes: ["light", "dark"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: /^Agent: / }).click();
+      await page.getByRole("menuitemradio", { name: /^Claude Code/ }).click();
+      await settle(page, 400);
+    },
+  },
+  "harness-approval": {
+    tag: "u5", describe: "Harness session mid-approval", themes: ["light", "dark"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: /^Agent: / }).click();
+      await page.getByRole("menuitemradio", { name: /^Claude Code/ }).click();
+      await page.keyboard.press("Escape");
+      const composer = page.getByRole("textbox", { name: /Message or run a task|describe your task/i });
+      await composer.fill("please ask then edit hello.txt");
+      await composer.press("Enter");
+      await page.getByRole("button", { name: "Allow once" }).waitFor({ timeout: 20_000 });
+      await settle(page, 400);
+    },
+  },
+  "harness-auth-error": {
+    tag: "u5", describe: "Harness turn failed: sign-in hint", themes: ["light"],
+    setup: async (page) => {
+      await page.getByRole("button", { name: /^Agent: / }).click();
+      await page.getByRole("menuitemradio", { name: /^Claude Code/ }).click();
+      await page.keyboard.press("Escape");
+      const composer = page.getByRole("textbox", { name: /Message or run a task|describe your task/i });
+      await composer.fill("authfail please");
+      await composer.press("Enter");
+      await page.locator('[data-harness-hint="sign-in"]').waitFor({ timeout: 20_000 });
+      await settle(page, 400);
+    },
+  },
 };
 
 interface Options {
@@ -382,11 +460,19 @@ async function main(): Promise<void> {
   const scratch = await mkdtemp(join(tmpdir(), "ui-shots-"));
   const browser = await chromium.launch();
   try {
+    const u5 = opts.states.some((n) => STATES[n]!.tag === "u5");
+    const fake = u5 ? await makeFakeHost() : undefined;
+    const aimock = u5 ? await bootAimock() : undefined;
     await withTempHome(async (home) => {
-      const { app, client } = await bootApp(home);
+      const { app, client } = u5 ? await bootHarnessApp(home, fake!) : await bootApp(home);
       let repo: string | undefined;
       try {
-        if (opts.model) await inv(client, "model.configure", { providerId: "mock", baseURL: "http://127.0.0.1:59999/v1", protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
+        if (u5) {
+          const url = `http://127.0.0.1:${aimock!.port}/v1`;
+          await inv(client, "model.configure", { providerId: "openrouter", baseURL: "https://openrouter.ai/api/v1", protocol: "openai-compatible", model: "openai/gpt-4.1-mini", apiKey: "sk-or-demo", displayName: "OpenRouter" });
+          await inv(client, "model.configure", { providerId: "ollama", baseURL: url, protocol: "openai-compatible", model: "qwen3-coder:30b", auth: "none", displayName: "Ollama" });
+          await inv(client, "model.configure", { providerId: "work-gateway", baseURL: url, protocol: "openai-compatible", model: "gpt-4.1", apiKey: "sk-demo", displayName: "Work gateway" });
+        } else if (opts.model) await inv(client, "model.configure", { providerId: "mock", baseURL: "http://127.0.0.1:59999/v1", protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
         if (opts.onboardingDismiss) {
           await inv(client, "onboarding.dismiss", { step: "notice" });
           await inv(client, "onboarding.dismiss", { step: "apikey" });
@@ -434,6 +520,7 @@ async function main(): Promise<void> {
       } finally {
         await client.close();
         await app.stop();
+        await aimock?.stop();
       }
     });
   } finally {

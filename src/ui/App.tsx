@@ -497,7 +497,6 @@ export function SessionRowButton({
         {harnessLabel && (
           <span className="session-agent-tag" title={`Runs ${harnessLabel}`} aria-label={`Agent: ${harnessLabel}`}>
             <TerminalIcon aria-hidden="true" />
-            {harnessLabel}
           </span>
         )}
         {needsReconciliation && (
@@ -1345,7 +1344,7 @@ export const SETTINGS_SECTIONS = [
   { id: "general", label: "General", description: "Defaults for new sessions and how the agent reports its work.", icon: <GearIcon /> },
   { id: "appearance", label: "Appearance", description: "Theme and the size of conversation text.", icon: <PaletteIcon /> },
   { id: "models", label: "Providers", description: "Model providers, where their keys are stored, and which one is active.", icon: <ChipIcon /> },
-  { id: "agents", label: "Agents", description: "The built-in Cognate agent and external agent CLIs installed on this computer.", icon: <TerminalIcon /> },
+  { id: "agents", label: "Agents", description: "Cognate's own agent and external agent CLIs on this computer.", icon: <TerminalIcon /> },
   { id: "plugins", label: "Plugins", description: "Built-in tools this deployment ships and which sessions get them.", icon: <PluginIcon /> },
   { id: "presets", label: "Agent presets", description: "Choose the agent's tools and how it works. Standard suits everyday tasks.", icon: <BotIcon /> },
   { id: "governance", label: "Governance & evidence", description: "Who decides approvals, whether agent runs are settled, and the proof they are judged by.", icon: <ShieldIcon /> },
@@ -1789,6 +1788,13 @@ function FailureBlock({ code, message, onRetry }: { readonly code: string; reado
   );
 }
 
+/** The approval sentence. A harness CLI's request carries no justification, so name the tool instead. */
+function approvalSentence(entry: ToolEntry): string {
+  const why = entry.approval?.justification;
+  if (typeof why === "string" && why.trim()) return `Allow this operation with ${entry.approval?.permission} permissions: ${why}.`;
+  return `Allow ${entry.tool} with ${entry.approval?.permission} permissions.`;
+}
+
 /** Approval bar: docked where the composer normally sits (reference `11-approval-pending`: the
  *  approval card sits at the bottom of the chat pane, composer hidden underneath it) — exact
  *  strings/buttons/keyboard behavior: Enter = allow once, Escape = reject (characterization's
@@ -1819,7 +1825,7 @@ export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; re
   // Long plain-text justifications get a one-line summary plus a disclosure; a structured `surface`
   // is exempt because `SurfaceView` renders diff content that must never be clipped or collapsed.
   const structured = entry.approval?.surface !== undefined;
-  const summary = summarizeApproval(`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`);
+  const summary = summarizeApproval(approvalSentence(entry));
   const showDisclosure = approvalNeedsDisclosure(summary, structured);
   return (
     <div
@@ -1850,9 +1856,9 @@ export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; re
         ) : showDisclosure ? (
           <>
             {expanded ? (
-              <pre className="approval-full-text">{`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`}</pre>
+              <pre className="approval-full-text">{approvalSentence(entry)}</pre>
             ) : (
-              <span className="approval-summary-line" title={`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`}>
+              <span className="approval-summary-line" title={approvalSentence(entry)}>
                 {summary.line}
               </span>
             )}
@@ -1866,7 +1872,7 @@ export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; re
             </button>
           </>
         ) : (
-          <>Allow this operation with {entry.approval?.permission} permissions: {entry.approval?.justification}.</>
+          <>{approvalSentence(entry)}</>
         )}
       </div>
       <div className="approval-actions">
