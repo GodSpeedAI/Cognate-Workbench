@@ -310,7 +310,7 @@ async function doctor(): Promise<number> {
 }
 
 async function run(bin: string, args: readonly string[]): Promise<string> {
-  const child = Bun.spawn([bin, ...args], { stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([bin, ...args], { stdout: "pipe", stderr: "pipe", windowsHide: true });
   const [out, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
   return code === 0 ? out : "unknown";
 }

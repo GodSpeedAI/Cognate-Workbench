@@ -51,7 +51,7 @@ export function appWindowArgs(url: string, profileDir: string): string[] {
 export function openDefaultBrowser(url: string, platform: NodeJS.Platform = process.platform): boolean {
   const command = platform === "win32" ? ["rundll32", "url.dll,FileProtocolHandler", url] : platform === "darwin" ? ["open", url] : ["xdg-open", url];
   try {
-    Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "ignore" }).unref();
+    Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true }).unref();
     return true;
   } catch {
     return false;
@@ -65,6 +65,6 @@ export interface AppWindow {
 
 /** Spawn the browser in app mode with the dedicated profile `<home>/app-window`. */
 export function launchAppWindow(browser: string, url: string, home: string): AppWindow {
-  const child = Bun.spawn([browser, ...appWindowArgs(url, join(home, "app-window"))], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  const child = Bun.spawn([browser, ...appWindowArgs(url, join(home, "app-window"))], { stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true });
   return { exited: child.exited, unref: () => child.unref() };
 }
