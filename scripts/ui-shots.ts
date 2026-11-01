@@ -261,6 +261,25 @@ export const STATES: Record<string, ShotState> = {
       await settle(page, 500);
     },
   },
+  // t3: inspector Files and Config tabs.
+  "t3-settings-config": {
+    tag: "t3", describe: "Settings > Open configuration file opens the editable Config tab beside the page", themes: ["light", "dark"],
+    setup: async (page) => {
+      await openSettings(page, "General");
+      await page.getByRole("button", { name: "Open configuration file" }).click();
+      await page.getByRole("textbox", { name: /configuration/i }).first().waitFor();
+      await settle(page, 400);
+    },
+  },
+  "t3-files-tree": {
+    tag: "t3", describe: "Files tab: workspace tree with a folder expanded and a file open", themes: ["light", "dark"], viewports: ["desktop", "mobile"],
+    setup: async (page) => {
+      await ensureInspector(page, "Files");
+      await page.getByRole("treeitem", { name: /src/ }).first().click();
+      await page.getByRole("treeitem", { name: /index\.ts/ }).first().click();
+      await settle(page, 400);
+    },
+  },
 };
 
 interface Options {

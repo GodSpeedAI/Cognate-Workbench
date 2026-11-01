@@ -157,6 +157,7 @@ import { CloseButton, DialogHeader } from "./shell/DialogHeader.tsx";
 import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
 import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
+import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
 import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
 import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
@@ -1616,7 +1617,7 @@ function SettingsPage({
   const [rowApiKey, setRowApiKey] = useState("");
   // T11: "Open configuration file" (config.path), provider Delete (confirmed, secret-first) and
   // "Fetch models" (model.catalog) — the three Settings -> Models actions that were inert.
-  const [configFileOpen, setConfigFileOpen] = useState(false);
+  const inspector = useInspector();
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const openAddWizard = useCallback(() => {
@@ -1700,18 +1701,13 @@ function SettingsPage({
       <header className="settings-head">
         <h1>Settings</h1>
         <div className="settings-head-actions">
-          <button type="button" className="open-config-file-btn" onClick={() => setConfigFileOpen(true)}>
+          {/* The configuration file opens in the inspector's Config tab, beside this page, where it can be edited. */}
+          <button type="button" className="open-config-file-btn" aria-controls="inspector" onClick={() => inspector.openInspector("config")}>
             Open configuration file
           </button>
           <CloseButton label="settings" onClick={onClose} />
         </div>
       </header>
-      {configFileOpen && (
-        <ConfigFileDialog
-          onResolve={() => client.invoke("config.path", {}) as unknown as Promise<ConfigPathResult>}
-          onClose={() => setConfigFileOpen(false)}
-        />
-      )}
       <nav className="settings-nav" aria-label="Settings sections">
         <div role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={onTabKeyDown}>
           {SETTINGS_SECTIONS.map((x) => (
@@ -6070,6 +6066,7 @@ function AppShell() {
           <InspectorEmpty title="Nothing selected" hint="Select a step in the Trajectory view or open a subagent to see its details here." />
         )}
       </InspectorTab>
+      <InspectorExtraTabs workspaceId={currentWorkspaceId} workspaceName={currentWorkspace?.title} />
       {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
