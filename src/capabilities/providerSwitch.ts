@@ -62,11 +62,32 @@ export async function recordProviderFact(service: RuntimeService, caller: Caller
   const { runId } = await service.startRun(caller, { agent: AGENT_CONFIG, input: input as unknown as Json, idempotencyKey: randomUUID() });
   for (let i = 0; i < 400; i++) {
     const run = await service.getRun(caller, { runId });
-    if (run.status === "completed") return;
+    if (run.status === "completed") {
+      await awaitRoutesReflect(service, caller, input);
+      return;
+    }
     if (run.status === "failed" || run.status === "cancelled") throw new Error(`provider: recording failed (${run.status})`);
     await new Promise((r) => setTimeout(r, 10));
   }
   throw new Error("provider: recording timed out");
+}
+
+/** A completed run is not yet a folded projection. Wait until `provider-routes` shows the fact, so the
+ *  caller's next read (provider.test, provider.activate, provider.list) sees its own write. */
+async function awaitRoutesReflect(service: RuntimeService, caller: Caller, fact: Record<string, unknown>): Promise<void> {
+  const providerId = typeof fact.providerId === "string" ? fact.providerId : undefined;
+  if (!providerId) return;
+  const reflected = (routes: readonly ModelConfig[]): boolean => {
+    const row = routes.find((r) => r.providerId === providerId);
+    if (fact.kind === "provider.deleted") return row === undefined;
+    if (fact.kind === "model.configured") return row !== undefined && row.baseURL === fact.baseURL && row.model === fact.model && row.protocol === fact.protocol;
+    return true;
+  };
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (reflected(await readStoredRoutes(service, caller))) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 /** Stored routes from the `provider-routes` projection (tenant-relative keys `provider:<id>`). */

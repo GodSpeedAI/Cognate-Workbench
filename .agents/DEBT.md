@@ -121,3 +121,27 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: `route()` rejects any other key ("Model routes contain configuration only"); `expertModelGenerateComponent` calls `buildProvider(route, secrets)` with that route.
 - Confidence: high
 - Closure: let Expert routes reference a stored `providerId` row (resolving auth/apiVersion from `provider-routes` at build time) instead of copying fields; keep the credentials-free rule. Files likely touched: src/experts/service.ts, src/capabilities/expertModel.ts, test/expert-model-routing.test.ts; size M.
+
+### UI polish left open after the production-readiness audit (A2)
+- Date: 2026-11-01
+- Location: `.agents/reports/ui-production-readiness/recon/A2-final-audit.md` §3 (defect ids); src/ui/App.tsx header (mobile), Workbench/Experts/Automation/ContractEditor panels (native selects).
+- Debt: P2/P3 items not fixed: D-9 (mobile header still truncates workspace and session names), D-12, D-13, D-15 to D-19, D-21, D-22, D-24 to D-30, D-34 (model-picker search double focus ring). About 35 native `<select>` controls remain in the Workbench, Experts, Automation and ContractEditor panels (styled with the shared chevron; E2E drives them with `selectOption`). The session row menu has no Pin. Remote diagnostics are collected by the open dialog only; there is no server-side remote event log.
+- Evidence: A2 report rows; `.agents/reports/ui-production-readiness/evidence/final/` shots named there.
+- Confidence: high
+- Closure: one polish pass per A2 row; convert remaining selects to `src/ui/shell/MenuSelect.tsx` and update E2E to click the menu; size M.
+
+### Desktop launch and secret store not exercised on real Windows/macOS
+- Date: 2026-11-01
+- Location: src/desktopWindow.ts, scripts/package.ts, scripts/installers.ts, src/secrets.ts.
+- Debt: Edge/Chrome `--app` launch, the GUI-subsystem `cognate-workbench-desktop.exe`, Start Menu/Desktop shortcuts, the NSIS installer, the macOS `.app` (no icon) and the Credential Manager/Keychain backends are proven only by Linux runs, cross-built PE headers (desktop exe Subsystem=2) and unit tests. The Windows installer was not built (no `makensis` on the Linux host).
+- Evidence: `.agents/reports/ui-production-readiness/evidence/package/` (Linux launch log, window argv, pe-subsystem.txt).
+- Confidence: medium
+- Closure: run the packaged build on a Windows and a macOS host (launch, close, relaunch, store a provider key, reboot, key still there); add a macOS icon (`.icns`); size S.
+
+### Stray body-less POST seen once by the provider-switch fake
+- Date: 2026-11-01
+- Location: test/J-CFG-provider-switch.test.ts ("switching model with the key left blank…"), test/providerFake.ts.
+- Debt: In one full `just verify` run the recording fake on an ephemeral port saw a POST without a `model` field before the test's first model call; 9 isolated runs did not reproduce it. The likely source is a late request from an earlier app or fake in the same test process reaching a reused port, but it was not traced. The test now counts only POSTs that carry a model.
+- Evidence: the failing run's diff (`+ undefined` before `"model-one"`).
+- Confidence: low
+- Closure: record the request path and a per-test nonce header in `providerFake.ts` and reject requests without it; size S.
