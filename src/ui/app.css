@@ -5106,3 +5106,12 @@ body.is-col-resizing .resize-handle:active::after {
     scrollbar-width: none;
   }
 }
+/* Experts and interrupted-step selects share the chevron treatment of the other surfaces. */
+.experts-panel select, .experts-review select, .experts-schedules select {
+  appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+}
+/* Phone: the first-folder card keeps a 16px gutter instead of touching the screen edges. */
+@media (max-width: 640px) { .workspace-chooser { padding: 0 16px; box-sizing: border-box; } }

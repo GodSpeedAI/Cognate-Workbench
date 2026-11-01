@@ -144,15 +144,6 @@ export const STATES: Record<string, ShotState> = {
     },
   },
   "settings-about": { tag: "t1a", describe: "Settings > About", themes: ["light"], setup: (page) => openSettings(page, "About") },
-  "config-dialog": {
-    tag: "t1a", describe: "Configuration file dialog header over Settings", themes: ["light"],
-    setup: async (page) => {
-      await openSettings(page, "General");
-      await page.getByRole("button", { name: "Open configuration file" }).click();
-      await page.getByRole("dialog", { name: "Configuration file" }).waitFor();
-      await settle(page);
-    },
-  },
   "add-workspace-dialog": {
     tag: "t1a", describe: "Add workspace dialog header", themes: ["light"],
     setup: async (page) => {
@@ -582,7 +573,7 @@ async function main(): Promise<void> {
           await inv(client, "model.configure", { providerId: "openrouter", baseURL: "https://openrouter.ai/api/v1", protocol: "openai-compatible", model: "openai/gpt-4.1-mini", apiKey: "sk-or-demo", displayName: "OpenRouter" });
           await inv(client, "model.configure", { providerId: "ollama", baseURL: url, protocol: "openai-compatible", model: "qwen3-coder:30b", auth: "none", displayName: "Ollama" });
           await inv(client, "model.configure", { providerId: "work-gateway", baseURL: url, protocol: "openai-compatible", model: "gpt-4.1", apiKey: "sk-demo", displayName: "Work gateway" });
-        } else if (opts.model) await inv(client, "model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock?.port ?? 59999}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
+        } else if (opts.model) await inv(client, "model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock && opts.states.every((n) => STATES[n]!.tag === "f1") ? aimock.port : 59999}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
         if (opts.onboardingDismiss) {
           await inv(client, "onboarding.dismiss", { step: "notice" });
           await inv(client, "onboarding.dismiss", { step: "apikey" });
