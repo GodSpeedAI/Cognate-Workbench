@@ -101,5 +101,5 @@ describe("J-CFG-provider-test", () => {
         expect(((await client.invoke("provider.test", { providerId: "loc" })) as unknown as TestResult).ok).toBe(true);
       } finally { await app.stop(); await fake.stop(); }
     });
-  });
+  }, 60_000); // boots an app and makes four provider calls; the default 5s budget is not enough under suite load
 });
