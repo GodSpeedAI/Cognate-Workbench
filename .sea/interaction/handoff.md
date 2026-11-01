@@ -429,6 +429,7 @@ semantic entity and the exported table in `domain/index.ts`.
 
 | Capability | Bound to | Journeys |
 |---|---|---|
+| `agent.harness.list` | HarnessCli (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-detect, J-HARNESS-unavailable |
 | `case.derive` | Case (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup, J-COG-liveverify |
 | `case.observe` | Case (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-liveverify |
 | `case.open` | Case (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
@@ -450,6 +451,7 @@ semantic entity and the exported table in `domain/index.ts`.
 | `git.checkout.recreate` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-LIFECYCLE |
 | `git.checkout.remove` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-LIFECYCLE |
 | `git.checkout.status` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-BIND, J-CHECKOUT-LIFECYCLE |
+| `harness.turn.advance` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session, J-HARNESS-approval, J-HARNESS-cancel, J-HARNESS-unavailable |
 | `identity.inspect` | named in (domain/index.ts:539) | J-AUTH-SESSION |
 | `identity.session.issue` | named in (domain/index.ts:537) | J-AUTH-SESSION, J-AUTH-TENANT-ISOLATION |
 | `identity.session.revoke` | named in (domain/index.ts:538) | J-AUTH-SESSION |
@@ -466,11 +468,16 @@ semantic entity and the exported table in `domain/index.ts`.
 | `plugin.catalog` | shares the `Plugin` anchor of `plugin.install` (`catalogSemanticRef ?? installSemanticRef` in `src/capabilities/pluginInstall.ts`) | none (support capability) |
 | `plugin.install` | Plugin (TRANCHE11_ANCHORS) | J-PLG-install |
 | `plugin.uninstall` | Plugin (TRANCHE11_ANCHORS) | J-PLG-install |
+| `provider.activate` | ModelProvider (PROVIDER_CAPABILITY_ANCHORS) | J-CFG-provider-switch |
 | `provider.delete` | ModelProvider (TRANCHE11_ANCHORS) | J-CFG-provider-delete |
+| `provider.list` | ModelProvider (PROVIDER_CAPABILITY_ANCHORS) | J-CFG-provider-switch |
+| `provider.test` | ModelProvider (PROVIDER_CAPABILITY_ANCHORS) | J-CFG-provider-test |
 | `risk.assess` | RiskAssessment (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
 | `secret.put` | named in (domain/index.ts:83) | J-A-first-use, J-SECRETS-storage |
 | `secrets.backend.describe` | ModelProvider (TRANCHE11_ANCHORS) | J-SECRETS-storage |
 | `session.create` | Session (RED_JOURNEY_ANCHORS) | J-B-basic-session, J-SESSION-draft, J-UI-command-palette |
+| `session.harness.bind` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session, J-HARNESS-unavailable |
+| `session.harness.resolve` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session |
 | `session.history` | named in (domain/index.ts:86) | J-SESSION-draft, J-RUN-task-attribution |
 | `session.setArchived` | Session (TRANCHE11_ANCHORS) | J-SESSION-archive |
 | `session.task.bind` | Session (RED_JOURNEY_ANCHORS) | J-TASK-scope, J-RUN-task-attribution |
@@ -512,6 +519,19 @@ semantic entity and the exported table in `domain/index.ts`.
 | `world.freeze` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup, J-COG-liveverify |
 | `world.settle` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
 
+### External agent-harness bindings (J-HARNESS-*)
+
+`HARNESS_CAPABILITY_ANCHORS` in `domain/index.ts` binds `agent.harness.list` to `HarnessCli` and
+`session.harness.bind`, `session.harness.resolve`, `harness.turn.advance` to `HarnessBinding`.
+Event `session.harness.bound` is recorded by `agent.config` (`session.recorded`) and folded, with the
+agent-emitted `harness.session.recorded`, by the public `session-harness-bindings` projection.
+Agent `agent.harness` takes the same input as `agent.coding`; a UI that sees a binding must start it
+instead of `agent.coding`. Gaps stated, not hidden: per-tool authority checks, containment of the
+CLI's effects, protected-evidence blocking and settlement as `agent.coding` do not apply; the
+host-process runner (`src/agents/harness/hostProcess.ts`) exists because the Cognate execution port
+cannot stream or take stdin (`.agents/DEBT.md`, `framework-gap-streaming-process.md`).
+
+
 ### Open binding gaps (not fixed here; `domain/index.ts` and `src/server.ts` are outside this pass)
 
 - `onboarding.dismiss` is registered and granted but carries no `semanticRef`. Proposed anchor:
@@ -521,3 +541,9 @@ semantic entity and the exported table in `domain/index.ts`.
   `ExecutionWorld` anchor as `execution.world.probe`.
 - `observation.status` and `observation.record` are read-side RealityTrace capabilities with no
   journey and no binding; the nearest journey is `J-COG-realitytrace`.
+
+## Provider parity, server side (J-CFG-provider-switch, J-CFG-provider-test)
+
+- `model.configure` keeps the stored secret when `apiKey` is omitted or empty; only a non-empty key replaces it. `provider.activate` re-mounts a stored route and records it as `model.configured` (so `model-config` `current` and `provider-routes` follow, and the choice survives restart). `provider.delete` accepts any stored provider id; only the active one clears the live route. `provider.list` is the UI read (projection `provider-routes` plus `hasKey`/`isCurrent`). `provider.test` lists models only (never a completion).
+- Journey evidence: `test/J-CFG-provider-switch.test.ts`, `test/J-CFG-provider-test.test.ts`, extended `test/J-CFG-model-catalog.test.ts`, `test/J-CFG-provider-delete.test.ts`, `test/J-CFG-model-provider.test.ts`.
+- Framework gap: none for Azure on the chat protocol (api-key header and api-version query are applied through the adapter's `fetch` option). Azure on Responses/Anthropic wire is not offered.

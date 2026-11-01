@@ -19,7 +19,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -45,6 +45,11 @@ import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
+import { agentHarnessAgent } from "./agents/agentHarness.ts";
+import { harnessComponent } from "./capabilities/harness.ts";
+import { HarnessDetector, type HarnessHostEnv } from "./agents/harness/detect.ts";
+import { HarnessSessionHost } from "./agents/harness/sessions.ts";
+import { sessionHarnessBindingsProjection } from "./projections/sessionHarnessBindings.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
 import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
 import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
@@ -179,6 +184,9 @@ export interface ServerOptions {
   /** Readiness P05: the SWE_SEED binary and where declared proofs may come from (default
    *  COGNATE_SWE_SEED_BIN / COGNATE_PROOF_SOURCE; null = no SWE_SEED, any source). */
   readonly sweSeed?: SweSeedSettings | null;
+  /** Host environment used to detect harness CLIs and to build their minimal child environment
+   *  (default process.env / os.homedir()). Tests point it at fake binaries on a temp PATH. */
+  readonly harnessHost?: HarnessHostEnv;
 }
 
 export interface AppServer {
@@ -237,6 +245,10 @@ const GRANTED_CAPABILITIES = [
   "session.setArchived",
   "session.create",
   "session.task.bind",
+  "agent.harness.list",
+  "session.harness.bind",
+  "session.harness.resolve",
+  "harness.turn.advance",
   "workspace.directory.suggest",
   "workspace.files.list",
   "workspace.file.read",
@@ -434,6 +446,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // J-CHECKOUT (PandaCode worktree affordance): task-scoped Git checkouts (J-CHECKOUT-BIND /
   // J-CHECKOUT-EXECUTION / J-CHECKOUT-LIFECYCLE); see CHECKOUT_CAPABILITY_ANCHORS in domain/index.ts.
   const checkoutRefs = bindCheckoutCapabilities(domain);
+  const harnessRefs = bindHarnessCapabilities(domain);
+  const harnessDetector = new HarnessDetector(options.harnessHost ?? {});
+  const harnessHost = new HarnessSessionHost(harnessDetector);
 
   const serviceRef: { current: RuntimeService | undefined } = { current: undefined };
   const getService = () => {
@@ -516,7 +531,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, agentCodingAgent, agentCognitiveAgent, agentExpert],
+    agents: [agentConfigAgent, agentCodingAgent, agentHarnessAgent, agentCognitiveAgent, agentExpert],
     components: [
       runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
@@ -535,6 +550,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
       sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
       sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),
+      harnessComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, detector: harnessDetector, host: harnessHost, governanceActive: Boolean(externalAuthority), semanticRefs: harnessRefs }),
       taskCheckoutComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, semanticRefs: checkoutRefs }),
       workspaceFilesComponent({ registry: executionWorlds, getService, systemCaller: SYSTEM_CALLER, protectedHome: home, listSemanticRef: redRefs["workspace.files.list"], readSemanticRef: redRefs["workspace.file.read"] }),
       workspaceDirectorySuggestComponent({ registry: executionWorlds, protectedHome: home, semanticRef: redRefs["workspace.directory.suggest"] }),
@@ -569,6 +585,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       { projection: executionWorldsProjection, public: true },
       { projection: sessionsProjection, public: true },
       { projection: sessionTaskBindingsProjection, public: true },
+      { projection: sessionHarnessBindingsProjection, public: true },
       { projection: taskCheckoutBindingsProjection, public: true },
       { projection: plansProjection, public: true },
       { projection: subagentsProjection, public: true },
@@ -584,6 +601,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   serviceRef.current = governedService;
   pollApprovals = () => runtime.pollApprovals();
   finishServiceBoot(governedService);
+  harnessHost.startReaper(async (runId) => (await governedService.getRun(SYSTEM_CALLER, { runId }).catch(() => undefined))?.status);
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
   finishExpertsBoot(experts);
 
@@ -912,6 +930,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     operatorSessionToken: operatorSession.token,
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
+      await harnessHost.shutdown();
       eventsController.abort();
       await remote.close();
       await scheduleEvaluator.stop();

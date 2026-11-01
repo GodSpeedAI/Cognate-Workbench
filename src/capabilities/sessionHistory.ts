@@ -40,7 +40,7 @@ export function sessionHistoryComponent(getService: () => RuntimeService, semant
         const messages: (ModelMessage & { readonly stepCount?: number })[] = [];
         for (const run of runs) {
           if (run.runId === input.excludeRunId) continue;
-          if (run.agent !== "agent.coding") continue;
+          if (run.agent !== "agent.coding" && run.agent !== "agent.harness") continue;
           const runInput = run.input as { readonly message?: string };
           if (typeof runInput?.message === "string") messages.push({ role: "user", content: runInput.message });
           if (run.status === "completed") {

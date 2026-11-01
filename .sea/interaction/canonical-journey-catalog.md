@@ -116,6 +116,7 @@ settlement is still unsettled until the human acts.
 - **Steps**: open Settings → Models → select provider (DeepSeek / third-party / Custom model API)
   → enter credentials/base URL/protocol/model list → save → route usable immediately.
 - **Capabilities/actions (proposed)**: `model.configure`, `credentials.set`, `model.catalog`.
+- **Provider parity (server side)**: saving with the key blank keeps the stored key for that provider id; local servers (127.0.0.1/localhost, or `auth: none`) run with no key on every protocol; Azure OpenAI uses `auth: api-key` + `apiVersion` on the chat protocol. See J-CFG-provider-switch / J-CFG-provider-test.
 - **Policy/authority**: credential writes go through `credentials.set` exclusively — separate
   channel from non-secret provider config (inferred: secrets never round-trip unmasked).
 - **Artifacts/resources**: `ModelConfig`.
@@ -995,9 +996,29 @@ settlement, variants). Capabilities are bound explicitly in `domain/index.ts` an
 - **Preconditions/affordance**: A protocol and base URL are present. Capabilities: `model.catalog`.
 - **Steps**: user requests the catalog -> the provider's discovery endpoint is queried -> real ids populate the list -> a discovery failure or an unsupported protocol reports a specific reason.
 - **Evidence/settlement**: Supported providers return their real model ids into the editor; unsupported providers report that discovery is unavailable and offer manual entry; no model list is ever invented.
-- **Known variants**: openai-compatible list endpoint supported; provider returns an error; protocol has no discovery; base URL empty refuses before any request.
+- **Known variants**: openai-compatible list endpoint supported; provider returns an error; protocol has no discovery; base URL empty refuses before any request; a base URL with or without a trailing /v1 reaches the same /models endpoint on every protocol; a keyless local server sends no Authorization header.
 - **Evidence class**: declared.
 - **Executable evidence**: `test/J-CFG-model-catalog.test.ts`.
+
+### J-CFG-provider-switch (`j_cfg_provider_switch`)
+
+- **Actor/intention**: User. The operator has more than one stored provider and wants a different one (or a different model of the same one) to answer next. Purpose: Switch the active route between stored providers and models without re-entering any API key.
+- **Preconditions/affordance**: At least one provider is stored; for a switch, a second stored provider exists. Capabilities: `provider.list, provider.activate, model.configure`.
+- **Steps**: user opens the stored providers list -> picks a provider (optionally with another model) -> the registry hot-swaps and the choice is recorded as the same `model.configured` fact -> the next run uses the new route.
+- **Evidence/settlement**: The chosen provider is the active route, the next run goes to it with the key already stored for it, the choice survives a restart, and no secret reached the client or an event.
+- **Known variants**: switch model of the active provider with the key left blank; activate another stored provider; activating a provider that is not stored refuses; omitted model keeps the stored one; a provider with no stored key reports hasKey false.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-CFG-provider-switch.test.ts`.
+
+### J-CFG-provider-test (`j_cfg_provider_test`)
+
+- **Actor/intention**: User. The operator wants to know whether a stored provider, or an unsaved draft, is reachable and accepts its key. Purpose: Check connectivity and credentials with the cheapest safe request, never a paid completion.
+- **Preconditions/affordance**: A stored provider id, or a draft base URL and protocol, is present. Capabilities: `provider.test`.
+- **Steps**: user asks to test -> the key is resolved server-side -> the model list is requested -> the outcome is reported with latency.
+- **Evidence/settlement**: ok with latency and model count, or a specific reason; the key is never returned, logged or recorded.
+- **Known variants**: stored provider; unsaved draft with a typed key; local keyless server; rejected key; unreachable host; the stored key is only sent to the stored base URL.
+- **Evidence class**: declared.
+- **Executable evidence**: `test/J-CFG-provider-test.test.ts`.
 
 ### J-CFG-provider-delete (`j_cfg_provider_delete`)
 
@@ -1005,7 +1026,7 @@ settlement, variants). Capabilities are bound explicitly in `domain/index.ts` an
 - **Preconditions/affordance**: A provider configuration exists. Capabilities: `provider.delete`.
 - **Steps**: user confirms deletion -> the provider's secret is removed -> the configuration is removed -> the active route is cleared -> Settings shows no configured provider.
 - **Evidence/settlement**: The provider configuration and its stored secret are gone, the active route is cleared so the UI returns to the unconfigured state, and nothing later resolves to the deleted provider.
-- **Known variants**: deleting the active provider; deleting when already unconfigured refuses; a failure while removing the secret aborts before the configuration is removed.
+- **Known variants**: deleting the active provider; deleting a stored provider that is not the active one removes only its secret and route and leaves the active route running; deleting an unknown provider refuses; a failure while removing the secret aborts before the configuration is removed.
 - **Evidence class**: declared.
 - **Executable evidence**: `test/J-CFG-provider-delete.test.ts`.
 
@@ -1128,6 +1149,60 @@ settlement, variants). Capabilities are bound explicitly in `domain/index.ts` an
 - **Known variants**: opening a tab before it has registered still selects it once it appears; Changes shows a count of reviewable items; Files and Config are read through read-only or all-or-nothing capabilities and do not widen authority; narrow screens use an overlay instead of a docked panel.
 - **Evidence class**: observed.
 - **Executable evidence**: test/ui-inspector-tabs.test.tsx (Files and Config tabs); `test/E2E-ui-shell.test.ts`.
+
+## External agent-harness journeys (J-HARNESS-*)
+
+New in this pass; `evidence_class: proposed` until the tests below are observed passing. Source: PandaCode's harness design (protocol families, argv, permission mapping), re-implemented; see `.agents/reports/ui-production-readiness/recon/R6-agent-harnesses.md` and `framework-gap-streaming-process.md`.
+
+### J-HARNESS-detect (`j_harness_detect`)
+
+- **Actor/intention**: User. The operator sees which external agent-harness CLIs are installed on the machine the server runs on.
+- **Preconditions/affordance**: `agent.harness.list` (`{refresh?}`); detection is host-side (PATH + known install folders), `--version` probe with a 2 s timeout, 60 s cache.
+- **Transition/output**: The list returns `{id,label,installed,path?,version?,protocol,supportsApprovals,permissionModes,installHint,signInHint,reasonUnavailable?}` plus the host platform; unverified catalog entries (Gemini, Qwen) stay hidden unless present and their `--help` prints the ACP flag.
+- **Policy/authority**: No model call and no login; detection never reflects an SSH/WSL/contained workspace's machine.
+- **Evidence/settlement**: The result is a read; nothing is recorded.
+- **Failure/recovery/next**: Missing tools are listed as not installed with an install hint.
+- **Executable evidence**: `test/J-HARNESS-detect.test.ts`.
+
+### J-HARNESS-session (`j_harness_session`)
+
+- **Actor/intention**: User. The operator runs a Session through an external harness CLI and sees its output in the normal transcript.
+- **Preconditions/affordance**: `session.harness.bind` (`{sessionId, harnessId|null, permissionMode?, model?}`), `session.harness.resolve`, `harness.turn.advance` (internal, recorded), agent `agent.harness` (same input as `agent.coding`).
+- **Transition/output**: Streamed text, tool calls (edits carry diffs when reported), usage and the final message are emitted as the same domain events as the native agent (`tool.call.*`, `message.completed`, `workbench.usage.recorded`); the CLI's session id is recorded (`harness.session.recorded`) and resumed next turn.
+- **Policy/authority**: Posture labels: `harness-own-sandbox`, `harness-bridged-approvals`, `harness-uncontained` (full access). GUARANTEE GAPS: per-tool `authority.check`, containment of the CLI's tool effects, protected-evidence blocking and settlement as `agent.coding` do NOT apply; evidence is what the CLI self-reports. The CLI process is launched by an explicit host-process runner on the local world only (framework gap: the execution port has no streaming/stdin); remote, contained, SSH and WSL workspaces are refused; SEA-Forge governance on refuses binding. The child environment is an allowlist, never the Workbench's provider credentials.
+- **Evidence/settlement**: Binding is a durable `session.harness.bound` event folded by the public `session-harness-bindings` projection; turns are ordinary runs correlated `session:<id>`.
+- **Failure/recovery/next**: Binding while a run is active is refused; a restart mid-turn ends the turn as session-lost.
+- **Executable evidence**: `test/J-HARNESS-session.test.ts`.
+
+### J-HARNESS-approval (`j_harness_approval`)
+
+- **Actor/intention**: User. The operator allows or denies a CLI's permission request and the CLI resumes accordingly.
+- **Preconditions/affordance**: `session.harness.bind` (permission mode), the CLI protocol's permission request (Claude `can_use_tool`, Codex `*/requestApproval`, ACP `session/request_permission`).
+- **Transition/output**: The request becomes `tool.approval.requested` plus a `tool-approval` human-approval continuation; the decision becomes `tool.approval.decided` and is sent to the CLI (allow or refusal); denied tools fail with the reason.
+- **Policy/authority**: This is the CLI's own gate bridged to the operator, not the Workbench approval gate; plan mode declines state-changing requests; full access never asks.
+- **Evidence/settlement**: Approval request and decision events on the run.
+- **Failure/recovery/next**: A withdrawn request is dropped; structured questions are declined with a note.
+- **Executable evidence**: `test/J-HARNESS-approval.test.ts`.
+
+### J-HARNESS-cancel (`j_harness_cancel`)
+
+- **Actor/intention**: User. The operator stops a running harness turn.
+- **Preconditions/affordance**: `run.cancel` on the harness run.
+- **Transition/output**: Protocol interrupt, stdin close, process-group SIGTERM then SIGKILL (`taskkill /T /F` on Windows); the run is cancelled and keeps its partial transcript; a process left waiting for approval of a cancelled run is reaped.
+- **Policy/authority**: No process outlives the run.
+- **Evidence/settlement**: Run status `cancelled`; process gone.
+- **Failure/recovery/next**: An ignored interrupt escalates to a tree kill.
+- **Executable evidence**: `test/J-HARNESS-cancel.test.ts`.
+
+### J-HARNESS-unavailable (`j_harness_unavailable`)
+
+- **Actor/intention**: User. A missing, signed-out, limited or crashing CLI fails closed with a readable reason.
+- **Preconditions/affordance**: `session.harness.bind`, `harness.turn.advance`.
+- **Transition/output**: Missing CLI refuses binding with the install hint; an authentication error ends the turn as `turn.failed` (`AUTH_REQUIRED`) naming the CLI and its sign-in command; limits, crashes and nonzero exits end the turn as `turn.failed` (`RATE_LIMITED`, `FAILED`).
+- **Policy/authority**: No silent fallback to the native agent.
+- **Evidence/settlement**: `turn.failed` event and a failed run.
+- **Failure/recovery/next**: Remote/contained/SSH/WSL workspaces refused; SEA-Forge governance refuses binding.
+- **Executable evidence**: `test/J-HARNESS-unavailable.test.ts`.
 
 Notes: `J-DESKTOP-launch` is a host-surface journey: it governs the process around the server
 (launcher, app window, lock, stop), has no Cognate capability and no event; `J-UI-command-palette`

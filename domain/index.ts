@@ -514,6 +514,31 @@ export function bindCheckoutCapabilities(domain: Domain): Readonly<Record<string
   >;
 }
 
+/**
+ * J-HARNESS-*: external agent-harness CLIs. Detection anchors on `HarnessCli`; the durable per-
+ * session binding, its resolution and the recorded turn-advance step anchor on `HarnessBinding`.
+ */
+export const HARNESS_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "agent.harness.list": "HarnessCli",
+  "session.harness.bind": "HarnessBinding",
+  "session.harness.resolve": "HarnessBinding",
+  "harness.turn.advance": "HarnessBinding",
+};
+
+export function bindHarnessCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(HARNESS_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} harness contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: harness capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
 /** Effective native capacity is inspection data, distinct from advisory parallelism plans. */
 export function bindRuntimeExecution(domain: Domain): CapabilityContract["semanticRef"] {
   const contracts = bindCapabilities(domain.projection, [{

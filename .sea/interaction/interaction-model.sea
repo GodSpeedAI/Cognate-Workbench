@@ -464,7 +464,7 @@ Instance j_cfg_model_provider of "CanonicalJourney" {
     purpose: "Configure a usable model route (provider + credentials) so sessions can generate",
     settlement: "modelCatalog() lists the new route as usable; next request uses it (hot-apply, no restart)",
     steps: "open Settings -> Models -> select provider (DeepSeek, third-party, or Custom model API) -> enter credentials/base URL/protocol/model list -> save -> route becomes usable without server restart",
-    variants: "DeepSeek credential-only onboarding mode (restricted ProviderEditor) vs full custom-provider editor (base URL, API protocol, model list)"
+    variants: "DeepSeek credential-only onboarding mode (restricted ProviderEditor) vs full custom-provider editor (base URL, API protocol, model list); saving with the key left blank keeps the key already stored for that provider id, so switching model needs no key and a key is replaced only when a new one is typed; a local server (127.0.0.1/localhost or auth none) runs with no key on every protocol; Azure OpenAI authenticates with an api-key header and an api-version query on the chat protocol"
 }
 
 Instance j_ws_select of "CanonicalJourney" {
@@ -899,7 +899,7 @@ Instance j_cfg_provider_delete of "CanonicalJourney" {
     purpose: "Remove a provider and everything that was stored for it, without leaving an orphaned secret or a dangling active route",
     settlement: "The provider configuration and its stored secret are gone, the active route is cleared so the UI returns to the unconfigured state, and nothing later resolves to the deleted provider",
     steps: "user confirms deletion -> the provider's secret is removed -> the configuration is removed -> the active route is cleared -> Settings shows no configured provider",
-    variants: "deleting the active provider; deleting when already unconfigured refuses; a failure while removing the secret aborts before the configuration is removed"
+    variants: "deleting the active provider; deleting a stored provider that is not the active one removes only its secret and route and leaves the active route running; deleting an unknown provider refuses; a failure while removing the secret aborts before the configuration is removed"
 }
 
 Instance j_cfg_model_catalog of "CanonicalJourney" {
@@ -913,6 +913,32 @@ Instance j_cfg_model_catalog of "CanonicalJourney" {
     settlement: "Supported providers return their real model ids into the editor; unsupported providers report that discovery is unavailable and offer manual entry; no model list is ever invented",
     steps: "user requests the catalog -> the provider's discovery endpoint is queried -> real ids populate the list -> a discovery failure or an unsupported protocol reports a specific reason",
     variants: "openai-compatible list endpoint supported; provider returns an error; protocol has no discovery; base URL empty refuses before any request"
+}
+
+Instance j_cfg_provider_switch of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "provider.list, provider.activate, model.configure",
+    evidence_class: "declared",
+    initiating_condition: "The operator has more than one stored provider and wants a different one (or a different model of the same one) to answer next",
+    journey_id: "J-CFG-provider-switch",
+    precondition: "At least one provider is stored; for a switch, a second stored provider exists",
+    purpose: "Switch the active route between stored providers and models without re-entering any API key",
+    settlement: "The chosen provider is the active route, the next run goes to it using the key already stored for it, the choice survives a restart, and no secret was read back to the client or written to an event",
+    steps: "user opens the stored providers list (provider.list: id, name, protocol, base URL, model, key stored, active) -> picks a provider (provider.activate, optionally with another model) -> the registry hot-swaps and the choice is recorded as the same model.configured fact -> the next run uses the new route",
+    variants: "switch model of the active provider with no key (model.configure with the key left blank); activate another stored provider; activate a provider that is not stored refuses; activate with an unknown model keeps the stored one when model is omitted; a provider with no stored key reports hasKey false"
+}
+
+Instance j_cfg_provider_test of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "provider.test",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants to know whether a stored provider, or a draft not yet saved, is reachable and accepts its key",
+    journey_id: "J-CFG-provider-test",
+    precondition: "A stored provider id, or a draft base URL and protocol, is present",
+    purpose: "Check connectivity and credentials with the cheapest safe request, never a paid completion",
+    settlement: "The operator sees ok with latency and model count, or a specific reason (unreachable, rejected key, bad response); the key is never returned, logged or recorded",
+    steps: "user asks to test -> the stored key (or the typed draft key) is resolved server-side -> the provider's model list is requested -> the outcome is reported with latency",
+    variants: "stored provider; unsaved draft with a typed key; local keyless server; rejected key; unreachable host; the stored key is only sent to the stored base URL"
 }
 
 Instance j_cfg_config_path of "CanonicalJourney" {
@@ -1655,4 +1681,78 @@ Instance j_ui_inspector of "CanonicalJourney" {
     settlement: "Tabs Context, Changes, Details, Files and Config each show only data their own journey authorizes; the open state, width and selected tab survive reload; a tab with nothing to show explains why; mobile presents the inspector as an overlay",
     steps: "operator toggles the inspector or opens a named tab -> tabs register by identity and the selected tab renders -> the tab reads through its journey (Files through J-WS-files-browse, Config through J-CFG-config-edit) -> operator switches tabs or closes the inspector",
     variants: "opening a tab before it has registered still selects it once it appears; Changes shows a count of reviewable items; Files and Config are read through read-only or all-or-nothing capabilities and do not widen authority; narrow screens use an overlay instead of a docked panel"
+}
+
+// J-HARNESS-*: running a Session through an external agent-harness CLI installed on the machine
+// the Workbench server runs on. `HarnessCli` is a detected executable (host-side detection);
+// `HarnessBinding` is the durable operator choice that a Session runs through one. Neither widens
+// authority: the native guarantees (per-tool authority checks, containment of the tool effects,
+// protected-evidence blocking, settlement as agent.coding) do NOT apply to an external CLI.
+Entity "HarnessCli"
+
+Entity "HarnessBinding"
+
+Instance j_harness_detect of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "agent.harness.list",
+    evidence_class: "proposed",
+    initiating_condition: "The operator opens the place where an agent harness is chosen, or asks to refresh the list",
+    journey_id: "J-HARNESS-detect",
+    precondition: "The server runs on the host whose command-line tools are being detected; detection reads directories and runs only each tool's version probe",
+    purpose: "Show which external agent-harness CLIs are installed on the machine the server runs on, truthfully, without starting a model or a sign-in",
+    settlement: "Each catalog entry reports installed or not with its path and version when installed, its protocol, whether it can route permission requests through the Workbench, its permission modes, an install hint and a sign-in hint; detection happens on the server host and says so; results are cached briefly and refreshable on request; entries whose launch flags are not verified stay hidden unless the tool is present and its own help prints the flag; no model is called and no login is performed",
+    steps: "operator opens the picker -> agent.harness.list reads PATH and known install folders on the host -> each found tool answers a bounded version probe -> the list returns entries with install and sign-in hints -> refresh bypasses the cache",
+    variants: "a tool missing from the machine is listed as not installed with its install hint; a tool whose version probe times out is still listed as installed; a Windows command shim is resolved without a shell; detection never reflects an SSH, WSL or contained workspace's own machine"
+}
+
+Instance j_harness_session of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.harness.bind, agent.harness.list",
+    evidence_class: "proposed",
+    initiating_condition: "The operator chooses to run a Session through an external harness CLI instead of the native coding agent, then sends a turn",
+    journey_id: "J-HARNESS-session",
+    precondition: "The chosen CLI is installed on the server host; the Session's workspace lives in the local world; no run of the Session is active; SEA-Forge governance is off",
+    purpose: "Run a turn through the CLI and fold what it reports into the same transcript, tool timeline and usage events the native agent produces, labelled with a truthful posture",
+    settlement: "The binding is a durable explicit operator choice per Session, labelled harness-own-sandbox, harness-bridged-approvals or harness-uncontained; each turn runs the CLI process in the workspace folder with a minimal environment that carries no Workbench provider credentials; streamed text, tool calls (file edits with diffs when the CLI reports them), usage and the final message are recorded as the same domain events the native agent emits; the CLI's own session id is recorded so the next turn resumes it; a CLI failure ends the turn as a failed turn with a readable message; a binding to a remote, contained, SSH or WSL workspace is refused with the reason; binding is refused while a run is active; binding back to native is explicit and durable",
+    steps: "operator binds the Session to a harness with a permission mode and optional model -> session.harness.bind validates the CLI, the world and idleness and records the binding -> the operator sends a turn to the harness agent -> the agent drives the CLI through recorded advance steps -> events fold into the transcript -> the CLI's session id is recorded",
+    variants: "binding back to native; changing the permission mode or model between turns; a second turn resumes the CLI's own session; replay of a recorded turn reuses recorded outputs and never respawns the CLI; a server restart in the middle of a turn ends the turn as session-lost rather than repeating the CLI's effects. Guarantee gaps stated: per-tool authority checks, containment of the CLI's tool effects, protected-evidence blocking and settlement as agent.coding do not apply; evidence is what the CLI self-reports; cost is unknown unless the CLI reports tokens"
+}
+
+Instance j_harness_approval of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.harness.bind",
+    evidence_class: "proposed",
+    initiating_condition: "A harness CLI asks permission for a tool call during a turn",
+    journey_id: "J-HARNESS-approval",
+    precondition: "The Session is bound to a harness that can route permission requests, in a mode other than full access",
+    purpose: "Bridge the CLI's own permission requests into Workbench approvals so the operator allows or denies each one and the CLI resumes accordingly",
+    settlement: "Each CLI permission request becomes a tool approval request on the run with the tool, arguments and permission class; the turn waits as a durable continuation; approving answers the CLI with allow and the tool proceeds, denying answers with a refusal and the tool fails with that reason; the decision is recorded as a tool approval decision; in plan mode state-changing requests are declined without asking; this is the CLI's gate bridged to the operator, not the Workbench's own approval gate",
+    steps: "the CLI sends a permission request -> the adapter pauses the turn and returns the request -> the agent records the approval request and waits on a human-approval continuation -> the operator decides -> the agent answers the CLI through the adapter -> the CLI continues or reports the denial",
+    variants: "a request the CLI withdraws is dropped; multiple pending requests are answered one by one; a structured question from the CLI is declined with a note to answer in chat; the full-access mode never asks and is labelled harness-uncontained"
+}
+
+Instance j_harness_cancel of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.harness.bind",
+    evidence_class: "proposed",
+    initiating_condition: "The operator stops a running harness turn",
+    journey_id: "J-HARNESS-cancel",
+    precondition: "A harness turn is running or waiting on a permission request",
+    purpose: "Stop the external CLI promptly and leave no process behind",
+    settlement: "Cancelling the run asks the CLI to stop through its protocol, then closes its input, then signals its whole process group and finally force-kills it after short grace periods; the partial transcript is kept and the run is cancelled; a process left waiting on a permission request of a cancelled run is reaped",
+    steps: "operator stops the run -> the run signal aborts -> the adapter sends the protocol interrupt -> the process is closed and its process tree terminated if it does not exit -> the run ends cancelled",
+    variants: "the CLI honours the interrupt and exits on its own; the CLI ignores it and the tree is killed; the run was waiting for approval when cancelled"
+}
+
+Instance j_harness_unavailable of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "agent.harness.list, session.harness.bind",
+    evidence_class: "proposed",
+    initiating_condition: "The operator binds or runs a harness that is missing, not signed in, rate-limited or crashing",
+    journey_id: "J-HARNESS-unavailable",
+    precondition: "A harness is chosen",
+    purpose: "Fail closed with a readable reason and the next step, never falling back silently to another agent",
+    settlement: "A missing CLI refuses the binding with its install hint; a CLI that is not signed in ends the turn as a failed turn naming the CLI and its sign-in command; a rate or usage limit, a crash or a nonzero exit ends the turn as a failed turn with a readable message; the Workbench never substitutes the native agent for a failed harness turn",
+    steps: "bind or turn is attempted -> the CLI is missing, the CLI reports an authentication error, a limit or exits abnormally -> the failure is classified -> the binding is refused or the turn fails with the hint",
+    variants: "remote, contained, SSH and WSL workspaces are refused until a streaming process port exists upstream; SEA-Forge governance on refuses harness binding"
 }

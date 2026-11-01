@@ -17,7 +17,7 @@ import { WORKBENCH_EVENTS } from "../workbench/types.ts";
 /** Session-surface events a validated capability may record through the `session.recorded`
  *  command (J-TASK-scope/link). `session.created` and `session.archived` have their own typed
  *  commands; this list is the recording gate for everything else, mirroring `WORKBENCH_EVENTS`. */
-export const SESSION_EVENTS = ["session.task.bound"] as const;
+export const SESSION_EVENTS = ["session.task.bound", "session.harness.bound"] as const;
 export type SessionEventType = (typeof SESSION_EVENTS)[number];
 
 /** The recording run is a second validation gate: a settings event that skipped the
@@ -48,7 +48,7 @@ function validateSettingsPatch(patch: Partial<Record<keyof SettingsPatch, unknow
 }
 
 export type AgentConfigInput =
-  | { readonly kind: "model.configured"; readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages"; readonly model: string }
+  | { readonly kind: "model.configured"; readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages"; readonly model: string; readonly displayName?: string; readonly auth?: "bearer" | "none" | "api-key"; readonly apiVersion?: string; readonly prices?: { readonly inputUsdPerMillion: number; readonly outputUsdPerMillion: number } }
   /** `root` is provider-owned and opaque above the execution-world boundary; `executionWorldId`
    *  names where that root lives (see `@godspeedai/cognate-execution`). */
   | { readonly kind: "workspace.added"; readonly workspaceId: string; readonly root: string; readonly title: string; readonly executionWorldId: string }
