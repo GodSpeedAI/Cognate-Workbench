@@ -397,8 +397,6 @@ export function GovernancePane({ workspaceId }: { readonly workspaceId: string |
 
   return (
     <>
-      <h3>Governance &amp; evidence</h3>
-      <p className="settings-description">Who decides approvals, whether agent runs are settled, and the proof they are judged by.</p>
       <GovernanceAuthority />
       <GovernanceSettlement current={current} currentError={error} />
       <GovernanceProof workspaceId={workspaceId} current={current} error={error} onDeclared={onDeclared} />

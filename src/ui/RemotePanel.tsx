@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { remoteFetch } from "./remoteFetch.ts";
 import { PhoneIcon } from "./icons.tsx";
+import { DialogHeader } from "./shell/DialogHeader.tsx";
 
 type RemoteStatus = {
   readonly state: "off" | "waiting" | "connected";
@@ -110,7 +111,7 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
   return (
     <div className="modal-backdrop">
       <div className="modal remote-dialog" role="dialog" aria-modal="true" aria-labelledby="remote-heading" tabIndex={-1} ref={dialogRef}>
-        <h2 id="remote-heading">Control from your phone</h2>
+        <DialogHeader title="Control from your phone" titleId="remote-heading" closeLabel="remote control" onClose={onClose} />
         {phase.kind === "loading" && <p role="status">Checking remote control…</p>}
         {phase.kind === "preparing" && <p role="status">Preparing remote access…</p>}
         {phase.kind === "restoring" && <p role="status">Restoring connection…</p>}
@@ -150,9 +151,6 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
             </div>
           </>
         )}
-        <div className="remote-actions">
-          <button type="button" onClick={onClose}>Close</button>
-        </div>
       </div>
     </div>
   );

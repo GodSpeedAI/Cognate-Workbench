@@ -79,6 +79,19 @@ import {
   type SendBehavior,
 } from "../settings.ts";
 import {
+  ArchiveIcon,
+  ArrowLeftIcon,
+  BotIcon,
+  ChipIcon,
+  CommandIcon,
+  InfoIcon,
+  KeyboardIcon,
+  MoonIcon,
+  PaletteIcon,
+  SessionIcon,
+  ShieldIcon,
+  SunIcon,
+  UndoIcon,
   CheckIcon,
   ChevronDownIcon,
   PluginIcon,
@@ -120,6 +133,7 @@ import {
 import {
   SHORTCUT_ACTIONS,
   chordFromKeyboardEvent,
+  resolveKeypress,
   describeChord,
   effectiveChord,
   isChord,
@@ -135,6 +149,11 @@ import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
 import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
+import { CloseButton, DialogHeader } from "./shell/DialogHeader.tsx";
+import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
+import { ToastProvider, useToast } from "./shell/Toast.tsx";
+import { CommandPalette, type PaletteItem } from "./shell/CommandPalette.tsx";
+import { Kbd, chordLabel, isApplePlatform } from "./shell/Kbd.tsx";
 
 interface WorkspaceRow {
   readonly id: string;
@@ -479,66 +498,13 @@ export function SessionRowButton({
         aria-pressed={archived}
         onClick={onToggleArchive}
       >
-        {archived ? "↺" : "⌫"}
+        {archived ? <UndoIcon /> : <ArchiveIcon />}
       </button>
     </div>
   );
 }
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/** Open-modal stack (usage pass U2): the Keyboard shortcuts dialog stacks over Settings, and the
- *  Full-access confirmation stacks over the General pane — "Close menu or top dialog Esc" (listed
- *  as a real binding in that dialog) must close only the TOP dialog, so each mounted modal
- *  registers itself here and ignores Escape/Tab while something sits above it. */
-const OPEN_MODAL_STACK: HTMLElement[] = [];
-
-/** Shared modal contract (technical audit: only one of three modal surfaces had this before this
- *  redesign) — traps focus inside the dialog, returns focus to whatever opened it on unmount, and
- *  optionally calls `onEscape` when the dialog is open and Escape is pressed. Every modal in this
- *  app (Settings, both first-run dialogs, Keyboard shortcuts, the Full-access confirmation) uses
- *  this instead of inventing its own subset. */
-function useModalFocus(dialogRef: RefObject<HTMLElement | null>, onEscape?: () => void): void {
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    if (dialog) OPEN_MODAL_STACK.push(dialog);
-    const focusables = dialog?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-    (focusables && focusables[0] ? focusables[0] : dialog)?.focus();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only the top-most open modal reacts — a stacked dialog (shortcuts over Settings, the
-      // Full-access confirmation over General) absorbs Escape/Tab first.
-      if (dialog && OPEN_MODAL_STACK[OPEN_MODAL_STACK.length - 1] !== dialog) return;
-      if (e.key === "Escape" && onEscape) {
-        e.preventDefault();
-        onEscape();
-        return;
-      }
-      if (e.key !== "Tab" || !dialog) return;
-      const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (nodes.length === 0) return;
-      const first = nodes[0]!;
-      const last = nodes[nodes.length - 1]!;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      const index = dialog ? OPEN_MODAL_STACK.indexOf(dialog) : -1;
-      if (index >= 0) OPEN_MODAL_STACK.splice(index, 1);
-      previouslyFocused?.focus();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}
+// The modal focus trap / Escape stack lives in ./shell/useModalFocus.ts (shared with the palette).
 
 /** First-run dialog #1 (critic round-1 P0-1): same structure/roles as the reference's "Internal
  *  Testing Notice" (`dialog`, `heading[level=2]`, single "Continue" button; reference-behavior-
@@ -875,12 +841,7 @@ function FullAccessConfirmDialog({
         tabIndex={-1}
         ref={dialogRef}
       >
-        <div className="dialog-banner">
-          <h2 id="full-access-heading">Enable Full access?</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onCancel}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Enable Full access?" titleId="full-access-heading" closeLabel="full access confirmation" onClose={onCancel} />
         <p>
           Full access lets new sessions act without the usual confirmation steps, including
           sensitive operations, file changes, and external commands. Only turn it on for tasks
@@ -932,7 +893,8 @@ const SHORTCUT_FIXED_REGIONS: readonly { readonly region: string; readonly rows:
   },
 ];
 
-/** `dialog "Keyboard shortcuts"` (usage pass U2, checkpoint 22d; made real in T11): a searchable
+/** Settings -> Keyboard shortcuts (formerly the stacked `dialog "Keyboard shortcuts"`; now a section
+ *  of the Settings page, reached by Ctrl+/ too) (usage pass U2, checkpoint 22d; made real in T11): a searchable
  *  list of this app's real actions/bindings grouped "Application" (editable) / "Message input" /
  *  "Menus and dialogs" / "Approval area", plus a contentinfo "Restore all defaults".
  *
@@ -940,23 +902,20 @@ const SHORTCUT_FIXED_REGIONS: readonly { readonly region: string; readonly rows:
  *  and writes them through `settings.changeShortcuts`, so the dialog and the global key listener
  *  always agree. Capture happens in the capture phase on `window` so neither the dialog's own
  *  Escape handling nor the global shortcut listener can fire while a chord is being typed. */
-export function ShortcutsDialog({
+export function ShortcutsPanel({
   overrides,
   onChangeShortcuts,
-  onClose,
 }: {
   /** Durable per-action overrides from the `settings` projection. */
   readonly overrides: ShortcutOverrides;
   /** Writes one whole-value shortcut patch through `settings.changeShortcuts`. */
   readonly onChangeShortcuts: (shortcuts: ShortcutOverrides) => Promise<void>;
-  readonly onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
   const [capture, setCapture] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const cancelEditing = useCallback(() => {
     setEditingId(undefined);
     setCapture(undefined);
@@ -996,8 +955,6 @@ export function ShortcutsDialog({
       setSaving(false);
     }
   }, [onChangeShortcuts, cancelEditing]);
-
-  useModalFocus(dialogRef, onClose);
 
   // Chord capture: window + capture phase so this handler runs before every other keydown listener
   // in the app, and `stopImmediatePropagation` keeps them all from acting on the same keystroke.
@@ -1043,21 +1000,8 @@ export function ShortcutsDialog({
   })).filter((g) => g.rows.length > 0);
   const atDefaults = isDefault(overrides);
   return (
-    <div className="modal-backdrop modal-backdrop-stacked">
-      <div
-        className="modal shortcuts-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shortcuts-heading"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <div className="dialog-banner">
-          <h2 id="shortcuts-heading">Keyboard shortcuts</h2>
-          <button type="button" className="icon-btn" aria-label="Close keyboard shortcuts" onClick={onClose}>
-            ×
-          </button>
-        </div>
+    <div className="shortcuts-panel">
+      <div className="shortcuts-panel-inner">
         <div role="search" aria-label="Search shortcuts" className="shortcuts-search">
           <input type="search" aria-label="Search shortcuts" placeholder="Search shortcuts" value={query} onChange={(e) => setQuery(e.currentTarget.value)} />
         </div>
@@ -1071,6 +1015,7 @@ export function ShortcutsDialog({
                   const current = effectiveChord(a.id, overrides);
                   return (
                     <li key={a.id}>
+                      <span className="shortcuts-row-text">{a.label}</span>
                       {editing ? (
                         <span className="shortcuts-capture">
                           <span className="shortcuts-capture-hint">
@@ -1081,23 +1026,30 @@ export function ShortcutsDialog({
                           </button>
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          className="shortcuts-edit-btn"
-                          aria-label={`Edit shortcut for ${a.label}`}
-                          disabled={saving}
-                          onClick={() => {
-                            setEditingId(a.id);
-                            setCapture(undefined);
-                            setError(undefined);
-                          }}
-                        >
-                          Edit
-                        </button>
+                        <>
+                          {current ? (
+                            <>
+                              <Kbd chord={current} />
+                              <span className="sr-only">{describeChord(current)}</span>
+                            </>
+                          ) : (
+                            <span className="shortcuts-unbound">No shortcut</span>
+                          )}
+                          <button
+                            type="button"
+                            className="shortcuts-edit-btn"
+                            aria-label={`Edit shortcut for ${a.label}`}
+                            disabled={saving}
+                            onClick={() => {
+                              setEditingId(a.id);
+                              setCapture(undefined);
+                              setError(undefined);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </>
                       )}
-                      <span className="shortcuts-row-text">
-                        {a.label} {describeChord(current)}
-                      </span>
                     </li>
                   );
                 })}
@@ -1115,9 +1067,9 @@ export function ShortcutsDialog({
               <ul>
                 {g.rows.map((r) => (
                   <li key={r.label}>
-                    <span className="shortcuts-row-text">
-                      {r.label} {r.keys}
-                    </span>
+                    <span className="shortcuts-row-text">{r.label}</span>
+                    <Kbd chord={r.keys.split(" ").join("+")} />
+                    <span className="sr-only">{r.keys}</span>
                   </li>
                 ))}
               </ul>
@@ -1142,9 +1094,9 @@ export function ShortcutsDialog({
   );
 }
 
-/** One menu-button control of the General pane (usage pass U2, §11): the button's label IS the
- *  current value (reference convention — every General menu renders its selection as the label),
- *  opening a small `role="menu"` list. Closes on outside click and Escape. */
+/** One select control of the General pane. A native <select> (free keyboard, type-ahead and
+ *  screen-reader behaviour) restyled by the design system's `select` rule — consistent height, border,
+ *  radius and chevron in both themes. */
 function SettingMenu<T extends string>({
   value,
   options,
@@ -1158,49 +1110,26 @@ function SettingMenu<T extends string>({
   readonly disabled?: boolean;
   readonly ariaLabel: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const current = options.find((o) => o.value === value)?.label ?? value;
   return (
-    <div className="work-details-dropdown" ref={ref}>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel} disabled={disabled} onClick={() => setOpen(!open)}>
-        {current}
-        <svg className="dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
-      </button>
-      {open && (
-        <div role="menu" className="work-details-menu">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                onPick(o.value);
-                setOpen(false);
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <select aria-label={ariaLabel} value={value} disabled={disabled} onChange={(e) => onPick(e.currentTarget.value as T)}>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** One row of a settings card: label + description on the left, the control on the right. */
+function SettingRow({ label, description, children }: { readonly label: string; readonly description?: string; readonly children: React.ReactNode }) {
+  return (
+    <div className="settings-row" role="group" aria-label={label}>
+      <div className="settings-row-text">
+        <div className="settings-row-label">{label}</div>
+        {description && <div className="settings-row-desc">{description}</div>}
+      </div>
+      <div className="settings-row-control">{children}</div>
     </div>
   );
 }
@@ -1263,8 +1192,6 @@ function BuiltInPluginsPane({ settings }: { readonly settings: GeneralSettings }
   const globalRows = GLOBAL_PLUGIN_CATALOG.filter((p) => matches(p.name, p.id, p.description));
   return (
     <>
-      <h3>Built-in plugins</h3>
-      <p className="settings-description">Inspect the plugins this deployment ships.</p>
       <input
         type="search"
         aria-label="Search plugins"
@@ -1356,8 +1283,6 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
   const [configFor, setConfigFor] = useState<AgentPreset | undefined>(undefined);
   return (
     <>
-      <h3>Agent presets</h3>
-      <p className="settings-description">Choose the agent's tools and how it works. Use Standard mode for everyday tasks.</p>
       <ul className="plugins-list" aria-label="Agent presets">
         {AGENT_PRESETS.map((preset) => {
           const isDefault = settings.preset === preset;
@@ -1399,12 +1324,7 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
       {detailsFor && (
         <div className="modal-backdrop modal-backdrop-stacked">
           <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="preset-details-heading" tabIndex={-1}>
-            <div className="dialog-banner">
-              <h2 id="preset-details-heading">{AGENT_PRESET_LABELS[detailsFor]}</h2>
-              <button type="button" className="icon-btn" aria-label="Close" onClick={() => setDetailsFor(undefined)}>
-                ×
-              </button>
-            </div>
+            <DialogHeader title={AGENT_PRESET_LABELS[detailsFor]} titleId="preset-details-heading" closeLabel="preset details" onClose={() => setDetailsFor(undefined)} />
             <p>{PRESET_DETAILS[detailsFor]}</p>
             <div className="modal-actions">
               <button type="button" onClick={() => setDetailsFor(undefined)}>
@@ -1417,12 +1337,7 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
       {configFor && (
         <div className="modal-backdrop modal-backdrop-stacked">
           <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="preset-config-heading" tabIndex={-1}>
-            <div className="dialog-banner">
-              <h2 id="preset-config-heading">View configuration · {AGENT_PRESET_LABELS[configFor]}</h2>
-              <button type="button" className="icon-btn" aria-label="Close" onClick={() => setConfigFor(undefined)}>
-                ×
-              </button>
-            </div>
+            <DialogHeader title={`View configuration · ${AGENT_PRESET_LABELS[configFor]}`} titleId="preset-config-heading" closeLabel="preset configuration" onClose={() => setConfigFor(undefined)} />
             <p className="settings-description">The tools this preset registers for the agent's model calls:</p>
             <ul className="plugins-list">
               {SESSION_PLUGIN_CATALOG.filter((p) => p.presets.includes(configFor)).map((p) => (
@@ -1449,136 +1364,151 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
  *  usage, Coding Tools, Keyboard shortcuts, Send behavior while busy, and a current-version
  *  footer. Every control writes through its own durable `settings.change*` capability; the
  *  `settings` projection round trip re-renders the pane with the new value. */
+function useSettingsChange() {
+  const client = useCognate();
+  const toast = useToast();
+  return useCallback(
+    async (capability: string, field: string, value: unknown) => {
+      try {
+        await client.invoke(capability, { [field]: value } as never);
+        toast.show("Settings saved");
+      } catch (error) {
+        console.error(`settings: ${capability} failed`, error);
+        toast.show("Could not save that setting");
+      }
+    },
+    [client, toast],
+  );
+}
+
 function GeneralPane({
   settings,
-  onOpenShortcuts,
   fullAccessConfirm,
   setFullAccessConfirm,
 }: {
   readonly settings: GeneralSettings;
-  readonly onOpenShortcuts: () => void;
   readonly fullAccessConfirm: boolean;
   readonly setFullAccessConfirm: (open: boolean) => void;
 }) {
-  const client = useCognate();
-  const change = useCallback(
-    async (capability: string, field: string, value: unknown) => {
-      try {
-        await client.invoke(capability, { [field]: value } as never);
-      } catch (error) {
-        console.error(`settings: ${capability} failed`, error);
-      }
-    },
-    [client],
-  );
-
+  const change = useSettingsChange();
   return (
-    <>
-      <h3>General</h3>
+    <div className="settings-card">
+      <SettingRow label="Permission" description="Default permission mode for new sessions">
+        <SettingMenu
+          ariaLabel="Permission mode for new sessions"
+          value={settings.permission}
+          disabled={fullAccessConfirm}
+          options={PERMISSION_MODES.map((m) => ({ value: m, label: PERMISSION_LABELS[m] }))}
+          onPick={(m) => {
+            // Checkpoint 22f: "Full access" never commits directly — it opens the confirmation
+            // dialog, whose checked-state "Enable Full access" button commits.
+            if (m === "full-access") setFullAccessConfirm(true);
+            else void change("settings.changePermission", "permission", m);
+          }}
+        />
+      </SettingRow>
+      <SettingRow label="Language">
+        <SettingMenu
+          ariaLabel="Language"
+          value={settings.language}
+          options={LANGUAGE_CODES.map((l) => ({ value: l, label: LANGUAGE_LABELS[l] }))}
+          onPick={(l) => void change("settings.changeLanguage", "language", l)}
+        />
+      </SettingRow>
+      <SettingRow label="Work details" description="How much detail to show for tool calls">
+        <SettingMenu
+          ariaLabel="Work details"
+          value={settings.workDetails}
+          options={WORK_DETAILS_MODES.map((m) => ({ value: m, label: WORK_DETAILS_LABELS[m] }))}
+          onPick={(m) => void change("settings.changeWorkDetails", "workDetails", m)}
+        />
+      </SettingRow>
+      <SettingRow label="Performance & usage" description="How much performance and usage information to show">
+        <SettingMenu
+          ariaLabel="Performance and usage detail"
+          value={settings.performanceDetail}
+          options={(["compact", "detailed"] as const).map((m) => ({ value: m, label: PERFORMANCE_DETAIL_LABELS[m] }))}
+          onPick={(m) => void change("settings.changePerformanceDetail", "performanceDetail", m)}
+        />
+      </SettingRow>
+      <SettingRow label="Coding Tools" description="Shows trajectory, code diffs, and Agent preset switching in new chats">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={settings.codingTools}
+          aria-label="Coding Tools"
+          className="settings-switch"
+          onClick={() => void change("settings.changeCodingTools", "codingTools", !settings.codingTools)}
+        />
+      </SettingRow>
+      <SettingRow label="Send behavior while busy" description="What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior">
+        <SettingMenu
+          ariaLabel="Send behavior while busy"
+          value={settings.sendBehavior}
+          options={SEND_BEHAVIORS.map((b) => ({ value: b, label: SEND_BEHAVIOR_LABELS[b] }))}
+          onPick={(b) => void change("settings.changeSendBehavior", "sendBehavior", b)}
+        />
+      </SettingRow>
+    </div>
+  );
+}
 
-      <p className="settings-subtitle">Permission</p>
-      <p className="settings-description">Choose the default permission mode for new sessions</p>
-      <SettingMenu
-        ariaLabel="Permission mode for new sessions"
-        value={settings.permission}
-        disabled={fullAccessConfirm}
-        options={PERMISSION_MODES.map((m) => ({ value: m, label: PERMISSION_LABELS[m] }))}
-        onPick={(m) => {
-          // Checkpoint 22f: "Full access" never commits directly — it opens the confirmation
-          // dialog, whose checked-state "Enable Full access" button commits.
-          if (m === "full-access") setFullAccessConfirm(true);
-          else void change("settings.changePermission", "permission", m);
-        }}
-      />
-
-      <p className="settings-subtitle">Language</p>
-      <SettingMenu
-        ariaLabel="Language"
-        value={settings.language}
-        options={LANGUAGE_CODES.map((l) => ({ value: l, label: LANGUAGE_LABELS[l] }))}
-        onPick={(l) => void change("settings.changeLanguage", "language", l)}
-      />
-
-      <p className="settings-subtitle">Appearance</p>
-      <div role="group" aria-label="Appearance" className="appearance-group">
-        {APPEARANCE_MODES.map((mode) => (
-          <button key={mode} type="button" aria-pressed={settings.appearance === mode} onClick={() => void change("settings.changeAppearance", "appearance", mode)}>
-            {mode === "light" ? "Light" : mode === "dark" ? "Dark" : "System"}
+/** Settings → Appearance: theme (segmented) and conversation font size (stepper). */
+function AppearancePane({ settings }: { readonly settings: GeneralSettings }) {
+  const change = useSettingsChange();
+  return (
+    <div className="settings-card">
+      <SettingRow label="Theme" description="Light, dark, or follow the operating system">
+        <div role="group" aria-label="Appearance" className="segmented">
+          {APPEARANCE_MODES.map((mode) => (
+            <button key={mode} type="button" aria-pressed={settings.appearance === mode} onClick={() => void change("settings.changeAppearance", "appearance", mode)}>
+              {mode === "light" ? <SunIcon /> : mode === "dark" ? <MoonIcon /> : <ChipIcon />}
+              {mode === "light" ? "Light" : mode === "dark" ? "Dark" : "System"}
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      <SettingRow label="Font size" description="Only affects conversation content">
+        <div className="stepper font-size-stepper" role="group" aria-label="Font size">
+          <button
+            type="button"
+            aria-label="Decrease font size"
+            disabled={settings.fontSize <= MIN_FONT_SIZE_PX}
+            onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize - 1)}
+          >
+            −
           </button>
-        ))}
-      </div>
+          <span className="font-size-value" aria-live="polite">
+            {settings.fontSize} px
+          </span>
+          <button
+            type="button"
+            aria-label="Increase font size"
+            disabled={settings.fontSize >= MAX_FONT_SIZE_PX}
+            onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize + 1)}
+          >
+            +
+          </button>
+        </div>
+      </SettingRow>
+    </div>
+  );
+}
 
-      <p className="settings-subtitle">Font size</p>
-      <p className="settings-description">Only affects conversation content</p>
-      <div className="font-size-stepper" role="group" aria-label="Font size">
-        <span className="font-size-value">{settings.fontSize}</span>
-        <button
-          type="button"
-          aria-label="Increase font size"
-          disabled={settings.fontSize >= MAX_FONT_SIZE_PX}
-          onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize + 1)}
-        >
-          +
-        </button>
-        <button
-          type="button"
-          aria-label="Decrease font size"
-          disabled={settings.fontSize <= MIN_FONT_SIZE_PX}
-          onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize - 1)}
-        >
-          −
-        </button>
-        <span className="font-size-unit">px</span>
-      </div>
-
-      <p className="settings-subtitle">Work details</p>
-      <p className="settings-description">Choose how much detail to show for tool calls</p>
-      <SettingMenu
-        ariaLabel="Work details"
-        value={settings.workDetails}
-        options={WORK_DETAILS_MODES.map((m) => ({ value: m, label: WORK_DETAILS_LABELS[m] }))}
-        onPick={(m) => void change("settings.changeWorkDetails", "workDetails", m)}
-      />
-
-      <p className="settings-subtitle">Performance &amp; usage</p>
-      <p className="settings-description">Choose how much performance and usage information to show</p>
-      <SettingMenu
-        ariaLabel="Performance and usage detail"
-        value={settings.performanceDetail}
-        options={(["compact", "detailed"] as const).map((m) => ({ value: m, label: PERFORMANCE_DETAIL_LABELS[m] }))}
-        onPick={(m) => void change("settings.changePerformanceDetail", "performanceDetail", m)}
-      />
-
-      <p className="settings-subtitle">Coding Tools</p>
-      <p className="settings-description">Shows trajectory, code diffs, and Agent preset switching in new chats</p>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={settings.codingTools}
-        aria-label="Coding Tools"
-        className="settings-switch"
-        onClick={() => void change("settings.changeCodingTools", "codingTools", !settings.codingTools)}
-      />
-
-      <p className="settings-subtitle">Keyboard shortcuts</p>
-      <p className="settings-description">View and edit available shortcuts and input actions</p>
-      <button type="button" onClick={onOpenShortcuts}>
-        Edit shortcuts
-      </button>
-
-      <p className="settings-subtitle">Send behavior while busy</p>
-      <p className="settings-description">
-        What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior
-      </p>
-      <SettingMenu
-        ariaLabel="Send behavior while busy"
-        value={settings.sendBehavior}
-        options={SEND_BEHAVIORS.map((b) => ({ value: b, label: SEND_BEHAVIOR_LABELS[b] }))}
-        onPick={(b) => void change("settings.changeSendBehavior", "sendBehavior", b)}
-      />
-
-      <p className="settings-version">Current version: {APP_VERSION}</p>
-    </>
+/** Settings → About: what this build is and where its keys live. */
+function AboutPane() {
+  return (
+    <div className="settings-card">
+      <SettingRow label="Version" description="This build of Cognate Workbench">
+        <code>{APP_VERSION}</code>
+      </SettingRow>
+      <SettingRow label="Keyboard" description="Open the command palette to reach anything">
+        <Kbd chord="Ctrl+K" />
+      </SettingRow>
+      <SettingRow label="Configuration" description="Where settings, provider config and the config export live">
+        <span className="settings-row-note">Use “Open configuration file” at the top of this page</span>
+      </SettingRow>
+    </div>
   );
 }
 
@@ -1627,12 +1557,7 @@ export function ConfigFileDialog({
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal config-file-dialog" role="dialog" aria-modal="true" aria-labelledby="config-file-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="config-file-heading">Configuration file</h2>
-          <button type="button" className="icon-btn" aria-label="Close configuration file" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Configuration file" titleId="config-file-heading" closeLabel="configuration file" onClose={onClose} />
         {busy && <p className="empty-state small">Resolving configuration location…</p>}
         {!busy && error && (
           <p role="alert" className="form-error">
@@ -1698,27 +1623,45 @@ export function ConfigFileDialog({
   );
 }
 
-function SettingsModels({
+/** Settings sections, in nav order. `description` is the muted line under each section's h2. */
+export const SETTINGS_SECTIONS = [
+  { id: "general", label: "General", description: "Defaults for new sessions and how the agent reports its work.", icon: <GearIcon /> },
+  { id: "appearance", label: "Appearance", description: "Theme and the size of conversation text.", icon: <PaletteIcon /> },
+  { id: "models", label: "Models", description: "Model providers and the API keys they use.", icon: <ChipIcon /> },
+  { id: "plugins", label: "Plugins", description: "Built-in tools this deployment ships and which sessions get them.", icon: <PluginIcon /> },
+  { id: "presets", label: "Agent presets", description: "Choose the agent's tools and how it works. Standard suits everyday tasks.", icon: <BotIcon /> },
+  { id: "governance", label: "Governance & evidence", description: "Who decides approvals, whether agent runs are settled, and the proof they are judged by.", icon: <ShieldIcon /> },
+  { id: "shortcuts", label: "Keyboard shortcuts", description: "View and edit the shortcuts and input actions available in the app.", icon: <KeyboardIcon /> },
+  { id: "about", label: "About", description: "Version and where to find configuration.", icon: <InfoIcon /> },
+] as const;
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
+
+/** Settings as a full-page takeover of the sidebar + center columns (the right-hand inspector stays
+ *  beside it). Left: a vertical tablist. Right: one section at a time in a fixed-width column that
+ *  scrolls inside the page, so switching sections never moves the page. The close control is the
+ *  top-right X (and Esc, handled by the App's global key listener). */
+function SettingsPage({
   onClose,
+  section,
+  onSectionChange,
   settings,
-  onOpenShortcuts,
   workspaceId,
+  onChangeShortcuts,
 }: {
   readonly onClose: () => void;
+  /** Writes one whole-value shortcut patch through `settings.changeShortcuts`. */
+  readonly onChangeShortcuts: (shortcuts: ShortcutOverrides) => Promise<void>;
+  readonly section: SettingsSection;
+  readonly onSectionChange: (section: SettingsSection) => void;
   /** The app's selected workspace, for the Governance & evidence proof. */
   readonly workspaceId: string | undefined;
-  /** Every General setting, resolved with defaults from the durable `settings` row (usage pass
-   *  U2, reference-behavior-matrix.md §11) — the General pane is the full inventory: Permission,
-   *  Language, Appearance, Font size, Work details, Performance & usage, Coding Tools, Keyboard
-   *  shortcuts, Send behavior while busy. Each control writes through its own
-   *  `settings.change*` capability; the projection round trip re-renders this pane. */
+  /** Every General setting, resolved with defaults from the durable `settings` row. */
   readonly settings: GeneralSettings;
-  /** Opens the Keyboard shortcuts dialog (stacked above this modal). */
-  readonly onOpenShortcuts: () => void;
 }) {
+  const setSection = onSectionChange;
+  const toast = useToast();
   const client = useCognate();
   const config = useModelConfig();
-  const [section, setSection] = useState<"general" | "models" | "plugins" | "presets" | "governance">("models");
   // Full-access confirmation (checkpoint 22f): opened by selecting "Full access" in the Permission
   // menu; the Permission control stays disabled while it is open, and only the checked-state
   // "Enable Full access" button commits the durable change.
@@ -1830,12 +1773,13 @@ function SettingsModels({
         apiKey,
       });
       setView("list");
+      toast.show("Model provider saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [client, providerId, displayName, baseURL, apiKey, models, protocol]);
+  }, [client, toast, providerId, displayName, baseURL, apiKey, models, protocol]);
 
   const applyRowKey = useCallback(async () => {
     if (!config) return;
@@ -1852,6 +1796,7 @@ function SettingsModels({
         apiKey: rowApiKey,
       });
       setSaved(true);
+      toast.show("API key saved");
       setRowApiKey("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1912,72 +1857,79 @@ function SettingsModels({
     }
   }, [client, protocol, baseURL, apiKey]);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef, onClose);
+  const pageRef = useRef<HTMLElement>(null);
+  // Page focus contract (it is not a modal, so no trap): land on the active tab when opened and
+  // hand focus back to whatever opened it when closed.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    pageRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    return () => opener?.focus?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onTabKeyDown = (e: React.KeyboardEvent) => {
+    const keys = ["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const i = SETTINGS_SECTIONS.findIndex((x) => x.id === section);
+    const last = SETTINGS_SECTIONS.length - 1;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? last : e.key === "ArrowDown" || e.key === "ArrowRight" ? (i + 1) % (last + 1) : (i - 1 + last + 1) % (last + 1);
+    const target = SETTINGS_SECTIONS[next]!.id;
+    setSection(target);
+    requestAnimationFrame(() => document.getElementById(`settings-tab-${target}`)?.focus());
+  };
+  const meta = SETTINGS_SECTIONS.find((x) => x.id === section)!;
   return (
-    <div className="modal-backdrop">
-      <div className="modal settings-panel" role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} ref={dialogRef}>
-        <div className="settings-titlebar">
-          <h2>Settings</h2>
+    <section className="settings-page" aria-label="Settings" ref={pageRef}>
+      <header className="settings-head">
+        <h1>Settings</h1>
+        <div className="settings-head-actions">
           <button type="button" className="open-config-file-btn" onClick={() => setConfigFileOpen(true)}>
             Open configuration file
           </button>
-          <button type="button" className="icon-btn" aria-label="Close settings" onClick={onClose}>
-            ×
-          </button>
+          <CloseButton label="settings" onClick={onClose} />
         </div>
-        {configFileOpen && (
-          <ConfigFileDialog
-            onResolve={() => client.invoke("config.path", {}) as unknown as Promise<ConfigPathResult>}
-            onClose={() => setConfigFileOpen(false)}
-          />
-        )}
-        <div className="settings-body">
-          <nav className="settings-nav" aria-label="Settings sections">
+      </header>
+      {configFileOpen && (
+        <ConfigFileDialog
+          onResolve={() => client.invoke("config.path", {}) as unknown as Promise<ConfigPathResult>}
+          onClose={() => setConfigFileOpen(false)}
+        />
+      )}
+      <nav className="settings-nav" aria-label="Settings sections">
+        <div role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={onTabKeyDown}>
+          {SETTINGS_SECTIONS.map((x) => (
             <button
+              key={x.id}
               type="button"
-              className={section === "general" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "general" ? "page" : undefined}
-              onClick={() => setSection("general")}
+              role="tab"
+              id={`settings-tab-${x.id}`}
+              aria-selected={section === x.id}
+              aria-controls="settings-panel"
+              tabIndex={section === x.id ? 0 : -1}
+              className={section === x.id ? "settings-nav-item active" : "settings-nav-item"}
+              onClick={() => setSection(x.id)}
             >
-              General
+              {x.icon}
+              <span>{x.label}</span>
             </button>
-            <button
-              type="button"
-              className={section === "models" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "models" ? "page" : undefined}
-              onClick={() => setSection("models")}
-            >
-              Models
-            </button>
-            <button
-              type="button"
-              className={section === "plugins" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "plugins" ? "page" : undefined}
-              onClick={() => setSection("plugins")}
-            >
-              Built-in plugins
-            </button>
-            <button
-              type="button"
-              className={section === "presets" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "presets" ? "page" : undefined}
-              onClick={() => setSection("presets")}
-            >
-              Agent presets
-            </button>
-            <button
-              type="button"
-              className={section === "governance" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "governance" ? "page" : undefined}
-              onClick={() => setSection("governance")}
-            >
-              Governance &amp; evidence
-            </button>
-          </nav>
+          ))}
+        </div>
+      </nav>
+      <div className="settings-scroll">
+        <div className="settings-column" role="tabpanel" id="settings-panel" aria-labelledby={`settings-tab-${section}`}>
+          <div className="settings-section-head">
+            <h2>{meta.label}</h2>
+            <p>{meta.description}</p>
+          </div>
           <div className="settings-content">
             {section === "general" ? (
-              <GeneralPane settings={settings} onOpenShortcuts={onOpenShortcuts} fullAccessConfirm={fullAccessConfirm} setFullAccessConfirm={setFullAccessConfirm} />
+              <GeneralPane settings={settings} fullAccessConfirm={fullAccessConfirm} setFullAccessConfirm={setFullAccessConfirm} />
+            ) : section === "appearance" ? (
+              <AppearancePane settings={settings} />
+            ) : section === "shortcuts" ? (
+              <ShortcutsPanel overrides={settings.shortcuts} onChangeShortcuts={onChangeShortcuts} />
+            ) : section === "about" ? (
+              <AboutPane />
             ) : section === "plugins" ? (
               <BuiltInPluginsPane settings={settings} />
             ) : section === "presets" ? (
@@ -1986,7 +1938,6 @@ function SettingsModels({
               <GovernancePane workspaceId={workspaceId} />
             ) : view === "list" ? (
               <>
-                <h3>Models</h3>
                 <p className="settings-subtitle">Enter your API key to use models from the following provider.</p>
                 {config ? (
                   <div className="provider-card provider-card-configured">
@@ -2207,28 +2158,31 @@ function SettingsModels({
               </>
             )}
           </div>
+          {section === "models" && view === "wizard" && (
+            <div className="modal-actions settings-actions">
+              <button type="button" onClick={() => setView("list")}>
+                Cancel
+              </button>
+              <button type="button" disabled={busy || !createProviderValid} onClick={createProvider}>
+                Create provider
+              </button>
+            </div>
+          )}
         </div>
-        {section === "models" && view === "wizard" && (
-          <div className="modal-actions">
-            <button type="button" onClick={() => setView("list")}>
-              Cancel
-            </button>
-            <button type="button" disabled={busy || !createProviderValid} onClick={createProvider}>
-              Create provider
-            </button>
-          </div>
-        )}
-        {fullAccessConfirm && (
-          <FullAccessConfirmDialog
-            onCancel={() => setFullAccessConfirm(false)}
-            onConfirm={() => {
-              setFullAccessConfirm(false);
-              void client.invoke("settings.changePermission", { permission: "full-access" } as never).catch((e) => console.error("settings: full access failed", e));
-            }}
-          />
-        )}
       </div>
-    </div>
+      {fullAccessConfirm && (
+        <FullAccessConfirmDialog
+          onCancel={() => setFullAccessConfirm(false)}
+          onConfirm={() => {
+            setFullAccessConfirm(false);
+            void client
+              .invoke("settings.changePermission", { permission: "full-access" } as never)
+              .then(() => toast.show("Settings saved"))
+              .catch((e) => console.error("settings: full access failed", e));
+          }}
+        />
+      )}
+    </section>
   );
 }
 
@@ -2616,9 +2570,7 @@ function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly 
       <div className="right-panel-tabs" role="tablist">
         <span role="tab" aria-selected="true" className="right-panel-tab">
           {row.title}
-          <button type="button" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
+          <CloseButton label={row.title} onClick={onClose} />
         </span>
       </div>
       <div className="right-panel-body">
@@ -3731,12 +3683,7 @@ function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="add-workspace-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="add-workspace-heading">Add workspace</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Add workspace" titleId="add-workspace-heading" closeLabel="add workspace" onClose={onClose} />
         <div role="tablist" aria-label="Where the workspace lives" className="rw-tabs">
           {places.map(([id, text], i) => (
             <button
@@ -3791,6 +3738,7 @@ function RenameWorkspaceDialog({
   readonly onClose: () => void;
 }) {
   const client = useCognate();
+  const toast = useToast();
   const [title, setTitle] = useState(workspace.title);
   const [error, setError] = useState<string | undefined>(undefined);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -3798,20 +3746,16 @@ function RenameWorkspaceDialog({
   const submit = useCallback(async () => {
     try {
       await client.invoke("workspace.rename", { workspaceId: workspace.id, title } as never);
+      toast.show("Workspace renamed");
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [client, workspace.id, title, onClose]);
+  }, [client, toast, workspace.id, title, onClose]);
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-workspace-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="rename-workspace-heading">Rename workspace</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Rename workspace" titleId="rename-workspace-heading" closeLabel="rename workspace" onClose={onClose} />
         <input aria-label="Workspace name" value={title} onChange={(e) => setTitle(e.currentTarget.value)} onKeyDown={(e) => {
           if (e.key === "Enter" && title.trim()) void submit();
         }} autoFocus />
@@ -3965,9 +3909,7 @@ export function PluginsPanelBody({
               </button>
             </>
           )}
-          <button type="button" className="icon-btn" aria-label="Close plugins panel" onClick={onClose}>
-            ×
-          </button>
+          <CloseButton label="plugins panel" onClick={onClose} />
         </div>
       </div>
 
@@ -4212,12 +4154,7 @@ function AddPluginDialog({
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal add-plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="add-plugin-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="add-plugin-heading">Add plugin</h2>
-          <button type="button" className="icon-btn" aria-label="Close add plugin" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Add plugin" titleId="add-plugin-heading" closeLabel="add plugin" onClose={onClose} />
         <div className="add-plugin-body">
           {candidates.length === 0 ? (
             <p className="empty-state small">Everything this deployment offers is already installed.</p>
@@ -4511,9 +4448,7 @@ function TraceDetailsPanel({
             </button>
           ))}
         </div>
-        <button type="button" className="icon-btn" aria-label="Close details" onClick={onClose}>
-          ×
-        </button>
+        <CloseButton label="details" onClick={onClose} />
       </div>
       <div className="right-panel-body">
         {request && tab === "summary" && (
@@ -4794,8 +4729,9 @@ function WorkbenchIcon() {
   );
 }
 
-export function App() {
+function AppShell() {
   const client = useCognate();
+  const toast = useToast();
   const workspaces = useWorkspaces();
   const worlds = useExecutionWorlds();
   const sessions = useSessions();
@@ -4809,26 +4745,13 @@ export function App() {
   const settings = useGeneralSettings();
   const theme = useTheme(settings.appearance);
   const workDetails = settings.workDetails;
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-
-  // "Open keyboard shortcuts Ctrl /" (ShortcutsDialog's one real binding) — a global listener, so
-  // the dialog opens from anywhere. Ignored while typing in a textarea/input (the reference's
-  // binding list is application-level, not composer-level).
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "/" && (e.ctrlKey || e.metaKey)) {
-        const target = e.target as HTMLElement | null;
-        if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
-        e.preventDefault();
-        setShortcutsOpen((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   const [collapsed, setCollapsed] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  // Settings is a page (not a modal): `settingsSection` is both "is it open" and "which section".
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
+  const showSettings = settingsSection !== undefined;
+  const openSettings = useCallback((section: SettingsSection = "general") => setSettingsSection(section), []);
+  const closeSettings = useCallback(() => setSettingsSection(undefined), []);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Usage pass U2: per-session access mode (the composer dropdown) — an override map keyed by
   // session id, seeded from the settings default for new sessions (`pendingAccessMode` carries a
   // hero-composer choice into the session send() creates). The `sessions` projection folds each
@@ -5248,6 +5171,127 @@ export function App() {
     [client, startNewSession],
   );
 
+  // ---- Global keyboard shortcuts + command palette (T1a) -----------------------------------
+  // `chordFor` is the effective chord (durable override, else shipped default) for an action id.
+  const chordFor = useCallback((id: string) => effectiveChord(id, settings.shortcuts), [settings.shortcuts]);
+  const closeCenterPanels = useCallback(() => {
+    setExpertsPanelOpen(false);
+    setWorkbenchOpen(false);
+    if (pluginsPanelOpen) closePluginsPanel();
+  }, [pluginsPanelOpen, closePluginsPanel]);
+
+  const actionHandlers = useRef<Record<string, () => void>>({});
+  actionHandlers.current = {
+    "open-command-palette": () => setPaletteOpen((open) => !open),
+    "open-settings": () => (showSettings ? closeSettings() : openSettings()),
+    "open-shortcuts": () => openSettings("shortcuts"),
+    "toggle-sidebar": () => setCollapsed((c) => !c),
+    "new-session": () => {
+      closeSettings();
+      newSession();
+    },
+  };
+  const shortcutOverridesRef = useRef(settings.shortcuts);
+  shortcutOverridesRef.current = settings.shortcuts;
+  const escapeStateRef = useRef({ showSettings });
+  escapeStateRef.current = { showSettings };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "Escape") {
+        // Escape closes the topmost surface. Dialogs (OPEN_MODAL_STACK) and open menus own their
+        // own Escape; the palette is a dialog; only then does it fall through to the Settings page.
+        if (OPEN_MODAL_STACK.length > 0) return;
+        if (document.querySelector('[aria-haspopup][aria-expanded="true"]')) return;
+        if (escapeStateRef.current.showSettings) {
+          e.preventDefault();
+          closeSettings();
+        }
+        return;
+      }
+      // Cmd acts as Ctrl on Apple platforms, so the stored "Ctrl+K" is Cmd+K there.
+      const event = { key: e.key, ctrlKey: e.ctrlKey || (isApplePlatform && e.metaKey), shiftKey: e.shiftKey, altKey: e.altKey, metaKey: !isApplePlatform && e.metaKey };
+      // Every chord carries a modifier (shortcuts.ts refuses bare keys), so it can never be
+      // someone typing. The composer is the default focus, so firing from <input>/<textarea> is
+      // required (Ctrl+K from the composer); only a rich-text editing surface is protected, via
+      // `isTypingTarget`'s contenteditable rule.
+      const target = e.target as HTMLElement | null;
+      const guard = target?.isContentEditable === true ? { tagName: "DIV", isContentEditable: true } : null;
+      const action = resolveKeypress(event, shortcutOverridesRef.current, guard);
+      const handler = action ? actionHandlers.current[action] : undefined;
+      if (!handler) return;
+      e.preventDefault();
+      handler();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeSettings]);
+
+  const paletteItems = useMemo<readonly PaletteItem[]>(() => {
+    const items: PaletteItem[] = [];
+    const go = (fn: () => void) => () => {
+      closeSettings();
+      fn();
+    };
+    items.push({ id: "new-session", group: "Actions", label: "New session", icon: <PlusIcon />, chord: chordFor("new-session"), keywords: "chat conversation create", run: () => actionHandlers.current["new-session"]?.() });
+    items.push({ id: "add-workspace", group: "Actions", label: "Add workspace", icon: <FolderIcon />, keywords: "open folder project directory", run: go(() => setAddWorkspaceOpen(true)) });
+    items.push({ id: "toggle-sidebar", group: "Actions", label: "Toggle sidebar", icon: <CollapseIcon />, chord: chordFor("toggle-sidebar"), keywords: "collapse expand navigation", run: () => setCollapsed((c) => !c) });
+    items.push({
+      id: "toggle-theme",
+      group: "Actions",
+      label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+      icon: theme === "dark" ? <SunIcon /> : <MoonIcon />,
+      keywords: "appearance dark light mode",
+      run: () => void client.invoke("settings.changeAppearance", { appearance: theme === "dark" ? "light" : "dark" } as never).then(() => toast.show("Settings saved")).catch(() => toast.show("Could not save that setting")),
+    });
+    items.push({ id: "experts", group: "Actions", label: "Experts & Teams", icon: <BotIcon />, keywords: "agents teams", run: go(() => { closeCenterPanels(); setExpertsPanelOpen(true); }) });
+    if (currentWorkspaceId) items.push({ id: "workbench", group: "Actions", label: "Workbench", icon: <WorkbenchIcon />, keywords: "tasks workflows automations", run: go(() => { closeCenterPanels(); setWorkbenchOpen(true); }) });
+    items.push({ id: "plugins", group: "Actions", label: "Plugins", icon: <PluginIcon />, keywords: "extensions", run: go(() => { setExpertsPanelOpen(false); setWorkbenchOpen(false); setPluginsPanelOpen(true); }) });
+    items.push({ id: "settings", group: "Settings", label: "Settings", icon: <GearIcon />, chord: chordFor("open-settings"), keywords: "preferences configuration", run: () => openSettings() });
+    for (const section of SETTINGS_SECTIONS) {
+      items.push({
+        id: `settings-${section.id}`,
+        group: "Settings",
+        label: section.id === "shortcuts" ? "Keyboard shortcuts" : `Settings: ${section.label}`,
+        icon: section.icon,
+        ...(section.id === "shortcuts" ? { chord: chordFor("open-shortcuts") } : {}),
+        keywords: `settings ${section.description}`,
+        run: () => openSettings(section.id),
+      });
+    }
+    for (const ws of workspaces) {
+      items.push({
+        id: `ws-${ws.id}`,
+        group: "Workspaces",
+        label: ws.title || ws.id,
+        detail: ws.root,
+        icon: <FolderIcon />,
+        keywords: "workspace switch",
+        run: go(() => void client.invoke("workspace.select", { path: ws.root, worldId: ws.executionWorldId ?? "local" } as never).catch((e) => toast.show(errorText(e)))),
+      });
+    }
+    const titleOf = new Map(workspaces.map((w) => [w.id, w.title || w.id]));
+    [...sessions]
+      .filter((x) => x.archived !== true)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .forEach((session) => {
+        items.push({
+          id: `session-${session.id}`,
+          group: "Sessions",
+          label: session.title || "New Session",
+          detail: titleOf.get(session.workspaceId) ?? "",
+          icon: <SessionIcon />,
+          keywords: "session conversation",
+          run: go(() => {
+            closeCenterPanels();
+            void openSession(session.id);
+          }),
+        });
+      });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chordFor, theme, workspaces, sessions, currentWorkspaceId, client, toast, closeCenterPanels, openSession, openSettings, closeSettings]);
+
   // Close the sidebar's floating menus on outside click / Escape (same pattern as SettingMenu).
   useEffect(() => {
     if (!viewOptionsOpen && !chooseWsOpen && wsMenuFor === undefined) return;
@@ -5545,7 +5589,7 @@ export function App() {
 
   return (
     <div className="app-shell" data-theme={theme}>
-      <aside className={collapsed ? "sidebar collapsed" : "sidebar"}>
+      <aside className={`${collapsed ? "sidebar collapsed" : "sidebar"}${showSettings ? " shell-hidden" : ""}`}>
         <div className="sidebar-top">
           <div className="brand">
             <LogoIcon />
@@ -5556,7 +5600,7 @@ export function App() {
               </span>
             )}
           </div>
-          <button type="button" className="icon-btn" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((c) => !c)}>
+          <button type="button" className="icon-btn" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={`${collapsed ? "Expand" : "Collapse"} sidebar (${chordLabel(chordFor("toggle-sidebar"))})`} aria-keyshortcuts={chordLabel(chordFor("toggle-sidebar"))} onClick={() => setCollapsed((c) => !c)}>
             <CollapseIcon />
           </button>
         </div>
@@ -5565,12 +5609,15 @@ export function App() {
           type="button"
           className="new-session-btn"
           aria-label="New session"
+          title={`New session (${chordLabel(chordFor("new-session"))})`}
+          aria-keyshortcuts={chordLabel(chordFor("new-session"))}
           onClick={newSession}
           disabled={!currentWorkspaceId || newSessionPending}
           aria-busy={newSessionPending}
         >
           <PlusIcon />
           {!collapsed && (newSessionPending ? "Creating…" : "New Session")}
+          {!collapsed && !newSessionPending && <Kbd chord={chordFor("new-session")} className="kbd-right" />}
         </button>
         {newSessionError && (
           <p role="alert" className="new-session-error">
@@ -5776,6 +5823,14 @@ export function App() {
                       const archived = session.archived !== true;
                       void client
                         .invoke("session.setArchived", { sessionId: session.id, archived } as never)
+                        .then(() =>
+                          toast.show(archived ? "Session archived" : "Session restored", {
+                            action: {
+                              label: "Undo",
+                              onAction: () => void client.invoke("session.setArchived", { sessionId: session.id, archived: !archived } as never).catch((e) => console.error("session.setArchived failed", e)),
+                            },
+                          }),
+                        )
                         .catch((e) => console.error("session.setArchived failed", e));
                     }}
                   />
@@ -5900,16 +5955,32 @@ export function App() {
         )}
 
         <div className="sidebar-bottom">
-          <button type="button" className="icon-btn" aria-label="Settings" onClick={() => setShowSettings(true)}>
+          <button type="button" className="icon-btn" aria-label="Command palette" title={`Command palette (${chordLabel(chordFor("open-command-palette"))})`} aria-keyshortcuts={chordLabel(chordFor("open-command-palette"))} onClick={() => setPaletteOpen(true)}>
+            <CommandIcon />
+            {!collapsed && <span>Search &amp; commands</span>}
+            {!collapsed && <Kbd chord={chordFor("open-command-palette")} className="kbd-right" />}
+          </button>
+          <button type="button" className="icon-btn" aria-label="Settings" onClick={() => openSettings()} title={`Settings (${chordLabel(chordFor("open-settings"))})`} aria-keyshortcuts={chordLabel(chordFor("open-settings"))}>
             <GearIcon />
             {!collapsed && <span>Settings</span>}
+            {!collapsed && <Kbd chord={chordFor("open-settings")} className="kbd-right" />}
           </button>
         </div>
       </aside>
 
-      <main className="center-column">
+      {showSettings && (
+        <SettingsPage
+          onClose={closeSettings}
+          section={settingsSection}
+          onSectionChange={setSettingsSection}
+          settings={settings}
+          workspaceId={currentWorkspaceId}
+          onChangeShortcuts={(shortcuts) => client.invoke("settings.changeShortcuts", { shortcuts } as never) as unknown as Promise<void>}
+        />
+      )}
+      <main className={showSettings ? "center-column shell-hidden" : "center-column"}>
         {expertsPanelOpen ? (
-          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onClose={() => setExpertsPanelOpen(false)} onOpenNavigation={() => setCollapsed(false)} onOpenSettings={() => setShowSettings(true)} />
+          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onClose={() => setExpertsPanelOpen(false)} onOpenNavigation={() => setCollapsed(false)} onOpenSettings={() => openSettings("models")} />
         ) : pluginsPanelOpen ? (
           <PluginsPanel
             detailId={detailPluginId}
@@ -6135,17 +6206,18 @@ export function App() {
       ) : (
         openChildRow ? <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} /> : <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
       )}
-      {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} workspaceId={currentWorkspaceId} />}
-      {shortcutsOpen && (
-        <ShortcutsDialog
-          overrides={settings.shortcuts}
-          onChangeShortcuts={(shortcuts) => client.invoke("settings.changeShortcuts", { shortcuts } as never) as unknown as Promise<void>}
-          onClose={() => setShortcutsOpen(false)}
-        />
-      )}
+      {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
       <FirstRunDialogs />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <ToastProvider>
+      <AppShell />
+    </ToastProvider>
   );
 }

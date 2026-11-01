@@ -85,7 +85,7 @@ describe("E2E remote workspaces", () => {
         const folder = dialog.getByLabel("Remote folder path");
         expect((await folder.inputValue()).startsWith("/")).toBe(true);
         await folder.fill(remote);
-        await dialog.getByRole("button", { name: "Add workspace" }).click();
+        await dialog.getByRole("button", { name: "Add workspace", exact: true }).click();
         await dialog.waitFor({ state: "detached" });
 
         // the sidebar marks it as remote, with the connection's name
