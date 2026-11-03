@@ -102,4 +102,23 @@ export interface BlockedRecord {
   readonly reason: string;
 }
 
+/** J-TERMINAL-session: the durable metadata of one interactive terminal session. */
+export interface TerminalRow {
+  readonly sessionId: string;
+  readonly worldId: string;
+  readonly worldKind: string;
+  readonly workspaceId?: string;
+  readonly workspaceLabel?: string;
+  readonly worldLabel?: string;
+  readonly cwd: string;
+  readonly shell: string;
+  readonly status: "running" | "exited";
+  readonly openedAt: string;
+  readonly closedAt?: string;
+  readonly reason?: string;
+  readonly exitCode?: number | null;
+  readonly message?: string;
+  readonly ownerActorId?: string;
+}
+
 export type { EvidenceEntry, Inbox, WorkflowDefinition };

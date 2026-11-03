@@ -39,6 +39,8 @@
     "@godspeedai/cognate-runtime-bun": "0.8.0",
     "@godspeedai/cognate-store-postgres": "0.8.0",
     "@godspeedai/cognate-ui-astryx": "0.8.0",
+    "@xterm/addon-fit": "^0.11",
+    "@xterm/xterm": "^6",
     "gpt-tokenizer": "^4.0.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

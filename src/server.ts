@@ -350,6 +350,7 @@ import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { App } from "../src/ui/App.tsx";
 import { setRemoteFetch } from "../src/ui/remoteFetch.ts";
+import { setBootToken } from "../src/ui/bootToken.ts";
 import { coalesceProjectionReads } from "../src/ui/coalesceReads.ts";
 
 const caller = { tenant: ${JSON.stringify(caller.tenant)}, actor: { id: ${JSON.stringify(caller.actorId)}, kind: "user" } };
@@ -361,6 +362,9 @@ const service = coalesceProjectionReads(createRemoteRuntimeService(transport, ()
 const client = createClient({ service, caller });
 // Mobile remote control: the desktop's own loopback calls to /remote/* carry this boot session bearer.
 setRemoteFetch((path, init) => fetch(path, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), authorization: "Bearer " + authToken } }));
+// Surfaces that cannot set headers on their transport (websockets) present the same bearer as
+// their first message; the server resolves it against the durable session ledger like any request.
+setBootToken(authToken);
 
 const root = document.getElementById("root");
 
@@ -894,11 +898,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // A packaged build serves the Astryx stylesheets from its share directory, copied there at build time.
   const cssPaths = packaged ? [resourcePath("dist", "web", "astryx.css"), resourcePath("dist", "web", "theme.css")] : stylesheetPaths();
   const appCssPath = resourcePath("src", "ui", "app.css");
+  // xterm.js's stylesheet ships with the package; dev reads it from node_modules, packaged builds
+  // get it copied to dist/web (scripts/package.ts). Without it the terminal renders unstyled.
+  const xtermCssPath = packaged ? resourcePath("dist", "web", "xterm.css") : resourcePath("node_modules", "@xterm", "xterm", "css", "xterm.css");
   // The workbench cockpit's styles are layered after app.css: shared primitives first, then each
   // component's layout-only sheet (the server concatenates; components never import CSS).
   const WORKBENCH_CSS = ["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"];
   const cssParts: string[] = [];
-  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css"), resourcePath("src", "ui", "inspector", "inspector.css")]) {
+  for (const file of [appCssPath, xtermCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css"), resourcePath("src", "ui", "inspector", "inspector.css")]) {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");

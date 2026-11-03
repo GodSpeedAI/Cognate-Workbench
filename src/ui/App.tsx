@@ -153,6 +153,7 @@ import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
 import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
 import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
+import { TerminalPanel } from "./terminal/TerminalPanel.tsx";
 import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
 import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
@@ -4346,6 +4347,35 @@ function AppShell() {
   const inspector = useInspector();
   const isMobile = useMediaQuery("(max-width: 760px)");
   const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
+  // J-TERMINAL-session: the docked working surface (terminal today; browser with its phase).
+  // The dock is a view of a server-side session — height is the only local preference.
+  const [surface, setSurface] = useState<"none" | "terminal" | "browser">("none");
+  const [surfaceMaximized, setSurfaceMaximized] = useState(false);
+  const [surfaceHeight, setSurfaceHeight] = useState<number>(() => {
+    const raw = Number(localStorage.getItem("cognate.surface.height"));
+    return Number.isFinite(raw) && raw >= 180 && raw <= 800 ? raw : 320;
+  });
+  const setSurfaceHeightPersisted = useCallback((px: number) => {
+    const clamped = Math.round(Math.max(180, Math.min(800, px)));
+    setSurfaceHeight(clamped);
+    try { localStorage.setItem("cognate.surface.height", String(clamped)); } catch { /* storage may be unavailable */ }
+  }, []);
+  const toggleSurface = useCallback((next: "terminal" | "browser") => {
+    setSurface((current) => (current === next ? "none" : next));
+    setSurfaceMaximized(false);
+  }, []);
+  const startSurfaceResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = surfaceHeight;
+    const move = (moveEvent: PointerEvent) => setSurfaceHeightPersisted(startHeight + (startY - moveEvent.clientY));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, [surfaceHeight, setSurfaceHeightPersisted]);
   const setSidebarWidth = useCallback((w: number) => {
     setSidebarWidthState(w);
     try {
@@ -5844,14 +5874,28 @@ function AppShell() {
             />
           }
           trailing={
-            inSession && subagentRows.length > 0 ? (
+            <>
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "terminal" ? " active" : ""}`}
+                  aria-pressed={surface === "terminal"}
+                  aria-label={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  title={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  onClick={() => toggleSurface("terminal")}
+                >
+                  <TerminalIcon />
+                </button>
+              )}
+              {inSession && subagentRows.length > 0 ? (
               <div className="subagent-count-wrap">
                 <button type="button" className="subagent-count-btn" aria-expanded={subagentsExpanded} onClick={() => setSubagentsExpanded((v) => !v)}>
                   {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
                 </button>
                 {subagentsExpanded && <SubagentTree rows={subagentRows} onOpen={(row) => openSubagent(row.toolCallId)} />}
               </div>
-            ) : undefined
+            ) : undefined}
+            </>
           }
           inspectorOpen={inspector.open}
           onToggleInspector={inspector.toggleInspector}
@@ -6009,6 +6053,26 @@ function AppShell() {
               />
             )}
           </>
+        )}
+        {surface === "terminal" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Terminal dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize terminal dock" onPointerDown={startSurfaceResize} />
+            )}
+            <TerminalPanel
+              workspaceId={currentWorkspaceId}
+              workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+              worldId={currentWorkspace?.executionWorldId ?? "local"}
+              worldLabel={currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId)?.label ?? currentWorkspace.executionWorldId : "Local"}
+              maximized={surfaceMaximized}
+              onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+              onClose={() => setSurface("none")}
+            />
+          </section>
         )}
       </main>
       <Inspector sidebarWidth={isMobile || collapsed ? 0 : sidebarWidth} />

@@ -5173,3 +5173,102 @@ body.is-col-resizing .resize-handle:active::after {
 }
 .remote-diag button { padding: 5px 12px; border: 1px solid var(--cg-border-strong); border-radius: var(--cg-radius-md); background: var(--cg-surface); color: var(--cg-text); font: inherit; font-size: 12.5px; cursor: pointer; }
 .remote-diag button:hover { background: var(--cg-hover); }
+
+/* ---- Terminal dock (J-TERMINAL-session) ---------------------------------------------------------- */
+
+.surface-toggles { display: flex; align-items: center; gap: 2px; }
+
+.surface-dock {
+  flex: none;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--cg-border);
+  background: var(--cg-surface);
+  position: relative;
+}
+.surface-dock.maximized { flex: 1; min-height: 0; height: auto !important; border-top: none; }
+.surface-dock-resize {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: ns-resize;
+  z-index: 5;
+}
+.surface-dock-resize:hover, .surface-dock-resize:focus-visible { background: color-mix(in srgb, var(--cg-accent) 25%, transparent); }
+
+.term-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.term-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--cg-border);
+}
+.term-panel-title { font-family: var(--cg-font-display, inherit); font-weight: 500; }
+.term-panel-context { color: var(--cg-text-muted, var(--cg-text)); opacity: 0.75; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-panel-spring { flex: 1; }
+.term-panel-error { margin: 0; padding: 8px 12px; color: var(--cg-danger); }
+.term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--cg-border);
+  overflow-x: auto;
+  min-height: 30px;
+}
+.term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-xs, 4px);
+  background: transparent;
+  color: var(--cg-text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.term-tab.active { border-color: var(--cg-accent); }
+.term-tab.ended { opacity: 0.55; }
+.term-tab-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--cg-text) 8%, transparent);
+}
+.term-tab-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.term-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--cg-text);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.term-tab-add, .term-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--cg-text);
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--cg-radius-xs, 4px);
+}
+.term-tab-add:hover, .term-tab-btn:hover { background: color-mix(in srgb, var(--cg-text) 8%, transparent); }
+.term-hosts { flex: 1; min-height: 0; padding: 0 6px 6px; display: flex; }
+.term-host { flex: 1; min-height: 0; }
+.term-host .xterm, .term-host .xterm .xterm-viewport, .term-host .xterm .xterm-screen { height: 100%; }
+.term-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--cg-text-muted, var(--cg-text));
+}

@@ -75,6 +75,8 @@ export async function stageShareTree(repo: string, share: string, bunTarget: str
     ...["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"].map((n) => `src/ui/workbench/${n}.css`),
   ];
   for (const f of cssFiles) await copyInto(join(repo, f), join(share, f));
+  // xterm.js's stylesheet for the terminal dock (the server concat reads it from dist/web when packaged).
+  await copyInto(join(repo, "node_modules", "@xterm", "xterm", "css", "xterm.css"), join(web, "xterm.css"));
 
   // 3. Semantic model (read at boot; its digest is the canonical identity the server reports).
   await copyInto(join(repo, ".sea/interaction/interaction-model.sea"), join(share, ".sea/interaction/interaction-model.sea"));
