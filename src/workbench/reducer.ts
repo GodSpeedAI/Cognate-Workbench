@@ -209,6 +209,38 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       }
       return writes;
     }
+    case "workbench.terminal.opened": {
+      const row = {
+        sessionId: String(p.sessionId),
+        worldId: String(p.worldId),
+        worldKind: String(p.worldKind),
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        ...(typeof p.workspaceLabel === "string" ? { workspaceLabel: p.workspaceLabel } : {}),
+        cwd: String(p.cwd),
+        shell: String(p.shell),
+        status: "running",
+        openedAt: recordedAt,
+        ...(typeof p.ownerActorId === "string" ? { ownerActorId: p.ownerActorId } : {}),
+      };
+      return [{ key: `terminal/${row.sessionId}`, value: j(row) }];
+    }
+    case "workbench.terminal.closed": {
+      const sessionId = String(p.sessionId);
+      const key = `terminal/${sessionId}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{
+        key,
+        value: j({
+          ...prev,
+          status: "exited",
+          closedAt: recordedAt,
+          reason: String(p.reason ?? "exit"),
+          ...(p.exitCode === null || typeof p.exitCode === "number" ? { exitCode: p.exitCode } : {}),
+          ...(typeof p.message === "string" ? { message: p.message } : {}),
+        }),
+      }];
+    }
     default:
       return [];
   }

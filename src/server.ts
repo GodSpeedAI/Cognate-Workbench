@@ -19,7 +19,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -47,6 +47,12 @@ import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { agentHarnessAgent } from "./agents/agentHarness.ts";
 import { harnessComponent } from "./capabilities/harness.ts";
+import { terminalComponent } from "./capabilities/terminal.ts";
+import { TerminalService } from "./terminal/service.ts";
+import { localTerminalPort, wslTerminalPort } from "./terminal/local.ts";
+import { sshTerminalPort } from "./terminal/ssh.ts";
+import { terminalWsController, type TerminalSocketData } from "./terminal/wsController.ts";
+import type { Json } from "@godspeedai/cognate-events";
 import { HarnessDetector, type HarnessHostEnv } from "./agents/harness/detect.ts";
 import { HarnessSessionHost } from "./agents/harness/sessions.ts";
 import { sessionHarnessBindingsProjection } from "./projections/sessionHarnessBindings.ts";
@@ -252,6 +258,10 @@ const GRANTED_CAPABILITIES = [
   "session.harness.bind",
   "session.harness.resolve",
   "harness.turn.advance",
+  // J-TERMINAL / J-BROWSER / J-PREVIEW: desktop collaboration surfaces. The mutating members
+  // (terminal.open/close, browser.input, browser.close, preview.stop) are operator-only inside
+  // the component; agent-invocable browser reads are added deliberately in the browser phase.
+  ...Object.keys(SURFACES_CAPABILITY_ANCHORS),
   "workspace.directory.suggest",
   "workspace.files.list",
   "workspace.file.read",
@@ -456,6 +466,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // J-CHECKOUT-EXECUTION / J-CHECKOUT-LIFECYCLE); see CHECKOUT_CAPABILITY_ANCHORS in domain/index.ts.
   const checkoutRefs = bindCheckoutCapabilities(domain);
   const harnessRefs = bindHarnessCapabilities(domain);
+  // J-TERMINAL / J-BROWSER / J-PREVIEW: the desktop collaboration surfaces (terminal PTYs,
+  // the shared browser, dev-server previews); see SURFACES_CAPABILITY_ANCHORS in domain/index.ts.
+  const surfaceRefs = bindSurfaceCapabilities(domain);
   const harnessDetector = new HarnessDetector(options.harnessHost ?? {});
   const harnessHost = new HarnessSessionHost(harnessDetector);
 
@@ -518,6 +531,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // instance can be handed to any future surface that needs to resolve a catalog entry, and so an
   // additional `PluginSource` can be registered at boot without touching the capability.
   const pluginRegistry = new PluginRegistry();
+  // J-TERMINAL-session: live PTY sessions are ephemeral, in-memory state. The durable truth is
+  // the workbench.terminal.* events the terminal capabilities record; this registry dies with
+  // the process and stale projection rows render as what they are (sessions of an earlier run).
+  const terminalService = new TerminalService({
+    ports: { local: localTerminalPort(), wsl: wslTerminalPort(), ssh: sshTerminalPort() },
+  });
+  const terminalConnectionFor = async (worldId: string): Promise<{ readonly connection: Json } | undefined> => {
+    const rows = (await getService().readProjection(SYSTEM_CALLER, { name: "execution-worlds" })).rows;
+    const row = rows.find(entry => entry.key.endsWith(`/record/${worldId}`))?.value as { readonly connection: Json } | undefined;
+    return row ? { connection: row.connection } : undefined;
+  };
 
   let pollApprovals: (() => Promise<number>) | undefined;
   const runtime: Runtime = await createRuntime({
@@ -542,7 +566,15 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     actions: buildActionPolicy(),
     agents: [agentConfigAgent, agentCodingAgent, agentHarnessAgent, agentCognitiveAgent, agentExpert],
     components: [
-      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
+      terminalComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        registry: executionWorlds,
+        service: terminalService,
+        home,
+        connectionFor: terminalConnectionFor,
+        semanticRefs: surfaceRefs,
+      }),      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
@@ -821,6 +853,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     console.warn("[cognate-workbench] dev auth ARMED: client-claimed bearer identities are trusted; never use this posture in production");
   }
   registerRuntimeService(connectRouter, governedService, { authenticate, maxJsonDepth: 32 });
+  // J-TERMINAL-session: the terminal stream endpoint. First-message auth (the browser cannot set
+  // headers on a websocket and the token never travels in a URL), then the service binds the
+  // socket to one session whose owner must match the token's identity.
+  const terminalWs = terminalWsController({
+    service: terminalService,
+    authenticate: async (token) => await authenticate(new Headers({ authorization: `Bearer ${token}` })),
+  });
   const connectHandlersByPath = new Map<string, (req: Request) => Promise<Response>>();
   for (const uHandler of connectRouter.handlers) {
     connectHandlersByPath.set(uHandler.requestPath, (request) => createFetchHandler(uHandler, { httpVersion: "1.1" })(request).then(response => {
@@ -907,7 +946,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     "cross-origin-resource-policy": "same-origin",
     ...headers,
   });
-  const server = Bun.serve({
+  const server = Bun.serve<TerminalSocketData>({
     port: options.port,
     hostname: "127.0.0.1",
     idleTimeout: 0,
@@ -916,6 +955,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       const refusal = loopbackRefusal(request.headers);
       if (refusal) return new Response(refusal.reason, { status: refusal.status, headers: hardened() });
       const url = new URL(request.url);
+      // Terminal stream upgrade: same-origin only (loopbackRefusal above already refused
+      // non-loopback Origins), then the controller demands first-message authentication.
+      if (url.pathname === "/terminal/stream") {
+        const session = url.searchParams.get("session");
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" || !session) {
+          return new Response("websocket upgrade required", { status: 426, headers: hardened() });
+        }
+        const upgraded = server.upgrade(request, { data: { authed: false, sessionId: session } });
+        if (upgraded) return undefined;
+        return new Response("upgrade failed", { status: 500, headers: hardened() });
+      }
       if (url.pathname === "/health") {
         return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest }, execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined } }, { headers: hardened() });
       }
@@ -940,6 +990,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }) });
       return new Response("not found", { status: 404, headers: hardened() });
     },
+    websocket: {
+      open: (ws) => void terminalWs.open(ws as never),
+      message: (ws, message) => void terminalWs.message(ws as never, message),
+      close: (ws) => terminalWs.close(ws as never),
+    },
   });
 
   return {
@@ -951,6 +1006,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     operatorSessionToken: operatorSession.token,
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
+      await terminalService.dispose();
       await harnessHost.shutdown();
       eventsController.abort();
       await remote.close();

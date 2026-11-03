@@ -204,5 +204,9 @@ export const WORKBENCH_EVENTS = [
   // The truth is this event log; the `task-checkout-bindings` projection rows are derived.
   "workbench.checkout.bound",
   "workbench.checkout.removed",
+  // J-TERMINAL-session: metadata and transitions of interactive terminal sessions. Stream
+  // bytes are deliberately absent — the durable log never records what a terminal printed.
+  "workbench.terminal.opened",
+  "workbench.terminal.closed",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];
