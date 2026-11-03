@@ -147,10 +147,14 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             let _ = window.eval("location.reload()");
         }
         "wb-devtools" => {
-            if window.is_devtools_open() {
-                window.close_devtools();
-            } else {
-                window.open_devtools();
+            // Devtools exist implicitly in debug builds; a release build has no such surface.
+            #[cfg(debug_assertions)]
+            {
+                if window.is_devtools_open() {
+                    window.close_devtools();
+                } else {
+                    window.open_devtools();
+                }
             }
         }
         "wb-zoom-in" => {
