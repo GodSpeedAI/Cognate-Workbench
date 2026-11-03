@@ -9,7 +9,10 @@
     "test": "bun test --timeout 15000 test",
     "typecheck": "tsc -p tsconfig.json",
     "verify": "bun run typecheck && bun run test",
-    "test:smoke": "bun test test/workbench-contract.test.ts test/workbench-glob.test.ts test/skill-bundle.test.ts"
+    "test:smoke": "bun test test/workbench-contract.test.ts test/workbench-glob.test.ts test/skill-bundle.test.ts",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "bun scripts/tauri-sidecar.ts && tauri build"
   },
   "dependencies": {
     "@connectrpc/connect": "2.2.0",
@@ -42,15 +45,16 @@
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.43.0",
+    "@happy-dom/global-registrator": "20.14.5",
+    "@playwright/test": "1.63.0",
+    "@tauri-apps/cli": "^2",
+    "@testing-library/react": "16.3.3",
+    "@types/bun": "1.4.2",
+    "@types/node": "^24.0.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.2.2",
-    "@types/bun": "1.4.2",
-    "@playwright/test": "1.63.0",
-    "@happy-dom/global-registrator": "20.14.5",
-    "@testing-library/react": "16.3.3",
-    "typescript": "7.0.2",
-    "@types/node": "^24.0.0",
-    "@types/ssh2": "^1.15.5"
+    "@types/ssh2": "^1.15.5",
+    "typescript": "7.0.2"
   },
   "description": "Capability-native agent Workbench, powered by the published Cognate SDK",
   "packageManager": "bun@1.4.0"

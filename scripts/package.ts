@@ -10,6 +10,9 @@
 //   share/cognate-workbench/MANIFEST.json  sha256 of every shipped file plus provenance
 // and an archive (.tar.gz, or .zip on Windows) with a SHA256SUMS file beside it.
 // The sha256 pins are checked before anything is staged; a mismatch fails the build.
+//
+// The staging steps (web bundles, stylesheets, .sea model, pg0, manifest) are shared with
+// scripts/tauri-sidecar.ts, which stages the same tree for the Tauri desktop shell.
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -21,168 +24,205 @@ import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 import { buildDeb, buildMacInstaller, buildWindowsInstaller } from "./installers.ts";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
-const [bunTarget, tag] = process.argv.slice(2);
-if (!bunTarget || !tag) throw new Error("usage: bun scripts/package.ts <bun-target> <tag>");
 
 // Bun compile target -> pg0 asset key and the napi binding the npm package ships for that platform.
-const PLATFORMS: Record<string, { pg0: string; binding: string; exeSuffix: string }> = {
+export const PLATFORMS: Record<string, { pg0: string; binding: string; exeSuffix: string }> = {
   "bun-linux-x64": { pg0: "linux-x86_64-gnu", binding: "linux-x64-gnu", exeSuffix: "" },
   "bun-linux-arm64": { pg0: "linux-aarch64-gnu", binding: "linux-arm64-gnu", exeSuffix: "" },
   "bun-darwin-arm64": { pg0: "darwin-aarch64", binding: "darwin-arm64", exeSuffix: "" },
   "bun-darwin-x64": { pg0: "darwin-x86_64", binding: "darwin-x64", exeSuffix: "" },
   "bun-windows-x64": { pg0: "windows-x86_64.exe", binding: "win32-x64-msvc", exeSuffix: ".exe" },
 };
-const platform = PLATFORMS[bunTarget];
-if (!platform) throw new Error(`package: unsupported target ${bunTarget}`);
-const win = bunTarget.includes("windows");
-const pg0Name = win ? "pg0.exe" : "pg0";
 
-const pkg = JSON.parse(await readFile(join(repo, "package.json"), "utf8")) as { version: string };
-const folder = `cognate-workbench-${pkg.version}-${tag}`;
-const out = join(repo, "dist-package");
-const prefix = join(out, folder);
-const share = join(prefix, "share", "cognate-workbench");
-await rm(prefix, { recursive: true, force: true });
-await mkdir(join(prefix, "bin"), { recursive: true });
-await mkdir(join(share, "bin"), { recursive: true });
-
-async function copyInto(from: string, to: string): Promise<void> {
+export async function copyInto(from: string, to: string): Promise<void> {
   await mkdir(dirname(to), { recursive: true });
   await copyFile(from, to);
 }
 
-async function bundle(entry: string): Promise<string> {
+export async function bundle(entry: string): Promise<string> {
   const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm", minify: true });
   if (!build.success) throw new Error(`package: bundling ${entry} failed: ${build.logs.map(String).join("; ")}`);
   return build.outputs[0]!.text();
 }
 
-// 1. Web bundles. The desktop bundle keeps the boot-token placeholder; the server substitutes it at boot.
-const generated = join(repo, ".generated");
-await mkdir(generated, { recursive: true });
-const entryPath = join(generated, "entry.tsx");
-await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, BOOT_TOKEN_PLACEHOLDER));
-const web = join(share, "dist", "web");
-await mkdir(web, { recursive: true });
-await writeFile(join(web, "app.js"), await bundle(entryPath));
-await writeFile(join(web, "phone.js"), await bundle(join(repo, "src/ui/mobile/entry.tsx")));
+/**
+ * Stage the server's read-only resource tree (web bundles with the boot-token placeholder,
+ * stylesheets, the .sea model, the pinned pg0 binary). Returns the pg0 pin recorded in the
+ * manifest. Mirrors the checkout's paths so `resourcePath()` resolves the same in both modes.
+ */
+export async function stageShareTree(repo: string, share: string, bunTarget: string): Promise<{ pg0Asset: string; pg0Digest: string }> {
+  const platform = PLATFORMS[bunTarget];
+  if (!platform) throw new Error(`package: unsupported target ${bunTarget}`);
+  const win = bunTarget.includes("windows");
+  const pg0Name = win ? "pg0.exe" : "pg0";
 
-// 2. Stylesheets: Astryx comes from its SDK package, the rest from the checkout.
-const [astryx, theme] = stylesheetPaths();
-await copyInto(astryx!, join(web, "astryx.css"));
-await copyInto(theme!, join(web, "theme.css"));
-const cssFiles = [
-  "src/ui/app.css", "src/ui/mobile/mobile.css", "src/ui/experts/experts.css", "src/ui/inspector/inspector.css",
-  ...["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"].map((n) => `src/ui/workbench/${n}.css`),
-];
-for (const f of cssFiles) await copyInto(join(repo, f), join(share, f));
+  // 1. Web bundles. The desktop bundle keeps the boot-token placeholder; the server substitutes it at boot.
+  const generated = join(repo, ".generated");
+  await mkdir(generated, { recursive: true });
+  const entryPath = join(generated, "entry.tsx");
+  await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, BOOT_TOKEN_PLACEHOLDER));
+  const web = join(share, "dist", "web");
+  await mkdir(web, { recursive: true });
+  await writeFile(join(web, "app.js"), await bundle(entryPath));
+  await writeFile(join(web, "phone.js"), await bundle(join(repo, "src/ui/mobile/entry.tsx")));
 
-// 3. Semantic model (read at boot; its digest is the canonical identity the server reports).
-await copyInto(join(repo, ".sea/interaction/interaction-model.sea"), join(share, ".sea/interaction/interaction-model.sea"));
+  // 2. Stylesheets: Astryx comes from its SDK package, the rest from the checkout.
+  const [astryx, theme] = stylesheetPaths();
+  await copyInto(astryx!, join(web, "astryx.css"));
+  await copyInto(theme!, join(web, "theme.css"));
+  const cssFiles = [
+    "src/ui/app.css", "src/ui/mobile/mobile.css", "src/ui/experts/experts.css", "src/ui/inspector/inspector.css",
+    ...["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"].map((n) => `src/ui/workbench/${n}.css`),
+  ];
+  for (const f of cssFiles) await copyInto(join(repo, f), join(share, f));
 
-// 4. Compiled executable.
-const exe = join(prefix, "bin", `cognate-workbench${platform.exeSuffix}`);
-// The DomainForge npm package ships only the linux-x64 binding; other targets need it built first (see
-// .github/workflows/package.yml). Without it the exe compiles but crashes at startup, so stop here.
-const bindingFile = join(repo, "node_modules", "@godspeedai", "domainforge", `domainforge-core.${platform.binding}.node`);
-if (!existsSync(bindingFile)) {
-  throw new Error(`package: missing DomainForge binding ${bindingFile}; build it for ${platform.binding} first (see .github/workflows/package.yml)`);
-}
-const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
-if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile failed for ${bunTarget}`);
+  // 3. Semantic model (read at boot; its digest is the canonical identity the server reports).
+  await copyInto(join(repo, ".sea/interaction/interaction-model.sea"), join(share, ".sea/interaction/interaction-model.sea"));
 
-// 4b. Desktop integration. Windows: a second, windowed (GUI-subsystem, icon-bearing) executable whose only job is
-// `launch`; the console exe stays the CLI. Linux: a freedesktop launcher and icon in the archive's share/ tree.
-const icons = join(repo, "assets", "icons");
-if (win) {
-  const desktopExe = join(prefix, "bin", "cognate-workbench-desktop.exe");
-  const parts = pkg.version.split(/[.+-]/).slice(0, 3).map((n) => (/^\d+$/.test(n) ? n : "0"));
-  while (parts.length < 4) parts.push("0");
-  // Icon and version resources can only be written when compiling on Windows (the release runner); a
-  // cross-compile on another host still gets the GUI subsystem, just without them.
-  const resources = process.platform === "win32"
-    ? [`--windows-icon=${join(icons, "cognate-workbench.ico")}`, "--windows-title=Cognate Workbench", "--windows-publisher=GodSpeedAI", `--windows-version=${parts.join(".")}`, "--windows-description=Cognate Workbench"]
-    : [];
-  const desktop = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/desktop.ts"), "--outfile", desktopExe, "--windows-hide-console", ...resources], { cwd: repo, stdout: "inherit", stderr: "inherit" });
-  if ((await desktop.exited) !== 0) throw new Error(`package: bun build --compile (desktop) failed for ${bunTarget}`);
-}
-if (tag.startsWith("linux")) {
-  await copyInto(join(icons, "cognate-workbench-256.png"), join(prefix, "share", "icons", "hicolor", "256x256", "apps", "cognate-workbench.png"));
-  await mkdir(join(prefix, "share", "applications"), { recursive: true });
-  await writeFile(join(prefix, "share", "applications", "cognate-workbench.desktop"), [
-    "[Desktop Entry]", "Type=Application", "Name=Cognate Workbench", "Comment=Local capability-native agent workbench",
-    "Exec=cognate-workbench launch", "Icon=cognate-workbench", "Terminal=false", "Categories=Development;", "StartupWMClass=CognateWorkbench", "",
-  ].join("\n"));
-}
-if (tag.startsWith("darwin")) await copyInto(join(icons, "cognate-workbench-256.png"), join(share, "icons", "cognate-workbench.png"));
-
-// 5. pg0, fetched from the pinned release and verified before it is staged.
-const pg0Digest = PG0_DIGESTS[platform.pg0];
-if (!pg0Digest) throw new Error(`package: no pinned pg0 digest for ${platform.pg0}`);
-// Retried on network errors and server errors: a runner's DNS or connection can time out once, and the digest below
-// still decides whether the bytes are accepted.
-async function fetchPg0(url: string): Promise<Buffer> {
-  for (let attempt = 1; ; attempt++) {
-    let response: Response | undefined;
-    try {
-      response = await fetch(url);
-    } catch (error) {
-      if (attempt === 4) throw error;
-    }
-    if (response?.ok) return Buffer.from(await response.arrayBuffer());
-    if (response && (response.status < 500 || attempt === 4)) throw new Error(`package: pg0 download failed: ${response.status}`);
-    await new Promise((resolve) => setTimeout(resolve, 5000 * attempt));
-  }
-}
-const pg0Bytes = await fetchPg0(pg0Url(platform.pg0));
-const pg0Actual = createHash("sha256").update(pg0Bytes).digest("hex");
-if (pg0Actual !== pg0Digest) throw new Error(`package: pg0 sha256 mismatch for ${platform.pg0}: got ${pg0Actual}`);
-await writeFile(join(share, "bin", pg0Name), pg0Bytes);
-await chmod(join(share, "bin", pg0Name), 0o755);
-
-// 6. Manifest: every shipped file with its sha256, plus the provenance needed to audit the package.
-const files: Array<{ path: string; sha256: string; bytes: number }> = [];
-async function walk(dir: string): Promise<void> {
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) await walk(full);
-    else if (!full.endsWith("MANIFEST.json")) {
-      const bytes = await readFile(full);
-      files.push({ path: relative(prefix, full), sha256: createHash("sha256").update(bytes).digest("hex"), bytes: (await stat(full)).size });
+  // 5. pg0, fetched from the pinned release and verified before it is staged.
+  const pg0Digest = PG0_DIGESTS[platform.pg0];
+  if (!pg0Digest) throw new Error(`package: no pinned pg0 digest for ${platform.pg0}`);
+  // Retried on network errors and server errors: a runner's DNS or connection can time out once, and the digest below
+  // still decides whether the bytes are accepted.
+  async function fetchPg0(url: string): Promise<Buffer> {
+    for (let attempt = 1; ; attempt++) {
+      let response: Response | undefined;
+      try {
+        response = await fetch(url);
+      } catch (error) {
+        if (attempt === 4) throw error;
+      }
+      if (response?.ok) return Buffer.from(await response.arrayBuffer());
+      if (response && (response.status < 500 || attempt === 4)) throw new Error(`package: pg0 download failed: ${response.status}`);
+      await new Promise((resolve) => setTimeout(resolve, 5000 * attempt));
     }
   }
+  const pg0Bytes = await fetchPg0(pg0Url(platform.pg0));
+  const pg0Actual = createHash("sha256").update(pg0Bytes).digest("hex");
+  if (pg0Actual !== pg0Digest) throw new Error(`package: pg0 sha256 mismatch for ${platform.pg0}: got ${pg0Actual}`);
+  await mkdir(join(share, "bin"), { recursive: true });
+  await writeFile(join(share, "bin", pg0Name), pg0Bytes);
+  await chmod(join(share, "bin", pg0Name), 0o755);
+  return { pg0Asset: platform.pg0, pg0Digest };
 }
-await walk(prefix);
-const commit = (await new Response(Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: repo, stdout: "pipe" }).stdout).text()).trim();
-const manifest = {
-  product: "cognate-workbench",
-  version: pkg.version,
-  tag,
-  bunTarget,
-  commit,
-  pg0: { version: PG0_VERSION, postgres: POSTGRES_VERSION, asset: `pg0-${platform.pg0}`, sha256: pg0Digest },
-  domainforgeBinding: platform.binding,
-  files: files.sort((a, b) => a.path.localeCompare(b.path)),
-};
-await writeFile(join(share, "MANIFEST.json"), JSON.stringify(manifest, null, 2) + "\n");
 
-// 7. Archive and checksums.
-const archive = win ? `${folder}.zip` : `${folder}.tar.gz`;
-const tarArgs = win ? ["tar", "-a", "-c", "-f", join(out, archive), "-C", out, folder] : ["tar", "-czf", join(out, archive), "-C", out, folder];
-if ((await Bun.spawn(tarArgs, { stdout: "inherit", stderr: "inherit" }).exited) !== 0) throw new Error(`package: archive failed`);
-const archiveBytes = await readFile(join(out, archive));
-const archiveDigest = createHash("sha256").update(archiveBytes).digest("hex");
-await writeFile(join(out, `${archive}.sha256`), `${archiveDigest}  ${archive}\n`);
-console.log(`package: ${archive} sha256=${archiveDigest} (${files.length} files, pg0 ${PG0_VERSION}, commit ${commit.slice(0, 12)})`);
-// 8. Platform installer(s) from the same staged folder: .deb, .pkg + .dmg, or the Windows per-user setup.
-const installerInput = { tag, version: pkg.version, commit, prefix, out, repo };
-const installers: string[] = [];
-if (tag.startsWith("linux")) installers.push(await buildDeb(installerInput, tag.endsWith("arm64") ? "arm64" : "amd64"));
-else if (tag.startsWith("darwin")) installers.push(...await buildMacInstaller(installerInput, tag.endsWith("arm64") ? "arm64" : "x64"));
-else if (tag === "windows-x64") installers.push(await buildWindowsInstaller(installerInput));
-for (const file of installers) {
-  const digest = createHash("sha256").update(await readFile(file)).digest("hex");
-  await writeFile(`${file}.sha256`, `${digest}  ${file.split(/[\\/]/).pop()}\n`);
-  console.log(`package: ${file.split(/[\\/]/).pop()} sha256=${digest}`);
+/** Manifest: every staged file with its sha256, plus the provenance needed to audit the package. */
+export async function writeManifest(
+  root: string,
+  meta: { version: string; tag: string; bunTarget: string; commit: string; pg0Asset: string; pg0Digest: string; binding: string },
+): Promise<void> {
+  const files: Array<{ path: string; sha256: string; bytes: number }> = [];
+  async function walk(dir: string): Promise<void> {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (!full.endsWith("MANIFEST.json")) {
+        const bytes = await readFile(full);
+        files.push({ path: relative(root, full), sha256: createHash("sha256").update(bytes).digest("hex"), bytes: (await stat(full)).size });
+      }
+    }
+  }
+  await walk(root);
+  const manifest = {
+    product: "cognate-workbench",
+    version: meta.version,
+    tag: meta.tag,
+    bunTarget: meta.bunTarget,
+    commit: meta.commit,
+    pg0: { version: PG0_VERSION, postgres: POSTGRES_VERSION, asset: `pg0-${meta.pg0Asset}`, sha256: meta.pg0Digest },
+    domainforgeBinding: meta.binding,
+    files: files.sort((a, b) => a.path.localeCompare(b.path)),
+  };
+  await writeFile(join(root, "MANIFEST.json"), JSON.stringify(manifest, null, 2) + "\n");
 }
-if (!existsSync(exe)) throw new Error("package: executable missing after compile");
+
+async function main(bunTarget: string, tag: string) {
+  const platform = PLATFORMS[bunTarget];
+  if (!platform) throw new Error(`package: unsupported target ${bunTarget}`);
+  const win = bunTarget.includes("windows");
+
+  const pkg = JSON.parse(await readFile(join(repo, "package.json"), "utf8")) as { version: string };
+  const folder = `cognate-workbench-${pkg.version}-${tag}`;
+  const out = join(repo, "dist-package");
+  const prefix = join(out, folder);
+  const share = join(prefix, "share", "cognate-workbench");
+  await rm(prefix, { recursive: true, force: true });
+  await mkdir(join(prefix, "bin"), { recursive: true });
+
+  const pg0 = await stageShareTree(repo, share, bunTarget);
+
+  // 4. Compiled executable.
+  const exe = join(prefix, "bin", `cognate-workbench${platform.exeSuffix}`);
+  // The DomainForge npm package ships only the linux-x64 binding; other targets need it built first (see
+  // .github/workflows/package.yml). Without it the exe compiles but crashes at startup, so stop here.
+  const bindingFile = join(repo, "node_modules", "@godspeedai", "domainforge", `domainforge-core.${platform.binding}.node`);
+  if (!existsSync(bindingFile)) {
+    throw new Error(`package: missing DomainForge binding ${bindingFile}; build it for ${platform.binding} first (see .github/workflows/package.yml)`);
+  }
+  const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
+  if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile failed for ${bunTarget}`);
+
+  // 4b. Desktop integration. Windows: a second, windowed (GUI-subsystem, icon-bearing) executable whose only job is
+  // `launch`; the console exe stays the CLI. Linux: a freedesktop launcher and icon in the archive's share/ tree.
+  const icons = join(repo, "assets", "icons");
+  if (win) {
+    const desktopExe = join(prefix, "bin", "cognate-workbench-desktop.exe");
+    const parts = pkg.version.split(/[.+-]/).slice(0, 3).map((n) => (/^\d+$/.test(n) ? n : "0"));
+    while (parts.length < 4) parts.push("0");
+    // Icon and version resources can only be written when compiling on Windows (the release runner); a
+    // cross-compile on another host still gets the GUI subsystem, just without them.
+    const resources = process.platform === "win32"
+      ? [`--windows-icon=${join(icons, "cognate-workbench.ico")}`, "--windows-title=Cognate Workbench", "--windows-publisher=GodSpeedAI", `--windows-version=${parts.join(".")}`, "--windows-description=Cognate Workbench"]
+      : [];
+    const desktop = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/desktop.ts"), "--outfile", desktopExe, "--windows-hide-console", ...resources], { cwd: repo, stdout: "inherit", stderr: "inherit" });
+    if ((await desktop.exited) !== 0) throw new Error(`package: bun build --compile (desktop) failed for ${bunTarget}`);
+  }
+  if (tag.startsWith("linux")) {
+    await copyInto(join(icons, "cognate-workbench-256.png"), join(prefix, "share", "icons", "hicolor", "256x256", "apps", "cognate-workbench.png"));
+    await mkdir(join(prefix, "share", "applications"), { recursive: true });
+    await writeFile(join(prefix, "share", "applications", "cognate-workbench.desktop"), [
+      "[Desktop Entry]", "Type=Application", "Name=Cognate Workbench", "Comment=Local capability-native agent workbench",
+      "Exec=cognate-workbench launch", "Icon=cognate-workbench", "Terminal=false", "Categories=Development;", "StartupWMClass=CognateWorkbench", "",
+    ].join("\n"));
+  }
+  if (tag.startsWith("darwin")) await copyInto(join(icons, "cognate-workbench-256.png"), join(share, "icons", "cognate-workbench.png"));
+
+  // 6. Manifest.
+  const commit = (await new Response(Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: repo, stdout: "pipe" }).stdout).text()).trim();
+  await writeManifest(prefix, {
+    version: pkg.version,
+    tag,
+    bunTarget,
+    commit,
+    pg0Asset: pg0.pg0Asset,
+    pg0Digest: pg0.pg0Digest,
+    binding: platform.binding,
+  });
+
+  // 7. Archive and checksums.
+  const archive = win ? `${folder}.zip` : `${folder}.tar.gz`;
+  const tarArgs = win ? ["tar", "-a", "-c", "-f", join(out, archive), "-C", out, folder] : ["tar", "-czf", join(out, archive), "-C", out, folder];
+  if ((await Bun.spawn(tarArgs, { stdout: "inherit", stderr: "inherit" }).exited) !== 0) throw new Error(`package: archive failed`);
+  const archiveBytes = await readFile(join(out, archive));
+  const archiveDigest = createHash("sha256").update(archiveBytes).digest("hex");
+  await writeFile(join(out, `${archive}.sha256`), `${archiveDigest}  ${archive}\n`);
+  console.log(`package: ${archive} sha256=${archiveDigest} (pg0 ${PG0_VERSION}, commit ${commit.slice(0, 12)})`);
+  // 8. Platform installer(s) from the same staged folder: .deb, .pkg + .dmg, or the Windows per-user setup.
+  const installerInput = { tag, version: pkg.version, commit, prefix, out, repo };
+  const installers: string[] = [];
+  if (tag.startsWith("linux")) installers.push(await buildDeb(installerInput, tag.endsWith("arm64") ? "arm64" : "amd64"));
+  else if (tag.startsWith("darwin")) installers.push(...await buildMacInstaller(installerInput, tag.endsWith("arm64") ? "arm64" : "x64"));
+  else if (tag === "windows-x64") installers.push(await buildWindowsInstaller(installerInput));
+  for (const file of installers) {
+    const digest = createHash("sha256").update(await readFile(file)).digest("hex");
+    await writeFile(`${file}.sha256`, `${digest}  ${file.split(/[\\/]/).pop()}\n`);
+    console.log(`package: ${file.split(/[\\/]/).pop()} sha256=${digest}`);
+  }
+  if (!existsSync(exe)) throw new Error("package: executable missing after compile");
+}
+
+if (import.meta.main) {
+  const [bunTarget, tag] = process.argv.slice(2);
+  if (!bunTarget || !tag) throw new Error("usage: bun scripts/package.ts <bun-target> <tag>");
+  await main(bunTarget, tag);
+}
