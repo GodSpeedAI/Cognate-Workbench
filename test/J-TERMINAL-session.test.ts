@@ -94,7 +94,7 @@ describe("J-TERMINAL-session", () => {
         const { workspaceId, workspaceDir } = await seedWorkspaceOnly(client, home);
 
         // --- open: operator-only capability returns a live view
-        const view = (await inv(client, "terminal.open", { workspaceId })) as TerminalSessionView;
+        const view = (await inv(client, "terminal.open", { workspaceId })) as unknown as TerminalSessionView;
         expect(view.status).toBe("running");
         expect(view.worldKind).toBe("local");
         expect(view.cwd).toBe(workspaceDir);
@@ -180,7 +180,7 @@ describe("J-TERMINAL-session", () => {
       const { app, client } = await bootApp(home);
       try {
         const { workspaceId } = await seedWorkspaceOnly(client, home);
-        const view = (await inv(client, "terminal.open", { workspaceId })) as TerminalSessionView;
+        const view = (await inv(client, "terminal.open", { workspaceId })) as unknown as TerminalSessionView;
         const url = `${app.url.replace("http://", "ws://")}/terminal/stream?session=${view.sessionId}`;
 
         // No auth within the guard window → closed with the auth-expected code.
@@ -222,7 +222,7 @@ describe("J-TERMINAL-session", () => {
       const { app, client } = await bootApp(home);
       try {
         const { workspaceId } = await seedWorkspaceOnly(client, home);
-        const view = (await inv(client, "terminal.open", { workspaceId })) as TerminalSessionView;
+        const view = (await inv(client, "terminal.open", { workspaceId })) as unknown as TerminalSessionView;
 
         // Attach to a session id that was never live on this server.
         const url = `${app.url.replace("http://", "ws://")}/terminal/stream?session=00000000-0000-4000-8000-000000000000`;
