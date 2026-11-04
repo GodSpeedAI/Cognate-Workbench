@@ -413,7 +413,10 @@ fn terminate(child: &mut Child) {
         // the standalone package's documented Windows limitation (see README.md).
         let _ = child.kill();
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // The sidecar's clean stop covers app teardown (terminal/browser/preview disposal) AND the
+    // bundled database's own stop. Ten seconds SIGKILLed it mid-cleanup, leaving an orphaned
+    // pg0 behind — observed on this host. Thirty seconds covers a checkpointing database.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
         match child.try_wait() {
             Ok(Some(_)) | Err(_) => return,

@@ -83,3 +83,99 @@ Append-only. Every entry: date, exact command, result, evidence notes.
   (`bun test test/J-CFG-provider-switch.test.ts` → 6 pass; `bun test
   test/E2E-expert-workspace-admission.test.ts` → 1 pass). Neither file touches the terminal or
   browser surface.
+
+## T10 — Inspect + annotate (2026-11-03)
+
+- Commit `4d12704`.
+- `bun test test/J-BROWSER-inspect.test.ts` → 3 pass / 0 fail: select-without-activate (the
+  capture-phase click kill is load-bearing — preventDefault on mousedown alone still activates
+  buttons, which the journey caught and the script now handles), full structured capture (tag,
+  role, name, text, rect, viewport, candidates of all four kinds, ancestry, styles, timestamp),
+  evidence screenshot on disk, durable fold with the staleness token, stale-after-navigation,
+  resolve-after-SPA-update (both directions proven), the submitted message reaching the model's
+  own aimock journal with the payload intact and the untrusted-input fence present, and inspect
+  refused under agent control with the reason.
+- `bun test test/E2E-browser.test.ts` → 2 pass / 0 fail incl. the dock inspect flow: toggle,
+  hint, click-to-card, durable "Record only", card clears.
+- `test/ui-viewport-math.test.ts` → 9 pass: the letterbox mapping matrix (both axes, exact fit,
+  the real failing dock shape, extreme ratios, resize, HiDPI invariance, margin clamping,
+  pre-frame fallback, fractional rounding).
+
+## Flake characterization (2026-11-03) — evidence, not normalization
+
+Three full `bun run verify` runs, one on the pre-desktop baseline, two on this branch:
+
+| Run | Commit | Failures (of ~1570) |
+|---|---|---|
+| baseline | `448a095` | `J-RW-ssh-workspaces` (SSH coexist) — 1 |
+| HEAD #1 | `ed81cde` | `J-CFG-provider-switch` (Azure headers), `J-EXPERT-WORKSPACE-ADMISSION` (15s UI wait) — 2 |
+| HEAD #2 | `4d12704` | `J-CFG-provider-test` (keyless), `J-EXPERT-WORKSPACE-ADMISSION` (again) — 2 |
+
+- Both reported HEAD-#1 flakes pass in isolation immediately after the run (provider-switch: 6
+  pass; workspace-admission: 1 pass) and again in the targeted regression set.
+- `J-RW-ssh-workspaces` failed ONLY on the baseline — the suite has pre-existing load flakiness
+  independent of this branch.
+- `J-EXPERT-WORKSPACE-ADMISSION` failed on both HEAD runs but not the baseline: not proven
+  pre-existing, so treated as aggravated by this work. The aggravation vector identified is the
+  initial page-load weight: the dock panels (including the xterm renderer) were statically
+  imported into `App.tsx`. Fixed in `d2119a2` (React.lazy + Suspense; Bun.build defers the module
+  init). HEAD #3 (`d2119a2`) is the controlled re-run: its result is recorded below when done —
+  if the admission test still fails there, the fix is wrong and stays open as debt.
+- The provider-suite failures rotate (`switch`/`test` in different runs; both pass in isolation
+  and on the baseline): pre-existing mock-server timing races under 189-file parallelism.
+
+## T11 — Preview registration + forwarding (2026-11-03)
+
+- Commit `d2119a2`.
+- `bun test test/J-PREVIEW-register.test.ts` → 4 pass / 0 fail: local-world lifecycle (explicit
+  registration, readiness probe before ready, the managed browser opens the registered URL,
+  stop kills the owned process — group discipline, liveness polled), unreachable port refused
+  with the reason and nothing recorded, archiving the owning session stops the preview and the
+  process (reason "owner ended"), and an SSH world's preview reached through a REAL local
+  forward (direct-tcpip over the genuine ssh2 fixture connection, fingerprint re-verified,
+  view URL on an ephemeral local port, forward close actually closes, no password material in
+  the durable record).
+- Product bugs found and fixed while proving it: the execution-world connection resolver's
+  key matcher could never match (silent SSH terminal breakage, now fixed + bounded over the
+  async fold), and owner-ended cleanup was not durable (the stop recorder is now injected and
+  shared by every stop path).
+- WSL forwarding documented, not tested here: WSL2's loopback forwarding is a Windows-host
+  feature; this host is Linux.
+
+## T12 — Mission journey + native shell (2026-11-03)
+
+- Commit `d2119a2`: `test/E2E-mission.test.ts` — 1 pass. The original success criterion, end to
+  end in one run: the agent (real aimock-driven loop, real bash tool) writes and serves a web
+  app (setsid-detached so the tool returns and the server survives; content-type correct — the
+  missing header rendered the page as literal text, which the journey caught); the preview is
+  registered governed and readiness-probed; the operator opens it in the shared browser dock,
+  arms inspect, selects the heading (a click that cannot activate), annotates with a note; the
+  model's journal shows the structured payload with the untrusted-input fence; the agent's edit
+  lands in the served file; an explicit refresh in the SAME browser workspace shows the change.
+  Port note: the fixture authors the bash, so the mission port (47190) is fixed; the test
+  reclaims it before and after.
+- Tauri shell: `cargo check` in `src-tauri` → clean (2m24s). `J-DESKTOP-launch` (real launch
+  path with a fake browser: app window opens, quits with it, second launch reuses the running
+  instance) passes in both HEAD full runs (~4.6s).
+- Still open for T12: release packaged build + real-window pass on WSLg, sidecar-failure surface
+  probe, package scripts; platform validation on Windows/macOS remains blocked on hosts (below).
+
+### Tauri packaging + failure surface (2026-11-03, after d2119a2)
+
+- `bun run tauri:build` → release shell compiled (1m22s); **deb bundle produced**
+  (`Cognate Workbench_0.1.0_amd64.deb`, 75 MB, sidecar + resources staged at commit d2119a2).
+  AppImage bundling fails at linuxdeploy — the known WSL2/FUSE limitation from the
+  standalone-packages tranche; recorded, not silently dropped.
+- Packaged-layout launch pass (deb extracted to a clean prefix, `DISPLAY=:0`, WSLg): the shell
+  started, spawned the sidecar, the bundled pg0 came up ("database: bundled pg0 … port 5435"),
+  the domain loaded, the backend reached `backend ready` (durable session posture, contained
+  execution). Pixel-level window verification is not possible on this host (no xdotool/wmctrl);
+  the window lifecycle is covered by `J-DESKTOP-launch` (passes).
+- **Failure-surface bug found and fixed**: an external SIGTERM orphaned the bundled pg0. The
+  chain was shell→sidecar SIGTERM→clean stop, but the shell's 10 s terminate grace SIGKILLed
+  the sidecar mid-cleanup (app teardown + database stop can exceed 10 s). Grace is now 30 s
+  (wedge failsafe 45 s). Verified against the repackaged deb: SIGTERM → `[shell] signal 15` →
+  sidecar `closing the application` → `bundled database "…" stopped (owned by this data home)`
+  → shell, sidecar and pg0 all gone.
+- Recovery path observed working: the second launch reused the interrupted owner's database
+  ("recovering from an interrupted owner (pid …); its database is reused, not reinitialised").
