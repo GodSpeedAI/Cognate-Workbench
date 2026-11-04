@@ -1,37 +1,34 @@
 # Current status
 
-Revision 37, 2026-11-01. Branch `feat/ui-production-readiness` (cut from `51e579b` on `feat/standalone-packages`; PR #22 still pending there). Nothing on this branch is pushed.
+Revision 38, 2026-11-03. Branch `feat/ui-production-readiness`. Latest work: desktop-terminal-browser tranches T4–T9 (commits `be49122`…`ec7fc4d`). Nothing on this branch is pushed.
 
-Plan: `.agents/plans/20261031_ui-production-readiness.plan.yaml`.
-Proof report: `.agents/reports/ui-production-readiness/REPORT.md`.
+Plan: `.agents/plans/desktop-terminal-browser/plan.md`. Verification log: `.agents/plans/desktop-terminal-browser/verification.md`.
 
 ## What changed
 
-- Desktop: `cognate-workbench launch` opens an Edge/Chrome app window (own profile, single instance, quits with the window). Windows ships a GUI-subsystem `cognate-workbench-desktop.exe` for the shortcuts.
-- UI adopts PandaCode's layout and flows with Cognate's identity: full-page Settings (close X on the right), command palette and global shortcuts, toasts, main header with view switch, resizable inspector (Context, Changes, Files, Config, Details), mobile drawer and sheets.
-- First run: Welcome, then the full provider form, then folder choice.
-- Providers: 21 presets with test, switch, delete; keys in the OS secret store (file fallback).
-- External agent CLIs: 12 detected (Claude Code, Codex, ACP agents), bound per session, approvals bridged.
-- Folder autocomplete handles fragments, `~`, fuzzy matches and drill-down.
-- The config file opens editable in the inspector.
-- New capabilities each have a journey and a test: `config.file.*`, `workspace.files.list`, `workspace.file.read`, `secrets.backend.describe`, `provider.*`, `agent.harness.list`, `session.harness.*`, `session.rename`.
+- Terminal (T4/T5): PTY terminal service — local Bun.Terminal, WSL via wsl.exe, SSH via ssh2 with host-key fingerprint re-verification and the world's stored credentials; process-group termination (group SIGTERM, grace, group SIGKILL); governed `terminal.open`/`terminal.close` capabilities (operator-only, workspace-scoped cwd); `/terminal/stream` websocket with first-message token auth; durable record is `workbench.terminal.*` metadata — stream bytes are never persisted.
+- Terminal UI (T6/T7): docked xterm panel under the conversation — tabbed sessions per workspace world, detach keeps the process, reattach replays bounded scrollback, maximize and persisted dock height, header toggle.
+- Browser (T8/T9): managed shared browser sessions on the agent-browser provider (isolated Chromium per session). Streamed JPEG viewport over `/browser/stream` (one Bun websocket shared with the terminal via a surface tag), base64 frames decoded to bytes, url/console relayed live. Control is named, never ambient: `browser.control` records the one controller; human input is refused while the agent holds control and vice versa; reads (snapshot/screenshot) stay available either way. Durable record is `workbench.browser.*` metadata.
+- Browser UI: canvas panel with address bar through `browser.navigate`, control badge, page-error feed; click/keyboard coordinates map through the object-fit: contain letterbox rect; header globe toggle beside the terminal toggle.
+- Interaction model: `browser.control` and the handoff variant added model-first; bindings updated; validate 0 violations.
 
 ## Verified
 
-- `just verify` at `04f648d`: 1564 tests, 1551 pass, 13 skip, 0 fail.
-- DomainForge validate: 0 violations.
-- 135 final screenshots with a contrast audit; two independent screenshot audits (A1, A2), A2's blocking defects fixed.
-- Real CLI turns: Claude Code and Codex answered; OpenCode refused cleanly when not signed in.
-- Packaged Linux build launched as an app window; Windows desktop exe is Subsystem 2 (GUI).
+- `bun run typecheck`: 0 errors.
+- Journeys/E2E: J-TERMINAL (3), J-BROWSER (2), E2E-terminal, E2E-browser — 7 pass / 0 fail, including real-Chromium passes in both surfaces.
+- `bun run test:smoke` 73 pass / 0 fail; `workbench-contract` 16 pass / 0 fail.
+- `bun run verify` at `ec7fc4d`: 1571 tests, 1556 pass, 13 skip, 2 fail — both failures are parallel-load flakes (`J-CFG-provider-switch`, `J-EXPERT-WORKSPACE-ADMISSION`) that pass in isolation; neither touches the terminal/browser surface.
+- agent-browser spike: every required op verified against the real CLI and daemon websocket before the adapter was written (decision recorded in verification.md).
 
 ## Limits
 
-- Not production hardened: single-operator development authenticator.
-- Not run on real Windows or macOS; Windows installer not built here (no `makensis`).
-- Open UI polish and platform debts are listed in `.agents/DEBT.md` (2026-11-01 entries).
+- SSH terminal journey not exercised against a live sshd on this host; WSL paths are Windows-host-only by design and unverified here.
+- T6 as planned (center-view registry extraction) was not performed — the dock lives in `App.tsx`; debt folded into T12.
+- Tauri acceptance rows (packaged launch pass, second-window single instance, close cleanup, failure surface) still open, scheduled with T12.
+- Earlier revision-37 limits still stand: not production hardened (single-operator dev authenticator); packaged builds not exercised on real Windows/macOS hosts.
 
 ## Next
 
-1. Run the packaged build on Windows and macOS hosts.
-2. Work through the remaining A2 P2/P3 rows.
-3. Merge PR #22, then open a PR for this branch.
+1. T10 — inspect + annotate + evidence: injected inspector, structured capture, annotation records, agent receives context.
+2. T11 — preview registration + forwarding (`preview.register` journey).
+3. T12 — end-to-end mission journey, threat review, Tauri acceptance rows, packaging, docs.
