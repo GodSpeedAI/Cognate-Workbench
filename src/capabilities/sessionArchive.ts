@@ -19,6 +19,8 @@ export function sessionArchiveComponent(options: {
   readonly getService: () => RuntimeService;
   readonly systemCaller: Caller;
   readonly semanticRef: SemanticRef | undefined;
+  /** J-PREVIEW-register: ended sessions stop the previews they own (injected, not imported). */
+  readonly onArchived?: (sessionId: string, archived: boolean) => Promise<unknown>;
 }): Component {
   const contract = { id: "session.setArchived", version: "1.0.0", semanticRef: options.semanticRef };
   return {
@@ -43,6 +45,7 @@ export function sessionArchiveComponent(options: {
           input: { kind: "session.archived", sessionId: input.sessionId, archived: input.archived },
           idempotencyKey: randomUUID(),
         });
+        if (input.archived) await options.onArchived?.(input.sessionId, true);
         return { ok: true, sessionId: input.sessionId, archived: input.archived };
       });
     },

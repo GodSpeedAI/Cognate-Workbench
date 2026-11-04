@@ -217,5 +217,9 @@ export const WORKBENCH_EVENTS = [
   "workbench.browser.screenshot",
   "workbench.browser.annotated",
   "workbench.browser.closed",
+  // J-PREVIEW-register: governed dev-server previews. The registration is explicit and
+  // ownership-carrying; readiness is probed, never assumed.
+  "workbench.preview.registered",
+  "workbench.preview.stopped",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, ReactNode } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
@@ -154,8 +154,11 @@ import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
 import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
 import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
-import { TerminalPanel } from "./terminal/TerminalPanel.tsx";
-import { BrowserPanel } from "./browser/BrowserPanel.tsx";
+// J-TERMINAL/J-BROWSER: the dock surfaces load on first open (React.lazy). Their module graph
+// includes the xterm renderer and the browser panel; keeping them out of the initial chunk keeps
+// every non-dock page load light — measurable in the UI E2Es under parallel load.
+const TerminalPanel = lazy(() => import("./terminal/TerminalPanel.tsx").then((m) => ({ default: m.TerminalPanel })));
+const BrowserPanel = lazy(() => import("./browser/BrowserPanel.tsx").then((m) => ({ default: m.BrowserPanel })));
 import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
 import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
@@ -6077,14 +6080,18 @@ function AppShell() {
             {!surfaceMaximized && (
               <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize browser dock" onPointerDown={startSurfaceResize} />
             )}
-            <BrowserPanel
-              workspaceId={currentWorkspaceId}
-              workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
-              maximized={surfaceMaximized}
-              onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
-              onClose={() => setSurface("none")}
-              onSendToConversation={(message) => void send(message)}
-            />
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the browser panel…</p></div>}
+            >
+              <BrowserPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+                onSendToConversation={(message) => void send(message)}
+              />
+            </Suspense>
           </section>
         )}
         {surface === "terminal" && currentWorkspaceId && (
@@ -6096,15 +6103,19 @@ function AppShell() {
             {!surfaceMaximized && (
               <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize terminal dock" onPointerDown={startSurfaceResize} />
             )}
-            <TerminalPanel
-              workspaceId={currentWorkspaceId}
-              workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
-              worldId={currentWorkspace?.executionWorldId ?? "local"}
-              worldLabel={currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId)?.label ?? currentWorkspace.executionWorldId : "Local"}
-              maximized={surfaceMaximized}
-              onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
-              onClose={() => setSurface("none")}
-            />
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the terminal…</p></div>}
+            >
+              <TerminalPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                worldId={currentWorkspace?.executionWorldId ?? "local"}
+                worldLabel={currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId)?.label ?? currentWorkspace.executionWorldId : "Local"}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+              />
+            </Suspense>
           </section>
         )}
       </main>

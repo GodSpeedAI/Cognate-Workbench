@@ -308,6 +308,30 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       if (!prev) return [];
       return [{ key, value: j({ ...prev, status: "closed", closedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
     }
+    // J-PREVIEW-register: the explicit, ownership-carrying dev-server registration.
+    case "workbench.preview.registered": {
+      const row = {
+        previewId: String(p.previewId),
+        worldId: String(p.worldId),
+        worldKind: String(p.worldKind),
+        viewUrl: String(p.viewUrl),
+        originUrl: String(p.originUrl),
+        status: "ready",
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        ...(typeof p.ownerSessionId === "string" ? { ownerSessionId: p.ownerSessionId } : {}),
+        ...(typeof p.ownerTaskId === "string" ? { ownerTaskId: p.ownerTaskId } : {}),
+        ...(typeof p.ownerRunId === "string" ? { ownerRunId: p.ownerRunId } : {}),
+        ...(typeof p.pid === "number" ? { pid: p.pid } : {}),
+        registeredAt: recordedAt,
+      };
+      return [{ key: `preview/${row.previewId}`, value: j(row) }];
+    }
+    case "workbench.preview.stopped": {
+      const key = `preview/${String(p.previewId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, status: "stopped", stoppedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
+    }
     default:
       return [];
   }

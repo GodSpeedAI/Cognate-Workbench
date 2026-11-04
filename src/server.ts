@@ -1,6 +1,7 @@
 // Single Bun process: runtime + Connect RuntimeService + bundled React UI + CSS.
 // See docs/explanation/why-single-bun-process.md for why this is a hand-composed
 // `createRuntime` rather than `createHarness`.
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -43,7 +44,7 @@ import { createSettlementOrchestrator } from "./settlement/orchestrator.ts";
 import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/realitytrace.ts";
 import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
-import { agentConfigAgent } from "./agents/agentConfig.ts";
+import { agentConfigAgent, AGENT_CONFIG } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { agentHarnessAgent } from "./agents/agentHarness.ts";
 import { harnessComponent } from "./capabilities/harness.ts";
@@ -89,6 +90,8 @@ import { subagentStartComponent } from "./capabilities/subagentStart.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
+import { previewComponent } from "./capabilities/preview.ts";
+import { PreviewService } from "./preview/service.ts";
 import { sessionRenameComponent } from "./capabilities/sessionRename.ts";
 import { providerManageComponent } from "./capabilities/providerManage.ts";
 import { providerSwitchComponent } from "./capabilities/providerSwitch.ts";
@@ -547,10 +550,40 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   });
   // J-BROWSER-session: managed shared browser sessions behind the agent-browser provider.
   const browserService = new BrowserService({ provider: agentBrowserProvider() });
+  // J-PREVIEW-register: governed dev-server previews, reachable across worlds (SSH by forward).
+  const previewService = new PreviewService({
+    // Every stop path folds the same durable event (owner-ended cleanup included).
+    recordStopped: async (view, reason) => {
+      const { runId } = await getService().startRun(SYSTEM_CALLER, {
+        agent: AGENT_CONFIG,
+        input: { kind: "workbench.recorded", events: [{ type: "workbench.preview.stopped", payload: { previewId: view.previewId, reason } }] } as unknown as import("@godspeedai/cognate-events").Json,
+        idempotencyKey: randomUUID(),
+        correlationId: `preview/${view.previewId}`,
+      });
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const run = await getService().getRun(SYSTEM_CALLER, { runId });
+        if (run.status === "completed") return;
+        if (run.status === "failed" || run.status === "cancelled") throw new Error(`preview: recording the stop failed (${run.status})`);
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      throw new Error("preview: recording the stop timed out");
+    },
+  });
+  const previewWorldKindFor = (worldId: string): "local" | "ssh" | "wsl" | undefined => {
+    if (worldId === "local") return "local";
+    return executionWorlds.get(worldId)?.kind as "local" | "ssh" | "wsl" | undefined;
+  };
   const terminalConnectionFor = async (worldId: string): Promise<{ readonly connection: Json } | undefined> => {
-    const rows = (await getService().readProjection(SYSTEM_CALLER, { name: "execution-worlds" })).rows;
-    const row = rows.find(entry => entry.key.endsWith(`/record/${worldId}`))?.value as { readonly connection: Json } | undefined;
-    return row ? { connection: row.connection } : undefined;
+    // The world record folds asynchronously after connect; a capability-time read right behind a
+    // fresh connect races the fold. Bound the wait instead of failing the first caller.
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      const rows = (await getService().readProjection(SYSTEM_CALLER, { name: "execution-worlds" })).rows;
+      const row = rows.find(entry => entry.key === `record/${worldId}`)?.value as { readonly connection: Json } | undefined;
+      if (row) return { connection: row.connection };
+      if (Date.now() > deadline) return undefined;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
   };
 
   let pollApprovals: (() => Promise<number>) | undefined;
@@ -591,7 +624,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         service: browserService,
         evidenceDir: join(home, "browser-evidence"),
         semanticRefs: surfaceRefs,
-      }),      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
+      }),
+      previewComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        service: previewService,
+        connectionFor: terminalConnectionFor,
+        worldKindFor: previewWorldKindFor,
+        home,
+        semanticRefs: surfaceRefs,
+      }),
+      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
@@ -620,7 +663,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: [...usage2.settingsChange, t8.containment], shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
-      sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
+      sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"], onArchived: (sessionId, archived) => (archived ? previewService.stopForOwner({ sessionId }) : Promise.resolve([])) }),
       sessionRenameComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.rename"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       secretsBackendDescribeComponent({ describe: () => secretsBackend, semanticRef: t11["secrets.backend.describe"] }),

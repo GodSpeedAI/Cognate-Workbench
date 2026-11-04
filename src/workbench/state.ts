@@ -154,6 +154,24 @@ export interface BrowserRow {
   readonly navigations?: number;
 }
 
+/** J-PREVIEW-register: one governed development-server preview. */
+export interface PreviewRow {
+  readonly previewId: string;
+  readonly worldId: string;
+  readonly worldKind: string;
+  readonly viewUrl: string;
+  readonly originUrl: string;
+  readonly status: "ready" | "stopped";
+  readonly workspaceId?: string;
+  readonly ownerSessionId?: string;
+  readonly ownerTaskId?: string;
+  readonly ownerRunId?: string;
+  readonly pid?: number;
+  readonly registeredAt: string;
+  readonly stoppedAt?: string;
+  readonly reason?: string;
+}
+
 /** Staleness of an annotation against its row: later navigation (by counter or by URL) marks it. */
 export const annotationIsStale = (annotation: BrowserAnnotationRow, row: BrowserRow): boolean =>
   (annotation.navigationsAtCapture !== undefined && (row.navigations ?? 0) > annotation.navigationsAtCapture) ||
