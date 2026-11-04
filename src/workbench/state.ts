@@ -121,6 +121,20 @@ export interface TerminalRow {
   readonly ownerActorId?: string;
 }
 
+/** J-BROWSER-inspect: one durable element annotation. `navigationsAtCapture` is the staleness
+ *  token — the row's `navigations` counter passing it means later navigation moved the page. */
+export interface BrowserAnnotationRow {
+  readonly annotationId: string;
+  readonly note: string;
+  readonly url: string;
+  readonly capturedAt?: string;
+  readonly navigationsAtCapture?: number;
+  readonly evidencePath?: string;
+  readonly element: { readonly tag: string; readonly role: string; readonly name?: string; readonly text?: string };
+  readonly candidates: readonly { readonly kind: string; readonly value: string }[];
+  readonly annotatedAt: string;
+}
+
 /** J-BROWSER-session: the durable metadata of one shared browser session. */
 export interface BrowserRow {
   readonly sessionId: string;
@@ -135,6 +149,14 @@ export interface BrowserRow {
   readonly closedAt?: string;
   readonly reason?: string;
   readonly screenshots?: readonly { readonly path: string; readonly url?: string; readonly takenAt: string }[];
+  readonly annotations?: readonly BrowserAnnotationRow[];
+  /** J-BROWSER-inspect: monotonic navigations folded from browser.navigated events. */
+  readonly navigations?: number;
 }
+
+/** Staleness of an annotation against its row: later navigation (by counter or by URL) marks it. */
+export const annotationIsStale = (annotation: BrowserAnnotationRow, row: BrowserRow): boolean =>
+  (annotation.navigationsAtCapture !== undefined && (row.navigations ?? 0) > annotation.navigationsAtCapture) ||
+  (annotation.navigationsAtCapture === undefined && row.url !== undefined && row.url !== annotation.url);
 
 export type { EvidenceEntry, Inbox, WorkflowDefinition };

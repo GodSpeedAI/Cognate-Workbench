@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import type { BrowserProvider, PageState, ViewportSpec } from "./provider.ts";
 import { BrowserProviderError } from "./provider.ts";
+import { INSPECT_DISABLE_EXPRESSION, INSPECT_ENABLE_EXPRESSION, INSPECT_TAKE_EXPRESSION, inspectVerifyExpression } from "./inspectScript.ts";
 
 export type Controller = "human" | "agent";
 
@@ -53,6 +54,11 @@ interface BrowserSession {
   stream?: { port: number; ws: WebSocket };
   /** Frames flow only when someone is attached (the daemon also caps per-client). */
   readonly createdAtName: string;
+  /** J-BROWSER-inspect: monotonic count of observed navigations — the staleness token a
+   *  capture carries so later navigation marks the annotation stale. */
+  navigations: number;
+  /** Inspect mode is a human act: only on while the human holds control and asked for it. */
+  inspecting: boolean;
 }
 
 const MAX_SESSIONS = 8;
@@ -135,6 +141,8 @@ export class BrowserService {
       createdAt: this.now(),
       clients: new Set(),
       createdAtName: name,
+      navigations: 0,
+      inspecting: false,
     };
     this.sessions.set(id, session);
     try {
@@ -161,6 +169,8 @@ export class BrowserService {
       throw new BrowserAccessError(`browser: only http(s) navigation is offered (got ${parsed.protocol})`);
     }
     session.page = await this.provider.navigate(session.name, url);
+    session.navigations += 1;
+    session.inspecting = false; // a navigation ends the inspect gesture; re-arm deliberately
     this.broadcastState(session);
     return this.view(session);
   }
@@ -207,9 +217,66 @@ export class BrowserService {
     if (session.status !== "running") throw new BrowserUnknownError(sessionId);
     if (session.controller !== controller) {
       session.controller = controller;
+      // Inspect mode is a human act; an agent takeover ends it.
+      if (controller === "agent" && session.inspecting) {
+        session.inspecting = false;
+        void this.provider.evaluate(session.name, INSPECT_DISABLE_EXPRESSION).catch(() => { /* the page may be mid-navigation */ });
+      }
       this.broadcast(session, { type: "control", controller, actorId });
     }
     return this.view(session);
+  }
+
+  /** J-BROWSER-inspect: arm or disarm page-side inspect mode. A human act under human control. */
+  async setInspect(sessionId: string, controller: Controller, enabled: boolean): Promise<BrowserSessionView> {
+    const session = this.require(sessionId);
+    if (session.status !== "running") throw new BrowserUnknownError(sessionId);
+    this.assertController(session, controller);
+    await this.provider.evaluate(session.name, enabled ? INSPECT_ENABLE_EXPRESSION : INSPECT_DISABLE_EXPRESSION);
+    session.inspecting = enabled;
+    return this.view(session);
+  }
+
+  isInspecting(sessionId: string): boolean {
+    return this.require(sessionId).inspecting;
+  }
+
+  /**
+   * Read and clear the current selection. Returns it with the session's staleness token: the
+   * annotation stores `navigations`, and any later navigation (counted above) marks it stale.
+   */
+  async captureSelection(sessionId: string): Promise<{
+    selection: Record<string, unknown> | null;
+    navigations: number;
+    url: string | undefined;
+    title: string | undefined;
+    inspecting: boolean;
+  }> {
+    const session = this.require(sessionId);
+    if (session.status !== "running") throw new BrowserUnknownError(sessionId);
+    const selection = await this.provider.evaluate(session.name, INSPECT_TAKE_EXPRESSION);
+    return {
+      selection: (selection ?? null) as Record<string, unknown> | null,
+      navigations: session.navigations,
+      url: session.page?.url,
+      title: session.page?.title,
+      inspecting: session.inspecting,
+    };
+  }
+
+  /** Re-resolve a capture's selector candidates against the page's current DOM (a read). */
+  async verifySelection(sessionId: string, candidates: readonly { readonly kind: string; readonly value: string }[]): Promise<{ resolved: boolean; matched: string | null; tag: string | null }> {
+    const session = this.require(sessionId);
+    if (session.status !== "running") throw new BrowserUnknownError(sessionId);
+    if (candidates.length === 0 || candidates.length > 8) {
+      throw new BrowserAccessError("browser: verify needs between 1 and 8 selector candidates");
+    }
+    const result = await this.provider.evaluate(session.name, inspectVerifyExpression(candidates));
+    return {
+      resolved: Boolean((result as { resolved?: unknown })?.resolved),
+      matched: ((result as { matched?: unknown })?.matched ?? null) as string | null,
+      tag: ((result as { tag?: unknown })?.tag ?? null) as string | null,
+    };
   }
 
   async close(sessionId: string): Promise<void> {
@@ -327,6 +394,12 @@ export class BrowserService {
           }
           // url (navigations) and console (page errors) are the live feed the panel shows.
           if (message.type === "url" || message.type === "console") {
+            if (message.type === "url" && typeof message.url === "string" && message.url !== session.page?.url) {
+              // The page navigated itself (a link, a redirect): the staleness token moves too.
+              session.navigations += 1;
+              session.page = { ...(session.page ?? { url: message.url, title: "" }), url: message.url };
+              session.inspecting = false;
+            }
             this.broadcast(session, message);
           }
         } catch {

@@ -215,6 +215,7 @@ export const WORKBENCH_EVENTS = [
   "workbench.browser.navigated",
   "workbench.browser.control.changed",
   "workbench.browser.screenshot",
+  "workbench.browser.annotated",
   "workbench.browser.closed",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

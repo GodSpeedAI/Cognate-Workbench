@@ -58,6 +58,8 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       { id: "browser.snapshot", version: "1.0.0", semanticRef: ref("browser.snapshot") },
       { id: "browser.screenshot", version: "1.0.0", semanticRef: ref("browser.screenshot") },
       { id: "browser.control", version: "1.0.0", semanticRef: ref("browser.control") },
+      { id: "browser.inspect", version: "1.0.0", semanticRef: ref("browser.inspect") },
+      { id: "browser.annotate", version: "1.0.0", semanticRef: ref("browser.annotate") },
       { id: "browser.close", version: "1.0.0", semanticRef: ref("browser.close") },
     ],
     activate(fiber) {
@@ -139,6 +141,87 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
           `browser/${view.sessionId}`,
         );
         return view;
+      });
+
+      fiber.provide({ id: "browser.inspect", version: "1.0.0", semanticRef: ref("browser.inspect") }, async (rawInput, ctx) => {
+        operatorOnly(ctx, "browser.inspect");
+        const input = rawInput as { readonly sessionId?: unknown; readonly enable?: unknown; readonly capture?: unknown; readonly verify?: unknown };
+        if (typeof input.sessionId !== "string") throw new Error("browser.inspect: a sessionId is required");
+        // Re-resolve a capture's selector candidates (a read, available regardless of mode).
+        if (input.verify !== undefined) {
+          const verify = input.verify as { readonly candidates?: unknown };
+          if (!Array.isArray(verify.candidates) || !verify.candidates.every((c) => typeof c === "object" && c !== null && "kind" in c && "value" in c)) {
+            throw new Error("browser.inspect: verify needs candidates of {kind, value}");
+          }
+          return options.service.verifySelection(input.sessionId, verify.candidates as readonly { kind: string; value: string }[]);
+        }
+        // Capture the current selection, with evidence. Available while inspecting; also answers
+        // honestly (selection null) when the click landed on nothing selectable.
+        if (input.capture !== undefined) {
+          const capture = await options.service.captureSelection(input.sessionId);
+          let evidencePath: string | undefined;
+          if (capture.selection !== null) {
+            await mkdir(options.evidenceDir, { recursive: true });
+            evidencePath = join(options.evidenceDir, `${input.sessionId}-inspect-${Date.now()}.png`);
+            await options.service.screenshot(input.sessionId, evidencePath);
+          }
+          return { ...capture, ...(evidencePath ? { evidencePath } : {}) };
+        }
+        // Arm or disarm the page-side inspector.
+        if (typeof input.enable !== "boolean") throw new Error("browser.inspect: enable (boolean), capture, or verify is required");
+        return options.service.setInspect(input.sessionId, "human", input.enable);
+      });
+
+      fiber.provide({ id: "browser.annotate", version: "1.0.0", semanticRef: ref("browser.annotate") }, async (rawInput, ctx) => {
+        operatorOnly(ctx, "browser.annotate");
+        const input = rawInput as {
+          readonly sessionId?: unknown;
+          readonly note?: unknown;
+          readonly url?: unknown;
+          readonly capturedAt?: unknown;
+          readonly navigationsAtCapture?: unknown;
+          readonly element?: unknown;
+          readonly candidates?: unknown;
+          readonly evidencePath?: unknown;
+        };
+        if (typeof input.sessionId !== "string" || typeof input.note !== "string" || typeof input.url !== "string") {
+          throw new Error("browser.annotate: sessionId, note and url are required");
+        }
+        if (input.note.length === 0 || input.note.length > 2000) {
+          throw new Error("browser.annotate: the note must be between 1 and 2000 characters");
+        }
+        const element = input.element as { readonly tag?: unknown; readonly role?: unknown; readonly name?: unknown; readonly text?: unknown } | undefined;
+        if (typeof element?.tag !== "string" || typeof element?.role !== "string") {
+          throw new Error("browser.annotate: element {tag, role} is required");
+        }
+        if (!Array.isArray(input.candidates) || input.candidates.length === 0 || input.candidates.length > 8) {
+          throw new Error("browser.annotate: 1 to 8 selector candidates are required");
+        }
+        const view = options.service.list(ownerOf(ctx)).find(entry => entry.sessionId === input.sessionId);
+        await recordAndWait(
+          [{
+            type: "workbench.browser.annotated",
+            payload: {
+              annotationId: randomUUID(),
+              sessionId: input.sessionId,
+              note: input.note,
+              url: input.url,
+              ...(view?.url ? { currentUrl: view.url } : {}),
+              ...(typeof input.capturedAt === "string" ? { capturedAt: input.capturedAt } : {}),
+              ...(typeof input.navigationsAtCapture === "number" ? { navigationsAtCapture: input.navigationsAtCapture } : {}),
+              element: {
+                tag: element.tag,
+                role: element.role,
+                ...(typeof element.name === "string" ? { name: element.name.slice(0, 120) } : {}),
+                ...(typeof element.text === "string" ? { text: element.text.slice(0, 200) } : {}),
+              },
+              candidates: input.candidates.slice(0, 8) as Json,
+              ...(typeof input.evidencePath === "string" ? { evidencePath: input.evidencePath } : {}),
+            },
+          }],
+          `browser/${input.sessionId}`,
+        );
+        return { annotated: true };
       });
 
       fiber.provide({ id: "browser.close", version: "1.0.0", semanticRef: ref("browser.close") }, async (rawInput, ctx) => {

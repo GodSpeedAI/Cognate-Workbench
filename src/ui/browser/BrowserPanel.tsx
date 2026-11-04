@@ -9,6 +9,8 @@ import { useCognate, useProjection } from "@godspeedai/cognate-react";
 import { bootToken } from "../bootToken.ts";
 import { ExternalLinkIcon, XIcon } from "../icons.tsx";
 import type { BrowserRow } from "../../workbench/state.ts";
+import { mapViewportPoint } from "./viewportMath.ts";
+import { annotationMessage } from "../../browser/annotationMessage.ts";
 
 export interface BrowserPanelProps {
   readonly workspaceId: string;
@@ -16,6 +18,8 @@ export interface BrowserPanelProps {
   readonly onClose?: () => void;
   readonly maximized?: boolean;
   readonly onToggleMaximize?: () => void;
+  /** J-BROWSER-inspect: submit an annotation as a structured message into the conversation. */
+  readonly onSendToConversation?: (message: string) => void;
 }
 
 interface BrowserSessionView {
@@ -27,12 +31,30 @@ interface BrowserSessionView {
   readonly workspaceId?: string;
 }
 
+/** One captured element, as the injected inspector reports it. All fields are page data. */
+interface InspectSelection {
+  readonly tag: string;
+  readonly role: string;
+  readonly name?: string;
+  readonly text?: string;
+  readonly url: string;
+  readonly capturedAt: string;
+  readonly candidates: readonly { readonly kind: string; readonly value: string }[];
+}
+
+interface InspectCapture {
+  readonly selection: InspectSelection | null;
+  readonly navigations: number;
+  readonly url?: string;
+  readonly evidencePath?: string;
+}
+
 const CONTROLLER_HINT: Record<"human" | "agent", string> = {
   human: "You are driving. The agent can still read the page, but its input is refused.",
   agent: "The agent is driving. Your input on the page is refused until you take control back.",
 };
 
-export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, onToggleMaximize }: BrowserPanelProps) {
+export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, onToggleMaximize, onSendToConversation }: BrowserPanelProps) {
   const client = useCognate();
   const workbench = useProjection("workbench");
   const [activeId, setActiveId] = useState<string | undefined>(undefined);
@@ -44,12 +66,19 @@ export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [streamLive, setStreamLive] = useState(false);
+  // J-BROWSER-inspect: the human's selection gesture. Inspecting is a session flag server-side;
+  // the card holds the latest capture until submitted or dismissed.
+  const [inspecting, setInspecting] = useState(false);
+  const [capture, setCapture] = useState<InspectCapture | undefined>(undefined);
+  const [note, setNote] = useState("");
+  const captureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rows = (workbench ?? [])
     .map((row) => row.value as unknown as BrowserRow)
     .filter((row) => row.workspaceId === workspaceId);
   const running = rows.filter((row) => row.status === "running");
   const active = rows.find((row) => row.sessionId === activeId);
+  const rowNavigations = active?.navigations ?? 0;
 
   // Attach (or open) the workspace's session — one per workspace keeps the mental model simple.
   useEffect(() => {
@@ -129,20 +158,70 @@ export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, 
 
   const controller = active?.controller ?? "human";
 
-  const pointEvent = useCallback((kind: "mouse", event: React.PointerEvent) => {
+  const toggleInspect = useCallback(() => {
+    if (!activeId) return;
+    const next = !inspecting;
+    client.invoke("browser.inspect", { sessionId: activeId, enable: next } as never)
+      .then(() => {
+        setInspecting(next);
+        if (!next) setCapture(undefined);
+      })
+      .catch((error: Error) => setNotice(error.message));
+  }, [activeId, client, inspecting]);
+
+  // While inspecting, a click selects rather than activates — the injected page script stops
+  // the event and records context; a moment later we read the selection back (the click has
+  // traveled the stream by then).
+  const captureAfterClick = useCallback(() => {
+    if (!inspecting || !activeId) return;
+    if (captureTimer.current) clearTimeout(captureTimer.current);
+    captureTimer.current = setTimeout(() => {
+      client.invoke("browser.inspect", { sessionId: activeId, capture: true } as never)
+        .then((result) => setCapture(result as unknown as InspectCapture))
+        .catch((error: Error) => setNotice(error.message));
+    }, 450);
+  }, [activeId, client, inspecting]);
+
+  const submitAnnotation = useCallback((alsoSend: boolean) => {
+    if (!activeId || !capture?.selection) return;
+    const selection = capture.selection;
+    client.invoke("browser.annotate", {
+      sessionId: activeId,
+      note,
+      url: selection.url ?? capture.url ?? "",
+      capturedAt: selection.capturedAt,
+      navigationsAtCapture: capture.navigations,
+      element: { tag: selection.tag, role: selection.role, ...(selection.name ? { name: selection.name } : {}), ...(selection.text ? { text: selection.text } : {}) },
+      candidates: selection.candidates,
+      ...(capture.evidencePath ? { evidencePath: capture.evidencePath } : {}),
+    } as never)
+      .then(() => {
+        if (alsoSend && onSendToConversation) {
+          onSendToConversation(annotationMessage({
+            note,
+            url: selection.url ?? capture.url ?? "",
+            element: { tag: selection.tag, role: selection.role, name: selection.name ?? "", text: selection.text ?? "" },
+            candidates: selection.candidates,
+            ...(capture.evidencePath ? { evidencePath: capture.evidencePath } : {}),
+          }));
+        }
+        setCapture(undefined);
+        setNote("");
+      })
+      .catch((error: Error) => setNotice(error.message));
+  }, [activeId, capture, note, onSendToConversation, client]);
+
+  // Refreshed every render: the inspect-mode capture hook reads the latest mode state.
+  const pointEvent = (kind: "mouse", event: React.PointerEvent): void => {
     const canvas = canvasRef.current;
     const ws = wsRef.current;
     if (!canvas || !ws || ws.readyState !== WebSocket.OPEN) return;
     const rect = canvas.getBoundingClientRect();
-    // The bitmap is painted with object-fit: contain, so the drawn image can be smaller than the
-    // element box and centered in it; map through the contained image rect, not the element box.
-    const bitmapWidth = canvas.width || rect.width;
-    const bitmapHeight = canvas.height || rect.height;
-    const scale = Math.min(rect.width / bitmapWidth, rect.height / bitmapHeight);
-    const offsetX = (rect.width - bitmapWidth * scale) / 2;
-    const offsetY = (rect.height - bitmapHeight * scale) / 2;
-    const x = Math.round((event.clientX - rect.left - offsetX) / scale);
-    const y = Math.round((event.clientY - rect.top - offsetY) / scale);
+    // The bitmap is painted with object-fit: contain; map through the contained image rect
+    // (shared geometry in viewportMath.ts, with the letterbox margin clamped).
+    const point = mapViewportPoint(event.clientX, event.clientY, rect, canvas.width, canvas.height);
+    const x = point.x;
+    const y = point.y;
     const eventType = event.type === "pointerdown" ? "mousePressed" : event.type === "pointerup" ? "mouseReleased" : "mouseMoved";
     ws.send(JSON.stringify({
       type: "input_mouse",
@@ -150,7 +229,8 @@ export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, 
       x, y,
       ...(eventType !== "mouseMoved" ? { button: event.button === 2 ? "right" : "left", clickCount: event.type === "pointerdown" || event.type === "pointerup" ? 1 : undefined } : {}),
     }));
-  }, []);
+    if (eventType === "mouseReleased") captureAfterClick();
+  };
 
   const keyEvent = useCallback((event: React.KeyboardEvent) => {
     const ws = wsRef.current;
@@ -212,6 +292,18 @@ export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, 
         {controller === "human" && running.length > 0 && (
           <button type="button" className="term-tab-btn" onClick={() => takeControl("agent")} title="Hand control to the agent">Give to agent</button>
         )}
+        {running.length > 0 && (
+          <button
+            type="button"
+            className={`term-tab-btn${inspecting ? " active" : ""}`}
+            aria-pressed={inspecting}
+            disabled={controller !== "human"}
+            title={controller !== "human" ? "Inspecting is a human act — take control first" : "Select an element to annotate (a click selects instead of activating)"}
+            onClick={toggleInspect}
+          >
+            {inspecting ? "Inspecting…" : "Inspect"}
+          </button>
+        )}
         <span className="term-panel-spring" />
         <span className={`browser-stream${streamLive ? " live" : ""}`} role="status">{streamLive ? "live" : "offline"}</span>
         {onToggleMaximize && (
@@ -248,6 +340,40 @@ export function BrowserPanel({ workspaceId, workspaceLabel, onClose, maximized, 
           {notice}{" "}
           <button type="button" className="term-tab-btn" onClick={() => setNotice(undefined)}>Dismiss</button>
         </p>
+      )}
+      {inspecting && !capture && (
+        <p className="browser-inspect-hint" role="status">Click an element in the page to select it — the click will not activate anything.</p>
+      )}
+      {capture?.selection && (
+        <section className="browser-annotate" aria-label="Element annotation">
+          <header className="browser-annotate-head">
+            <strong>{capture.selection.role}</strong>
+            {capture.selection.name && <span className="browser-annotate-name">"{capture.selection.name}"</span>}
+            <span className="browser-annotate-tag">&lt;{capture.selection.tag}&gt;</span>
+            {(active?.url && active.url !== capture.selection.url) || (rowNavigations > capture.navigations) ? (
+              <span className="browser-controller browser-controller-agent" title="The page navigated after this capture — reselect or verify the candidates">stale</span>
+            ) : null}
+            <span className="term-panel-spring" />
+            <button type="button" className="term-tab-btn" aria-label="Dismiss selection" onClick={() => setCapture(undefined)}><XIcon /></button>
+          </header>
+          <textarea
+            className="browser-annotate-note"
+            aria-label="Annotation note"
+            placeholder="What should change about this element?"
+            value={note}
+            rows={2}
+            onChange={(event) => setNote(event.target.value)}
+            onKeyDown={(event) => event.stopPropagation()}
+          />
+          <footer className="browser-annotate-actions">
+            <button type="button" className="term-tab-btn" disabled={note.length === 0} onClick={() => submitAnnotation(true)}>
+              Send to conversation
+            </button>
+            <button type="button" className="term-tab-btn" disabled={note.length === 0} onClick={() => submitAnnotation(false)}>
+              Record only
+            </button>
+          </footer>
+        </section>
       )}
       <div className="browser-viewport">
         {active && active.status !== "running" ? (

@@ -6083,6 +6083,7 @@ function AppShell() {
               maximized={surfaceMaximized}
               onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
               onClose={() => setSurface("none")}
+              onSendToConversation={(message) => void send(message)}
             />
           </section>
         )}

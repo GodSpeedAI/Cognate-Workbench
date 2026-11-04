@@ -5335,3 +5335,14 @@ body.is-col-resizing .resize-handle:active::after {
   border-top: 1px solid var(--cg-border);
 }
 .term-empty-hint { opacity: 0.75; }
+/* ---- J-BROWSER-inspect: inspect mode and the annotation card -------------------------------- */
+.term-tab-btn.active { background: color-mix(in srgb, var(--cg-accent) 18%, transparent); }
+.browser-inspect-hint { margin: 4px 12px; font-size: 12px; color: var(--cg-text); opacity: 0.75; }
+.browser-annotate { border-top: 1px solid var(--cg-border); border-bottom: 1px solid var(--cg-border); padding: 6px 12px; display: flex; flex-direction: column; gap: 6px; }
+.browser-annotate-head { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.browser-annotate-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-annotate-tag { font-family: var(--cg-mono, monospace); opacity: 0.7; }
+.browser-annotate-note { width: 100%; box-sizing: border-box; resize: vertical; min-height: 40px; padding: 6px 8px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-sm, 6px); background: var(--cg-bg); color: var(--cg-text); font: inherit; font-size: 13px; }
+.browser-annotate-note:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: -1px; }
+.browser-annotate-actions { display: flex; gap: 8px; }
+.browser-annotate-actions .term-tab-btn:disabled { opacity: 0.5; }

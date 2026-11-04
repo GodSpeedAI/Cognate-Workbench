@@ -252,14 +252,16 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
         ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
         openedAt: recordedAt,
         screenshots: [] as unknown[],
+        annotations: [] as unknown[],
+        navigations: 0,
       };
       return [{ key: `browser/${row.sessionId}`, value: j(row) }];
     }
     case "workbench.browser.navigated": {
       const key = `browser/${String(p.sessionId)}`;
-      const prev = get(key) as { [k: string]: unknown } | undefined;
+      const prev = get(key) as { [k: string]: unknown; navigations?: unknown } | undefined;
       if (!prev) return [];
-      return [{ key, value: j({ ...prev, url: String(p.url), ...(typeof p.title === "string" ? { title: p.title } : {}), navigatedAt: recordedAt }) }];
+      return [{ key, value: j({ ...prev, url: String(p.url), ...(typeof p.title === "string" ? { title: p.title } : {}), navigatedAt: recordedAt, navigations: (typeof prev.navigations === "number" ? prev.navigations : 0) + 1 }) }];
     }
     case "workbench.browser.control.changed": {
       const key = `browser/${String(p.sessionId)}`;
@@ -273,6 +275,32 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       if (!prev) return [];
       const screenshots = [...(prev.screenshots ?? []), { path: String(p.path), ...(typeof p.url === "string" ? { url: p.url } : {}), takenAt: recordedAt }];
       return [{ key, value: j({ ...prev, screenshots }) }];
+    }
+    // J-BROWSER-inspect: the durable annotation. Page-derived context is bounded here (the
+    // capability already bounds it; the fold re-bounds defensively) and is data, not instructions.
+    case "workbench.browser.annotated": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; annotations?: unknown[] } | undefined;
+      if (!prev) return [];
+      const element = (p.element ?? {}) as { [k: string]: unknown };
+      const annotation = {
+        annotationId: String(p.annotationId),
+        note: String(p.note),
+        url: String(p.url),
+        ...(typeof p.capturedAt === "string" ? { capturedAt: String(p.capturedAt) } : {}),
+        ...(typeof p.navigationsAtCapture === "number" ? { navigationsAtCapture: p.navigationsAtCapture } : {}),
+        ...(typeof p.evidencePath === "string" ? { evidencePath: p.evidencePath } : {}),
+        element: {
+          tag: String(element.tag ?? ""),
+          role: String(element.role ?? ""),
+          ...(typeof element.name === "string" ? { name: element.name.slice(0, 120) } : {}),
+          ...(typeof element.text === "string" ? { text: element.text.slice(0, 200) } : {}),
+        },
+        candidates: Array.isArray(p.candidates) ? (p.candidates as unknown[]).slice(0, 8) : [],
+        annotatedAt: recordedAt,
+      };
+      const annotations = [...(prev.annotations ?? []).slice(-19), annotation];
+      return [{ key, value: j({ ...prev, annotations }) }];
     }
     case "workbench.browser.closed": {
       const key = `browser/${String(p.sessionId)}`;
