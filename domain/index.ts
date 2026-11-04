@@ -565,6 +565,44 @@ export function bindHarnessCapabilities(domain: Domain): Readonly<Record<string,
 }
 
 /**
+ * J-TERMINAL-session / J-BROWSER-session / J-BROWSER-inspect / J-PREVIEW-register: the desktop
+ * collaboration surfaces. Terminal lifecycle anchors on `TerminalSession` (a human surface: agents
+ * keep tool.bash and never hold a PTY). Browser observation, control and element feedback anchor on
+ * `BrowserSession` (an annotation is a fact about a browser session's page; the durable feedback
+ * handed to the agent is the PageFeedback flow). Development-server registration anchors on
+ * `DevPreview`.
+ */
+export const SURFACES_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "terminal.open": "TerminalSession",
+  "terminal.close": "TerminalSession",
+  "browser.open": "BrowserSession",
+  "browser.close": "BrowserSession",
+  "browser.navigate": "BrowserSession",
+  "browser.snapshot": "BrowserSession",
+  "browser.screenshot": "BrowserSession",
+  "browser.input": "BrowserSession",
+  "browser.control": "BrowserSession",
+  "browser.inspect": "BrowserSession",
+  "browser.annotate": "BrowserSession",
+  "preview.register": "DevPreview",
+  "preview.stop": "DevPreview",
+};
+
+export function bindSurfaceCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(SURFACES_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} surface contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: surface capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
+/**
  * J-CFG-provider-switch / J-CFG-provider-test: stored-provider listing, activation and connection
  * test. All three anchor on `ModelProvider`, like `model.configure`, `provider.delete` and
  * `model.catalog`.

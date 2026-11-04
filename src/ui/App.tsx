@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, ReactNode } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
@@ -119,6 +119,7 @@ import {
   SplitViewIcon,
   StopIcon,
   TerminalIcon,
+  GlobeIcon,
   TrashIcon,
 } from "./icons.tsx";
 import {
@@ -153,6 +154,11 @@ import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
 import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
 import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
+// J-TERMINAL/J-BROWSER: the dock surfaces load on first open (React.lazy). Their module graph
+// includes the xterm renderer and the browser panel; keeping them out of the initial chunk keeps
+// every non-dock page load light — measurable in the UI E2Es under parallel load.
+const TerminalPanel = lazy(() => import("./terminal/TerminalPanel.tsx").then((m) => ({ default: m.TerminalPanel })));
+const BrowserPanel = lazy(() => import("./browser/BrowserPanel.tsx").then((m) => ({ default: m.BrowserPanel })));
 import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
 import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
@@ -4346,6 +4352,35 @@ function AppShell() {
   const inspector = useInspector();
   const isMobile = useMediaQuery("(max-width: 760px)");
   const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
+  // J-TERMINAL-session: the docked working surface (terminal today; browser with its phase).
+  // The dock is a view of a server-side session — height is the only local preference.
+  const [surface, setSurface] = useState<"none" | "terminal" | "browser">("none");
+  const [surfaceMaximized, setSurfaceMaximized] = useState(false);
+  const [surfaceHeight, setSurfaceHeight] = useState<number>(() => {
+    const raw = Number(localStorage.getItem("cognate.surface.height"));
+    return Number.isFinite(raw) && raw >= 180 && raw <= 800 ? raw : 320;
+  });
+  const setSurfaceHeightPersisted = useCallback((px: number) => {
+    const clamped = Math.round(Math.max(180, Math.min(800, px)));
+    setSurfaceHeight(clamped);
+    try { localStorage.setItem("cognate.surface.height", String(clamped)); } catch { /* storage may be unavailable */ }
+  }, []);
+  const toggleSurface = useCallback((next: "terminal" | "browser") => {
+    setSurface((current) => (current === next ? "none" : next));
+    setSurfaceMaximized(false);
+  }, []);
+  const startSurfaceResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = surfaceHeight;
+    const move = (moveEvent: PointerEvent) => setSurfaceHeightPersisted(startHeight + (startY - moveEvent.clientY));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, [surfaceHeight, setSurfaceHeightPersisted]);
   const setSidebarWidth = useCallback((w: number) => {
     setSidebarWidthState(w);
     try {
@@ -5844,14 +5879,40 @@ function AppShell() {
             />
           }
           trailing={
-            inSession && subagentRows.length > 0 ? (
+            <>
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "terminal" ? " active" : ""}`}
+                  aria-pressed={surface === "terminal"}
+                  aria-label={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  title={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  onClick={() => toggleSurface("terminal")}
+                >
+                  <TerminalIcon />
+                </button>
+              )}
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "browser" ? " active" : ""}`}
+                  aria-pressed={surface === "browser"}
+                  aria-label={surface === "browser" ? "Hide browser" : "Show browser"}
+                  title={surface === "browser" ? "Hide browser" : "Show browser"}
+                  onClick={() => toggleSurface("browser")}
+                >
+                  <GlobeIcon />
+                </button>
+              )}
+              {inSession && subagentRows.length > 0 ? (
               <div className="subagent-count-wrap">
                 <button type="button" className="subagent-count-btn" aria-expanded={subagentsExpanded} onClick={() => setSubagentsExpanded((v) => !v)}>
                   {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
                 </button>
                 {subagentsExpanded && <SubagentTree rows={subagentRows} onOpen={(row) => openSubagent(row.toolCallId)} />}
               </div>
-            ) : undefined
+            ) : undefined}
+            </>
           }
           inspectorOpen={inspector.open}
           onToggleInspector={inspector.toggleInspector}
@@ -6009,6 +6070,53 @@ function AppShell() {
               />
             )}
           </>
+        )}
+        {surface === "browser" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Browser dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize browser dock" onPointerDown={startSurfaceResize} />
+            )}
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the browser panel…</p></div>}
+            >
+              <BrowserPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+                onSendToConversation={(message) => void send(message)}
+              />
+            </Suspense>
+          </section>
+        )}
+        {surface === "terminal" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Terminal dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize terminal dock" onPointerDown={startSurfaceResize} />
+            )}
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the terminal…</p></div>}
+            >
+              <TerminalPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                worldId={currentWorkspace?.executionWorldId ?? "local"}
+                worldLabel={currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId)?.label ?? currentWorkspace.executionWorldId : "Local"}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+              />
+            </Suspense>
+          </section>
         )}
       </main>
       <Inspector sidebarWidth={isMobile || collapsed ? 0 : sidebarWidth} />
