@@ -119,6 +119,7 @@ import {
   SplitViewIcon,
   StopIcon,
   TerminalIcon,
+  GlobeIcon,
   TrashIcon,
 } from "./icons.tsx";
 import {
@@ -154,6 +155,7 @@ import { ToastProvider, useToast } from "./shell/Toast.tsx";
 import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
 import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
 import { TerminalPanel } from "./terminal/TerminalPanel.tsx";
+import { BrowserPanel } from "./browser/BrowserPanel.tsx";
 import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
 import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
@@ -5887,6 +5889,18 @@ function AppShell() {
                   <TerminalIcon />
                 </button>
               )}
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "browser" ? " active" : ""}`}
+                  aria-pressed={surface === "browser"}
+                  aria-label={surface === "browser" ? "Hide browser" : "Show browser"}
+                  title={surface === "browser" ? "Hide browser" : "Show browser"}
+                  onClick={() => toggleSurface("browser")}
+                >
+                  <GlobeIcon />
+                </button>
+              )}
               {inSession && subagentRows.length > 0 ? (
               <div className="subagent-count-wrap">
                 <button type="button" className="subagent-count-btn" aria-expanded={subagentsExpanded} onClick={() => setSubagentsExpanded((v) => !v)}>
@@ -6053,6 +6067,24 @@ function AppShell() {
               />
             )}
           </>
+        )}
+        {surface === "browser" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Browser dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize browser dock" onPointerDown={startSurfaceResize} />
+            )}
+            <BrowserPanel
+              workspaceId={currentWorkspaceId}
+              workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+              maximized={surfaceMaximized}
+              onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+              onClose={() => setSurface("none")}
+            />
+          </section>
         )}
         {surface === "terminal" && currentWorkspaceId && (
           <section

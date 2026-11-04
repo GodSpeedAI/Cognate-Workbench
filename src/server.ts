@@ -53,6 +53,10 @@ import { localTerminalPort, wslTerminalPort } from "./terminal/local.ts";
 import { sshTerminalPort } from "./terminal/ssh.ts";
 import { terminalWsController, type TerminalSocketData } from "./terminal/wsController.ts";
 import type { Json } from "@godspeedai/cognate-events";
+import { browserComponent } from "./capabilities/browser.ts";
+import { BrowserService } from "./browser/service.ts";
+import { agentBrowserProvider } from "./browser/agentBrowser.ts";
+import { browserWsController, type BrowserSocketData } from "./browser/wsController.ts";
 import { HarnessDetector, type HarnessHostEnv } from "./agents/harness/detect.ts";
 import { HarnessSessionHost } from "./agents/harness/sessions.ts";
 import { sessionHarnessBindingsProjection } from "./projections/sessionHarnessBindings.ts";
@@ -541,6 +545,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const terminalService = new TerminalService({
     ports: { local: localTerminalPort(), wsl: wslTerminalPort(), ssh: sshTerminalPort() },
   });
+  // J-BROWSER-session: managed shared browser sessions behind the agent-browser provider.
+  const browserService = new BrowserService({ provider: agentBrowserProvider() });
   const terminalConnectionFor = async (worldId: string): Promise<{ readonly connection: Json } | undefined> => {
     const rows = (await getService().readProjection(SYSTEM_CALLER, { name: "execution-worlds" })).rows;
     const row = rows.find(entry => entry.key.endsWith(`/record/${worldId}`))?.value as { readonly connection: Json } | undefined;
@@ -577,6 +583,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         service: terminalService,
         home,
         connectionFor: terminalConnectionFor,
+        semanticRefs: surfaceRefs,
+      }),
+      browserComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        service: browserService,
+        evidenceDir: join(home, "browser-evidence"),
         semanticRefs: surfaceRefs,
       }),      runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
@@ -864,6 +877,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     service: terminalService,
     authenticate: async (token) => await authenticate(new Headers({ authorization: `Bearer ${token}` })),
   });
+  const browserWs = browserWsController({
+    service: browserService,
+    authenticate: async (token) => await authenticate(new Headers({ authorization: `Bearer ${token}` })),
+  });
   const connectHandlersByPath = new Map<string, (req: Request) => Promise<Response>>();
   for (const uHandler of connectRouter.handlers) {
     connectHandlersByPath.set(uHandler.requestPath, (request) => createFetchHandler(uHandler, { httpVersion: "1.1" })(request).then(response => {
@@ -969,7 +986,16 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" || !session) {
           return new Response("websocket upgrade required", { status: 426, headers: hardened() });
         }
-        const upgraded = server.upgrade(request, { data: { authed: false, sessionId: session } });
+        const upgraded = server.upgrade(request, { data: { authed: false, sessionId: session, surface: "terminal" } });
+        if (upgraded) return undefined;
+        return new Response("upgrade failed", { status: 500, headers: hardened() });
+      }
+      if (url.pathname === "/browser/stream") {
+        const session = url.searchParams.get("session");
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" || !session) {
+          return new Response("websocket upgrade required", { status: 426, headers: hardened() });
+        }
+        const upgraded = server.upgrade(request, { data: { authed: false, sessionId: session, surface: "browser" } });
         if (upgraded) return undefined;
         return new Response("upgrade failed", { status: 500, headers: hardened() });
       }
@@ -998,9 +1024,20 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       return new Response("not found", { status: 404, headers: hardened() });
     },
     websocket: {
-      open: (ws) => void terminalWs.open(ws as never),
-      message: (ws, message) => void terminalWs.message(ws as never, message),
-      close: (ws) => terminalWs.close(ws as never),
+      open: (ws) => {
+        void terminalWs.open(ws as never);
+        void browserWs.open(ws as never);
+      },
+      message: (ws, message) => {
+        const surface = (ws.data as TerminalSocketData & BrowserSocketData).surface;
+        void (surface === "browser"
+          ? browserWs.message(ws as never, message)
+          : terminalWs.message(ws as never, message));
+      },
+      close: (ws) => {
+        terminalWs.close(ws as never);
+        browserWs.close(ws as never);
+      },
     },
   });
 
@@ -1014,6 +1051,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       await terminalService.dispose();
+      await browserService.dispose();
       await harnessHost.shutdown();
       eventsController.abort();
       await remote.close();

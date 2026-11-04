@@ -208,5 +208,13 @@ export const WORKBENCH_EVENTS = [
   // bytes are deliberately absent — the durable log never records what a terminal printed.
   "workbench.terminal.opened",
   "workbench.terminal.closed",
+  // J-BROWSER-session: metadata and transitions of the shared browser sessions. Page content,
+  // frames and cookies are never persisted — only which session exists, where it points and
+  // who holds control.
+  "workbench.browser.opened",
+  "workbench.browser.navigated",
+  "workbench.browser.control.changed",
+  "workbench.browser.screenshot",
+  "workbench.browser.closed",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

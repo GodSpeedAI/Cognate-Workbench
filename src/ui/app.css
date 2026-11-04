@@ -5272,3 +5272,66 @@ body.is-col-resizing .resize-handle:active::after {
   text-align: center;
   color: var(--cg-text-muted, var(--cg-text));
 }
+
+/* ---- Shared browser dock (J-BROWSER-session) ------------------------------------------------------ */
+.browser-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.browser-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--cg-border);
+}
+.browser-controller {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--cg-border);
+}
+.browser-controller-human { background: color-mix(in srgb, var(--cg-success, var(--cg-accent)) 12%, transparent); }
+.browser-controller-agent { background: color-mix(in srgb, var(--cg-accent) 14%, transparent); }
+.browser-stream { font-size: 11px; opacity: 0.7; }
+.browser-stream.live::before { content: "● "; color: var(--cg-success, var(--cg-accent)); }
+.browser-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--cg-border);
+}
+.browser-address { flex: 1; min-width: 0; }
+.browser-address input {
+  width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--cg-border);
+  border-radius: var(--cg-radius-sm, 6px);
+  background: var(--cg-bg);
+  color: var(--cg-text);
+  font: inherit;
+  font-size: 13px;
+}
+.browser-address input:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: -1px; }
+.browser-viewport { flex: 1; min-height: 0; display: flex; align-items: stretch; justify-content: center; background: var(--cg-bg); position: relative; }
+.browser-canvas { width: 100%; height: 100%; object-fit: contain; outline: none; }
+.browser-canvas:focus-visible { outline: 2px solid var(--cg-accent); outline-offset: -2px; }
+.browser-errors {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 40%;
+  overflow: auto;
+  background: color-mix(in srgb, var(--cg-surface) 92%, transparent);
+  border-top: 1px solid var(--cg-border);
+  padding: 6px 12px;
+  font-family: var(--cg-mono, monospace);
+  font-size: 12px;
+}
+.browser-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--cg-border);
+}
+.term-empty-hint { opacity: 0.75; }

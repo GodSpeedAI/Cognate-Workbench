@@ -581,6 +581,7 @@ export const SURFACES_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "browser.snapshot": "BrowserSession",
   "browser.screenshot": "BrowserSession",
   "browser.input": "BrowserSession",
+  "browser.control": "BrowserSession",
   "browser.inspect": "BrowserSession",
   "browser.annotate": "BrowserSession",
   "preview.register": "DevPreview",

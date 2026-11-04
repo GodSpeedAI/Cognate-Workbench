@@ -121,4 +121,20 @@ export interface TerminalRow {
   readonly ownerActorId?: string;
 }
 
+/** J-BROWSER-session: the durable metadata of one shared browser session. */
+export interface BrowserRow {
+  readonly sessionId: string;
+  readonly providerId: string;
+  readonly url?: string;
+  readonly title?: string;
+  readonly controller: "human" | "agent";
+  readonly status: "running" | "closed";
+  readonly workspaceId?: string;
+  readonly openedAt: string;
+  readonly navigatedAt?: string;
+  readonly closedAt?: string;
+  readonly reason?: string;
+  readonly screenshots?: readonly { readonly path: string; readonly url?: string; readonly takenAt: string }[];
+}
+
 export type { EvidenceEntry, Inbox, WorkflowDefinition };

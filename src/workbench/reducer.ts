@@ -241,6 +241,45 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
         }),
       }];
     }
+    case "workbench.browser.opened": {
+      const row = {
+        sessionId: String(p.sessionId),
+        providerId: String(p.providerId),
+        ...(typeof p.url === "string" ? { url: p.url } : {}),
+        ...(typeof p.title === "string" ? { title: p.title } : {}),
+        controller: "human",
+        status: "running",
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        openedAt: recordedAt,
+        screenshots: [] as unknown[],
+      };
+      return [{ key: `browser/${row.sessionId}`, value: j(row) }];
+    }
+    case "workbench.browser.navigated": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, url: String(p.url), ...(typeof p.title === "string" ? { title: p.title } : {}), navigatedAt: recordedAt }) }];
+    }
+    case "workbench.browser.control.changed": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, controller: String(p.controller), controllerActorId: typeof p.actorId === "string" ? p.actorId : undefined, controlChangedAt: recordedAt }) }];
+    }
+    case "workbench.browser.screenshot": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; screenshots?: unknown[] } | undefined;
+      if (!prev) return [];
+      const screenshots = [...(prev.screenshots ?? []), { path: String(p.path), ...(typeof p.url === "string" ? { url: p.url } : {}), takenAt: recordedAt }];
+      return [{ key, value: j({ ...prev, screenshots }) }];
+    }
+    case "workbench.browser.closed": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, status: "closed", closedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
+    }
     default:
       return [];
   }

@@ -261,6 +261,16 @@ export const PhoneIcon = (props: IconProps) =>
 
 export const XIcon = (props: IconProps) => base(<path d="M4 4l8 8M12 4l-8 8" />, props);
 
+/** Globe: the shared browser surface (J-BROWSER-session). */
+export const GlobeIcon = (props: IconProps) =>
+  base(
+    <>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M2.5 8h11M8 2.5c1.8 1.6 1.8 9.4 0 11M8 2.5c-1.8 1.6-1.8 9.4 0 11" />
+    </>,
+    props,
+  );
+
 /** Archive box: lid, body and a pull slot (replaces the former backspace glyph). */
 export const ArchiveIcon = (props: IconProps) =>
   base(

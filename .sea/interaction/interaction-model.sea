@@ -1826,7 +1826,7 @@ Instance j_terminal_session of "CanonicalJourney" {
 
 Instance j_browser_session of "CanonicalJourney" {
     actor: "User",
-    capabilities: "browser.open, browser.navigate, browser.snapshot, browser.screenshot, browser.input, browser.close",
+    capabilities: "browser.open, browser.navigate, browser.snapshot, browser.screenshot, browser.input, browser.control, browser.close",
     evidence_class: "proposed",
     initiating_condition: "The operator or the agent needs to see and operate a real web page or a running development application inside the Workbench",
     journey_id: "J-BROWSER-session",
@@ -1834,7 +1834,7 @@ Instance j_browser_session of "CanonicalJourney" {
     purpose: "Give person and agent one managed browser session: the same live page, one control owner at a time, screenshots and accessibility snapshots as recorded evidence",
     settlement: "The session streams its live viewport to the panel; human input and agent operations address the same session and are attributed separately; control has one owner at a time with explicit handoff and refusal of conflicting writes; navigation, snapshots and screenshots are recorded; only http(s) navigation is offered; closing the session disposes the browser process; a crashed or disconnected session renders dead, never live",
     steps: "operator opens the browser panel -> browser.open creates a managed session -> navigation by the operator (browser.navigate) or the agent shows the same page -> input goes through the single control owner -> browser.snapshot records an accessibility snapshot with element references -> browser.screenshot records visual evidence -> browser.close disposes the session",
-    variants: "agent-driven navigation during agent control; operator pauses the agent and takes over; the operator hands control back; navigating invalidates element references; localhost applications open directly; a refused navigation is explained, never silently blank; several isolated sessions may exist at once"
+    variants: "browser.control names the one controller — a person or the agent — and changing it is a recorded handoff; while the agent holds control, human input on the streamed viewport is refused with the reason, and while the person holds it, the agent's actuation is refused though its reads stay available; agent-driven navigation during agent control; navigating invalidates element references; localhost applications open directly; a refused navigation is explained, never silently blank; several isolated sessions may exist at once"
 }
 
 Instance j_browser_inspect of "CanonicalJourney" {

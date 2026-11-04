@@ -19,6 +19,8 @@ export interface TerminalSocketData {
   tenant?: string;
   actorId?: string;
   sessionId?: string;
+  /** Which endpoint upgraded this socket — the two stream controllers share one Bun websocket. */
+  surface?: "terminal" | "browser";
 }
 
 const MAX_PAYLOAD = 64_000;

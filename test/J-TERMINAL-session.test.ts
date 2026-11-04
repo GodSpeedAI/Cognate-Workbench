@@ -113,7 +113,7 @@ describe("J-TERMINAL-session", () => {
         const a = connect(url);
         await next(a.events, "open");
         a.socket.send(JSON.stringify({ type: "auth", token: app.operatorSessionToken }));
-        const attached = JSON.parse((await next(a.events, "text", (e) => e.text?.includes('"attached"'))).text!);
+        const attached = JSON.parse((await next(a.events, "text", (e) => e.text?.includes('"attached"') === true)).text!);
         expect(attached.session.sessionId).toBe(sessionId);
 
         // --- interact: the shell answers through the PTY
@@ -149,13 +149,13 @@ describe("J-TERMINAL-session", () => {
         const b = connect(url);
         await next(b.events, "open");
         b.socket.send(JSON.stringify({ type: "auth", token: app.operatorSessionToken }));
-        await next(b.events, "text", (e) => e.text?.includes('"attached"'));
+        await next(b.events, "text", (e) => e.text?.includes('"attached"') === true);
         await waitForOutput(b, "DETACHED_MARKER_7");
 
         // --- terminate: the process group dies; the socket hears the close
         const closeResult = (await inv(client, "terminal.close", { sessionId })) as { closed: boolean; exitCode?: number | null };
         expect(closeResult.closed).toBe(true);
-        const closed = JSON.parse((await next(b.events, "text", (e) => e.text?.includes('"closed"'))).text!);
+        const closed = JSON.parse((await next(b.events, "text", (e) => e.text?.includes('"closed"') === true)).text!);
         expect(closed.sessionId).toBe(sessionId);
 
         // --- the durable record shows the operator close
@@ -229,7 +229,7 @@ describe("J-TERMINAL-session", () => {
         const ghost = connect(url);
         await next(ghost.events, "open");
         ghost.socket.send(JSON.stringify({ type: "auth", token: app.operatorSessionToken }));
-        const dead = await next(ghost.events, "text", (e) => e.text?.includes('"dead"'));
+        const dead = await next(ghost.events, "text", (e) => e.text?.includes('"dead"') === true);
         expect(JSON.parse(dead.text!).sessionId).toBe("00000000-0000-4000-8000-000000000000");
 
         // A cwd outside the workspace root is refused (containment through the world's own resolve).
