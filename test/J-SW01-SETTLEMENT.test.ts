@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
-import { seaForgeCall } from "../src/capabilities/governance.ts";
+import { seaForgeCall } from "./support/sea-forge-raw.ts";
 import { bootAimock } from "./helpers.ts";
 import { gitWorkspace, liveSettlementEnabled, startLiveCell, treeDigest, until, type LiveCell } from "./liveSettlement.ts";
 import { createClient } from "@godspeedai/cognate-client";
