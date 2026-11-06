@@ -6,7 +6,7 @@
 // the service actor; the operator's approve/reject goes out `on_behalf_of` the operator actor, so
 // requester and approver stay distinct and SEA-Forge's self-approval refusal holds.
 import type { Component, SemanticRef } from "@godspeedai/cognate-kernel-api";
-import { governanceFromEnv, type GovernanceOptions } from "@godspeedai/cognate-runtime-bun";
+import { governanceFromEnv, SeaForgeAuthority, type GovernanceOptions } from "@godspeedai/cognate-runtime-bun";
 
 export const GOVERNANCE_STATUS = "governance.status";
 export const GOVERNANCE_APPROVALS_LIST = "governance.approvals.list";
@@ -27,6 +27,8 @@ export interface ExternalAuthority {
   /** The human approver, reached only through the gateway's `on_behalf_of` delegation. */
   readonly operator: SeaForgeActor;
   readonly timeoutMs?: number;
+  /** The typed gateway client (the service actor, request ids prefixed `workbench`). */
+  readonly client: SeaForgeAuthority;
 }
 
 const ACTOR_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -43,58 +45,16 @@ export function externalAuthorityFromEnv(env: Readonly<Record<string, string | u
   if (!operatorId || !ACTOR_ID.test(operatorId)) throw new Error(`${ENV_OPERATOR} must name the operator actor bound in SEA-Forge when COGNATE_GOVERNANCE=sea-forge`);
   const serviceId = env.COGNATE_SEA_FORGE_ACTOR?.trim() || "cognate-service";
   if (operatorId === serviceId) throw new Error(`${ENV_OPERATOR} must differ from the service actor: a requester cannot approve its own escalation`);
+  const socketPath = env.COGNATE_SEA_FORGE_SOCKET!.trim();
+  const envActor = env.COGNATE_SEA_FORGE_ACTOR?.trim();
   return {
     // Poll SEA-Forge for decided escalations so an approved run resumes on its own.
     governance: { ...governance, approvalPollMs: governance.approvalPollMs ?? 2_000 } as ExternalAuthority["governance"],
-    socketPath: env.COGNATE_SEA_FORGE_SOCKET!.trim(),
+    socketPath,
     service: { actor_id: serviceId, role: "service" },
     operator: { actor_id: operatorId, role: "operator" },
+    client: new SeaForgeAuthority({ socketPath, requestIdPrefix: "workbench", ...(envActor ? { actor: { actor_id: envActor, role: "service" } } : {}) }),
   };
-}
-
-/** One NDJSON request/response over the SEA-Forge Unix socket. */
-export async function seaForgeCall(socketPath: string, request: Record<string, unknown>, timeoutMs = 5_000): Promise<Record<string, unknown>> {
-  let buffered = "";
-  return await new Promise((resolve, reject) => {
-    let done = false;
-    const finish = (error: Error | null, value?: Record<string, unknown>) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      if (error) reject(error);
-      else resolve(value!);
-    };
-    const timer = setTimeout(() => finish(new Error("SEA-Forge did not answer in time")), timeoutMs);
-    Bun.connect({
-      unix: socketPath,
-      socket: {
-        open(socket) { socket.write(`${JSON.stringify(request)}\n`); },
-        data(socket, chunk) {
-          buffered += new TextDecoder().decode(chunk);
-          const newline = buffered.indexOf("\n");
-          if (newline < 0) return;
-          // Settle before closing: in Bun, end() fires close() synchronously.
-          try { finish(null, JSON.parse(buffered.slice(0, newline)) as Record<string, unknown>); }
-          catch { finish(new Error("SEA-Forge answered with invalid JSON")); }
-          socket.end();
-        },
-        close() { finish(new Error("SEA-Forge closed the connection without an answer")); },
-        error(_socket, error) { finish(error); },
-      },
-    }).catch((error: unknown) => finish(error instanceof Error ? error : new Error(String(error))));
-  });
-}
-
-interface ResolveInput {
-  readonly approvalId: string;
-  readonly resolution: "approved" | "rejected";
-}
-
-function validateResolve(raw: unknown): ResolveInput {
-  const value = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
-  if (typeof value.approvalId !== "string" || !/^[A-Za-z0-9_.:-]{1,200}$/.test(value.approvalId)) throw new Error("Resolution requires a SEA-Forge approval id");
-  if (value.resolution !== "approved" && value.resolution !== "rejected") throw new Error("Resolution must be approved or rejected");
-  return { approvalId: value.approvalId, resolution: value.resolution };
 }
 
 /** `governance.status`, `governance.approvals.list` and `governance.approval.resolve`. */
@@ -122,27 +82,20 @@ export function governanceComponent(options: {
         : { mode: "off" });
       fiber.provide(list, async () => {
         const a = require();
-        const response = await seaForgeCall(a.socketPath, { verb: "authority_approvals" }, a.timeoutMs);
-        if (response.ok === false || response.error) throw new Error(`SEA-Forge refused the approval list: ${String(response.error ?? response.error_class ?? "unknown")}`);
-        return { approvals: (response.approvals ?? []) as never };
+        const result = await a.client.listApprovals({ timeoutMs: a.timeoutMs });
+        if (!result.ok) throw new Error(`SEA-Forge refused the approval list: ${result.errorClass}: ${result.error}`);
+        return { approvals: result.approvals as never };
       });
       fiber.provide(resolve, async (raw, ctx) => {
         // Only a direct human operator, outside any run, may answer an escalation: an agent must never
         // approve its own consequential action.
         if (ctx.actor.kind !== "user" || ctx.runId) throw new Error("Only a direct human operator may resolve a SEA-Forge approval");
         const a = require();
-        const input = validateResolve(raw);
-        const response = await seaForgeCall(a.socketPath, {
-          verb: "authority_approval",
-          approval_id: input.approvalId,
-          resolution: input.resolution,
-          request_id: `workbench:${input.approvalId}:${input.resolution}`,
-          actor: a.service,
-          on_behalf_of: a.operator,
-        }, a.timeoutMs);
-        if (response.ok !== true) throw new Error(`SEA-Forge refused the resolution: ${String(response.error ?? response.error_class ?? JSON.stringify(response).slice(0, 300))}`);
+        const value = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+        const result = await a.client.resolveApproval({ approvalId: value.approvalId as string, resolution: value.resolution as "approved" | "rejected", onBehalfOf: a.operator, timeoutMs: a.timeoutMs });
+        if (!result.ok) throw new Error(result.errorClass === "invalid_input" ? result.error : `SEA-Forge refused the resolution: ${result.error}`);
         await options.pollApprovals?.().catch(() => 0);
-        return { approvalId: input.approvalId, resolution: input.resolution, resolvedBy: a.operator.actor_id };
+        return { approvalId: value.approvalId as string, resolution: value.resolution as string, resolvedBy: a.operator.actor_id };
       });
     },
   };

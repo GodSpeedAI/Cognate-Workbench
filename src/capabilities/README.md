@@ -54,8 +54,8 @@ returning a Cognate `Component`; many also export their input/result types and c
   model dispatch with token-budget enforcement and durable billing reservation/settlement.
 - [governance.ts:governanceComponent] — mounts `governance.status` (`GOVERNANCE_STATUS`),
   `governance.approvals.list` (`GOVERNANCE_APPROVALS_LIST`), `governance.approval.resolve`
-  (`GOVERNANCE_APPROVAL_RESOLVE`), backed by one NDJSON request/response over the SEA-Forge Unix
-  socket ([governance.ts:seaForgeCall]).
+  (`GOVERNANCE_APPROVAL_RESOLVE`), backed by the typed SEA-Forge client `SeaForgeAuthority`
+  (`listApprovals`, `resolveApproval`) held on [governance.ts:ExternalAuthority].
 - [identityAdmin.ts:identityAdminComponent] — mounts `identity.session.issue`,
   `identity.session.revoke`, `identity.inspect`.
 - [modelConfigure.ts:modelConfigureComponent] — mounts `model.configure`: writes the API key secret,
@@ -145,8 +145,7 @@ returning a Cognate `Component`; many also export their input/result types and c
 - [governance.ts:ENV_OPERATOR] (`COGNATE_SEA_FORGE_OPERATOR`),
   [governance.ts:externalAuthorityFromEnv] (unset/off gives `undefined`; refuses `COGNATE_SEA_FORGE_OPERATOR`
   set while governance is off, and an operator id equal to the service actor),
-  [governance.ts:ExternalAuthority], [governance.ts:SeaForgeActor], [governance.ts:seaForgeCall]
-  (default 5s timeout).
+  [governance.ts:ExternalAuthority], [governance.ts:SeaForgeActor].
 - [identityAdmin.ts:IdentityAdminOptions].
 - [modelConfigure.ts:ModelConfigureInput] (`apiKey` is write-only; optional operator-declared
   `prices` parsed by `parseBillingPrices`).
@@ -291,8 +290,8 @@ No child subdirectories.
   (`../workbench/gitOps.ts`) [taskCheckout.ts:taskCheckoutComponent]; bounded directory listing via
   the world's provider [workspaceDirectorySuggest.ts:workspaceDirectorySuggestComponent].
 - **Network**: provider catalog fetch with 15s timeout [providerManage.ts:providerManageComponent];
-  model dispatch/stream [expertModel.ts:expertModelGenerateComponent]; SEA-Forge NDJSON over a Unix
-  socket [governance.ts:seaForgeCall]; SSH/WSL world connections [executionWorlds.ts:buildProvider].
+  model dispatch/stream [expertModel.ts:expertModelGenerateComponent]; SEA-Forge calls through the
+  typed client [governance.ts:ExternalAuthority]; SSH/WSL world connections [executionWorlds.ts:buildProvider].
 - **Cross-process shared state**: optimistic-concurrency CAS loop on thread
   `containment:aggregate:v1` via `readSharedState`/`updateSharedState`
   [aggregateContainment.ts:acquireContainedSlot], [aggregateContainment.ts:releaseContainedSlot].
