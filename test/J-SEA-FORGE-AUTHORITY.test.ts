@@ -22,7 +22,7 @@ import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 
 const BIN = process.env.SEA_FORGE_SERVER_BIN;
-const DF = process.env.WB_DOMAINFORGE_BIN ?? "domainforge";
+import { assertDomainforgeLockstep, DOMAINFORGE_BIN as DF } from "./support/domainforge.ts";
 const enabled = Boolean(BIN) && process.env.COGNATE_BWRAP_TESTS === "1" && Boolean(process.env.COGNATE_BWRAP_TEST_ATTESTATION) && process.platform === "linux";
 const liveTest = enabled ? test : test.skip;
 
@@ -74,6 +74,7 @@ liveTest("J-SEA-FORGE-AUTHORITY: an agent edit waits for SEA-Forge; only the ope
     // Workbench's interaction model is the governed world; DomainForge and SEA-Forge must agree on it.
     await mkdir(join(root, "worlds"));
     await copyFile(join(import.meta.dir, "../.sea/interaction/interaction-model.sea"), join(root, "worlds/interaction-model.sea"));
+    assertDomainforgeLockstep(DF);
     const envelope = Bun.spawnSync([DF, "envelope", "--emit", "cep", "--world-name", "workbench", "interaction-model.sea"], { cwd: join(root, "worlds") });
     expect(envelope.exitCode, envelope.stderr.toString()).toBe(0);
     const worldRef = JSON.parse(envelope.stdout.toString()).scope.world_ref as string;

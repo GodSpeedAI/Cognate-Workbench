@@ -12,7 +12,7 @@ import type { RealityTraceSettings } from "../src/settlement/realitytrace.ts";
 
 export const SF = process.env.SEA_FORGE_SERVER_BIN;
 export const RT = process.env.REALITYTRACE_BIN;
-const DF = process.env.WB_DOMAINFORGE_BIN ?? "domainforge";
+import { assertDomainforgeLockstep, DOMAINFORGE_BIN as DF } from "./support/domainforge.ts";
 /** The live journeys' shared prerequisites: SEA-Forge, RealityTrace and real bwrap on Linux. */
 export const liveSettlementEnabled = Boolean(SF && RT) && process.env.COGNATE_BWRAP_TESTS === "1" && Boolean(process.env.COGNATE_BWRAP_TEST_ATTESTATION) && process.platform === "linux";
 
@@ -97,6 +97,7 @@ export async function startLiveCell(prefix: string): Promise<LiveCell> {
     await mkdir(rtState);
     await mkdir(join(root, "worlds"));
     await copyFile(join(import.meta.dir, "../.sea/interaction/interaction-model.sea"), join(root, "worlds/interaction-model.sea"));
+    assertDomainforgeLockstep(DF);
     const envelope = Bun.spawnSync([DF, "envelope", "--emit", "cep", "--world-name", "workbench", "interaction-model.sea"], { cwd: join(root, "worlds") });
     expect(envelope.exitCode, envelope.stderr.toString()).toBe(0);
     const worldRef = JSON.parse(envelope.stdout.toString()).scope.world_ref as string;
