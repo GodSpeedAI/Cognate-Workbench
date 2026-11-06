@@ -146,7 +146,7 @@ describe("J-D-approval", () => {
 
         // Full restart: stop the app entirely, then boot a fresh one against the same SQLite store.
         await app.stop();
-        const restarted = await startServer({ port: 0, home });
+        const restarted = await startServer({ executionPosture: "uncontained-local", port: 0, home });
         try {
           const stillOpen = await restarted.runtime.service.listContinuations(LOCAL_OPERATOR, { runId: run.runId });
           expect(stillOpen.some((c) => c.status === "OPEN")).toBe(true);
@@ -206,7 +206,7 @@ describe("J-D-approval", () => {
         await new Promise((r) => setTimeout(r, 150));
         await app.stop();
 
-        const restarted = await startServer({ port: 0, home });
+        const restarted = await startServer({ executionPosture: "uncontained-local", port: 0, home });
         try {
           for (let i = 0; i < 400; i++) {
             const r = await restarted.runtime.service.getRun(LOCAL_OPERATOR, { runId: run.runId });

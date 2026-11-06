@@ -41,16 +41,22 @@ const ACTIVE_STATES: ReadonlySet<CapabilityState> = new Set(["ENABLED", "EXERCIS
 export interface WorkbenchViewProps {
   readonly workspaceId: string;
   readonly workspaceLabel: string;
+  /** J-TASK-scope: the conversation this cockpit was opened from, when one is open — the
+   *  "This session" visibility choice and the move-to-session destination. */
+  readonly sessionId?: string;
   /** The task the chat composer is bound to, if any. */
   readonly activeTaskId?: string;
   /** Bind the chat composer to a task and return to the conversation. */
   readonly onWorkOnTask: (taskId: string) => void;
+  /** J-TASK-scope: a session-scoped task was created in `sessionId` — bind it there (durable
+   *  `session.task.bind`; the optimistic overlay keeps the composer bar truthful immediately). */
+  readonly onTaskCreatedInSession?: (taskId: string) => void;
   /** The person's current selection, published so "this" resolves deterministically in the conversation. */
   readonly onFocus: (ref: FocusRef | undefined) => void;
   readonly onClose: () => void;
 }
 
-export function WorkbenchView({ workspaceId, workspaceLabel, activeTaskId, onWorkOnTask, onFocus, onClose }: WorkbenchViewProps) {
+export function WorkbenchView({ workspaceId, workspaceLabel, sessionId, activeTaskId, onWorkOnTask, onTaskCreatedInSession, onFocus, onClose }: WorkbenchViewProps) {
   const [tab, setTab] = useState<Tab>("tasks");
   const [notice, setNotice] = useState<Notice>(undefined);
   const act = useWorkbenchActions(setNotice);
@@ -107,7 +113,7 @@ export function WorkbenchView({ workspaceId, workspaceLabel, activeTaskId, onWor
         {notice && <span className={notice.kind === "error" ? "wb-error" : "wb-muted"}>{notice.text}</span>}
       </div>
       <div role="tabpanel" id={`wb-panel-${tab}`} aria-labelledby={`wb-tab-${tab}`} className="wb-cockpit-body">
-        {tab === "tasks" && <TasksTab workspaceId={workspaceId} workspaceLabel={workspaceLabel} activeTaskId={activeTaskId} act={act} onWorkOnTask={onWorkOnTask} onFocus={onFocus} />}
+        {tab === "tasks" && <TasksTab workspaceId={workspaceId} workspaceLabel={workspaceLabel} sessionId={sessionId} activeTaskId={activeTaskId} act={act} onWorkOnTask={onWorkOnTask} onTaskCreatedInSession={onTaskCreatedInSession} onFocus={onFocus} />}
         {tab === "workflows" && <WorkflowsTab workspaceId={workspaceId} act={act} onFocus={onFocus} />}
         {tab === "capabilities" && <CapabilitiesTab act={act} />}
         {tab === "automations" && <AutomationsTab workspaceId={workspaceId} act={act} />}
@@ -145,8 +151,8 @@ function taskDoneLevel(task: TaskRecord, entries: readonly EvidenceEntry[]) {
   });
 }
 
-function TasksTab({ workspaceId, workspaceLabel, activeTaskId, act, onWorkOnTask, onFocus }: { workspaceId: string; workspaceLabel: string; activeTaskId: string | undefined; act: Act; onWorkOnTask: (id: string) => void; onFocus: (ref: FocusRef | undefined) => void }) {
-  const allTasks = useWbRows<TaskRecord>("task/");
+function TasksTab({ workspaceId, workspaceLabel, sessionId, activeTaskId, act, onWorkOnTask, onTaskCreatedInSession, onFocus }: { workspaceId: string; workspaceLabel: string; sessionId: string | undefined; activeTaskId: string | undefined; act: Act; onWorkOnTask: (id: string) => void; onTaskCreatedInSession: ((taskId: string) => void) | undefined; onFocus: (ref: FocusRef | undefined) => void }) {
+  const allTasks = useWbRows<TaskRecord & { readonly scope?: string; readonly sessionId?: string }>("task/");
   const evidence = useEvidenceByTask();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
@@ -173,33 +179,47 @@ function TasksTab({ workspaceId, workspaceLabel, activeTaskId, act, onWorkOnTask
       <div className="wb-tasks-detail">
         {creating && (
           <NewTaskForm
+            sessionId={sessionId}
             onCancel={() => setCreating(false)}
-            onCreate={async (title) => {
-              const out = await act.call<{ taskId: string }>("task.create", { title, workspaceId }, "Task created. Fill in its contract.");
+            onCreate={async (title, scope) => {
+              const out = await act.call<{ taskId: string; scope: string }>("task.create", { title, workspaceId, scope, ...(scope === "session" && sessionId ? { sessionId } : {}) }, "Task created. Fill in its contract.");
               if (out) {
                 setCreating(false);
                 setSelectedId(out.taskId);
                 onFocus({ kind: "task", id: out.taskId, workspaceId, label: title });
+                // J-TASK-scope: creating a task *in this session* is the binding decision itself —
+                // bind it (durable server-side, optimistic in the composer bar) so returning to the
+                // conversation shows it next to the composer immediately.
+                if (scope === "session" && sessionId) onTaskCreatedInSession?.(out.taskId);
               }
             }}
           />
         )}
-        {!creating && selected && <TaskDetail key={selected.id} workspaceLabel={workspaceLabel} task={selected} entries={evidence.get(selected.id) ?? []} activeTaskId={activeTaskId} act={act} onWorkOnTask={onWorkOnTask} />}
+        {!creating && selected && <TaskDetail key={selected.id} workspaceLabel={workspaceLabel} sessionId={sessionId} task={selected} entries={evidence.get(selected.id) ?? []} activeTaskId={activeTaskId} act={act} onWorkOnTask={onWorkOnTask} />}
         {!creating && !selected && tasks.length > 0 && <p className="wb-empty">Select a task to see its contract, evidence and review state.</p>}
       </div>
     </div>
   );
 }
 
-function NewTaskForm({ onCreate, onCancel }: { onCreate: (title: string) => void; onCancel: () => void }) {
+function NewTaskForm({ sessionId, onCreate, onCancel }: { sessionId: string | undefined; onCreate: (title: string, scope: "workspace" | "session") => Promise<void>; onCancel: () => void }) {
   const [title, setTitle] = useState("");
+  // J-TASK-scope: the default follows the entry context — a task begun from an open conversation
+  // starts as that conversation's own work; from a session-less cockpit it starts workspace-wide.
+  const [scope, setScope] = useState<"workspace" | "session">(sessionId ? "session" : "workspace");
+  // The create is durable (the capability waits for its recording runs), so the button shows the
+  // real pending state instead of letting a second click race the first.
+  const [pending, setPending] = useState(false);
+  const canCreate = title.trim() !== "" && (scope === "workspace" || Boolean(sessionId)) && !pending;
   return (
     <form
       className="wb-section"
       aria-label="New task"
       onSubmit={(e) => {
         e.preventDefault();
-        if (title.trim()) onCreate(title.trim());
+        if (!canCreate) return;
+        setPending(true);
+        void onCreate(title.trim(), scope).finally(() => setPending(false));
       }}
     >
       <h3>New task</h3>
@@ -208,20 +228,37 @@ function NewTaskForm({ onCreate, onCancel }: { onCreate: (title: string) => void
         <label htmlFor="wb-new-title">What is the task called</label>
         <input id="wb-new-title" value={title} onChange={(e) => setTitle(e.currentTarget.value)} autoFocus />
       </div>
+      <fieldset role="radiogroup" aria-label="Task visibility" className="wb-field wb-task-scope">
+        <legend>Task visibility</legend>
+        <label>
+          <input type="radio" name="wb-task-scope" value="workspace" checked={scope === "workspace"} onChange={() => setScope("workspace")} />
+          This workspace
+        </label>
+        <label>
+          <input type="radio" name="wb-task-scope" value="session" checked={scope === "session"} disabled={!sessionId} onChange={() => setScope("session")} />
+          This session
+        </label>
+        <p className="wb-muted wb-scope-hint">
+          {scope === "session"
+            ? "Only this conversation sees the task until it is promoted or moved; creating it here makes it the conversation's task."
+            : "Every conversation in this workspace can pick the task; none gets it automatically."}
+          {!sessionId && " Open a conversation to make a session task."}
+        </p>
+      </fieldset>
       <div className="wb-btn-row">
-        <button type="submit" className="wb-btn primary" disabled={!title.trim()}>
-          Create task
+        <button type="submit" className="wb-btn primary" disabled={!canCreate} aria-busy={pending}>
+          {pending ? "Creating…" : "Create task"}
         </button>
-        <button type="button" className="wb-btn" onClick={onCancel}>
+        <button type="button" className="wb-btn" onClick={onCancel} disabled={pending}>
           Cancel
         </button>
-        {!title.trim() && <span className="wb-muted">Enter a name to continue.</span>}
+        {!canCreate && !pending && <span className="wb-muted">Enter a name to continue.</span>}
       </div>
     </form>
   );
 }
 
-function TaskDetail({ task, workspaceLabel, entries, activeTaskId, act, onWorkOnTask }: { task: TaskRecord; workspaceLabel: string; entries: readonly EvidenceEntry[]; activeTaskId: string | undefined; act: Act; onWorkOnTask: (id: string) => void }) {
+function TaskDetail({ task, workspaceLabel, sessionId, entries, activeTaskId, act, onWorkOnTask }: { task: TaskRecord & { readonly scope?: string; readonly sessionId?: string }; workspaceLabel: string; sessionId: string | undefined; entries: readonly EvidenceEntry[]; activeTaskId: string | undefined; act: Act; onWorkOnTask: (id: string) => void }) {
   const [field, setField] = useState<ContractField | undefined>(undefined);
   const capRows = useWbRows<CapRow>("capability/");
   const blockedRows = useWbRows<BlockedRecord>("blocked/");
@@ -329,6 +366,8 @@ function TaskDetail({ task, workspaceLabel, entries, activeTaskId, act, onWorkOn
               Go to the conversation
             </button>
           )}
+          {!locked && !terminal && <MoveTaskControl task={task} sessionId={sessionId} act={act} />}
+          {locked && <span className="wb-muted">Moving is blocked while the task runs — stop it first.</span>}
         </div>
       </section>
 
@@ -526,9 +565,106 @@ function AutomationsTab({ workspaceId, act }: { workspaceId: string; act: Act })
   );
 }
 
-/** Convenience for the app shell: tasks the chat composer can bind to in this workspace. */
-export function useBindableTasks(workspaceId: string | undefined): readonly TaskRecord[] {
-  const rows = useWbRows<TaskRecord>("task/");
-  return useMemo(() => rows.map((r) => r.value).filter((t) => t.workspaceId === workspaceId && (t.status === "READY" || t.status === "RUNNING" || t.status === "REWORK")), [rows, workspaceId]);
+/** Convenience for the app shell: tasks the chat composer can bind to from this session.
+ *  J-TASK-scope: every task of the workspace is *available* here (scope is visibility, not
+ *  eligibility-by-status — a fresh task can be bound and its contract governs from turn one);
+ *  a session-scoped task appears only inside its owning session. */
+export function useBindableTasks(workspaceId: string | undefined, sessionId?: string): readonly TaskRecord[] {
+  const rows = useWbRows<TaskRecord & { readonly scope?: string; readonly sessionId?: string }>("task/");
+  return useMemo(
+    () =>
+      rows
+        .map((r) => r.value)
+        .filter((t) => t.workspaceId === workspaceId && ((t.scope ?? "workspace") !== "session" || (sessionId !== undefined && t.sessionId === sessionId))),
+    [rows, workspaceId, sessionId],
+  );
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// J-TASK-move: the governed move/promote/detach affordance
+// ---------------------------------------------------------------------------------------------
+
+/** Sessions currently bound to a task (the public `session-task-bindings` projection). */
+function useSessionsBoundToTask(taskId: string): readonly { readonly sessionId: string; readonly workspaceId: string }[] {
+  const rows = useProjection("session-task-bindings");
+  return useMemo(
+    () => (rows ?? []).map((r) => r.value as { readonly sessionId: string; readonly workspaceId: string; readonly taskId: string | null }).filter((b) => b.taskId === taskId),
+    [rows, taskId],
+  );
+}
+
+/**
+ * One explicit, discoverable mutation for promoting a session task to its workspace, moving a task
+ * to another workspace, or moving it into this session — with the consequences stated before the
+ * person commits. The capability preserves the task's identity, evidence and provenance and
+ * invalidates stale bindings; this control explains what that means in product words.
+ */
+function MoveTaskControl({ task, sessionId, act }: { task: TaskRecord & { readonly scope?: string; readonly sessionId?: string }; sessionId: string | undefined; act: Act }) {
+  const workspaceRows = useProjection("workspaces");
+  const boundConversations = useSessionsBoundToTask(task.id);
+  const [open, setOpen] = useState(false);
+  const [destination, setDestination] = useState<string>("");
+  const workspaces = useMemo(
+    () => (workspaceRows ?? []).filter((r) => r.key.startsWith("record/")).map((r) => r.value as { readonly id: string; readonly title: string }),
+    [workspaceRows],
+  );
+  const others = workspaces.filter((w) => w.id !== task.workspaceId);
+  const currentScope = (task.scope ?? "workspace") === "session" ? "this session" : "this workspace";
+  const target = destination === "workspace" ? { workspaceId: task.workspaceId, label: `This workspace (${workspaces.find((w) => w.id === task.workspaceId)?.title ?? task.workspaceId})` } : destination === "session" ? { sessionId: sessionId ?? "", label: "This session" } : others.find((w) => w.id === destination) ? { workspaceId: destination, label: `Workspace ${others.find((w) => w.id === destination)!.title}` } : undefined;
+
+  if (!open) {
+    return (
+      <button type="button" className="wb-btn" onClick={() => setOpen(true)}>
+        Move or promote…
+      </button>
+    );
+  }
+  return (
+    <div className="wb-move-control" role="group" aria-label="Move or promote this task">
+      <span className="wb-muted">Currently visible in: <strong>{currentScope}</strong>{boundConversations.length > 0 ? ` · bound in ${boundConversations.length} conversation${boundConversations.length === 1 ? "" : "s"}` : " · no conversation has it active"}</span>
+      <label className="wb-field">
+        <span className="wb-muted">Destination</span>
+        <select aria-label="Move destination" value={destination} onChange={(e) => setDestination(e.currentTarget.value)}>
+          <option value="">Choose a destination…</option>
+          {(task.scope ?? "workspace") === "session" && <option value="workspace">This workspace — promote it</option>}
+          {(task.scope ?? "workspace") !== "session" && sessionId && <option value="session">This session</option>}
+          {others.map((w) => (
+            <option key={w.id} value={w.id}>
+              Workspace: {w.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      {target && (
+        <p className="wb-muted wb-scope-hint" role="status">
+          {destination === "workspace"
+            ? "Promoting makes the task available in every conversation of this workspace; none gets it automatically. Its evidence, history and origin stay unchanged."
+            : destination === "session"
+              ? "Only this conversation will see the task. Its evidence and history stay unchanged."
+              : `Moving to ${target.label} recalculates which paths, tools, executors, budget and protected folders apply — the contract's workspace context is revalidated. Evidence and past runs are preserved and never reparented; conversations bound here fall back to no task.`}
+        </p>
+      )}
+      <div className="wb-btn-row">
+        <button
+          type="button"
+          className="wb-btn"
+          disabled={!target}
+          onClick={async () => {
+            if (!target) return;
+            const out =
+              destination === "session"
+                ? await act.call("task.move", { taskId: task.id, to: { sessionId: target.sessionId } }, "Task moved into this session.")
+                : await act.call("task.move", { taskId: task.id, to: { workspaceId: (target as { workspaceId: string }).workspaceId } }, "Task moved.");
+            if (out) setOpen(false);
+          }}
+        >
+          Move task
+        </button>
+        <button type="button" className="wb-btn" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}

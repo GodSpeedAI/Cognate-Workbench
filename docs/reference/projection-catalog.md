@@ -1,6 +1,6 @@
 # Reference: projection catalog
 
-The eleven read models. Each is a pure fold of events; each can be deleted and rebuilt.
+The sixteen read models. Each is a pure fold of events; each can be deleted and rebuilt.
 
 ## The contract
 
@@ -10,7 +10,7 @@ The eleven read models. Each is a pure fold of events; each can be deleted and r
 - A projection performs no I/O, calls no capability, starts no run, and decides nothing.
 - Bump `version` when you change how values are derived.
 
-## The eleven
+## The sixteen
 
 ### `sessions`
 
@@ -58,7 +58,7 @@ That is the direct consequence of fire-and-forget delegation.
 **Key:** tenant-prefixed; one cockpit view covering tasks, contracts, workflows and their instances,
 the capability catalog and bindings, the evidence ledger, automations, usage, steering inboxes,
 grounded feedback, and protection blocks.
-**Read by:** every cockpit component, and by the 23 workbench capabilities for validation.
+**Read by:** every cockpit component, and by the 25 workbench capabilities for validation.
 
 This is the projection most likely to be read immediately after a write, so it is the one where
 read-after-write lag is most visible. See
@@ -118,6 +118,57 @@ Every other field is whole-value. Getting this wrong is the classic way to lose 
 This projection stores **no Case**. The UI subscribes to it purely to learn that something changed,
 then asks `case.derive` for the Case, which is recomputed server-side from events on every read.
 
+### `experts`
+
+**Folds:** the Experts and Teams `state.changed` events on the versioned `experts:registry` thread,
+plus `erasure.recorded`.
+**Key:** tenant-prefixed, restored per section (`experts`, `teams`, `conversations`, `assignments`,
+`messages`, `memory`, `receipts`).
+**Shape:** `publicExperts(...)` — the roster and work view.
+**Read by:** the Experts & Teams surfaces.
+
+Scoped memory and private context deliberately stay outside this projection.
+
+### `experts-billing`
+
+**Folds:** `state.changed` events whose `metadata.threadId` is `EXPERTS_BILLING_THREAD`.
+**Key:** `${tenant}/current`.
+**Shape:** one sanitized `billingOverview(snapshot)` row: reservation ids, kinds, statuses, models,
+token amounts, booked costs, unknown-price counts.
+
+It never carries a route, a credential or a private payload. An unknown price surfaces as a null cost
+plus an unknown-price count, never as zero.
+
+### `provider-routes`
+
+**Folds:** `model.configured` and `provider.deleted`.
+**Key:** `${tenant}/provider:${providerId}`.
+**Shape:** `{ providerId, baseURL, protocol, model }` — the safe route catalog, no secret.
+
+`model.configured` writes one row per provider; `provider.deleted` deletes that provider's row. It
+keeps the legacy single-current-route view alongside the multi-provider list.
+
+### `session-task-bindings`
+
+**Folds:** `session.task.bound` only.
+**Key:** `${tenant}/${sessionId}`.
+**Shape:** `{ sessionId, workspaceId, taskId }`, where `taskId: null` is an explicit detach.
+
+Bindings are never inferred. Creating a workspace task binds no session, and a workspace task stays
+merely *available* in every session of its workspace. Invalidating a binding writes `taskId: null`,
+so history and run provenance are never rewritten. Absence of a row means the session was never
+bound, which is also a valid "no task".
+
+### `plugins`
+
+**Folds:** `plugin.installed` and `plugin.uninstalled`.
+**Key:** `${tenant}/record/${pluginId}`.
+**Shape:** `{ pluginId, installedAt, implementation? }`.
+
+Installation is durable and reversible: uninstall writes a `null` value, which deletes the key. The
+fold refuses to delete a row that was never installed, keeping it total against a replayed unmatched
+pair. The catalog is code; the install state is data; `src/plugins.ts` merges them.
+
 ## Choosing a fold style
 
 | Situation | Style | Example |
@@ -144,7 +195,7 @@ const row = await runtime.service.readProjection(caller, { name: "model-config" 
 
 ## Source trail
 
-- `src/projections/` — all eleven definitions, each documenting its own fold
+- `src/projections/` — all sixteen definitions, each documenting its own fold
 - `src/workbench/reducer.ts` — the `workbench.*` fold
 - `src/settings.ts` — `SettingsPatch`, `resolveGeneralSettings`
 - `src/agents/agentCognitive.ts` — `COGNITIVE_EVENT_TYPES`

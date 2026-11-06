@@ -22,7 +22,7 @@ Registered on `createRuntime` in `src/server.ts` and read by the UI through `use
 from `@godspeedai/cognate-react`, and by capability handlers through
 `runtime.service.readProjection(caller, { name })`.
 
-## The eleven
+## The sixteen
 
 | Name | File | Folds | Key shape |
 |---|---|---|---|
@@ -37,6 +37,11 @@ from `@godspeedai/cognate-react`, and by capability handlers through
 | `settings` | `settings.ts` | `settings.changed` | `${tenant}/current` |
 | `onboarding` | `onboarding.ts` | `onboarding.dismissed` | `${tenant}/notice`, `${tenant}/apikey` |
 | `cognitive` | `cognitive.ts` | any cognitive event type | `${tenant}/latest`, `${tenant}/activeCase` |
+| `experts` | `experts.ts` | Experts/Teams `state.changed`, `erasure.recorded` | per section, tenant-prefixed |
+| `experts-billing` | `expertsBilling.ts` | `state.changed` on the billing thread | `${tenant}/current` |
+| `provider-routes` | `providerRoutes.ts` | `model.configured`, `provider.deleted` | `${tenant}/provider:${providerId}` |
+| `session-task-bindings` | `sessionTaskBindings.ts` | `session.task.bound` | `${tenant}/${sessionId}` |
+| `plugins` | `plugins.ts` | `plugin.installed`, `plugin.uninstalled` | `${tenant}/record/${pluginId}` |
 
 ## Internal operation
 

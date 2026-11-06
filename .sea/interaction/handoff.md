@@ -347,3 +347,55 @@ schedule, handoff, usage and live-delivery receipts. See the canonical catalog a
 These bindings do not establish distributed run ownership, parallel workers on the installed SDK,
 or production trust. Upstream PR https://github.com/GodSpeedAI/Cognate/pull/42 contains separately
 tested native dispatch/concurrency/containment contracts; Workbench remains on published 0.2.0.
+
+## Session / Workspace / Task RED journeys — bindings and settlement evidence (2026-10-20)
+
+Six canonical journeys were added to the model first (instances `j_session_draft`,
+`j_ws_directory_discovery`, `j_task_scope`, `j_task_move`, `j_run_task_attribution`,
+`j_task_expert_provenance`; catalog section "Session / Workspace / Task / Run journeys"), together
+with the `AgentRun` entity and the `SessionDraft`, `DirectorySuggestion`, `TaskBindingRecord`,
+`TaskMoveRecord`, `RunTaskAttribution`, `AssignmentTaskRecord` resources and their flows.
+
+`RED_JOURNEY_ANCHORS` in `domain/index.ts` binds the new capabilities explicitly:
+
+| Semantic entity | Capabilities |
+|---|---|
+| `Session` | `session.create`, `session.task.bind` |
+| `ExecutionWorld` | `workspace.directory.suggest` |
+| `Task` (workbench family) | `task.list`, `task.move` (via `WORKBENCH_ANCHORS`) |
+
+`task.create` gains `scope`/`sessionId` and `team.converse` gains a validated `taskId` on their
+existing `Task`/`Conversation` anchors — no new bindings were minted for them. Projections: the
+`sessions` projection folds `session.created` draft rows; the new public
+`session-task-bindings` projection folds `session.task.bound`. Recording runs go through the
+deterministic `agent.config` (`session.created`, `session.recorded`, and `workbench.recorded` now
+accepting the `session.task.bound` family for task.create's ordered batch).
+
+Settlement evidence (all formerly red, now observed):
+
+- `test/J-SESSION-draft-contract.red.test.ts` (5) — durable drafts, explicit-workspace binding,
+  idempotent identity with exactly one event, unknown-workspace refusal, first-turn reuse.
+- `test/J-WS-directory-discovery.red.test.ts` (3) — directory-only prefix completion, fail-closed
+  unknown worlds, bounded deterministic results with no file content.
+- `test/J-TASK-session-scope.red.test.ts` (5) — workspace availability without auto-binding,
+  session-scope visibility and durable bind/detach, identity/evidence-preserving move with
+  destination revalidation, nonexistent-destination refusal, and J-RUN-task-attribution
+  (unbound turns carry no taskId; bound turns freeze it into `session.turn.started`).
+- `test/J-TASK-expert-provenance.red.test.ts` (1) — orchestrator and specialist Assignments retain
+  the Task with distinct Runs; no automatic acceptance.
+- `test/E2E-workspace-session-ux.red.test.ts` (4) — real-pointer journeys: + from Experts & Teams
+  produces a selected, focused, reload-surviving draft; per-workspace + switches the current
+  selection with no stale task; keyboard-driven directory completion opens the exact destination;
+  task visibility is understandable at creation and a new session starts unbound.
+
+Two test selectors were refined with the assertions preserved and strengthened (documented
+in-file): the active-row button is matched by an anchored name (the row's archive control also
+contains the title), and two reads tolerate the durable projection settle while asserting strictly
+more (the session task is not even offered in the new session's combobox).
+
+`just verify` (typecheck + full suite) passes: 1197 pass / 0 fail / 9 pre-existing skips.
+DomainForge 0.19.0: `validate` zero violations, `fmt --check` clean. UX evidence screenshots are in
+`screenshots/red-journeys/` (produced by `test/E2E-red-journeys-evidence.test.ts`).
+
+Known limits are recorded in `docs/known-gaps.md`; the client's per-event projection re-read
+amplification is the one item that needs an upstream framework change rather than app mitigation.

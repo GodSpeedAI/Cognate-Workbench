@@ -1,5 +1,6 @@
 // Opt-in Linux child-process namespace containment. Binary trust and runtime roots are host-owned;
 // a caller can choose only an existing workspace directory, never the sandbox implementation.
+import type { ExecutionPosture } from "../executionPosture.ts";
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, sep } from "node:path";
@@ -57,6 +58,8 @@ export interface ContainedWorkspaceOptions {
   readonly registry: ExecutionWorldRegistry;
   readonly getKnownWorkspaceIds: () => ReadonlySet<string>;
   readonly config?: ContainmentConfig;
+  /** The server's execution posture, reported by inspection (default "contained"). */
+  readonly executionPosture?: ExecutionPosture;
   /** Host application data/config directory; used to prevent exposing secrets through the workspace bind. */
   readonly protectedHome?: string;
   readonly semanticRefs: { readonly contained?: SemanticRef; readonly containmentInspect?: SemanticRef };
@@ -65,6 +68,8 @@ export interface ContainedWorkspaceOptions {
 export interface ContainedWorkspaceInput { readonly path: string }
 
 export interface ContainmentInspection {
+  /** Where agent effects may run on this server (src/executionPosture.ts). */
+  readonly executionPosture: ExecutionPosture;
   readonly configured: boolean;
   readonly platformSupported: boolean;
   readonly preflightRequired: true;
@@ -95,15 +100,15 @@ export class ConfigurationRunError extends Error implements ConfigurationRunFail
 function inside(root: string, path: string): boolean { return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep); }
 function titleFor(root: string): string { return root.split(sep).filter(Boolean).at(-1) ?? "Contained workspace"; }
 
-function safeInspection(config: ContainmentConfig | undefined): ContainmentInspection {
+function safeInspection(config: ContainmentConfig | undefined, executionPosture: ExecutionPosture): ContainmentInspection {
   const platformSupported = process.platform === "linux";
   let checked: ContainmentConfig | undefined;
   try { if (config) checked = validateContainmentConfig(config); } catch {}
   const limits = { timeoutMs: checked?.timeoutMs ?? 30_000, maxOutputBytes: checked?.maxOutputBytes ?? 1_048_576, runtimeRootCount: checked?.runtimeRoots.length ?? 0 };
-  if (!config) return { configured: false, platformSupported, preflightRequired: true, reason: "host containment configuration is unavailable", limits };
-  if (!checked) return { configured: false, platformSupported, preflightRequired: true, reason: "host containment configuration is invalid", limits };
-  if (!platformSupported) return { configured: true, platformSupported: false, preflightRequired: true, reason: "Linux namespace containment is unavailable on this host", limits };
-  return { configured: true, platformSupported: true, preflightRequired: true, reason: "select a dedicated root to run native containment preflight", limits };
+  if (!config) return { executionPosture, configured: false, platformSupported, preflightRequired: true, reason: "host containment configuration is unavailable", limits };
+  if (!checked) return { executionPosture, configured: false, platformSupported, preflightRequired: true, reason: "host containment configuration is invalid", limits };
+  if (!platformSupported) return { executionPosture, configured: true, platformSupported: false, preflightRequired: true, reason: "Linux namespace containment is unavailable on this host", limits };
+  return { executionPosture, configured: true, platformSupported: true, preflightRequired: true, reason: "select a dedicated root to run native containment preflight", limits };
 }
 
 async function committedConfigEffects(service: RuntimeService, caller: Caller, runId: string): Promise<{ readonly events: string[]; readonly certain: boolean }> {
@@ -341,7 +346,7 @@ export function containedWorkspaceComponent(options: ContainedWorkspaceOptions):
     activate(fiber) {
       fiber.provide(inspect, async (_raw, ctx) => {
         operatorOnly(ctx, inspect.id);
-        return safeInspection(options.config);
+        return safeInspection(options.config, options.executionPosture ?? "contained");
       });
       fiber.provide(contained, select);
     },

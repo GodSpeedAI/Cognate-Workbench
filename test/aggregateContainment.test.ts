@@ -54,7 +54,7 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
   const home = await mkdtemp(join(tmpdir(), "wb-containment-unit-"));
   let app: AppServer | undefined;
   try {
-    app = await startServer({ port: 0, home, devAuth: true });
+    app = await startServer({ executionPosture: "uncontained-local", port: 0, home, devAuth: true });
     const service = createRemoteRuntimeService(connectTransport(app.url), () => `local:${LOCAL_OPERATOR.actor.id}`);
     const client = createClient({ service, caller: LOCAL_OPERATOR });
     const setQuotas = async (quotas: Record<string, number>) => {

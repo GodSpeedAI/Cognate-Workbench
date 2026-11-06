@@ -49,7 +49,7 @@ An Assignment freezes the applicable Expert tools, Team ceiling, membership perm
 
 The Orchestrator's `team_delegate` tool creates an Assignment with purpose, context, acceptance criteria, depth, authority and return identity. `agent.expert` obtains that frozen specification through `expert.context` and reuses `agent.coding`. It suspends on a native continuation while a Specialist executes.
 
-Published Cognate0.5.0 stores run-completion conditions but does not automatically resolve them. Workbench's completion bridge follows committed events and scans persisted state on boot. It correlates terminal runs, records one logical Handoff, and resolves the native parent wait idempotently. Cognate's durable run outbox executes the work; there is no competing scheduler.
+Published Cognate 0.6.1 stores run-completion conditions but does not automatically resolve them. Workbench's completion bridge follows committed events and scans persisted state on boot. It correlates terminal runs, records one logical Handoff, and resolves the native parent wait idempotently. Cognate's durable run outbox executes the work; there is no competing scheduler.
 
 States are `queued`, `running`, `waiting`, `reconciliation-required`, `failed`, `cancelled` and human-settled `completed`. Creating a child run does not complete its Assignment. Typed returns can report a result, abstention or decline. A returned result remains an assertion until its evidence is checked.
 

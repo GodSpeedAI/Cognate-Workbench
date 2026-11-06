@@ -36,7 +36,7 @@ describe("J-I-work-details", () => {
 
       // Reopen the same SQLite file in a fresh process-equivalent server instance — durable across a
       // full runtime restart, not just a client reload.
-      const reopened = await startServer({ port: 0, home });
+      const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
       try {
         await reopened.runtime.idle();
         const rows = (await reopened.runtime.service.readProjection(LOCAL_OPERATOR, { name: "settings" })).rows;

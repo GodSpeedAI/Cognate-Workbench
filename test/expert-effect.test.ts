@@ -14,6 +14,7 @@ function harness(options: { readonly failAfterEffect?: boolean; readonly allowed
     id: "assignment-1", expertId: "builder", conversationId: "conversation-1", teamId: "team-1", parentId: "parent-1",
     purpose: "write the requested file", acceptance: ["file changed"], depth: 1, attempt: 1, status: "running", workspaceId: "workspace-1", mode: "workspace-write",
     authorityTools: [...(options.allowedTools ?? ["edit"])] as ExpertTool[],
+    taskId: null,
     execution: { expertId: "builder", assignmentId: "assignment-1", conversationId: "conversation-1", teamId: "team-1", instructions: "", route: { providerId: "fake", model: "fake", baseURL: "https://example.invalid", protocol: "openai-compatible" }, tools: [...(options.allowedTools ?? ["edit"])] as ExpertTool[], maxSteps: 4, context: [] },
     runId: "run-1", handoff: null, reconciled: false, review: null, settlement: null, effects: {},
   };

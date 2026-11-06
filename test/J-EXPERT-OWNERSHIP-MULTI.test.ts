@@ -46,7 +46,7 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
       });
     },
   });
-  const boot = (): Promise<AppServer> => startServer({
+  const boot = (): Promise<AppServer> => startServer({ executionPosture: "uncontained-local",
     devAuth: true,
     port: 0,
     home,

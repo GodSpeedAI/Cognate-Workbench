@@ -14,13 +14,13 @@ file does — see [Documentation map](documentation-map.md).
 |---|---|
 | Runtime and server | `src/server.ts` — `startServer`, `GRANTED_CAPABILITIES`, `LOCAL_OPERATOR`, `SYSTEM_CALLER`, `buildPolicy`, `buildActionPolicy`, `BROWSER_ENTRY_TEMPLATE`, `indexHtml`, `Bun.serve`; `src/store.ts` — `schemaFor`, `storeConfigFor` |
 | Agents | `src/agents/agentCoding.ts` — `agentCodingAgent`, `TOOL_DEFS`, `UI_TOOL_DEFS`, `PRESET_TOOLS`, `toolsForPreset`; `src/agents/agentConfig.ts` — `AgentConfigInput`; `src/agents/agentCognitive.ts` — `COGNITIVE_EVENT_TYPES` |
-| Capabilities | `src/capabilities/` (14 files); `src/capabilities/workbench.ts` — `WORKBENCH_CAPABILITY_IDS` |
+| Capabilities | `src/capabilities/` (27 files); `src/capabilities/workbench.ts` — `WORKBENCH_CAPABILITY_IDS` |
 | Projections | `src/projections/` (11 files) |
-| Workbench domain | `src/workbench/` (15 pure modules); `src/workbench/types.ts` — the type root; `src/workbench/reducer.ts` — the fold |
+| Workbench domain | `src/workbench/` (16 pure modules); `src/workbench/types.ts` — the type root; `src/workbench/reducer.ts` — the fold |
 | Cognitive domain | `src/cognitive/` (13 pure modules); `src/cognitive/world.ts`, `case.ts`, `criterion.ts`, `affordance.ts`, `mediation.ts`, `sentinel.ts`, `surface.ts` |
 | Execution worlds, providers, secrets | `src/capabilities/executionWorlds.ts` — `restoreExecutionWorlds`; `src/components/providerRegistry.ts` — `ModelWireProtocol`, `buildProvider`, `ProviderRegistry.swap`; `src/components/modelProvider.ts` — `streamingProviderComponent`; `src/secrets.ts` |
 | Observations and RealityTrace | `src/observations.ts` — `OBSERVED_EVENT_TYPES`, `observationOutboxFor`, `defaultSxrBin`, `wireObservations` |
-| User interface | `src/ui/App.tsx`; `src/ui/workbench/` (14 components, `UX.md`, 8 CSS sheets); `src/ui/CognitiveFrame.tsx`; `src/ui/webmcp.ts` |
+| User interface | `src/ui/App.tsx`; `src/ui/workbench/` (15 components, `UX.md`, 9 CSS sheets); `src/ui/CognitiveFrame.tsx`; `src/ui/webmcp.ts` |
 | Pure gates | `src/domain/approvalGate.ts`, `src/domain/planGate.ts` |
 
 ## Concepts

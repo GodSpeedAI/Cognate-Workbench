@@ -153,7 +153,7 @@ describe("J-PLG-panels", () => {
           await app.stop();
         }
       }
-      const reopened = await startServer({ port: 0, home });
+      const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
       try {
         const rows = (await reopened.runtime.service.readProjection(LOCAL_OPERATOR, { name: "settings" })).rows;
         expect((rows.find((r) => r.key === "current")?.value as { preset?: string }).preset).toBe("minimal");

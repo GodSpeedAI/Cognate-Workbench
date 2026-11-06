@@ -16,7 +16,7 @@ import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import type { ModelWireProtocol, ProviderRegistry } from "../components/providerRegistry.ts";
 import type { SecretStore } from "../secrets.ts";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
-import { authHeaderValue, catalogRequest, parseModelIds } from "../modelCatalog.ts";
+import { authHeaderValue, catalogRequest, parseModelIds, storedKeyTarget } from "../modelCatalog.ts";
 
 export interface ProviderDeleteInput {
   readonly providerId: string;
@@ -77,10 +77,14 @@ export function providerManageComponent(options: {
         const input = rawInput as ModelCatalogInput;
         const plan = catalogRequest(input.protocol, input.baseURL);
         if (!plan.ok) return { ok: false as const, reason: plan.reason, models: [] as readonly string[] };
-        // Resolve the key server-side. `ctx` is used only to scope the read to this caller's tenant.
-        const key = typeof input.apiKey === "string" && input.apiKey.trim().length > 0
-          ? input.apiKey
-          : await options.secrets.get(`${SECRET_KEY}${options.registry.current?.providerId ?? ""}`);
+        // Resolve the key server-side. A typed key goes where the caller says; the saved key goes only to
+        // the saved provider, so a caller cannot redirect it to a URL of their choosing.
+        const typed = typeof input.apiKey === "string" && input.apiKey.trim().length > 0;
+        if (!typed) {
+          const target = storedKeyTarget(options.registry.current, { baseURL: input.baseURL, protocol: input.protocol });
+          if (!target.ok) return { ok: false as const, reason: target.reason, models: [] as readonly string[] };
+        }
+        const key = typed ? input.apiKey : await options.secrets.get(`${SECRET_KEY}${options.registry.current?.providerId ?? ""}`);
         const headers: Record<string, string> = { accept: "application/json" };
         const auth = authHeaderValue(plan, key ?? "");
         if (auth) headers[plan.authHeader] = auth;

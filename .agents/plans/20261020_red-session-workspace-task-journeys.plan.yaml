@@ -1,0 +1,70 @@
+# Make the RED Session/Workspace/Task/Run journeys green (PR #2)
+branch: test/red-session-workspace-task-contracts-20261020
+spec: docs/specs/session-workspace-task-red-journeys.md
+created: 2026-10-20
+
+# Red baseline (recorded 2026-10-20, this machine)
+# - J-SESSION-draft-contract.red.test.ts: 5 fail — "no eligible provider for session.create"
+# - J-WS-directory-discovery.red.test.ts: 3 fail — "no eligible provider for workspace.directory.suggest"
+# - J-TASK-session-scope.red.test.ts: 5 fail — missing session.create / session.task.bind /
+#   task scope fields / task.list / task.move; run attribution payload lacks taskId
+# - J-TASK-expert-provenance.red.test.ts: 1 fail — Assignment has no taskId, child not linked
+# - E2E-workspace-session-ux.red.test.ts: 4 fail — no durable draft, no suggestions UI,
+#   no task visibility choices, no per-session task binding
+
+tranches:
+  - id: T-RED-1-model
+    aim: >
+      Extend the canonical IDM first: AgentRun entity, TaskSessionBinding relation,
+      SessionDraft/DirectorySuggestion/TaskBindingRecord/TaskMoveRecord/RunTaskAttribution/
+      AssignmentTaskRecord resources + flows, and the six CanonicalJourney instances
+      (J-SESSION-draft, J-WS-directory-discovery, J-TASK-scope/link, J-TASK-move,
+      J-RUN-task-attribution, J-TASK-expert-provenance). Update the journey catalog and
+      handoff; domainforge validate + check-cognate-adapter must pass.
+  - id: T-RED-2-session-create
+    aim: >
+      `session.create` capability (deterministic id from workspaceId+requestId, runtime
+      idempotency key, workspace validation, `session.created` event correlated
+      `session:<id>`), `sessions` projection draft rows (lastStatus "draft"),
+      agent.config "session.created" command. J-SESSION suite green.
+  - id: T-RED-3-task-scope
+    aim: >
+      TaskRecord scope (workspace|session) + sessionId, task.create scope validation and
+      session-scope auto-binding, `session.task.bind` capability + public
+      `session-task-bindings` projection + agent.config "session.recorded" recording,
+      `task.list` visibility semantics, `task.move` governed mutation with provenance and
+      stale-binding invalidation. J-TASK-session-scope suite green.
+  - id: T-RED-4-run-attribution
+    aim: >
+      agent.coding freezes the effective taskId into `session.turn.started` and validates
+      it against the session context; runs without a Task stay valid. Expert runs carry the
+      assignment taskId through expert.context into the coding engine.
+  - id: T-RED-5-directory
+    aim: >
+      `workspace.directory.suggest` read capability over the execution-world registry
+      (directories only, bounded, deterministic order, fail-closed worlds, app-home
+      protection) + shared accessible DirectoryPicker UI (debounce, keyboard, loading/
+      empty/error states) used by the Add-workspace dialog and first-run chooser.
+      J-WS suite green.
+  - id: T-RED-6-expert-provenance
+    aim: >
+      Assignment.taskId + team.converse validation + delegate inheritance; J-TASK-expert
+      suite green.
+  - id: T-RED-7-ux
+    aim: >
+      UI: + creates a durable selected draft from every screen (chat, Workbench, Experts,
+      Plugins), closes panels, focuses composer, remembers across reload, per-session
+      Task combobox bound to session.task.bind, New-task visibility radiogroup, task move
+      affordance with consequence preview, visible errors. E2E red suite green + UX
+      evidence (screenshots).
+  - id: T-RED-8-verify
+    aim: >
+      Full `just verify`, targeted regression suites (Session, Workspace, Task, Experts),
+      domainforge validation, docs/known-gaps/status updates, commit slices, push, PR
+      ready-for-review.
+
+rules:
+  - model first: every capability below must be bound in domain/index.ts to a semantic id
+    from the validated model before it is published.
+  - never weaken a red assertion; test APIs may change only with a documented mapping.
+  - no second execution framework; all state through Cognate events/projections.

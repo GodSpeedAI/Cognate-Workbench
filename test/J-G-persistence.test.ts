@@ -50,7 +50,7 @@ describe("J-G-persistence", () => {
         }
 
         // Reopen the same SQLite file in a fresh process-equivalent server instance.
-        const reopened = await startServer({ port: 0, home });
+        const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
         try {
           const rows = (await reopened.runtime.service.readProjection(LOCAL_OPERATOR, { name: "sessions" })).rows;
           const sessionRow = rows.find((r) => r.key === sessionId)?.value as { readonly title?: string; readonly lastStatus?: string } | undefined;

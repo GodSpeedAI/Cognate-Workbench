@@ -25,7 +25,7 @@ ExpertsService.prototype.command=async function(capability,input,ctx){
 };
 
 let modelCalls=0;
-const server=await startServer({
+const server=await startServer({ executionPosture: "uncontained-local",
     devAuth: true,
   port:0,
   home,

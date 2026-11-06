@@ -30,6 +30,10 @@ export function workspaceSelectComponent(options: {
   readonly getService: () => RuntimeService;
   readonly systemCaller: Caller;
   readonly getKnownWorkspaceIds: () => ReadonlySet<string>;
+  /** Synchronously note a validated workspace id the moment it is selected — the projection fold
+   *  is asynchronous, so this keeps "does this workspace exist?" answerable without a race for
+   *  capabilities invoked immediately after a select (J-SESSION-draft's session.create). */
+  readonly noteKnownWorkspace?: (workspaceId: string) => void;
   /** The execution worlds this app can place a workspace in. */
   readonly registry: ExecutionWorldRegistry;
   readonly semanticRef?: SemanticRef;
@@ -48,8 +52,11 @@ export function workspaceSelectComponent(options: {
         const stat = await provider.fileSystem.stat(root);
         if (!stat || stat.kind !== "directory") throw new Error(`workspace.select: not a directory in world ${worldId}: ${root}`);
         const workspaceId = workspaceIdFor(worldId, root);
-        const service = options.getService();
+        // Order matters: decide "add vs reselect" from the set BEFORE noting the id, or every
+        // select would look like a reselect and never record `workspace.added`.
         const isNew = !options.getKnownWorkspaceIds().has(workspaceId);
+        options.noteKnownWorkspace?.(workspaceId);
+        const service = options.getService();
         await service.startRun(options.systemCaller, {
           agent: AGENT_CONFIG,
           input: isNew

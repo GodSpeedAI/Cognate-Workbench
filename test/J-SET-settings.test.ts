@@ -69,7 +69,7 @@ describe("J-SET-settings", () => {
 
       // Fresh server instance on the same SQLite home — the settings row re-resolves from durable
       // events, so every field (not just work details, J-I's original scope) survives the restart.
-      const reopened = await startServer({ port: 0, home });
+      const reopened = await startServer({ executionPosture: "uncontained-local", port: 0, home });
       try {
         const current = await readSettings(reopened);
         expect(current?.workDetails).toBe("verbose");

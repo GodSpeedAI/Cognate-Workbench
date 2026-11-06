@@ -108,7 +108,7 @@ log. Modelling them as domain facts would misstate the domain.
 
 ## Workbench
 
-Twenty-three ids, all from `src/capabilities/workbench.ts`.
+Twenty-five ids, all from `src/capabilities/workbench.ts`.
 
 | Capability | Purpose |
 |---|---|
@@ -139,11 +139,14 @@ Twenty-three ids, all from `src/capabilities/workbench.ts`.
 Every one of these validates against the live `workbench` projection using the pure modules, then
 records through an `agent.config` run. None holds state.
 
-## The unbound gap
+## The cognitive family is bound
 
-The cognitive family above is executable but unbound. The recorded reason is that the `.sea` model
-carries another tranche's uncommitted edits. This is a gap, not a decision, and it is listed in
-[Known gaps](../known-gaps.md).
+The cognitive capabilities are executable **and** bound. `bindCognitiveCapabilities(domain)` runs at
+boot and anchors each one on an entity in the model — see
+[the binding table](../concepts/capability-model.md#cognitive-bindings) for the full mapping.
+
+An earlier revision of this page recorded them as an unbound gap because the `.sea` file was said to
+carry another tranche's uncommitted edits. That is not true of the current tree.
 
 ## Adding one
 

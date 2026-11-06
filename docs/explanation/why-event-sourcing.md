@@ -76,7 +76,7 @@ as a recovered rationale.
 - `src/agents/agentConfig.ts` — "The run body only emits — no I/O, no randomness, replay-safe by
   construction"
 - `src/capabilities/workbench.ts` — "The durable event log, never component memory, owns the state"
-- `src/projections/*.ts` — eleven pure folds, each documenting what it folds and why
+- `src/projections/*.ts` —  sixteen pure folds, each documenting what it folds and why
 - `src/workbench/reducer.ts` — the `workbench.*` fold
 - `src/cognitive/case.ts` — "a derived `CaseProjection` (no store of its own)"
 - `src/agents/agentCoding.ts` — the `ctx.step` determinism discipline

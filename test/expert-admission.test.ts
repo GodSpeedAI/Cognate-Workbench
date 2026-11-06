@@ -48,6 +48,7 @@ function fixture() {
     id: "assignment-a", expertId: "builder", conversationId: "conversation-a", teamId: null, parentId: null,
     purpose: "Answer the question", acceptance: ["Return evidence"], depth: 0, attempt: 2, status: "running",
     workspaceId: "workspace-a", mode: "read-only", authorityTools: ["expert_return"],
+    taskId: null,
     execution: {
       expertId: "builder", assignmentId: "assignment-a", conversationId: "conversation-a", instructions: "Answer",
       route: { providerId: "provider", model: "model", baseURL: "https://example.test", protocol: "openai-compatible" },

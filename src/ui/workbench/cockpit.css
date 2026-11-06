@@ -95,3 +95,12 @@
 .authority-notice p { margin: 4px 0 0; color: var(--cg-text-muted); }
 .authority-notice-tool { font-family: var(--cg-font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
 .wb-composerbar-focus { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+
+/* Task checkout (J-CHECKOUT): a compact association chip beside the task select, its live facts,
+   and the inline create/change form. Same surface language as the contract chips. */
+.wb-checkout { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.wb-checkout-chip { flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 10px; border-radius: var(--cg-radius-md); text-transform: none; letter-spacing: 0; font-family: var(--cg-font); }
+.wb-checkout-chip .wb-chip-value { font-family: var(--cg-font-mono); font-size: 12px; color: var(--cg-text); max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+.wb-checkout-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--cg-border); border-radius: var(--cg-radius-md); background: var(--cg-surface-sunken); }
+.wb-checkout-form label { display: inline-flex; align-items: center; gap: 6px; color: var(--cg-text-muted); }
+.wb-checkout-form input, .wb-checkout-form select { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: var(--cg-radius-sm); border: 1px solid var(--cg-border-strong); background: var(--cg-surface); color: var(--cg-text); min-width: 12ch; }

@@ -154,7 +154,7 @@ describe("J-F-delegation", () => {
           const toolCallId = mineBeforeRestart[0]!.key.split("/").pop()!;
           await app.stop();
 
-          const restarted = await startServer({ port: 0, home });
+          const restarted = await startServer({ executionPosture: "uncontained-local", port: 0, home });
           try {
             const childRuns = await restarted.runtime.service.listRuns(LOCAL_OPERATOR, { correlationId: `subagent:${run.runId}:${toolCallId}` });
             expect(childRuns).toHaveLength(1); // no duplicate child from a second `subagent.start`

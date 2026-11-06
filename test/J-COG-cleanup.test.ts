@@ -30,7 +30,7 @@ describe("J-COG-cleanup", () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
       const mods = { extraMediators: [userToyMod()] };
-      let app = await startServer({ devAuth: true, port: 0, home, ...mods });
+      let app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, ...mods });
       let client: Client = clientFor(app);
       try {
         // -- fixture repo (settled world Sₙ) -----------------------------------------------------
@@ -71,7 +71,7 @@ describe("J-COG-cleanup", () => {
 
         // -- restart while the continuation is open ----------------------------------------------
         await app.stop();
-        app = await startServer({ devAuth: true, port: 0, home, ...mods });
+        app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, ...mods });
         client = clientFor(app);
         await client.invoke("world.attach", { sandboxId: fork.sandboxId, root: fork.root });
         const reopened = (await app.runtime.service.listContinuations(LOCAL_OPERATOR, { runId: run1.runId })).find((c) => c.status === "OPEN");
@@ -116,7 +116,7 @@ describe("J-COG-cleanup", () => {
 
         // -- restart: lineage, Case, Reality reconstruct from events ------------------------------
         await app.stop();
-        app = await startServer({ devAuth: true, port: 0, home, ...mods });
+        app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, ...mods });
         client = clientFor(app);
         const evs = await allEvents(app);
         const lineage = foldLineage(evs);

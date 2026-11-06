@@ -22,7 +22,7 @@ describe("J-COG-attention", () => {
   test("'why did this fail?' resolves from focused evidence; switching focus switches the answer; inspection is read-only", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const app = await startServer({ devAuth: true, port: 0, home });
+      const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
         const repo = join(home, "repo");

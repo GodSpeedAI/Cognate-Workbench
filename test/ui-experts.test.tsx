@@ -95,6 +95,7 @@ const assignment = (review: Assignment["review"]): Assignment => ({
     id: "assignment-1", expertId: "verifier", conversationId: "conversation-1", teamId: "cognate-team", parentId: null,
     purpose: "Check the result", acceptance: ["the evidence supports the claim"], depth: 0, attempt: 1,
     status: "completed", workspaceId: "workspace-1", mode: "safe", authorityTools: ["read"],
+    taskId: null,
     execution: { expertId: "verifier", assignmentId: "assignment-1", conversationId: "conversation-1", instructions: "Verify", route: { providerId: "mock", baseURL: "http://localhost/v1", protocol: "openai-compatible", model: "mock" }, tools: ["read"], maxSteps: 3, context: [] },
     runId: "run-1", handoff: { assignmentId: "assignment-1", expertId: "verifier", runId: "run-1", disposition: "result", output: "Checked", artifacts: [], evidence: ["test passed"], uncertainties: [], failures: [], followUp: [] },
     reconciled: true, review, settlement: null,

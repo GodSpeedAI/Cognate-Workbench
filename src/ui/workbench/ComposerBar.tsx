@@ -1,10 +1,14 @@
 // The bar above the composer: which task this conversation serves (Context | Goal | Authority ...
 // live in the Workbench) and the run's real runtime state. Binding a task scopes the agent's
-// authority and attributes its usage. Serves J-WB-task-contract and J-WB-economics.
+// authority and attributes its usage. Serves J-WB-task-contract, J-WB-economics and
+// J-TASK-scope: the control shows this session's durable binding, "No task" is an obvious,
+// valid state, and changing the value writes the binding through `session.task.bind` — never a
+// silent global switch.
 import { useMemo } from "react";
 import { budgetState, provenanceLine, rollupUsage } from "../../workbench/economics.ts";
 import type { UsageRow } from "../../workbench/state.ts";
 import { describeFocusRef, type AttentionLevel, type FocusRef } from "../../workbench/focus.ts";
+import { CheckoutChip } from "./CheckoutChip.tsx";
 import { RuntimeStrip } from "./RuntimeStrip.tsx";
 import { useBindableTasks } from "./Workbench.tsx";
 import { useWbRow } from "./data.ts";
@@ -14,6 +18,8 @@ export interface ComposerBarProps {
   readonly sessionId?: string;
   readonly taskId?: string;
   readonly onTaskChange: (taskId: string | undefined) => void;
+  /** A readable refusal from the binding capability, shown where the person can act on it. */
+  readonly bindError?: string;
   readonly onOpenWorkbench: () => void;
   readonly state: "idle" | "running" | "waiting";
   readonly steps: number;
@@ -32,8 +38,8 @@ const LEVEL_WORDS: Readonly<Record<AttentionLevel, string>> = {
   "workspace-fallback": "workspace",
 };
 
-export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, onOpenWorkbench, state, steps, elapsedSeconds, approvalsPending, referent, onClearFocus }: ComposerBarProps) {
-  const tasks = useBindableTasks(workspaceId);
+export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bindError, onOpenWorkbench, state, steps, elapsedSeconds, approvalsPending, referent, onClearFocus }: ComposerBarProps) {
+  const tasks = useBindableTasks(workspaceId, sessionId);
   const bound = tasks.find((t) => t.id === taskId);
   const usage = useWbRow<UsageRow>(`usage/${taskId ?? `session:${sessionId ?? "none"}`}`);
   const econ = useMemo(() => rollupUsage(taskId ?? "", usage?.records ?? []), [taskId, usage]);
@@ -50,19 +56,36 @@ export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, onOp
           {tasks.map((t) => (
             <option key={t.id} value={t.id}>
               {t.title}
+              {(t as { readonly scope?: string }).scope === "session" ? " · this session" : ""}
             </option>
           ))}
+          {/* The bound task is always selectable, even in the sub-second window before its workbench
+              row reaches this client — the value must never visibly fall back to "No task". */}
+          {taskId && !bound && (
+            <option value={taskId}>
+              Selected task
+            </option>
+          )}
         </select>
         <button type="button" className="wb-btn" onClick={onOpenWorkbench}>
           Open Workbench
         </button>
         {state !== "idle" && <span className="wb-muted">Locked while the run is active.</span>}
-        {state === "idle" && tasks.length === 0 && <span className="wb-muted">No task is ready. Create and ready one in the Workbench to give this conversation a contract.</span>}
+        {state === "idle" && tasks.length === 0 && !taskId && <span className="wb-muted">No tasks in this workspace yet. Create one in the Workbench to give this conversation a contract.</span>}
+        {taskId && <span className="wb-muted">Bound to this conversation — changing or clearing it never rewrites past runs.</span>}
+        {bindError && (
+          <span className="wb-error" role="alert">
+            {bindError}
+          </span>
+        )}
+        {taskId && (
+          <CheckoutChip workspaceId={workspaceId} taskId={taskId} taskTitle={bound?.title ?? "task"} locked={state !== "idle"} />
+        )}
       </div>
       <div className="wb-composerbar-focus" role="status" aria-label="Focus">
         {referent ? (
           <>
-            <span className="wb-muted">Saying &quot;this&quot; means</span> <strong>{describeFocusRef(referent.ref)}</strong>
+            <span className="wb-muted">Saying "this" means</span> <strong>{describeFocusRef(referent.ref)}</strong>
             <span className="wb-muted"> ({LEVEL_WORDS[referent.level]})</span>
             {referent.level === "explicit-selection" && (
               <button type="button" className="wb-btn" onClick={onClearFocus}>
@@ -71,7 +94,7 @@ export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, onOp
             )}
           </>
         ) : (
-          <span className="wb-muted">Nothing is in focus. Select a task or workflow stage in the Workbench to give &quot;this&quot; a meaning.</span>
+          <span className="wb-muted">Nothing is in focus. Select a task or workflow stage in the Workbench to give "this" a meaning.</span>
         )}
       </div>
       <RuntimeStrip

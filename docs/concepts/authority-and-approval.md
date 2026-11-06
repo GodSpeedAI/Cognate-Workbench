@@ -59,6 +59,57 @@ this operation".
 **This is structural enforcement.** It runs inside the tool loop before the capability, not as
 prompt prose the model is asked to respect. `test/workbench-authority-bypass.test.ts` guards it.
 
+### Order of checks inside `decideShell`
+
+`decideWrite` and `decideShell` are where the outcome is actually computed. The protected-evidence
+scan runs first and short-circuits; only after it does each concern cast a vote, and the strictest
+vote wins. Reversing those two steps would let a broad `shell.run` grant hide a protected target.
+
+```mermaid
+flowchart TB
+    START["model returns a tool call"] --> KIND{"edit or bash?"}
+    KIND -->|"neither"| SKIP["no authority.check<br/>other gates still apply"]
+    KIND -->|bash| TARGETS["mutationTargets(cmd)<br/>rm, mv, cp, tee"]
+    KIND -->|edit| REL["normalizeRelative(path)"]
+
+    REL --> ESC{"escapes<br/>the workspace?"}
+    ESC -->|"yes"| OUT["fromGrant(filesystem.outsideWorkspace)"]
+    OUT -->|"allow"| GRANTW
+    OUT -->|"approval / no"| RET1["return"]
+
+    ESC -->|"no"| PROT{"matchesProtected<br/>against protectedPaths"}
+    PROT -->|"match + elevated"| APP1["approval<br/>rule: protected-evidence"]
+    PROT -->|"match"| DENY1["deny<br/>rule: protected-evidence"]
+    PROT -->|"no match"| GRANTW["fromGrant(filesystem.write)"]
+
+    TARGETS --> LOOP{"for each target<br/>that stays inside"}
+    LOOP -->|"protected match + elevated"| APP2["approval<br/>rule: protected-evidence"]
+    LOOP -->|"protected match"| DENY2["deny<br/>rule: protected-evidence"]
+    LOOP -->|"no match / no targets"| VOTES["collect votes"]
+    LOOP -->|"target escapes"| SKIPT["continue<br/>outside paths are not<br/>workspace-relative"]
+
+    VOTES --> V1["shell.run"]
+    VOTES --> V2["shell.destructive<br/>only if destructive"]
+    VOTES --> V3["network.outbound<br/>only if network use"]
+    VOTES --> V4["packages.install<br/>only if an install"]
+
+    V1 --> STRICT{"strictest vote wins<br/>deny &gt; approval &gt; allow"}
+    V2 --> STRICT
+    V3 --> STRICT
+    V4 --> STRICT
+    STRICT --> WIN["report the most specific<br/>rule producing that outcome"]
+```
+
+Two properties this diagram is meant to carry:
+
+- **A rule can only tighten.** `strictest()` folds `allow(0) < approval(1) < deny(2)`, so adding a
+  matching concern can move the outcome toward denial but never away from it.
+- **Protected evidence is not a vote.** It returns before the votes are collected, which is why a
+  `shell.run: yes` grant cannot wash out a protected target.
+
+The interactive model of this diagram, with every input editable, is
+[the authority decision explorer](../visuals/authority-decision-explorer.html).
+
 ## Gate 3 — the approval gate proper
 
 `approvalGate({ tool, args, mode })` in `src/domain/approvalGate.ts` is a pure function. It requires

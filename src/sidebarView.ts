@@ -14,6 +14,8 @@ export interface SessionRow {
   readonly lastStatus: string;
   readonly updatedAt: string;
   readonly runId?: string | null;
+  /** The continuation type a waiting run is blocked on (`run.waiting` payload.type), when known. */
+  readonly waitingType?: string | null;
   /** "ptc" once this session has ever needed a tool-approval escalation. */
   readonly mode?: string;
   /** The session's current access mode, folded from the run input of its latest turn. */

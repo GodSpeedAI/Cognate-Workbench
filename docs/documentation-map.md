@@ -35,7 +35,7 @@ abstractions, internal operation, state, lifecycle, failure modes, extension poi
 | [runtime and server](subsystems/runtime-and-server.md) | boot, composition root, trust configuration, shutdown | architecture |
 | [agents](subsystems/agents.md) | the three run bodies, the tool loop, presets | runtime, glossary |
 | [capabilities](subsystems/capabilities.md) | the governed choke point, the write path | architecture, capability model |
-| [projections](subsystems/projections.md) | the eleven read models and their fold styles | architecture |
+| [projections](subsystems/projections.md) | the sixteen read models and their fold styles | architecture |
 | [workbench domain](subsystems/workbench-domain.md) | the sixteen pure modules | architecture, domain types |
 | [cognitive domain](subsystems/cognitive-domain.md) | world identity, lineage, mediation, Surface | cognitive navigation |
 | [execution worlds, providers, secrets](subsystems/execution-worlds-providers-secrets.md) | the trust surface | runtime |
@@ -106,11 +106,44 @@ Each page separates verified design rationale from inference.
 | [configuration](reference/configuration.md) | environment variables, home resolution, durable settings |
 | [capability catalog](reference/capability-catalog.md) | every capability id, provider, binding and grant |
 | [event catalog](reference/event-catalog.md) | every durable event and what folds it |
-| [projection catalog](reference/projection-catalog.md) | the eleven read models and their fold styles |
+| [projection catalog](reference/projection-catalog.md) | the sixteen read models and their fold styles |
 | [domain types](reference/domain-types.md) | type shapes and the invariants on them |
 | [UI surfaces](reference/ui-surfaces.md) | which component shows what; the component contract |
 | [test layout](reference/test-layout.md) | test naming, harness, infrastructure |
 | [semantic model](reference/sea-model.md) | how to read `.sea/` |
+
+### Visuals
+
+Interactive explainers. Each is a single offline HTML file you open directly from disk. They restate
+named functions as something you can manipulate; the source remains the authority.
+
+| Page | Owns | Opened from |
+|---|---|---|
+| [authority decision explorer](visuals/authority-decision-explorer.html) | `decideWrite` / `decideShell`: protected evidence first, strictest vote wins, elevation | [authority and approval](concepts/authority-and-approval.md) |
+| [done level ladder](visuals/done-level-ladder.html) | `doneLevel` contiguity: how a later flag cannot skip an unmet earlier gate | [evidence and done](concepts/evidence-and-done.md) |
+
+### Specifications
+
+The contract baselines a tranche was built against. Read one when you need the intended behaviour a
+test enforces, not when you need current behaviour.
+
+| Page | Defines |
+|---|---|
+| [Session, workspace, task RED journeys](specs/session-workspace-task-red-journeys.md) | the J-SESSION / J-WS / J-TASK / J-RUN interaction contracts the five red suites were written against |
+
+### Release and verification records
+
+Evidence of what was published and what passed, kept as provenance rather than as current
+instructions. Current behaviour is described by the pages above.
+
+| Page | Records |
+|---|---|
+| [SDK 0.4.0 release](sdk-0.4.0-release.md) | publication matrix and consumer proof for 0.4.0 |
+| [SDK 0.5.0 release](sdk-0.5.0-release.md) | publication record for 0.5.0 |
+| [SDK 0.6.0 release](sdk-0.6.0-release.md) | publication record for 0.6.0, the version `package.json` pins |
+| [security review 2026-10-17 T8](security-review-2026-10-17-t8.md) | the independent adversarial review and its remediation |
+| [Experts verification](experts-verification.md) | what the Experts journeys established |
+| [Experts debt verification](experts-debt-verification.md) | debt closure evidence and measurements |
 
 ### Diagnosis
 
@@ -160,8 +193,9 @@ If you are about to explain one of these, go to the listed page rather than writ
 
 ## Knowledge recovered from removed documentation
 
-The tracked `docs/` tree was removed in the working tree and its content relocated under the
-gitignored `.tmp/`. The following knowledge was migrated into the pages above.
+An **earlier** revision of the `docs/` tree was removed from the working tree, with its content moved
+under the gitignored `.tmp/`. The tree that exists now is tracked and present. The following
+knowledge came from that earlier revision and was migrated into the pages above.
 
 | Recovered source | Now lives in |
 |---|---|
