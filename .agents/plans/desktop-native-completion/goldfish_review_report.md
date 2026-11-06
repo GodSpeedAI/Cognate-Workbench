@@ -1,7 +1,9 @@
 # Goldfish Annotated Review Report
 
 **Target:** `.agents/plans/desktop-native-completion/design.md` (full file)
-**Status:** pending resolution
+**Status:** resolved 2026-11-06 — 17 PROPOSE FIX items applied to design.md; 1 ESCALATE (C17)
+decided by the owner: D-track stays in-mission, E3 closes on desktop qualification with D rows
+carried.
 
 ## Prioritized Findings & AI Suggestions
 
