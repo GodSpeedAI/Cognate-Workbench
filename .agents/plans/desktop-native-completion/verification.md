@@ -267,3 +267,32 @@ idiom; all three suites pass isolated (5/5, 10/10, 5/5).
 1 fail** — `J-CFG-provider-switch` (local/no-Authorization-header row) fails under full-gate
 parallel load and **passes isolated 6/6**: the documented host-concurrency class. Combined with
 the first run (1598/3, all three fixed as `c41b919`), the S-track boundary is green.
+
+## D track — D-row fixes (2026-11-07)
+
+All 17 open A2 rows dispositioned, five fix commits plus three recorded as already landed:
+
+- **e3907ff** — D-15 (curly-quote pair in the delete-workspace title), D-19 (disclosure
+  buttons become section headings, no link-style underline), D-22 (the streaming status
+  names the running tool's action from the trace projection, elapsed seconds stay in the
+  accessible text).
+- **d187434** — contrast tokens: D-29 (dark `--cg-border-strong` 36%→45%; the dark Cancel
+  read borderless), D-18 (a `--cg-placeholder` token + global rule; the GovernancePane
+  grey-on-dark), D-17 (workspace chooser's disabled state via tokens, not 0.5 opacity),
+  D-30 (real `.cfg-btn` styles — the config Save was UA-default and read differently per
+  theme).
+- **6f2dee0** — responsive: D-9 (full tab labels kept, breadcrumb collapses to the last
+  crumb, trail tightens), D-24 (title prefixes that duplicated the row badge removed;
+  titles wrap to two lines), D-26 (review toolbar's toggles + open-actions collapse into
+  one Options menu with checkable items), D-12 (wizard footer stacks at phone widths),
+  D-27 (form errors get air before the footer divider).
+- **a6c9e6b** — D-25 (one turn counter: the review header counts assistant turns from the
+  same ordinal map as the composer's "N turns"), D-21 REDESIGN (settlement causes render
+  once above the reservation list, distinct).
+- **102cdbb** — D-13 (tab labels show at the default 340px inspector width; the 460px
+  container threshold made everything icon-only; icon-only only below 330px with scroll).
+- Recorded as already landed, no re-fix: **D-16** (two-line clamp, b0bbd87), **D-34**
+  (one focus ring, fb14932), and D-13's stray theme icon (removed by d918589).
+
+`DEBT.md` reconciled; F1 (session Pin) and F2 (remote diagnostics durability) remain the
+ledger's open BUILD rows.
