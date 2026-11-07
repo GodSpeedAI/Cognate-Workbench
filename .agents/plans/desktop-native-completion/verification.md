@@ -262,3 +262,8 @@ announced value; route options are proven interactively by the E2E provider-rout
 onboarding's exact `getByLabel("API protocol")`, and remote-workspaces' exact
 `[aria-label="WSL distribution"]` attribute selector. All three fixed to the announced-name
 idiom; all three suites pass isolated (5/5, 10/10, 5/5).
+
+**S-track boundary gate** (2026-11-07, second full run after the fallout fixes): **1600 pass /
+1 fail** — `J-CFG-provider-switch` (local/no-Authorization-header row) fails under full-gate
+parallel load and **passes isolated 6/6**: the documented host-concurrency class. Combined with
+the first run (1598/3, all three fixed as `c41b919`), the S-track boundary is green.
