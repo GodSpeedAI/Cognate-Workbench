@@ -407,9 +407,11 @@ input:focus-visible {
 }
 
 .session-row-title {
+  /* D-24: wrap to two lines rather than ellipsize mid-name. */
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   font-size: 13px;
 }
 
@@ -2183,7 +2185,8 @@ input::placeholder, textarea::placeholder {
 .form-error {
   color: var(--cg-danger);
   font-size: 12px;
-  margin: 0;
+  /* D-27: the add-workspace error sat flush against the footer divider. */
+  margin: 0 0 10px;
 }
 
 .form-success {
@@ -3312,6 +3315,7 @@ input::placeholder, textarea::placeholder {
 }
 .right-panel-tab-menu { left: 0; }
 .review-more-menu { right: 0; top: calc(100% + 4px); }
+.review-more-menu hr { border: none; border-top: 1px solid var(--cg-border); margin: 4px 0; }
 .right-panel-tab-menu button,
 .review-more-menu button {
   text-align: left;
@@ -4575,8 +4579,16 @@ body.is-col-resizing .resize-handle:active::after {
     transition: transform 200ms var(--cg-ease-out), visibility 0s linear 200ms;
   }
   .inspector-head { min-height: 48px; }
-  .view-switch .vs-full { display: none; }
-  .view-switch .vs-short { display: inline; }
+  /* D-9: the secondary breadcrumb collapses to where you are; the tabs keep their full
+   * labels (the short-label swap is what clipped "Experts" at the right edge), tightened
+   * instead; the trail's mode chip may shrink before anything clips. */
+  .main-header { gap: 8px; padding: 0 10px 0 12px; }
+  .main-header .breadcrumb li:not(:last-child) { display: none; }
+  .main-header .breadcrumb li + li::before { display: none; }
+  .view-switch .vs-full { display: inline; }
+  .view-switch .vs-short { display: none; }
+  .view-switch-btn { padding: 4px 8px; font-size: 12px; }
+  .main-header-trail { min-width: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sidebar.sidebar-drawer, .sidebar.sidebar-drawer.collapsed { transition: none; }
@@ -5073,6 +5085,12 @@ body.is-col-resizing .resize-handle:active::after {
 .pw-actions button:hover:not(:disabled), .pw-model-row button:hover:not(:disabled) { background: var(--cg-hover); }
 .pw-actions button:disabled, .pw-model-row button:disabled { opacity: 0.55; cursor: not-allowed; }
 .pw-actions .pw-primary:not(:disabled) { background: var(--cg-accent-interactive); color: var(--cg-accent-interactive-contrast); border-color: var(--cg-accent-interactive); }
+/* D-12: the footer's Test/Cancel/Save row wrapped its labels at phone widths — stack. */
+@media (max-width: 640px) {
+  .pw-actions { flex-wrap: wrap; }
+  .pw-actions .pw-actions-spacer { display: none; }
+  .pw-actions button { flex: 1 1 100%; white-space: nowrap; }
+}
 .session-agent-tag { padding: 2px 4px; }
 
 /* ---------- "Files changed during this turn" card ---------- */

@@ -506,7 +506,9 @@ export function SessionRowButton({
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
         <span className={`session-status-dot${status ? ` is-${status}` : ""}`} aria-hidden="true" title={statusLabel} />
         <span className="session-row-title">
-          {planPending ? "Plan awaiting review " : needsReconciliation ? "Needs reconciliation " : otherWait ? `Waiting: ${otherWait} ` : waiting ? "Waiting for approval " : ""}
+          {/* D-24: the wait/reconcile prefixes duplicated the row's own badge and made the
+           *  title truncate mid-name; the badge + status dot + tooltip carry the signal. */}
+          {planPending ? "Plan awaiting review " : ""}
           {label}
           {archived ? " (archived)" : ""}
         </span>
@@ -2370,17 +2372,8 @@ export function ReviewPanel({
         <span className="review-panel-stat">
           +{summary.additions} -{summary.deletions}
         </span>
-        <button type="button" className="review-toolbar-btn" aria-pressed={lineWrap} onClick={() => setLineWrap((v) => !v)}>
-          Line wrap
-        </button>
-        <button
-          type="button"
-          className="review-toolbar-btn"
-          aria-pressed={showLocation}
-          onClick={() => setShowLocation((v) => !v)}
-        >
-          Show file location
-        </button>
+        {/* D-26: the text toggles and the open-actions collapsed into one options menu — the
+         *  toolbar kept wrapping to two rows at 340 px. Toggles render as checkable items. */}
         <button
           type="button"
           className="review-toolbar-btn"
@@ -2388,10 +2381,17 @@ export function ReviewPanel({
           aria-expanded={openMenu === "more"}
           onClick={() => setOpenMenu((v) => (v === "more" ? undefined : "more"))}
         >
-          More ways to open
+          Options
         </button>
         {openMenu === "more" && (
           <div role="menu" className="review-more-menu">
+            <button type="button" role="menuitemcheckbox" aria-checked={lineWrap} onClick={() => setLineWrap((v) => !v)}>
+              {lineWrap ? "✓ " : ""}Line wrap
+            </button>
+            <button type="button" role="menuitemcheckbox" aria-checked={showLocation} onClick={() => setShowLocation((v) => !v)}>
+              {showLocation ? "✓ " : ""}Show file location
+            </button>
+            <hr />
             <button type="button" role="menuitem" onClick={() => void copyPath(summary.file_path, "Path")}>
               Copy path
             </button>
