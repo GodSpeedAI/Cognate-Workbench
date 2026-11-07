@@ -51,6 +51,12 @@ if (!existsSync(bindingFile)) {
 
 const binaries = join(repo, "src-tauri", "binaries");
 const resources = join(repo, "src-tauri", "resources", "cognate-workbench");
+// The bundle version is the package.json version (the repo's single version source); the
+// Tauri config's own version field comes from Cargo.toml, so the build merges this override
+// (`tauri build --config src-tauri/tauri.conf.override.json`, wired into the tauri:build
+// script and the CI workflow). Regenerated on every staging; gitignored.
+const pkg = JSON.parse(await Bun.file(join(repo, "package.json")).text()) as { version: string };
+await writeFile(join(repo, "src-tauri", "tauri.conf.override.json"), `${JSON.stringify({ version: pkg.version }, null, 2)}\n`);
 await rm(binaries, { recursive: true, force: true });
 await rm(join(repo, "src-tauri", "resources"), { recursive: true, force: true });
 await mkdir(binaries, { recursive: true });
@@ -69,7 +75,6 @@ if (!existsSync(exe)) throw new Error("tauri-sidecar: executable missing after c
 
 // 3. Manifest at the resource root: verifyPg0 refuses to start the bundled pg0 without it.
 const commit = (await new Response(Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: repo, stdout: "pipe" }).stdout).text()).trim();
-const pkg = JSON.parse(await Bun.file(join(repo, "package.json")).text()) as { version: string };
 await writeManifest(resources, {
   version: pkg.version,
   tag: `tauri-${bunTarget.replace("bun-", "")}`,

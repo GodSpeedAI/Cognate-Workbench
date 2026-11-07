@@ -1069,7 +1069,35 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         return new Response("upgrade failed", { status: 500, headers: hardened() });
       }
       if (url.pathname === "/health") {
-        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest }, execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined } }, { headers: hardened() });
+        // The desktop shell's machine inputs (desktop-native-completion B5): which surface
+        // spawned this boot, and the server-side state the fail-closed close guard reads.
+        // Counts fold from the sessions projection; a failed read leaves them undefined and
+        // the shell's guard treats absent counts as unknown — fail-closed. The watchdog's
+        // liveness check only reads `ok`, so a projection hiccup never flaps the menus.
+        const shell = shellKindForEnv();
+        let runsInFlight: number | undefined;
+        let pendingApprovals: number | undefined;
+        try {
+          const rows = (await runtime.service.readProjection(SYSTEM_CALLER, { name: "sessions" })).rows;
+          const states = rows
+            .map((row) => (typeof row.value === "object" && row.value !== null ? (row.value as { lastStatus?: unknown; waitingType?: unknown }) : undefined))
+            .filter((value): value is { lastStatus?: unknown; waitingType?: unknown } => value !== undefined);
+          runsInFlight = states.filter((state) => state.lastStatus === "running").length;
+          pendingApprovals = states.filter((state) => state.lastStatus === "waiting" && (state.waitingType === "tool-approval" || state.waitingType === "governance-approval")).length;
+        } catch {
+          // unknown counts; the close guard decides fail-closed
+        }
+        return Response.json(
+          {
+            ok: true,
+            semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest },
+            execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined },
+            ...(shell ? { shell } : {}),
+            ...(runsInFlight !== undefined ? { runsInFlight } : {}),
+            ...(pendingApprovals !== undefined ? { pendingApprovals } : {}),
+          },
+          { headers: hardened() },
+        );
       }
       if (url.pathname.startsWith("/cognate.v1.RuntimeService/")) {
         const handler = connectHandlersByPath.get(url.pathname);

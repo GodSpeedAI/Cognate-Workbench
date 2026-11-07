@@ -84,27 +84,22 @@ pub fn run() {
 
 /// The fail-closed close guard (design §2), scoped by backend ownership:
 /// - reused backend: the shell exits; the backend keeps its own owner — nothing to confirm.
-/// - shell-owned backend: confirm before close whenever work is in flight OR the server
-///   state cannot be read (probe failure, unknown state). A dead or wedged webview can
-///   never suppress the confirm, because the signal comes from the server side, not the
-///   page. Until B5 lands the `/health` run counts, the interim in-flight signal is the
-///   window title's own state grammar (B3) — a strictly weaker but fail-closed stand-in;
-///   an unparseable title reads as in-flight.
+/// - shell-owned backend: confirm before close whenever work is in flight (the server's own
+///   `/health` run counts — the machine authority) OR the state cannot be read (probe
+///   failure, missing counts). A dead or wedged webview can never suppress the confirm,
+///   because the signal comes from the server side, not the page.
 fn close_requested(app: &tauri::AppHandle, api: tauri::CloseRequestApi) {
     if !backend::shell_owned_backend(app) {
         return; // reused backend: closing the shell leaves it with its owner
     }
     let port = backend::backend_port(app);
-    let healthy = port != 0 && backend::probe_health(port);
-    let in_flight = match app.get_webview_window("main").and_then(|w| w.title().ok()) {
-        Some(title_text) => match title::parse_title(&title_text) {
-            Some(title::TitleState::Idle) => false,
-            Some(_) => true,
-            None => true, // unknown title → fail closed
-        },
-        None => true, // no window title readable → fail closed
-    };
-    if healthy && !in_flight {
+    let state = backend::health_state(port);
+    let known_idle = state.healthy
+        && state.runs_in_flight.is_some()
+        && state.pending_approvals.is_some()
+        && state.runs_in_flight == Some(0)
+        && state.pending_approvals == Some(0);
+    if known_idle {
         return; // idle and healthy: close proceeds
     }
     let Some(window) = app.get_webview_window("main") else {

@@ -13,6 +13,7 @@ import { describeSecretBackend } from "./secrets.ts";
 import { parseDevAuth, startServer } from "./server.ts";
 import { EXECUTION_POSTURE_ENV } from "./executionPosture.ts";
 import { findAppBrowser, launchAppWindow, openDefaultBrowser } from "./desktopWindow.ts";
+import packageJson from "../package.json";
 
 const LOCK_FILE = "server.lock";
 
@@ -167,6 +168,10 @@ async function runningInstance(home: string): Promise<string | undefined> {
 /** The desktop entry: one server per home, shown in its own application window; closing the window quits the server. */
 async function launch(): Promise<number> {
   const home = homeOf();
+  // Which desktop surface is serving (desktop-native-completion B4/B5): the `--app` window's
+  // server reports "chromium-app@<version>" so the served page installs its own beforeunload
+  // close guard and /health carries the surface identity. The Tauri shell sets "tauri@<version>".
+  process.env.COGNATE_SHELL = process.env.COGNATE_SHELL ?? `chromium-app@${packageJson.version}`;
   const noWindow = process.env.COGNATE_NO_WINDOW === "1";
   const browser = noWindow ? undefined : findAppBrowser(process.platform, process.env);
 

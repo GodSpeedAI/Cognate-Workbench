@@ -1,3 +1,51 @@
+# Current status — revision 41
+
+Milestone B of the **desktop-native-completion** mission is complete — the whole Tauri desktop
+foundation, B1 through B5, landed on `feat/desktop-terminal-browser`.
+
+**The B-tranche.** B1 CI scaffold (five-platform `tauri.yml` RC matrix — windows-2022 x64,
+macos-15 ARM, macos-15-intel x64, ubuntu-22.04 x64, ubuntu-22.04-arm aarch64 — with the Rust
+1.95 Jetson MSRV gate, plus a per-commit tauri-linux fmt/clippy/test job in `verify.yml`);
+B2 packaged smoke harness (`scripts/qualify-tauri.sh`, `just tauri-guards`/`tauri-smoke`, the
+T2 `COGNATE_TEST_SIDECAR` mode); B3 shell↔web seam protocol (the frozen `__wbShell` bridge,
+the two-side-pinned title grammar, the committed six-action menu map with the
+`/health`+page-load liveness rule); B4 desktop contract (fail-closed close guard scoped by
+backend ownership, title-transition attention cue, external-link routing via the opener,
+`--app` beforeunload confirm, downloads DEFER); B5 lifecycle hardening: startup budgets
+(180 s first boot / 60 s steady — measured 4 s on this host) with a graceful SIGTERM stop on
+readiness timeout instead of the SIGKILL that orphaned pg0; a 5 s `/health` watchdog
+(two-failure threshold) covering spawned-exit **and** hung-or-reused backends with a recovery
+surface that names the owner and the relaunch move; handle-before-wait so an early quit always
+has a kill path; 5 MB `desktop-shell.log` rotation; `/health` machine inputs (`shell`,
+`runsInFlight`, `pendingApprovals`) folded server-side from the sessions projection with
+absent counts fail-closed; the close guard switched to that machine authority (the B3 title
+signal retired to the attention cue); package identity `cognate-workbench-shell` distinct
+from the CLI's deb — proven non-overlapping by the coexistence smoke pass; `appimage` removed
+from bundle targets on the recorded linuxdeploy/FUSE failure; `--app` surface identity
+`chromium-app@<version>`; and the operator-executed Jetson AGX Orin qualification runbook
+(`docs/jetson-qualification.md`) for E2.
+
+**Also this revision:** the `postgresUrl()` environment-coupling test class is fixed —
+`test/helpers.ts` gains `storeUrlForTest()` (the same resolution `storeConfigFor` uses: env
+URL, else the shared development pg0 instance) and three suites that opened stores or scanned
+schemas directly no longer dial whatever PostgreSQL happens to listen on 5432. The previous
+B5 boundary run was 1582 pass / 5 fail; the fixes closed its three environment-coupled
+failures.
+
+**Verified.** Commits `6b7ac38` (B1), `78c4bb2` (B2), `daeb97a` (B3), `06c366a` (B4), this
+commit (B5). Debug-shell and packaged-deb qualifications PASS; the B5 coexistence run proves
+`packages distinct … no overlapping file paths`. Rust gates: fmt clean, clippy 0 warnings,
+`cargo test` 7/7. Full `just verify` at the boundary: **1586 pass / 1 fail** — the one
+failure (`J-EXPERT-WORKSPACE-ADMISSION`) hits the 22 s E2E deadline under full-gate load and
+passes isolated in 9.76 s: the documented host-concurrency flake class, not a product bug.
+
+**Next.** The D parallel track (per-panel native-select batches, the Pin affordance, remote
+diagnostics — the ledger's BUILD rows), then Milestone C (native UX convergence), then
+Milestone E (five-platform CI green, installer verification, the platform-honesty matrix, the
+Jetson E2 run, a drift re-run, and the final report as revision 42).
+
+---
+
 # Current status — revision 40
 
 Milestone A of the **desktop-native-completion** mission is complete: the EGM sequence ran end to

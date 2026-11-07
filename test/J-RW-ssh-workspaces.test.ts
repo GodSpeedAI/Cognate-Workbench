@@ -14,9 +14,9 @@ import { createClient } from "@godspeedai/cognate-client";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
-import { postgresUrl, schemaFor } from "../src/store.ts";
+import { schemaFor } from "../src/store.ts";
 import postgres from "postgres";
-import { bootAimock, withTempHome } from "./helpers.ts";
+import { bootAimock, storeUrlForTest, withTempHome } from "./helpers.ts";
 
 const PASSWORD = "s3cret-pass-ZXCV-1234";
 const clientFor = (app: AppServer) => createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
@@ -88,7 +88,7 @@ describe("J-RW-ssh-workspaces", () => {
         expect(secretsFile).toContain(PASSWORD);
         expect((await Bun.file(join(home, "secrets.json")).stat()).mode & 0o777).toBe(0o600);
         // Scan the authoritative PostgreSQL schema for the secret (payloads, metadata, records, folds).
-        const scan = postgres(postgresUrl(), { max: 1, onnotice: () => {} });
+        const scan = postgres(await storeUrlForTest(), { max: 1, onnotice: () => {} });
         try {
           const t = (name: string) => scan`${scan(schemaFor(home))}.${scan(name)}`;
           const texts = [

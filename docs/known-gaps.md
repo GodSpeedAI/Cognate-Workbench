@@ -196,10 +196,19 @@ These are the packaged desktop shell's honest limits, each from the EGM-reviewed
   shell's loopback origin is a secure context) and the browser/CLI surfaces, where the anchor
   download works. Dispositioned DEFER in the mission's dispositions ledger; revisit on a real
   operator job.
-- **The close guard's in-flight signal is interim.** The fail-closed close confirmation
-  consults the server-side `/health` run counts only once the B5 tranche lands them; until
-  then it reads the window title's state grammar (B3) and treats an unparseable title as
-  in-flight — fail-closed in both cases, never trusting the page.
+- **The close guard reads the server's own counts.** Since the B5 tranche the fail-closed
+  close confirmation consults `/health`'s `runsInFlight`/`pendingApprovals` (the machine
+  authority): healthy + both counts present + both zero → close proceeds; anything else —
+  work in flight, missing counts (failed projection read), dead backend → the confirm
+  dialog. The page is never trusted; a wedged webview cannot suppress the confirm. (The B3
+  title grammar remains as the human attention cue only.)
+- **AppImage is not a supported bundle target.** linuxdeploy's AppImage tooling fails in
+  FUSE-less CI/container environments (the B2 qualification log records the failure), so
+  `bundle.targets` ships `deb` (Linux x64 + arm64), `nsis` (Windows) and `app`/`dmg`
+  (macOS). The desktop shell's package identity is distinct from the CLI's
+  (`cognate-workbench-shell` vs `cognate-workbench` — proven non-overlapping by the B5
+  smoke run); the operator installs the CLI package separately when both surfaces are
+  wanted.
 - **Live-window rows verified on WSLg are enumerated per tranche** in the mission's
   `verification.md`; anything not verified on a real device is recorded as
   implemented-per-docs in the final platform-honesty matrix (menu clicks, dialog

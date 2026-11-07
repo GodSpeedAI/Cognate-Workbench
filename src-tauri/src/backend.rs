@@ -57,7 +57,9 @@ pub fn shell_owned_backend(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// Entry point called from setup: resolves the backend, then opens a window.
+/// Entry point called from setup: resolves the backend, then opens a window. The managed
+/// handles exist from the first moment (empty), so an early quit always has a kill path —
+/// the health wait can no longer race the exit (design §3).
 pub fn launch(app: AppHandle) {
     let resource_root = if cfg!(debug_assertions) {
         None
@@ -69,12 +71,20 @@ pub fn launch(app: AppHandle) {
             .ok()
             .map(|dir| dir.join("resources").join("cognate-workbench"))
     };
+    app.manage(BackendHandle {
+        child: Mutex::new(None),
+    });
+    app.manage(BackendPort::default());
     thread::spawn(move || match start_backend(resource_root) {
         Ok(Started::Spawned { port, child, log }) => {
-            app.manage(BackendHandle {
-                child: Mutex::new(Some(child)),
-            });
-            app.manage(BackendPort(std::sync::atomic::AtomicU16::new(port)));
+            if let Some(state) = app.try_state::<BackendHandle>() {
+                if let Ok(mut guard) = state.child.lock() {
+                    *guard = Some(child);
+                }
+            }
+            if let Some(state) = app.try_state::<BackendPort>() {
+                state.0.store(port, std::sync::atomic::Ordering::Relaxed);
+            }
             spawn_watchdog(app.clone(), log.clone());
             if let Err(error) = open_main_window(&app, port) {
                 open_error_window(
@@ -85,10 +95,10 @@ pub fn launch(app: AppHandle) {
             }
         }
         Ok(Started::Reused { port, log }) => {
-            app.manage(BackendHandle {
-                child: Mutex::new(None),
-            });
-            app.manage(BackendPort(std::sync::atomic::AtomicU16::new(port)));
+            if let Some(state) = app.try_state::<BackendPort>() {
+                state.0.store(port, std::sync::atomic::Ordering::Relaxed);
+            }
+            spawn_watchdog(app.clone(), log.clone());
             if let Err(error) = open_main_window(&app, port) {
                 open_error_window(
                     &app,
@@ -98,9 +108,6 @@ pub fn launch(app: AppHandle) {
             }
         }
         Err(BackendError { reason, log }) => {
-            app.manage(BackendHandle {
-                child: Mutex::new(None),
-            });
             open_error_window(&app, &reason, &log);
         }
     });
@@ -164,10 +171,23 @@ fn start_backend(resource_root: Option<PathBuf>) -> Result<Started, BackendError
 
     pump_output(&mut child, &log);
 
-    let deadline = Instant::now() + Duration::from_secs(60);
+    // Startup budgets (design §3): a first boot initializes the bundled database, which is
+    // measurable and one-time — 180 s; a steady boot re-attaches — 60 s. The measured times
+    // are logged at readiness and recorded in the mission's verification log.
+    let first_boot = !home.join("database").exists();
+    let budget_secs = if first_boot { 180 } else { 60 };
+    let started_at = Instant::now();
+    let deadline = started_at + Duration::from_secs(budget_secs);
     loop {
         if probe_health(port) {
-            append_log(&log, &format!("backend ready on port {port}"));
+            let elapsed = started_at.elapsed().as_secs();
+            append_log(
+                &log,
+                &format!(
+                    "backend ready on port {port} after {elapsed}s ({budget_secs}s budget, {} boot)",
+                    if first_boot { "first" } else { "steady" }
+                ),
+            );
             return Ok(Started::Spawned { port, child, log });
         }
         if let Ok(Some(status)) = child.try_wait() {
@@ -179,9 +199,20 @@ fn start_backend(resource_root: Option<PathBuf>) -> Result<Started, BackendError
             });
         }
         if Instant::now() > deadline {
-            let _ = child.kill();
+            // A timed-out backend gets the same graceful stop the shutdown path uses —
+            // SIGTERM with the 30 s database-stop grace — because SIGKILLing it here would
+            // orphan the bundled pg0 exactly the way the 10 s shutdown window once did.
+            append_log(
+                &log,
+                &format!("backend not ready within {budget_secs}s; requesting a clean stop"),
+            );
+            terminate(&mut child);
+            let tail = log_tail(&log, 2000);
             return Err(BackendError {
-                reason: "the backend did not become ready within 60 seconds".into(),
+                reason: format!(
+                    "the backend did not become ready within {budget_secs}s; it was asked to stop cleanly. Its own last output:\n{}",
+                    tail
+                ),
                 log,
             });
         }
@@ -267,20 +298,67 @@ fn pick_free_port() -> Option<u16> {
 }
 
 pub fn probe_health(port: u16) -> bool {
-    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
+    let Some(body) = health_body(port) else {
         return false;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(1000)));
+    let ok = body.contains("\"ok\":true") || body.contains("\"ok\": true");
+    if !ok {
+        // A parseable-but-unexpected /health body means the contract changed under us —
+        // record the raw body once it happens, instead of failing silently (design §3).
+        append_log(
+            &data_home().join("desktop-shell.log"),
+            &format!(
+                "[shell] /health answered, but not ok: {}",
+                body.chars().take(400).collect::<String>()
+            ),
+        );
+    }
+    ok
+}
+
+/// The `/health` body, or None when the backend does not answer. Raw text; callers parse
+/// what they need.
+fn health_body(port: u16) -> Option<String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(1000)))
+        .ok()?;
     let request =
         format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
+    stream.write_all(request.as_bytes()).ok()?;
     let mut body = String::new();
-    if stream.read_to_string(&mut body).is_err() {
-        return false;
+    stream.read_to_string(&mut body).ok()?;
+    Some(body)
+}
+
+/// The close guard's machine inputs (design §2): whether the backend is healthy and, when
+/// the server reports them, the runs-in-flight and pending-approval counts. `None` counts
+/// are unknown state — the caller decides fail-closed.
+pub struct HealthState {
+    pub healthy: bool,
+    pub runs_in_flight: Option<u32>,
+    pub pending_approvals: Option<u32>,
+}
+
+pub fn health_state(port: u16) -> HealthState {
+    let Some(body) = health_body(port) else {
+        return HealthState {
+            healthy: false,
+            runs_in_flight: None,
+            pending_approvals: None,
+        };
+    };
+    // The body is JSON after the blank line that ends the HTTP headers.
+    let json = body.split("\r\n\r\n").nth(1).unwrap_or("");
+    let parsed: Option<serde_json::Value> = serde_json::from_str(json.trim()).ok();
+    let value = parsed.unwrap_or(serde_json::Value::Null);
+    let healthy = value.get("ok").and_then(|ok| ok.as_bool()).unwrap_or(false);
+    let count = |name: &str| value.get(name).and_then(|n| n.as_u64()).map(|n| n as u32);
+    HealthState {
+        healthy,
+        runs_in_flight: count("runsInFlight"),
+        pending_approvals: count("pendingApprovals"),
     }
-    body.contains("\"ok\":true") || body.contains("\"ok\": true")
 }
 
 fn pump_output(child: &mut Child, log: &Path) {
@@ -318,8 +396,28 @@ pub fn log_shell(line: &str) {
 }
 
 fn append_log_raw(log: &Path, text: &str) {
+    // Size-capped rotation (design §3): two pump threads write everything the sidecar says,
+    // unbounded until now. At 5 MB the log moves to `.1` (one rotated file retained) and the
+    // current file starts fresh.
+    if let Ok(metadata) = fs::metadata(log) {
+        if metadata.len() > 5 * 1024 * 1024 {
+            let rotated = log.with_extension("log.1");
+            let _ = fs::rename(log, &rotated);
+        }
+    }
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log) {
         let _ = file.write_all(text.as_bytes());
+    }
+}
+
+/// The last `max_bytes` of a log file, for surfacing the sidecar's own words in an error.
+fn log_tail(log: &Path, max_bytes: usize) -> String {
+    match fs::read(log) {
+        Ok(bytes) => {
+            let start = bytes.len().saturating_sub(max_bytes);
+            String::from_utf8_lossy(&bytes[start..]).to_string()
+        }
+        Err(_) => String::new(),
     }
 }
 
@@ -414,34 +512,81 @@ fn uri_encode(raw: &str) -> String {
     encoded
 }
 
-/// Watches the spawned backend: if it dies while the app is running, surface an
-/// error window instead of leaving a dead webview.
+/// Watches the backend for the two failures that strand the operator (design §3): the
+/// spawned process dying (exit watchdog, as before) and — new — the backend hanging while
+/// alive or a REUSED owner dying, caught by a `/health` probe every 5 s with a
+/// two-consecutive-failure threshold. The recovery surface names what happened, who owns
+/// the lock, and the move that fixes it; the backend itself is left to its owner unless
+/// the shell spawned it (the exit arm stops it through the normal shutdown path).
 fn spawn_watchdog(app: AppHandle, log: PathBuf) {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(2));
-        let Some(state) = app.try_state::<BackendHandle>() else {
-            return; // shell is shutting down
-        };
-        let mut guard = match state.child.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
-        match guard.as_mut() {
-            Some(child) => match child.try_wait() {
-                Ok(Some(status)) => {
-                    *guard = None; // already exited; shutdown becomes a no-op
-                    drop(guard);
-                    open_error_window(
-                        &app,
-                        &format!("the backend process exited unexpectedly (exit status: {status})"),
-                        &log,
-                    );
-                    return;
+    thread::spawn(move || {
+        let mut health_failures = 0u32;
+        loop {
+            thread::sleep(Duration::from_secs(5));
+            let Some(state) = app.try_state::<BackendHandle>() else {
+                return; // shell is shutting down
+            };
+            let mut shell_owned = false;
+            {
+                let mut guard = match state.child.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return,
+                };
+                match guard.as_mut() {
+                    Some(child) => {
+                        shell_owned = true;
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                *guard = None; // already exited; shutdown becomes a no-op
+                                drop(guard);
+                                open_error_window(
+                                    &app,
+                                    &format!(
+                                        "the backend process exited unexpectedly (exit status: {status}).\
+                                         \n\nRelaunch the app to start a new one; your sessions and settings\
+                                         \nare durable in the data home."
+                                    ),
+                                    &log,
+                                );
+                                return;
+                            }
+                            Ok(None) => {}
+                            Err(_) => {}
+                        }
+                    }
+                    None => {
+                        // Reused backend: its owner manages its lifetime; the shell only
+                        // watches so the window is never a silent zombie.
+                    }
                 }
-                Ok(None) => {}
-                Err(_) => return, // status unavailable; treat as running
-            },
-            None => return, // reused backend: its owner manages it
+            }
+            let port = backend_port(&app);
+            if port == 0 {
+                continue;
+            }
+            if probe_health(port) {
+                health_failures = 0;
+                continue;
+            }
+            health_failures += 1;
+            if health_failures >= 2 {
+                let ownership = if shell_owned {
+                    "The app owns this backend and will stop it on exit if it returns."
+                } else {
+                    "The backend was started outside this window (its owner is recorded in server.lock); this window will not stop it."
+                };
+                open_error_window(
+                    &app,
+                    &format!(
+                        "the backend stopped answering /health (2 consecutive failures).\
+                         \n\n{ownership}\
+                         \n\nRelaunch the app to attach to a running server or start a new one;\
+                         \nyour sessions and settings are durable in the data home."
+                    ),
+                    &log,
+                );
+                return;
+            }
         }
     });
 }

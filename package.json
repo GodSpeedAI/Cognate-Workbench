@@ -12,7 +12,7 @@
     "test:smoke": "bun test test/workbench-contract.test.ts test/workbench-glob.test.ts test/skill-bundle.test.ts",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "bun scripts/tauri-sidecar.ts && tauri build"
+    "tauri:build": "bun scripts/tauri-sidecar.ts && tauri build --config src-tauri/tauri.conf.override.json"
   },
   "dependencies": {
     "@connectrpc/connect": "2.2.0",

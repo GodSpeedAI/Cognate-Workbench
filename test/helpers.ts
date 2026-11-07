@@ -8,7 +8,7 @@ import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { resolvePg0Url } from "@godspeedai/cognate-store-postgres";
 import { startServer, LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
-import { schemaFor, storeConfigFor } from "../src/store.ts";
+import { postgresUrl, schemaFor, storeConfigFor } from "../src/store.ts";
 
 /** Every app name a store is opened under for a temp home (`src/server.ts` uses "harness"; the
  *  migration tests use "migration"). Keep in sync with the `storeConfigFor`/`schemaFor` call sites. */
@@ -43,6 +43,16 @@ async function dropHomeSchemas(home: string, targets: StoreTargets): Promise<voi
       await sql.close();
     }
   }
+}
+
+
+/** The store URL for tests that open the store directly (schema scans, cleaners): the same
+ *  resolution `storeConfigFor` uses — env URL, else the shared development pg0 instance —
+ *  with the hardcoded default as the last resort. Tests that dial `postgresUrl()` raw used
+ *  to connect to whatever PostgreSQL happened to be listening on the default port, which
+ *  silently passed (or failed) with the wrong database. */
+export async function storeUrlForTest(): Promise<string> {
+  return process.env.COGNATE_POSTGRES_URL ?? (await resolvePg0Url({ name: process.env.COGNATE_PG0_NAME ?? "cognate-dev" }).catch(() => postgresUrl()));
 }
 
 export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {

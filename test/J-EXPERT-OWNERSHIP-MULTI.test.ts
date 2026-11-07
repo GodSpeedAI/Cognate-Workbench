@@ -13,10 +13,11 @@ import { createClient } from "@godspeedai/cognate-client";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { openPostgresStore } from "@godspeedai/cognate-store-postgres";
+import { storeUrlForTest } from "./helpers.ts";
 import { StaleRunOwnerError, type CommitRequest } from "@godspeedai/cognate-events";
 import type { ModelProvider, ModelResponse } from "@godspeedai/cognate-capabilities";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
-import { postgresUrl, schemaFor } from "../src/store.ts";
+import { schemaFor } from "../src/store.ts";
 import { readExperts } from "../src/experts/state.ts";
 import { EXPERTS_BILLING_THREAD, type BillingReservation } from "../src/experts/billing.ts";
 
@@ -83,7 +84,7 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
     // A zombie writer (the killed process's still-open handle on the same store) attempts a
     // late run-scoped append under a superseded ownership credential: the store fences it and
     // nothing is appended.
-    const zombie = await openPostgresStore({ url: postgresUrl(), schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
+    const zombie = await openPostgresStore({ url: await storeUrlForTest(), schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
     try {
       const streamId = `run-${runId}`;
       const currentVersion = (await zombie.store.readStream(streamId)).length;
@@ -150,7 +151,7 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
   } finally {
     await serverA?.stop().catch(() => {});
     await serverB?.stop().catch(() => {});
-    const cleaner = await openPostgresStore({ url: postgresUrl(), schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
+    const cleaner = await openPostgresStore({ url: await storeUrlForTest(), schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
     await cleaner.dropSchema();
     await cleaner.close();
     await rm(home, { recursive: true, force: true });
