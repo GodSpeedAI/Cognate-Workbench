@@ -116,7 +116,8 @@ describe("E2E Experts and Teams", () => {
         await page.getByLabel("Name", { exact: true }).fill("Solo Analyst");
         await page.getByLabel("Specialization").fill("Evidence research");
         await page.getByLabel("Instructions").fill("Compare evidence and report uncertainty.");
-        await page.getByLabel("Configured provider").selectOption("mock");
+        await page.getByRole("button", { name: /^Configured provider/ }).click();
+        await page.getByRole("menuitemradio", { name: /^mock · / }).click();
         expect(await page.getByRole("textbox", { name: "Model" }).inputValue()).toBe("mock-model-1");
         await page.getByRole("button", { name: "Create Expert" }).click();
         await page.getByRole("heading", { name: "Solo Analyst", exact: true }).waitFor();
