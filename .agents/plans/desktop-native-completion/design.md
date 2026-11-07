@@ -59,8 +59,8 @@ The design rests on four decisions (each argued in Alternatives Considered):
 
 1. **No capability grants to web content — ever, in this design.** The Tauri ACL stays empty and a
    CI guard enforces it. All web↔shell traffic rides the sanctioned channels enumerated in §1
-   (host-side dispatch; the window-title cue; the shell's own `/health` probes), none of which
-   requires a grant.
+   (host-side dispatch; the window-title cue; the shell's own `/health` probes; standard close
+   paths), none of which requires a grant.
 2. **A desktop contract instead of a chrome list.** Close/quit semantics per backend ownership
    with a fail-closed confirmation, an attention cue, working external links, and one shortcut
    source of truth — these, not a longer list of integrations, are what make it native.
@@ -201,7 +201,7 @@ handling lives today):
   orphaned-database class this project just fixed. Dock Quit takes the same path.
 
 **The `--app` fallback surface.** Today the fallback's window exit unconditionally stops the
-server (`src/cli.ts:192`, "app window closed") with no confirmation possible from browser chrome.
+server (`src/cli.ts:197`, "app window closed") with no confirmation possible from browser chrome.
 Decision: the fallback adopts a `beforeunload` confirmation **conditioned on
 `COGNATE_SHELL=chromium-app`** (so it never double-confirms inside the Tauri webview), verified in
 Chromium where the fallback actually runs; if it cannot be made reliable, the limitation is
@@ -340,9 +340,11 @@ custom ARIA to announce its value — properties a custom control must match bef
 per panel — ContractEditor (13, may split), ExpertsTeamsPanel (8), AutomationPanel (6),
 SchedulesPanel (5), then the five-file tail — each batch shipping its E2E updates in the same
 change. **The three real `selectOption` files are `test/E2E-experts.test.ts`,
-`test/E2E-experts-debt.test.ts`, and `test/E2E-workbench.test.ts`**; the automation and contract
-panels have no select-driving E2E today, so their conversions **add** coverage per the ledger
-instead of updating it. A mechanical guard test ends the track: no `<select` outside
+`test/E2E-experts-debt.test.ts`, and `test/E2E-workbench.test.ts`**; the contract and ledger
+panels' existing drives live in `E2E-workbench` (the `#auth-fs-write`/`#auth-shell-run` selects
+and the ledger form) and are updated in those batches — only the automation panel's six selects
+have no driving E2E today, so its conversion **adds** coverage per the ledger instead of updating
+it. A mechanical guard test ends the track: no `<select` outside
 `MenuSelect.tsx` without a ledger-recorded exception. The suite's known flakes (font-route
 blocking, concurrency cap — both sized S in DEBT.md) land before the batches so a red suite means
 a real regression. Sequencing note: the bridge and title-manager live in new files (B3), and D's
@@ -365,8 +367,8 @@ governed workspace capabilities with its own `.sea` journey; drops originating f
 
 A committed runbook (operator-executed; the device stays read-only to this effort until the
 operator acts): prerequisites the operator authorizes (`libwebkit2gtk-4.1-0` via
-`apt install ./<shell-deb>.deb` dependency resolution — the exact artifact name decided in §4's
-package identity), then the T1 harness against the arm64 deb produced by CI, including the
+`apt install ./<shell-deb>.deb` dependency resolution — the exact artifact name decided in B5's
+package-identity row), then the T1 harness against the arm64 deb produced by CI, including the
 compositing check (the window renders a known UI frame under the device's actual
 compositor/session, verified by the operator's screenshot); if the WebKitGTK DMABUF renderer
 misbehaves on the NVIDIA driver, `WEBKIT_DISABLE_DMABUF_RENDERER=1` is recorded as a supported
@@ -615,7 +617,7 @@ first, validated, before code. Each tranche's done-state is its "Proves" line.
 | `package.json` (`test` script) | Concurrency cap for constrained hosts (DEBT closure, size S). |
 | `src/ui/shell/MenuSelect.tsx` + `test/ui-menu-select.test.tsx` (New) | Accessibility gate: screen-reader value announcement, full keyboard contract — before any conversion. |
 | `src/ui/workbench/ContractEditor.tsx` (13), `src/ui/experts/ExpertsTeamsPanel.tsx` (8), `src/ui/workbench/AutomationPanel.tsx` (6), `src/ui/experts/SchedulesPanel.tsx` (5), `src/ui/workbench/Workbench.tsx` (3, D-28), `src/ui/workbench/LedgerPanel.tsx` (3), `src/ui/experts/ExpertEditor.tsx` (2), `src/ui/AmbiguousStepCard.tsx` (1), `src/ui/workbench/CheckoutChip.tsx` (1) | Per-panel select conversion per the ledger dispositions (largest panel first; ContractEditor may split). |
-| `test/E2E-experts.test.ts`, `test/E2E-experts-debt.test.ts`, `test/E2E-workbench.test.ts` | The three files that drive `selectOption` today — updated in the same commits as their panel conversions. The automation and contract panels have no select-driving E2E today; their conversions add coverage per the ledger. |
+| `test/E2E-experts.test.ts`, `test/E2E-experts-debt.test.ts`, `test/E2E-workbench.test.ts` | The three files that drive `selectOption` today — updated in the same commits as their panel conversions (E2E-workbench covers the contract auth selects and the ledger form). Only AutomationPanel's conversion adds new coverage per the ledger. |
 | `test/native-select-guard.test.ts` (New) | Mechanical guard: no `<select` outside `MenuSelect.tsx` without a ledger-recorded exception. |
 | D-series fixes | The FIX dispositions the ledger records for the reconciled open rows; one commit per row, each re-capturing its screenshot and naming its test. Targets per A2: `src/ui/App.tsx` (D-9 header, D-13 tabs/stray icon, D-15 quote typography, D-17 disabled contrast, D-19 label style, D-24 badges, D-25 turn counter, D-26 toolbar collapse, D-29 dark Cancel border, D-22 status copy surfacing the current step), `src/ui/models/ProviderWizard.tsx` (D-12 footer, D-16 card clamp), `src/ui/GovernancePane.tsx` (D-18), `src/components/modelProvider.ts` (D-21 redesign — render once per group), `src/ui/DirectoryField.tsx` (D-27), `src/ui/inspector/ConfigTab.tsx` (D-30), `src/ui/models/ModelPicker.tsx` (D-34). |
 | Pin feature: `.sea/interaction/interaction-model.sea`, `domain/index.ts`, `src/workbench/types.ts`, `src/workbench/reducer.ts`, `src/workbench/state.ts`, `src/projections/sessions.ts`, `src/capabilities/workbench.ts`, `src/server.ts` (GRANTED_CAPABILITIES + binding), `src/ui/App.tsx` (row menu), `test/J-SESSION-pin.test.ts` (New) | Model-first: `J-SESSION-pin` journey validated first; then capability + event + projection + row-menu entry (behavior per §5's definition) in one tranche. |
@@ -648,6 +650,6 @@ first, validated, before code. Each tranche's done-state is its "Proves" line.
 0.8.0 pins); `.sea/interaction/interaction-model.sea` semantic IDs (only additive journeys: Pin,
 remote diagnostics, optionally DnD); the standalone packaging pipeline (`scripts/package.ts`,
 `scripts/installers.ts`, the existing `qualify-*.sh` scripts — the new `qualify-tauri*` harness is
-in scope per B2); the CLI command surface (`src/cli.ts` commands; the `--app` launcher's
-shell-identity env in `src/desktopWindow.ts` is the single exception, per B4/B5); the
-mobile/phone entry (the mobile remote-control surface, `docs/REMOTE.md`).
+in scope per B2); the CLI command surface (`src/cli.ts` commands; the `--app` entry's
+shell-identity env in `src/desktopWindow.ts` and its close confirmation in B4 are the stated
+exceptions); the mobile/phone entry (the mobile remote-control surface, `docs/REMOTE.md`).
