@@ -192,35 +192,12 @@ fn find_sidecar(dir: &Path) -> Option<PathBuf> {
             // it would trip the single-instance plugin and exit 0. Match the shipped target
             // triples explicitly instead of any shared-prefix name.
             const TRIPLES: [&str; 3] = ["-unknown-linux-gnu", "-apple-darwin", "-pc-windows-msvc"];
-            name.starts_with("cognate-workbench-") && TRIPLES.iter().any(|triple| name.contains(triple))
+            name.starts_with("cognate-workbench-")
+                && TRIPLES.iter().any(|triple| name.contains(triple))
         })
         .collect();
     candidates.sort();
     candidates.into_iter().next()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sidecar_selection_skips_the_shell_binary() {
-        let dir = std::env::temp_dir().join(format!("wb-sidecar-test-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("cognate-workbench-shell"), b"").unwrap();
-        fs::write(dir.join("cognate-workbench-x86_64-unknown-linux-gnu"), b"").unwrap();
-        let found = find_sidecar(&dir).unwrap();
-        assert!(found.to_string_lossy().contains("x86_64-unknown-linux-gnu"));
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn sidecar_selection_is_none_without_a_candidate() {
-        let dir = std::env::temp_dir().join(format!("wb-sidecar-empty-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        assert!(find_sidecar(&dir).is_none());
-        fs::remove_dir_all(&dir).ok();
-    }
 }
 
 #[cfg(unix)]
@@ -466,4 +443,28 @@ fn dirs_home() -> PathBuf {
 
 fn default_home_fallback() -> PathBuf {
     PathBuf::from(".")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidecar_selection_skips_the_shell_binary() {
+        let dir = std::env::temp_dir().join(format!("wb-sidecar-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("cognate-workbench-shell"), b"").unwrap();
+        fs::write(dir.join("cognate-workbench-x86_64-unknown-linux-gnu"), b"").unwrap();
+        let found = find_sidecar(&dir).unwrap();
+        assert!(found.to_string_lossy().contains("x86_64-unknown-linux-gnu"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn sidecar_selection_is_none_without_a_candidate() {
+        let dir = std::env::temp_dir().join(format!("wb-sidecar-empty-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(find_sidecar(&dir).is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
 }
