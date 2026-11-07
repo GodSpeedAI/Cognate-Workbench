@@ -334,3 +334,24 @@ recorded DEFERs.
 (2 s deadline under full-gate load) **passes isolated 7/7**, and `J-WS-delete` is the same
 host-concurrency flake classified at the D-row boundary (isolated PASS 2.44 s). The F track
 is green; the ledger's BUILD rows are closed.
+
+## C — Native UX convergence (recorded 2026-11-07)
+
+- **Per-platform menu conventions** — verified against the code and the Tauri 2 platform
+  contract: the macOS-required predefined Edit roles (undo/redo/cut/copy/paste/select-all)
+  and Window roles ship (`lib.rs:182-196`); macOS adds about/quit items; devtools gate per
+  platform; Windows/Linux carry the same menu structure in-window. The no-accelerator
+  deviation is documented (menu.rs:5-7): the operator-editable shortcut table stays the
+  single source of truth, so the menus cannot diverge from it. Divergences to correct: none
+  found.
+- **Desktop-contract acceptance rows per platform** — the B4 real-window pass on WSLg
+  (X11-forced) remains the one real-window verification: window mapping, class, sidecar
+  spawn, backend readiness, composed idle title. Menu-click and dialog-interaction rows need
+  xdotool, which is **absent on this host and requires passworded sudo** — recorded BLOCKED
+  for this environment, explicitly, per the honesty rule (not silently skipped); they stay
+  `implemented-per-code` until a real interaction pass (E-phase device pass or an
+  operator-installed xdotool).
+- **Notifications (Open Question OQ1)** — deliberately **OPEN, owner's call** per the
+  design: the notification plugin ships only if the operator finds the B4 title cue
+  insufficient for the approval-waiting path in their own use. Nothing is implemented
+  pre-gate; the known-gaps row carries the current truth.
