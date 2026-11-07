@@ -221,3 +221,44 @@ Append-only. Every entry: date, exact command, result, evidence notes.
   9.76 s** — the documented host-concurrency flake class, not a product bug. The previous
   boundary run (before the `postgresUrl()` coupling fixes) was 1582/5; the fixes closed
   the three environment-coupled failures and two host-load flakes passed on re-run.
+
+## D track — S1–S9 MenuSelect conversion (2026-11-07)
+
+The ledger's global gate landed first (`d5ec3fd`): MenuSelect's trigger accessible name now
+carries the current value (`Label: Value`), with the full keyboard contract (Enter/Space/
+ArrowDown/ArrowUp open with the disabled guard, arrows/Home/End move, Enter/Space pick via
+explicit activation with the native-click double-fire prevented, Esc/Tab close and return
+focus, click-outside closes) pinned by `test/ui-menu-select.test.tsx` (New, 12 tests,
+happy-dom + Testing Library per the `remote-dialog-focus` idiom).
+
+Then the nine batches, one commit each, in ledger order:
+
+- **S1** `133876b` — ContractEditor, 13 selects (9 authority grants through a shared
+  `GrantField`, executor role/kind, invariant kind, acceptance kind); MenuSelect gains the
+  optional trigger `id` so `<label htmlFor>` association survives.
+- **S2** `a24cbb0` — ExpertsTeamsPanel, 8 selects (Add Specialist and Mention-a-Specialist
+  keep a placeholder row as action pickers; Conversation history; Review verdict; Knowledge
+  kind; Team memory visibility; Memory scope; Observed outcome). E2E drivers rewritten to
+  the open-and-pick idiom; history rows found by marker text; the trigger name carries the
+  current message count.
+- **S3** `7b2d19b` — AutomationPanel, 6 selects (Source task/Repeat/Runner in both form
+  copies) + the ledger's new coverage: a component test asserting the announced values and
+  no native select.
+- **S4** `f154453` — SchedulesPanel, 5 selects; the create handler's existing `targetId`
+  guard replaces the redundant HTML5 `required`.
+- **S5** `56f96ff` — Workbench, 3 selects (Workflow picker resets instance+node; Instance;
+  Move destination with placeholder and conditional rows) — closes D-28's selects.
+- **S6** `4a10f37` — LedgerPanel, 3 selects; the E2E independent-check step drives the
+  announced names.
+- **S7** `48280c7` — ExpertEditor, 2 selects (Configured provider, Protocol).
+- **S8+S9** `5b894b9` — AmbiguousStepCard observed outcome + CheckoutChip start-from-branch,
+  and the ledger's closing guard `test/native-select-guard.test.ts` (New): the suite fails
+  if any component renders `<select>` again outside MenuSelect.tsx.
+
+**Gate fallout, classified and fixed** (`c41b919`): the a11y gate's value announcement
+changes every MenuSelect trigger's accessible name, which broke three exact-name test
+lookups — the ui-experts static route-options assertion (a closed menu renders only the
+announced value; route options are proven interactively by the E2E provider-route journey),
+onboarding's exact `getByLabel("API protocol")`, and remote-workspaces' exact
+`[aria-label="WSL distribution"]` attribute selector. All three fixed to the announced-name
+idiom; all three suites pass isolated (5/5, 10/10, 5/5).
