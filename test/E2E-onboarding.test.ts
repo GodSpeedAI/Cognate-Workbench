@@ -36,7 +36,8 @@ describe("J-A-first-use E2E first-run onboarding", () => {
 
           await dialog.getByRole("heading", { name: "Connect a model provider" }).waitFor();
           await dialog.getByRole("radiogroup", { name: "Provider" }).waitFor();
-          for (const label of ["Base URL", "API protocol", "API key", "Model"]) await dialog.getByLabel(label, { exact: true }).waitFor();
+          // "API protocol" is a MenuSelect whose announced name carries the value, so no exact match.
+          for (const label of ["Base URL", "API protocol", "API key", "Model"]) await dialog.getByLabel(label).waitFor();
           // Not a lone API key field: the primary action is disabled until the form is valid.
           expect(await dialog.getByRole("button", { name: "Save and continue" }).isDisabled()).toBe(true);
           await shot(page, "02-provider-step");
