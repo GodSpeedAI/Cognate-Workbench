@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import type { NativeSchedule, ScheduleOccurrence } from "../../schedules/types.ts";
 import type { Expert, Team } from "../../experts/types.ts";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -70,16 +71,16 @@ export function SchedulesPanel({ schedules, occurrences, experts, teams, workspa
     {evaluator?.error && <p role="alert">Evaluator error: {evaluator.error}</p>}
     <form onSubmit={create} className="experts-schedules__form">
       <h3>{editingScheduleId ? "Edit schedule" : "Create schedule"}</h3>
-      <label>Target type<select aria-label="Target type" value={targetKind} onChange={(event) => setTargetKind(event.target.value as "expert" | "team")}><option value="expert">Expert</option><option value="team">Team</option></select></label>
-      <label>Active {targetKind}<select aria-label={`Active ${targetKind}`} value={targetId} onChange={(event) => setTargetId(event.target.value)} required><option value="">Choose {targetKind}</option>{targets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}</select></label>
+      <label>Target type<MenuSelect ariaLabel="Target type" value={targetKind} variant="field" placement="down" options={[{ value: "expert", label: "Expert" }, { value: "team", label: "Team" }]} onPick={(v) => setTargetKind(v)} /></label>
+      <label>Active {targetKind}<MenuSelect ariaLabel={`Active ${targetKind}`} value={targetId} variant="field" placement="down" options={[{ value: "", label: `Choose ${targetKind}` }, ...targets.map((target) => ({ value: target.id, label: target.name }))]} onPick={(v) => setTargetId(v)} /></label>
       <label>Objective<textarea value={objective} onChange={(event) => setObjective(event.target.value)} required maxLength={4000} rows={3} /></label>
-      <label>Recurrence<select aria-label="Recurrence" value={recurrenceKind} onChange={(event) => setRecurrenceKind(event.target.value as typeof recurrenceKind)}><option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+      <label>Recurrence<MenuSelect ariaLabel="Recurrence" value={recurrenceKind} variant="field" placement="down" options={[{ value: "once", label: "Once" }, { value: "daily", label: "Daily" }, { value: "weekly", label: "Weekly" }]} onPick={(v) => setRecurrenceKind(v)} /></label>
       {recurrenceKind === "once" ? <label>Due instant (ISO with timezone)<input value={at} onChange={(event) => setAt(event.target.value)} placeholder="2026-10-14T14:30:00-04:00" required /></label> : <>
         <label>Local time<input type="time" value={time} onChange={(event) => setTime(event.target.value)} required /></label>
         <label>IANA timezone<input value={timezone} onChange={(event) => setTimezone(event.target.value)} required maxLength={100} /></label>
-        {recurrenceKind === "weekly" && <label>Weekday<select aria-label="Weekday" value={weekday} onChange={(event) => setWeekday(Number(event.target.value))}>{days.map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>}
+        {recurrenceKind === "weekly" && <label>Weekday<MenuSelect ariaLabel="Weekday" value={String(weekday)} variant="field" placement="down" options={days.map((day, index) => ({ value: String(index), label: day }))} onPick={(v) => setWeekday(Number(v))} /></label>}
       </>}
-      <label>Missed occurrence<select aria-label="Missed occurrence" value={misfire} onChange={(event) => setMisfire(event.target.value as typeof misfire)}><option value="coalesce">Coalesce to latest due time</option><option value="skip">Skip missed work</option></select></label>
+      <label>Missed occurrence<MenuSelect ariaLabel="Missed occurrence" value={misfire} variant="field" placement="down" options={[{ value: "coalesce", label: "Coalesce to latest due time" }, { value: "skip", label: "Skip missed work" }]} onPick={(v) => setMisfire(v)} /></label>
       <p>Scheduled work is read-only. Credentials and broader execution authority are never stored in a schedule.</p>
       <button type="submit" disabled={busy || !workspaceId}>{editingScheduleId ? "Save revision" : "Save schedule"}</button>
       {editingScheduleId && <button type="button" disabled={busy} onClick={() => setEditingScheduleId(undefined)}>Cancel editing</button>}
