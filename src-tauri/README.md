@@ -14,10 +14,14 @@ zoom, window state, single-instance behavior, and a startup-failure error window
   `cognate-workbench/` resources (browser assets, `.sea` model, bundled pg0).
 - Reuse: before spawning, the shell reads `<data home>/server.lock` and, if that
   process is alive and `/health` responds `ok:true`, attaches a window to it instead.
-- Shutdown: on exit the spawned child gets SIGTERM (10 s grace, then SIGKILL). On
-  Windows there is no portable SIGTERM for a detached child, so the process is
-  terminated directly — the same clean-stop gap the standalone package documents for
-  Windows; the bundled database stop on Windows remains unverified.
+- Shutdown: on exit the spawned child gets SIGTERM (30 s grace, then SIGKILL; a 45 s
+  wedge failsafe covers a hung event loop after an external SIGTERM/SIGINT). The 30 s
+  grace exists because the sidecar's clean stop covers app teardown AND the bundled
+  database's own stop — a shorter window SIGKILLed it mid-cleanup and orphaned pg0
+  (observed, fixed in `96f7fb0`). On Windows there is no portable SIGTERM for a
+  detached child, so the process is terminated directly — the same clean-stop gap the
+  standalone package documents for Windows; the bundled database stop on Windows
+  remains unverified.
 - Watchdog: if the spawned backend dies while the shell is running, an error window
   opens with the reason and the log path (`<data home>/desktop-shell.log`).
 

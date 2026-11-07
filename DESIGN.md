@@ -187,10 +187,11 @@ above, not from every state reinventing layout.
 
 ## Exports
 
-### tokens.css
+### Tokens
 
-See `src/ui/tokens.css`, generated alongside this file and imported by `app.css`. Canonical values
-live there; this file documents intent, `tokens.css` is the enforced source.
+Canonical values live in the `:root` and `[data-theme]` blocks of `src/ui/app.css`; this file
+documents intent, `app.css` is the enforced source. (An earlier revision named `src/ui/tokens.css`,
+which does not exist in the repository.)
 
 ## Stamp
 

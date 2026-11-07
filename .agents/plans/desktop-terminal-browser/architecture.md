@@ -24,12 +24,16 @@ Status: living document. Update when a decision changes. Evidence lives in
 - Capability model: components provide `CapabilityContract`s; `bindCapabilities` in `domain/index.ts`
   anchors them on `.sea` concepts with hard count assertions; client-invocable ids must be in
   `GRANTED_CAPABILITIES` (`src/server.ts:205`) and mounted in `createRuntime`.
-- Events: closed `WORKBENCH_EVENTS` list (28 types, `src/workbench/types.ts:175`), pure reducer
+- Events: closed `WORKBENCH_EVENTS` list (38 types at the desktop-native-completion audit,
+  `src/workbench/types.ts:175` — this section's original 28-count predates the
+terminal/browser/preview event families), pure reducer
   (`src/workbench/reducer.ts`), projections registered in `src/server.ts:588`, streamed to the UI via
   the Connect `StreamEvents` RPC (no SSE/WS on the main surface today).
-- UI: `src/ui/App.tsx` (6075 lines) hand-rolls center views (`currentView`, `App.tsx:5296`) over four
-  booleans; the right inspector already has a registry (`shell/Inspector.tsx`: register by id/order,
-  portal, persisted width/open/tab). No terminal/browser/xterm/iframe code exists in the UI.
+- UI: `src/ui/App.tsx` (6,183 lines at the desktop-native-completion audit) hand-rolls center views
+  (`currentView`, `App.tsx:5296`) over four booleans; the right inspector already has a registry
+  (`shell/Inspector.tsx`: register by id/order, portal, persisted width/open/tab). The T1-baseline
+  statement "No terminal/browser/xterm/iframe code exists in the UI" is historical: the terminal and
+  browser panels landed in T7 and T9.
 - CSP on `/` (`src/server.ts:933`): `default-src 'self'; connect-src 'self'; frame-ancestors 'none'` —
   any WebSocket must be same-origin; external-site iframes are blocked today.
 - Bun 1.4.0 pinned. `Bun.Terminal` (PTY) exists since 1.3.5, Windows ConPTY since 1.3.14. node-pty is
@@ -60,8 +64,9 @@ src-tauri/                     Tauri 2 shell (Rust)
   - spawns sidecar: cognate-workbench (Bun binary), env COGNATE_NO_WINDOW=1,
     COGNATE_RESOURCE_DIR=<tauri resource dir>, PORT=<free port picked by shell>
   - waits for GET /health, then opens the webview at http://127.0.0.1:<port>
-  - reuses a live instance: reads <home>/server.lock, probes /health, attaches a
-    second window instead of spawning a second backend
+  - reuses a live instance: reads <home>/server.lock, probes /health, and focuses
+    the existing window instead of spawning a second backend (single-instance
+    focus is the implemented behavior; a second attached window is not)
   - native menus + shortcuts (Rust-side, no webview IPC required)
   - minimal capability grants: the localhost webview is a *remote* Tauri context and
     gets NO Tauri APIs by default (CSP + capability system keep it web-only)

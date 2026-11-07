@@ -1,3 +1,53 @@
+# Current status — revision 40
+
+Milestone A of the **desktop-native-completion** mission is complete: the EGM sequence ran end to
+end over the Tauri desktop completion effort, and the doc reconciliation the drift report demanded
+has landed (this revision).
+
+**Reconciliation.** The markdown had sat at revision 36 while the JSONL ledger carried three
+unreconciled revisions: **37** — the UI production-readiness pass (PandaCode-style UI with Cognate
+identity, 1564-test gate green at `04f648d`, report at `.agents/reports/ui-production-readiness/`);
+**38** — desktop-terminal-browser T4–T9 (PTY terminal service, docked xterm panel, shared managed
+browser sessions); **39** — T10–T11 + T12 core (inspect+annotate, governed previews across worlds,
+the end-to-end mission journey), including three product bugs found and fixed while proving it
+(execution-world connection-resolver key matcher, owner-ended preview cleanup durability, the
+inspect click-kill). All three remain recorded in full in `.agents/CURRENT_STATUS.jsonl`. The
+Tauri 2 desktop shell has been the primary desktop surface since `4ac47c1` on
+`feat/desktop-terminal-browser`; the Chromium `--app` window remains the CLI fallback.
+
+**The EGM Milestone A artifacts** (`.agents/plans/desktop-native-completion/`): scoped drift
+report (`2026-11-06_DRIFT_REPORT.md`); six-lens Goldfish brainstorm brief (`concepts_brief.md`);
+the reviewed design (`design.md`); the five-stage review reports and their consolidation
+(`zoom_out_report.md`, `comprehension_report.md`, `critic_report.md`,
+`intermediate_zoom_out_report.md`, `consolidated_review_report.md`); the owner-adjudicated
+resolution (`goldfish_review_report.md` — 17 PROPOSE FIX applied, C17 decided in-mission); and
+the post-resolution verification pass (`verification-pass.md`). The load-bearing corrections the
+review forced: a fail-closed `/health` close guard scoped by backend ownership (the title channel
+demoted to a human cue), a canonical zero-grant channel list, the Ctrl+Alt+N shortcut default
+kept on every surface, downloads/DnD/Pin/remote-diagnostics routed through the dispositions
+ledger, and tiered T1/T2/T3 packaged qualification. The design is the implementation contract
+pending the owner's Milestone A sign-off; the architectural tranches (B3+) wait for it.
+
+**Verified.** Commits `36cecea` (EGM artifacts), `e72723b` (resolution), `f133139` (verification
+pass + corrections). Five review stages completed with every requested reviewer reporting; the
+verification pass confirmed C1–C18 incorporated and found one new ground-truth error (the
+contract panel's selects are driven by `E2E-workbench`), fixed in the same pass.
+
+**This revision's doc reconciliation.** `src-tauri/README.md` shutdown text corrected (30 s grace
++ 45 s wedge failsafe — the 10 s figure documented the bug `96f7fb0` fixed); `src/README.md`
+counts corrected (38 mounted capability components, 18 public projections) with subsystem entries
+for `src/terminal/`, `src/browser/`, `src/preview/`; the sibling
+desktop-terminal-browser `architecture.md` baseline corrections (event count, App.tsx size,
+single-instance focus wording, T1-baseline markers); `DESIGN.md`'s nonexistent `tokens.css`
+reference corrected to `app.css`; and EGM contract READMEs created for the three new subsystem
+directories per the revision-34 bootstrap convention.
+
+**Next.** Owner sign-off on `design.md`, then the dispositions ledger (A3) and the CI scaffold
+(B1). The Jetson prerequisite (`libwebkit2gtk-4.1-0`, available in Ubuntu repos as 2.50.4) remains
+an operator-authorized device change.
+
+---
+
 # Current status — revision 36
 
 Standalone packages for Linux (x64, arm64), macOS (arm64, x64) and Windows (x64) are built and
