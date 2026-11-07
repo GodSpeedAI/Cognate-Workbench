@@ -61,13 +61,14 @@ describe("E2E task checkout", () => {
         const branchInput = page.getByLabel("Branch name");
         await branchInput.waitFor();
         expect(await branchInput.inputValue()).toBe("tidy-the-greeting");
-        const startSelect = form.getByLabel("Start from branch");
+        // S9 conversion: the branch picker is a MenuSelect whose trigger announces the current value.
+        const startSelect = form.getByRole("button", { name: /^Start from branch/ });
         await startSelect.waitFor();
         await page.waitForFunction(() => {
-          const el = document.querySelector('select[aria-label="Start from branch"]') as HTMLSelectElement | null;
-          return el !== null && el.value !== "";
+          const el = document.querySelector('.menu-select-btn[aria-label^="Start from branch"]');
+          return el !== null && !(el.getAttribute("aria-label") ?? "").endsWith(": ");
         });
-        expect(await startSelect.inputValue()).toBe("main");
+        expect(await startSelect.getAttribute("aria-label")).toBe("Start from branch: main (default)");
         await shot(page, "e2e-checkout-02-form");
 
         await form.getByRole("button", { name: "Create checkout" }).click();
