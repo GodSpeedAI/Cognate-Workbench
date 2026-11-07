@@ -902,6 +902,19 @@ Instance j_session_archive of "CanonicalJourney" {
     variants: "archive then restart, still archived; archive the currently open session; unarchive while hidden behind the filter; archiving never deletes turns or events"
 }
 
+Instance j_session_pin of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.setPinned",
+    evidence_class: "declared",
+    initiating_condition: "A conversation the operator returns to repeatedly sinks below newer activity in the sidebar",
+    journey_id: "J-SESSION-pin",
+    precondition: "The session exists in the sessions projection",
+    purpose: "Let the operator keep a conversation at the top of its sidebar list, independent of the active sort order, without touching its history",
+    settlement: "The pinned flag is recorded as an event, the sessions projection folds it, the sidebar lists pinned sessions first regardless of the active sort order, the flag survives reload and restart, and no history is deleted",
+    steps: "user chooses Pin on a session row menu -> the pin is recorded as an event -> the sessions projection folds it -> the sidebar floats the session to the top of its list -> Unpin on the same menu reverses it",
+    variants: "pin then restart, still pinned first; pin then archive (the archive filter still governs visibility); unpin restores the ordinary sort order; pinning an unknown session id is refused; multiple pinned sessions keep their relative recency order"
+}
+
 Instance j_prefs_shortcuts of "CanonicalJourney" {
     actor: "User",
     capabilities: "settings.changeShortcuts",

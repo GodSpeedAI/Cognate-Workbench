@@ -72,6 +72,9 @@ export type AgentConfigInput =
    *  sidebar visibility; no turn, run or event is ever deleted. */
   | { readonly kind: "session.archived"; readonly sessionId: string; readonly archived: boolean }
   | { readonly kind: "session.renamed"; readonly sessionId: string; readonly title: string }
+  /** F1 (J-SESSION-pin): durable, sort-independent pinning of a conversation to the top of its
+   *  sidebar list. A view-ordering fact with event-log durability; history is untouched. */
+  | { readonly kind: "session.pinned"; readonly sessionId: string; readonly pinned: boolean }
   /** J-SESSION-draft: durable creation of a conversation identity *before* any prompt. The
    *  capability layer already validated the workspace and derived the deterministic session id;
    *  this run only records the fact. `title` is the literal pre-turn sidebar label. */
@@ -180,6 +183,11 @@ export const agentConfigAgent: AgentDefinition = {
       case "session.renamed": {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("session.renamed", payload);
+        return { ok: true };
+      }
+      case "session.pinned": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.pinned", payload);
         return { ok: true };
       }
       case "session.created": {

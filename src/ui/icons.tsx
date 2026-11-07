@@ -281,6 +281,16 @@ export const ArchiveIcon = (props: IconProps) =>
     props,
   );
 
+/** Pin (F1, session row menu): a map pin at a slight tilt, unread so it reads at 14px. */
+export const PinIcon = (props: IconProps) =>
+  base(
+    <>
+      <path d="M8 14.25V9.5" />
+      <path d="M8 9.5a4.25 4.25 0 1 0-3.4-1.7L3 9l2 2 .8-2.2A4.2 4.2 0 0 0 8 9.5Z" transform="rotate(30 8 7)" />
+    </>,
+    props,
+  );
+
 /** Restore from archive: a counter-clockwise arrow. */
 export const UndoIcon = (props: IconProps) =>
   base(

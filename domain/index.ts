@@ -321,6 +321,21 @@ export const TRANCHE11_ANCHORS: readonly (readonly [string, string])[] = [
   ["plugin.uninstall", "Plugin"],
 ];
 
+/**
+ * F1 (J-SESSION-pin): the session row menu's Pin affordance (the design's donor-parity half of
+ * D-23), anchored on the `Session` entity the archive/rename capabilities already use.
+ */
+export const SESSION_PIN_ANCHORS: readonly (readonly [string, string])[] = [
+  ["session.setPinned", "Session"],
+];
+
+export function bindSessionPin(domain: Domain) {
+  const bindings = SESSION_PIN_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} session-pin contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}
+
 export function tranche11Bindings(domain: Domain): readonly CapabilityBinding[] {
   return TRANCHE11_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
 }

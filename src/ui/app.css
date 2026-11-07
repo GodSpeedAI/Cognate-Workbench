@@ -415,6 +415,10 @@ input:focus-visible {
   font-size: 13px;
 }
 
+/* F1: the pinned row's quiet glyph, before the relative time. */
+.session-pin-tag { display: inline-flex; align-items: center; color: var(--cg-accent); flex-shrink: 0; }
+.session-pin-tag svg { width: 12px; height: 12px; }
+
 .session-row-time {
   font-size: 11px;
   color: var(--cg-text-faint);

@@ -121,7 +121,7 @@ import {
   TerminalIcon,
   GlobeIcon,
   TrashIcon,
-} from "./icons.tsx";
+  PinIcon, } from "./icons.tsx";
 import {
   ARCHIVE_FILTER_LABELS,
   GROUP_BY_LABELS,
@@ -458,6 +458,7 @@ export function SessionRowButton({
   onToggleArchive,
   onRename,
   onCopyPath,
+  onTogglePin,
 }: {
   readonly session: SessionRow;
   readonly active: boolean;
@@ -470,8 +471,11 @@ export function SessionRowButton({
   readonly onRename?: () => void;
   /** Copies the workspace folder path (client-only). Omitted: no Copy workspace path item. */
   readonly onCopyPath?: () => void;
+  /** Toggles the durable pin (F1, J-SESSION-pin). Omitted: no Pin item. */
+  readonly onTogglePin?: () => void;
 }) {
   const archived = session.archived === true;
+  const pinned = session.pinned === true;
   const label = session.title || "New Session";
   // A waiting run is labelled by what it is blocked on: an interrupted step needs operator
   // reconciliation (never an approval); other known non-approval waits name their type.
@@ -531,6 +535,7 @@ export function SessionRowButton({
         )}
         {status === "running" && <span className="sr-only">Running</span>}
         {status === "failed" && <span className="sr-only">Last run failed</span>}
+        {pinned && <span className="session-pin-tag" title="Pinned to the top" aria-label="Pinned"><PinIcon aria-hidden="true" /></span>}
         <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
       </button>
       <div className="session-row-menu-wrap" ref={menuRef}>
@@ -547,6 +552,20 @@ export function SessionRowButton({
         </button>
         {menuOpen && (
           <div role="menu" className="workspace-actions-menu session-row-menu">
+            {onTogglePin && (
+              <button
+                type="button"
+                role="menuitem"
+                aria-label={pinned ? `Unpin ${label}` : `Pin ${label} to the top`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onTogglePin();
+                }}
+              >
+                {pinned ? <UndoIcon /> : <PinIcon />}
+                {pinned ? "Unpin" : "Pin to top"}
+              </button>
+            )}
             {onRename && (
               <button
                 type="button"
@@ -5713,6 +5732,13 @@ function AppShell() {
                     {...(harnessBindings.get(session.id)?.harnessId ? { harnessLabel: agentLabel(harnessList.harnesses, harnessBindings.get(session.id)!.harnessId) } : {})}
                     onOpen={() => openSession(session.id)}
                     onRename={() => setRenameSessionFor({ id: session.id, title: session.title })}
+                    onTogglePin={() => {
+                      const pinned = session.pinned === true;
+                      void client
+                        .invoke("session.setPinned", { sessionId: session.id, pinned: !pinned } as never)
+                        .then(() => toast.show(pinned ? "Session unpinned" : "Session pinned to the top"))
+                        .catch((e) => console.error("session.setPinned failed", e));
+                    }}
                     {...(workspaces.find((w) => w.id === session.workspaceId)?.root
                       ? {
                           onCopyPath: () => {

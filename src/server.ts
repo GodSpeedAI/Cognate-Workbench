@@ -20,7 +20,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -90,6 +90,7 @@ import { subagentStartComponent } from "./capabilities/subagentStart.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
+import { sessionPinComponent } from "./capabilities/sessionPin.ts";
 import { previewComponent } from "./capabilities/preview.ts";
 import { PreviewService } from "./preview/service.ts";
 import { sessionRenameComponent } from "./capabilities/sessionRename.ts";
@@ -259,6 +260,7 @@ const GRANTED_CAPABILITIES = [
   "identity.inspect",
   "session.setArchived",
   "session.rename",
+  "session.setPinned",
   "session.create",
   "session.task.bind",
   "agent.harness.list",
@@ -483,6 +485,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
+  const pinRefs = bindSessionPin(domain);
   const gapRefs = bindConformanceGaps(domain);
   const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
@@ -690,6 +693,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"], onArchived: (sessionId, archived) => (archived ? previewService.stopForOwner({ sessionId }) : Promise.resolve([])) }),
       sessionRenameComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.rename"] }),
+      sessionPinComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: pinRefs["session.setPinned"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       secretsBackendDescribeComponent({ describe: () => secretsBackend, semanticRef: t11["secrets.backend.describe"] }),
       configFileComponent({ home, getService, systemCaller: SYSTEM_CALLER, readSemanticRef: t11["config.file.read"], applySemanticRef: t11["config.file.apply"] }),

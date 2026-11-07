@@ -51,6 +51,15 @@ export const sessionsProjection: Projection = {
       if (!existing) return [];
       return [{ key, value: { ...existing, title: payload.title, renamed: true } }];
     }
+    // F1 (J-SESSION-pin): an operator-chosen pin. Like archive/rename, it is an `agent.config`
+    // event (not "session:"-correlated). Pure view-ordering: the fold only rewrites the flag.
+    if (event.eventType === "session.pinned") {
+      const payload = event.payload as { readonly sessionId: string; readonly pinned: boolean };
+      const key = `${event.tenant}/${payload.sessionId}`;
+      const existing = state.get(key) as Record<string, Json> | undefined;
+      if (!existing) return [];
+      return [{ key, value: { ...existing, pinned: payload.pinned } }];
+    }
     if (!event.correlationId.startsWith("session:")) return [];
     // T10 (J-F-delegation): a subagent's child run is `agent.coding` too, so it emits the same
     // `session.turn.started`/`message.completed` event types as a real session turn — but
@@ -109,6 +118,7 @@ export const sessionsProjection: Projection = {
             // T11: this fold rebuilds the row rather than spreading it, so the durable archive flag
             // must be carried forward explicitly or a new turn would silently un-archive the session.
             ...(existing?.archived === true ? { archived: true } : {}),
+            ...(existing?.pinned === true ? { pinned: true } : {}),
             ...(accessMode !== undefined ? { accessMode } : {}),
             ...(preset !== undefined ? { mode: preset } : {}),
           },
@@ -135,6 +145,7 @@ export const sessionsProjection: Projection = {
             updatedAt: event.recordedAt,
             // T11: same carry-forward as `session.turn.started` above — this fold also rebuilds.
             ...(existing?.archived === true ? { archived: true } : {}),
+            ...(existing?.pinned === true ? { pinned: true } : {}),
             ...(existing?.accessMode !== undefined ? { accessMode: existing.accessMode } : {}),
             // Usage pass U4: the folded preset (the row's `mode` badge field) persists across the
             // turn's completion the same way `accessMode` does.
