@@ -4462,8 +4462,11 @@ body.is-col-resizing .resize-handle:active::after {
 }
 .inspector-head { container-type: inline-size; container-name: inspector-head; }
 .inspector-tab-label { white-space: nowrap; }
-/* Narrow inspector: only the selected tab keeps its label; the rest are icon-only (title shows the name). */
-@container inspector-head (max-width: 460px) {
+/* D-13: labels show at the default 340px inspector width — icon-only kicks in only when the
+ * operator drags the panel genuinely narrow (the old 460px threshold made every default-width
+ * tab icon-only but the active one). The strip scrolls if a narrow width still overflows. */
+.inspector-tabs { overflow-x: auto; scrollbar-width: none; }
+@container inspector-head (max-width: 330px) {
   .inspector-tab:not([aria-selected="true"]) .inspector-tab-label { display: none; }
   .inspector-tab:not([aria-selected="true"]) { padding: 6px 8px; }
 }
