@@ -5334,6 +5334,14 @@ function AppShell() {
   const showHero =
     Boolean(currentWorkspaceId) && transcript.length === 0 && streaming.status === "idle" && !activeRunId;
   const sessionTurns = transcript.filter((m) => m.role === "assistant").length;
+  // D-25: one turn counter. The diff header's "Review · turn N" used the raw transcript index
+  // (user messages counted), so it read "turn 2" while the composer said "1 turn". Both now
+  // count assistant turns.
+  const turnOrdinals = new Map<number, number>();
+  let assistantTurnCounter = 0;
+  transcript.forEach((m, i) => {
+    if (m.role === "assistant") turnOrdinals.set(i, ++assistantTurnCounter);
+  });
   const sessionSteps = transcript.reduce((sum, m) => sum + (m.stepCount ?? 0), 0);
 
   // ---- One source of truth for the center view -------------------------------------------------
@@ -6016,7 +6024,7 @@ function AppShell() {
                 <MessageBubble
                   key={index}
                   message={message}
-                  turnNumber={index + 1}
+                  turnNumber={turnOrdinals.get(index) ?? 1}
                   onOpenReview={openReviewPanel}
                   workDetails={workDetails}
                   {...(message.failed && index === transcript.length - 1 && streaming.status !== "streaming"
@@ -6173,7 +6181,7 @@ function AppShell() {
             <p className="cf-h">File changes in this session</p>
             <ul className="inspector-list">
               {transcript.flatMap((message, index) =>
-                (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => ({ summary, turn: index + 1 })),
+                (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => ({ summary, turn: turnOrdinals.get(index) ?? 1 })),
               ).map(({ summary, turn }) => (
                 <li key={`${turn}-${summary.file_path}`}>
                   <button type="button" className="inspector-list-row" onClick={() => setOpenReview({ summary, turnNumber: turn })}>
