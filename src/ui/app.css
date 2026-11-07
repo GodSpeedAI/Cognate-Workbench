@@ -34,6 +34,7 @@
   --cg-danger-bg: oklch(96% 0.03 25);
   --cg-success: oklch(55% 0.14 152);
   --cg-code-bg: oklch(93% 0.01 255);
+  --cg-placeholder: oklch(45% 0.012 257);
   --cg-hover: oklch(24% 0.02 258 / 0.045);
   --cg-active: oklch(24% 0.02 258 / 0.08);
   --cg-shadow: 0 1px 2px oklch(24% 0.02 258 / 0.06), 0 1px 3px oklch(24% 0.02 258 / 0.08);
@@ -123,7 +124,7 @@
   --cg-surface-raised: oklch(19% 0.014 258);
   --cg-surface-sunken: oklch(12% 0.01 258);
   --cg-border: oklch(28% 0.012 258);
-  --cg-border-strong: oklch(36% 0.014 258);
+  --cg-border-strong: oklch(45% 0.014 258);
   --cg-text: oklch(94% 0.008 258);
   --cg-text-muted: oklch(74% 0.012 257);
   --cg-text-faint: oklch(58% 0.012 257);
@@ -138,6 +139,7 @@
   --cg-success: oklch(72% 0.15 152);
   --cg-code-bg: oklch(19% 0.012 258);
   --cg-hover: oklch(94% 0.008 258 / 0.06);
+  --cg-placeholder: oklch(65% 0.012 257);
   --cg-active: oklch(94% 0.008 258 / 0.14);
   --cg-shadow: 0 1px 2px oklch(0% 0 0 / 0.4), 0 1px 3px oklch(0% 0 0 / 0.5);
   --cg-shadow-consequential: 0 4px 16px oklch(0% 0 0 / 0.5), 0 1px 2px oklch(0% 0 0 / 0.4);
@@ -496,8 +498,12 @@ input:focus-visible {
   font-weight: 500;
 }
 
+/* D-17: disabled reads as disabled through tokens, not transparency (0.5 opacity over a
+ * pale card was pale-on-pale). */
 .workspace-chooser-card button:disabled {
-  opacity: 0.5;
+  color: var(--cg-text-faint);
+  background: var(--cg-surface-sunken);
+  border: 1px solid var(--cg-border);
   cursor: not-allowed;
 }
 
@@ -1948,8 +1954,42 @@ input:focus-visible {
   outline: none;
 }
 
-.composer-card textarea::placeholder {
+/* D-30: the config editor's Revert/Save were UA-default buttons (no app styles), so the
+ * disabled Save looked enabled in dark and washed out in light. One consistent face. */
+.cfg-btn {
+  border: 1px solid var(--cg-border-strong);
+  background: var(--cg-surface-sunken);
+  color: var(--cg-text);
+  border-radius: var(--cg-radius-sm);
+  padding: 7px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.cfg-btn:disabled {
   color: var(--cg-text-faint);
+  border-color: var(--cg-border);
+  background: var(--cg-surface);
+  cursor: not-allowed;
+}
+.cfg-btn-primary {
+  border-color: var(--cg-accent);
+  background: var(--cg-accent);
+  color: var(--cg-accent-contrast);
+}
+.cfg-btn-primary:disabled {
+  color: var(--cg-accent-contrast);
+  background: color-mix(in oklch, var(--cg-accent) 35%, var(--cg-surface));
+  border-color: color-mix(in oklch, var(--cg-accent) 35%, var(--cg-border));
+}
+
+/* D-18: placeholders read as label text, not as disabled content — one token everywhere
+ * (the GovernancePane grey-on-dark came from text-faint). */
+input::placeholder, textarea::placeholder {
+  color: var(--cg-placeholder);
+}
+
+.composer-card textarea::placeholder {
+  color: var(--cg-placeholder);
 }
 
 .composer-toolbar {
