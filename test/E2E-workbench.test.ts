@@ -78,9 +78,12 @@ describe("E2E workbench cockpit", () => {
         await waitUntil("skills chip", async () => /1 skills/.test(await chip(page, "Skills").innerText()));
 
         // Authority: the plane is explicit. Allow writes and shell, and protect the file under test.
+        // The S1 conversion: the grant selects are MenuSelects — open by the announced name, pick the row.
         await chip(page, "Authority").click();
-        await page.locator("#auth-fs-write").selectOption("yes");
-        await page.locator("#auth-shell-run").selectOption("yes");
+        await page.getByRole("button", { name: "Workspace write: no" }).click();
+        await page.getByRole("menuitemradio", { name: "yes" }).click();
+        await page.getByRole("button", { name: "Run shell commands: no" }).click();
+        await page.getByRole("menuitemradio", { name: "yes" }).click();
         await page.locator("#auth-protected-paths").fill("src/greet.ts");
         await page.locator(".wb-contract-editor").getByRole("button", { name: "Save" }).click();
         await waitUntil("authority chip", async () => /write/.test(await chip(page, "Authority").innerText()));

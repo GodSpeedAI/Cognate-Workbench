@@ -13,6 +13,7 @@ export function MenuSelect<T extends string>({
   onPick,
   disabled,
   ariaLabel,
+  id,
   placement = "up",
   variant = "toolbar",
 }: {
@@ -21,6 +22,8 @@ export function MenuSelect<T extends string>({
   readonly onPick: (value: T) => void;
   readonly disabled?: boolean;
   readonly ariaLabel: string;
+  /** The trigger button's id, so a `<label htmlFor>` can point at the control. */
+  readonly id?: string;
   readonly placement?: "up" | "down";
   /** "field" draws like a form input (bordered, full width) instead of a quiet toolbar button. */
   readonly variant?: "toolbar" | "field";
@@ -78,6 +81,7 @@ export function MenuSelect<T extends string>({
         ref={btnRef}
         type="button"
         className="menu-select-btn"
+        id={id}
         aria-label={`${ariaLabel}: ${current?.label ?? value}`}
         aria-haspopup="menu"
         aria-expanded={open}
