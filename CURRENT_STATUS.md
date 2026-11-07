@@ -1,3 +1,55 @@
+# Current status — revision 42
+
+The **desktop-native-completion** mission's D and F tracks are closed, and Milestone C is
+recorded — this revision covers the recovered session's continuation.
+
+**Recovery.** The previous session stalled in model-stream timeouts at 2026-11-06 23:42 with
+its whole B5 change set uncommitted. The tree was verified against the mission's recorded
+evidence, the gates re-run, and B5 landed (`3ed0337` + evidence refresh `37d2c5d`; rev 41).
+
+**D track — the dispositions ledger, executed.** The global gate landed first: MenuSelect's
+trigger accessible name now carries the current value with a full engine-independent keyboard
+contract, pinned by `test/ui-menu-select.test.tsx` (12 tests, `d5ec3fd`). Then all **42 native
+selects** converted across the nine ledger batches S1–S9, one commit each with its E2E delta,
+closed by the standing `native-select-guard` test. All **17 open A2 D-rows** dispositioned:
+14 fixed across five commits, three recorded as already landed (D-16, D-34, D-13's stray
+theme icon); `DEBT.md` reconciled.
+
+**F track — both BUILD rows, model-first.** F1 **session Pin** (`3596abc`): `J-SESSION-pin`
+validated in the SEA model → `session.setPinned` anchored on `Session` → `session.pinned`
+folded by the `sessions` projection (carried across turn rebuilds) → pinned-first
+sort-independent ordering → row-menu Pin/Unpin with a pinned glyph → journey test proving
+restart durability, reversibility and refusal. F2 **durable remote diagnostics** (`b9c7d9b`):
+`J-REMOTE-diagnostics` validated with a new `RemoteControl` entity → bounded
+`workbench.remote.state`/`.error` family folded into the workbench projection's
+`remote/control` row → the recorder injected into `MobileRemote` at transitions and pairing
+refusals only (never the polls, never secrets) → durable history rendered in the Remote
+dialog → journey test proving polls record nothing and history survives restart.
+
+**Milestone C recorded** (`d105c65`): per-platform menu conventions verified — no divergences
+found (the macOS Edit/Window roles ship by construction; the no-accelerator deviation is
+documented); the WSLg real-window rows recorded; the menu-click/dialog rows explicitly
+BLOCKED on xdotool (passworded sudo) until a device pass. **OQ1 resolved by the owner**
+(`ed8f583`): the B4 title cue stays the canonical approval-waiting surface; the notification
+plugin is not shipped.
+
+**E1 dispatched with owner authorization.** The push was initially rejected — 895 MB of
+accidentally committed `dist-package/` packaging artifacts (regenerable output of
+`scripts/package.ts`, now gitignored) sat in the unpushed history; a history rewrite of the
+unpushed range removed them. The branch is pushed, PR #28 is ready for review, and the
+five-platform `tauri` matrix is running on tag `v0.1.0-rc1`.
+
+**Verified.** Boundary gates at every tranche with per-failure isolated classification:
+1586/1 → 1600/1 → 1599/2 → 1603/2 (all failures the documented host-concurrency class;
+`J-CHECKOUT-lifecycle` and `J-WS-delete` pass isolated, the admission E2E flake classified
+twice). `domainforge validate` + `fmt --check` after every model change: 0 violations. Rust
+gates: fmt clean, clippy 0 warnings, `cargo test` 7/7.
+
+**Next.** E1: record the matrix results per OS/arch/SHA/checksum. E2: the Jetson runbook is
+the operator's. E3: platform-honesty report, drift re-run, final reconciliation (rev 43).
+
+---
+
 # Current status — revision 41
 
 Milestone B of the **desktop-native-completion** mission is complete — the whole Tauri desktop
