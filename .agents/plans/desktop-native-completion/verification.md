@@ -329,3 +329,8 @@ sequence (validated journey → explicit binding → capability → projection �
 The settled context rows are thereby closed: Pin is no longer the donor-parity gap, and remote
 diagnostics are no longer dialog-memory-only. F3 (downloads) and F4 (drag-and-drop) remain
 recorded DEFERs.
+
+**F-track boundary gate** (2026-11-07): **1603 pass / 2 fail** — `J-CHECKOUT-lifecycle`
+(2 s deadline under full-gate load) **passes isolated 7/7**, and `J-WS-delete` is the same
+host-concurrency flake classified at the D-row boundary (isolated PASS 2.44 s). The F track
+is green; the ledger's BUILD rows are closed.
