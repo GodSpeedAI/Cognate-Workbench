@@ -429,7 +429,7 @@ E2 hangs off E1's arm64 artifact with an explicit blocked state, never silently.
 
 | # | Question | Deciding authority & trigger |
 |---|---|---|
-| OQ1 | Ship the notification plugin (v2) or stay with the title cue? | The operator, after B4 ships: the trigger is the title cue proving insufficient for the approval-waiting path in the operator's own use. |
+| OQ1 | Ship the notification plugin (v2) or stay with the title cue? | **Resolved 2026-11-07 (owner): stay with the title cue.** The v1 attention cue is the canonical approval-waiting surface; the notification plugin is not shipped. The gate can be reopened by the operator after real use. |
 | OQ2 | Adopt the Windows graceful-shutdown mechanism or record the limitation? | The B5 implementer, one bounded attempt during B5; the verification log records the outcome either way; the default is the honest record. |
 | OQ3 | Close behavior at OS session end (logout/restart/shutdown) per platform? | The T3/manual checklist: one row per platform — confirm suppressed and loss recorded, or confirm attempted; blocking at session end is a hazard to avoid. |
 | OQ4 | D-track scope (in-mission vs split) | Decided by the owner 2026-11-06: in-mission; E3 closes on desktop qualification with D rows carried (see §7-E). |

@@ -196,6 +196,7 @@ These are the packaged desktop shell's honest limits, each from the EGM-reviewed
   shell's loopback origin is a secure context) and the browser/CLI surfaces, where the anchor
   download works. Dispositioned DEFER in the mission's dispositions ledger; revisit on a real
   operator job.
+- **Notifications are not shipped — the title cue is canonical.** The OQ1 gate (design §"Notifications") resolved 2026-11-07 with the owner: the B4 attention cue (window title grammar + transition flash) is the approval-waiting surface; the OS notification plugin is not built. The in-app cards remain the only approve/deny surface, so no OS surface can ever claim an action it cannot perform. The gate can be reopened by the operator.
 - **The close guard reads the server's own counts.** Since the B5 tranche the fail-closed
   close confirmation consults `/health`'s `runsInFlight`/`pendingApprovals` (the machine
   authority): healthy + both counts present + both zero → close proceeds; anything else —
