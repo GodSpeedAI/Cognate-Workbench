@@ -17,7 +17,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Component, SemanticRef } from "@godspeedai/cognate-kernel-api";
-import type { StoredEvent, Json, DurableStore, OutboxIntent } from "@godspeedai/cognate-events";
+import { fingerprint, type StoredEvent, type Json, type DurableStore, type OutboxIntent } from "@godspeedai/cognate-events";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { ObservationDelivery, observationIntent, createSxrCliPort, type ObservationPort } from "@godspeedai/cognate-realitytrace";
 import type { SxrWorkflow } from "@godspeedai/cognate-realitytrace";
@@ -30,7 +30,11 @@ const OBSERVED_EVENT_TYPES = new Set([
   // Cognitive-navigation evidence that affects settlement rides the same outbox (no second evidence system).
   "verification.observed", "world.baseline.frozen", "world.candidate.frozen", "world.candidate.rejected", "world.settled",
   "sentinel.finding", "experiment.round.completed", "method.recommended", "method.accepted",
+  // A user turn (`session.turn.started`) and a model request (`run.invocation` of a model capability).
+  "session.turn.started", "run.invocation",
 ]);
+
+const MODEL_CAPABILITIES = new Set(["model.generate", "expert.model.generate"]);
 
 /** Which capability an observation is about — `tool.<name>` for tool events (payload.tool), else
  *  omitted (the turn-level events are app events, not capability invocations). */
@@ -47,7 +51,19 @@ export function observationOutboxFor(
   event: Omit<StoredEvent, "streamSequence" | "position">,
 ): readonly OutboxIntent[] {
   if (!OBSERVED_EVENT_TYPES.has(event.eventType)) return [];
-  return [observationIntent(event as StoredEvent, { classification: "durable_fact", capabilityId: capabilityIdOf(event as StoredEvent) })];
+  const payload = (event.payload ?? {}) as { readonly input?: Json; readonly result?: Json; readonly failure?: Json };
+  let refs: { inputRef?: string; outputRef?: string } = {};
+  if (event.eventType === "run.invocation") {
+    // Only model requests; other invocations are not observed. Refs are hashes: no text leaves the workshop.
+    if (!MODEL_CAPABILITIES.has(String(event.metadata?.capability ?? ""))) return [];
+    refs = {
+      ...(payload.input !== undefined ? { inputRef: fingerprint(payload.input) } : {}),
+      ...(payload.result !== undefined || payload.failure !== undefined ? { outputRef: fingerprint((payload.result ?? payload.failure) as Json) } : {}),
+    };
+  } else if (event.eventType === "session.turn.started") {
+    refs = { inputRef: fingerprint(event.payload) };
+  }
+  return [observationIntent(event as StoredEvent, { classification: "durable_fact", capabilityId: capabilityIdOf(event as StoredEvent), ...refs })];
 }
 
 /** The pinned SXR CLI (v0.3.0, `just setup-realitytrace`), or null when absent — dev machines

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import { LOCAL_OPERATOR } from "../src/server.ts";
+import { observationOutboxFor } from "../src/observations.ts";
 import { bootApp, bootAimock, withTempHome } from "./helpers.ts";
 
 // Phase-0 fixture contract: the pinned binary must exist — this test FAILS (not skips) without it.
@@ -165,4 +166,26 @@ describe("J-RT-realitytrace", () => {
       }
     });
   }, 30_000);
+
+  test("model request and user turn observations carry sha256 refs and no text", () => {
+    const prompt = "SECRET-PROMPT-TEXT please summarise";
+    const base = { tenant: "t", correlationId: "session:s", causationId: "c", runId: "r", scopeId: "s", recordedAt: new Date().toISOString(), streamId: "x" };
+    const turn = observationOutboxFor({ ...base, eventId: "e1", eventType: "session.turn.started", payload: { message: prompt } } as never);
+    const model = observationOutboxFor({
+      ...base, eventId: "e2", eventType: "run.invocation", metadata: { capability: "model.generate" },
+      payload: { input: { messages: [{ role: "user", content: prompt }] }, result: { message: { role: "assistant", content: "ANSWER-TEXT" } } },
+    } as never);
+    const other = observationOutboxFor({ ...base, eventId: "e3", eventType: "run.invocation", metadata: { capability: "fs.read" }, payload: { input: {} } } as never);
+    expect(other).toHaveLength(0);
+    expect(turn).toHaveLength(1);
+    expect(model).toHaveLength(1);
+    const turnObs = turn[0]!.payload as { inputRef?: string };
+    const modelObs = model[0]!.payload as { inputRef?: string; outputRef?: string };
+    expect(turnObs.inputRef).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(modelObs.inputRef).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(modelObs.outputRef).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const wire = JSON.stringify([turn, model]);
+    expect(wire).not.toContain("SECRET-PROMPT-TEXT");
+    expect(wire).not.toContain("ANSWER-TEXT");
+  });
 });
