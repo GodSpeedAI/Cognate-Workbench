@@ -296,3 +296,8 @@ All 17 open A2 rows dispositioned, five fix commits plus three recorded as alrea
 
 `DEBT.md` reconciled; F1 (session Pin) and F2 (remote diagnostics durability) remain the
 ledger's open BUILD rows.
+
+**D-row boundary gate** (2026-11-07): **1599 pass / 2 fail** — `J-WS-delete` (32.4 s deadline
+under load) **passes isolated in 2.44 s**, proving the D-15 dialog change live, and
+`J-EXPERT-WORKSPACE-ADMISSION` is the same host-concurrency flake classified at the B5
+boundary (isolated PASS, twice). The D track is green.
