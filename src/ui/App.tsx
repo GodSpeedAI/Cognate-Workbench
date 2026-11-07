@@ -149,6 +149,8 @@ import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
 import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
+import { registerShellBridge } from "./shell/desktopBridge.ts";
+import { composeTitle, highestTitleState, type TitleState } from "./titleStatus.ts";
 import { CloseButton, DialogHeader } from "./shell/DialogHeader.tsx";
 import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
@@ -4861,6 +4863,12 @@ function AppShell() {
   };
   const shortcutOverridesRef = useRef(settings.shortcuts);
   shortcutOverridesRef.current = settings.shortcuts;
+  // The Tauri shell dispatches menu actions into this bridge (desktop-native-completion B3);
+  // in a browser or CLI context nothing registers it and the shell is not there to call it.
+  // Handlers are read live on every dispatch so the bridge always routes to the current map.
+  useEffect(() => {
+    registerShellBridge(() => actionHandlers.current);
+  }, []);
   const escapeStateRef = useRef({ showSettings, drawerOpen: false, closeDrawer: () => {} });
   escapeStateRef.current = { showSettings, drawerOpen: isMobile && !collapsed, closeDrawer: () => setCollapsed(true) };
   useEffect(() => {
@@ -5411,6 +5419,21 @@ function AppShell() {
     [client, activeSessionId],
   );
   const agentLocked = Boolean(activeRunId) || streaming.status === "streaming" || Boolean(pendingApproval);
+  // The window title is the shell's one sanctioned web→shell cue (desktop-native-completion
+  // B3): states and counts only, never session content. Precedence (approval →
+  // reconciliation → waiting → running) is titleStatus's documented contract, and the format
+  // is a two-sided, test-pinned grammar the shell parses strictly.
+  useEffect(() => {
+    const states: TitleState[] = showHero
+      ? [{ kind: "idle" }]
+      : [
+          streaming.status === "streaming" ? { kind: "running" } : { kind: "idle" },
+          ...(pendingApproval ? [{ kind: "approval", count: 1 } satisfies TitleState] : []),
+          ...(planReviewContinuation || governanceContinuation ? [{ kind: "waiting" } satisfies TitleState] : []),
+          ...(ambiguousContinuation ? [{ kind: "reconciliation" } satisfies TitleState] : []),
+        ];
+    document.title = composeTitle(highestTitleState(states));
+  }, [showHero, pendingApproval, planReviewContinuation, governanceContinuation, ambiguousContinuation, streaming.status]);
   const contextBar = currentWorkspaceId ? (
     <ComposerBar
       agentChip={<AgentChip harnesses={harnessList.harnesses} choice={agentChoice} locked={agentLocked} error={agentBindError} onChange={changeAgent} onOpenSettings={() => openSettings("agents")} />}

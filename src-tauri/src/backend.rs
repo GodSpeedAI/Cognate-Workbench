@@ -26,6 +26,22 @@ pub struct BackendHandle {
     child: Mutex<Option<Child>>,
 }
 
+/// The managed backend's loopback port (0 when startup failed). The liveness rule in
+/// `lib.rs` probes `/health` on it; the close guard (B4) will too.
+#[derive(Default)]
+pub struct BackendPort(std::sync::atomic::AtomicU16);
+
+/// The main webview finished loading a page. One half of the menu-liveness rule
+/// (with `/health`); the web app's bridge is expected to be registered by then.
+#[derive(Default)]
+pub struct PageReady(pub std::sync::atomic::AtomicBool);
+
+pub fn backend_port(app: &AppHandle) -> u16 {
+    app.try_state::<BackendPort>()
+        .map(|p| p.0.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0)
+}
+
 /// Entry point called from setup: resolves the backend, then opens a window.
 pub fn launch(app: AppHandle) {
     let resource_root = if cfg!(debug_assertions) {
@@ -43,6 +59,7 @@ pub fn launch(app: AppHandle) {
             app.manage(BackendHandle {
                 child: Mutex::new(Some(child)),
             });
+            app.manage(BackendPort(std::sync::atomic::AtomicU16::new(port)));
             spawn_watchdog(app.clone(), log.clone());
             if let Err(error) = open_main_window(&app, port) {
                 open_error_window(
@@ -56,6 +73,7 @@ pub fn launch(app: AppHandle) {
             app.manage(BackendHandle {
                 child: Mutex::new(None),
             });
+            app.manage(BackendPort(std::sync::atomic::AtomicU16::new(port)));
             if let Err(error) = open_main_window(&app, port) {
                 open_error_window(
                     &app,
@@ -233,7 +251,7 @@ fn pick_free_port() -> Option<u16> {
     Some(port)
 }
 
-fn probe_health(port: u16) -> bool {
+pub fn probe_health(port: u16) -> bool {
     let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
         return false;
     };
@@ -298,6 +316,17 @@ fn open_main_window(app: &AppHandle, port: u16) -> tauri::Result<()> {
         .inner_size(1440.0, 920.0)
         .min_inner_size(960.0, 600.0)
         .zoom_hotkeys_enabled(true)
+        .on_page_load(|window, payload| {
+            // One half of the menu-liveness rule: the web app's document is live (the
+            // bridge registers on mount). A later reload re-fires this.
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                window
+                    .app_handle()
+                    .state::<PageReady>()
+                    .0
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        })
         .build()?;
     Ok(())
 }

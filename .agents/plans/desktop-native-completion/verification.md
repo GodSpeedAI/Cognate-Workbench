@@ -92,3 +92,42 @@ Append-only. Every entry: date, exact command, result, evidence notes.
   distinct identity, after which this pass goes green.
 - Also proven this tranche: `bun scripts/package.ts bun-linux-x64 linux-x64` still produces the
   standalone package (sha256 `87d5c5c9…`) — the standalone pipeline is untouched.
+
+## B3 — Seam protocol (2026-11-06)
+
+- **Web side**: `src/ui/shell/desktopBridge.ts` (New) registers the frozen `window.__wbShell`
+  entry point — one documented dispatch protocol (`{v:1, action, args?}`), live handler-map
+  lookup, unknown/malformed refused with a console warning, at-most-once registration, no-op
+  without a window. `src/ui/titleStatus.ts` (New) is the title owner: the v1 grammar
+  (`Cognate Workbench [— running|waiting for you|needs reconciliation|N approval(s) waiting]`),
+  precedence (approval > reconciliation > waiting > running), strict parser. App.tsx registers
+  the bridge and drives the title from the existing state (pendingApproval / plan- /
+  governance-continuations / ambiguousContinuation / streaming). `src/server.ts:396` title
+  template reconciled to "Cognate Workbench" (one base name across the server template, the
+  Rust window builder, and `src-tauri/dist/index.html`).
+- **Shell side**: `src-tauri/src/menu.rs` (New) is the committed menu map — the Workbench menu
+  with exactly the six `SHORTCUT_ACTIONS` ids as ui-dispatch items (no accelerators), the
+  dispatch_script protocol, and bidirectional tests (every menu item maps to a real action; no
+  dead actions). `src-tauri/src/title.rs` (New) is the strict two-sided grammar parser
+  (consumer lands in B4; `#[allow(dead_code)]` annotated). `backend.rs` exposes the managed
+  `BackendPort` + `PageReady` (set by the webview's page-load-finished hook) and a public
+  `probe_health`; `lib.rs` adds the **liveness rule** — a 2 s thread flips the ui-dispatch
+  menu items enabled only when `/health` is ok AND the page has loaded; rust-only items
+  (File/Edit/View/Window) are untouched; menu events route through
+  `window.__wbShell.dispatch` only while live.
+- **Deliberate deviation recorded**: the drafted "versioned sentinel prefix in the title bytes"
+  is dropped — the titlebar is operator-visible, so the machine contract lives in the grammar
+  + format tests pinned on BOTH sides (web `test/ui-title-status.test.tsx`, shell
+  `src-tauri/src/title.rs`). The bridge-readiness signal is the shell's page-load observation
+  (not a web-authored flag): indistinguishable-from-builder-title made a title-based readiness
+  signal unsound at startup.
+- **Gates**: `bun test test/ui-title-status.test.tsx test/ui-desktop-bridge.test.tsx` → 10 pass
+  (grammar round-trip, strict refusal incl. content-bearing titles, precedence, live handler
+  rebinding, args passthrough, malformed refusal, single registration, browser no-op).
+  `cargo fmt --check` clean; `cargo clippy --all-targets` 0 warnings; `cargo test` 7/7.
+  `test/E2E-desktop-bridge.test.ts` (New) → 1 pass in real Chromium: bridge registered,
+  unknown/malformed dispatch refused silently, dispatched new-session creates a session row,
+  idle title reads "Cognate Workbench".
+- Regression: `test/J-DESKTOP-launch.test.ts` + `test/J-PREFS-shortcuts.test.ts` +
+  `test/ui-terminal.test.tsx` → 13 pass; `test/E2E-ui-shell.test.ts` → 2 pass; `just smoke` →
+  73 pass; `bun run typecheck` clean; `just tauri-guards` → capability manifest empty.

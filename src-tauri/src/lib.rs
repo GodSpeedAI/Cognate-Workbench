@@ -6,13 +6,25 @@
 // no Tauri IPC at all. That is deliberate — see README.md in this directory.
 
 mod backend;
+mod menu;
+mod title;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::{
     menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder},
     Manager,
 };
+
+/// The menu-liveness rule (design §1): ui-dispatch menu items are enabled only once the
+/// managed backend answers `/health` AND the main webview has finished loading a page —
+/// the shell's two observable signals that the web app (and its bridge) is there. The
+/// handles are updated in place; the menu is never rebuilt for a liveness flip.
+struct WorkbenchItems {
+    enabled: AtomicBool,
+    items: Vec<MenuItem<tauri::Wry>>,
+}
 
 pub fn run() {
     let single = tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -30,8 +42,14 @@ pub fn run() {
         .plugin(window_state)
         .setup(|app| {
             app.manage(Mutex::new(1.0f64));
-            build_menu(app)?;
+            app.manage(backend::PageReady::default());
+            let workbench = build_menu(app)?;
+            app.manage(WorkbenchItems {
+                enabled: AtomicBool::new(false),
+                items: workbench,
+            });
             backend::launch(app.handle().clone());
+            spawn_liveness_rule(app.handle().clone());
             install_signal_handlers(app.handle().clone());
             Ok(())
         })
@@ -80,7 +98,7 @@ fn install_signal_handlers(app: tauri::AppHandle) {
 #[cfg(not(unix))]
 fn install_signal_handlers(_app: tauri::AppHandle) {}
 
-fn build_menu(app: &tauri::App) -> tauri::Result<()> {
+fn build_menu(app: &tauri::App) -> tauri::Result<Vec<MenuItem<tauri::Wry>>> {
     let reload = MenuItem::with_id(app, "wb-reload", "Reload", true, None::<&str>)?;
     let mut view = SubmenuBuilder::new(app, "View").item(&reload);
     if cfg!(debug_assertions) {
@@ -117,6 +135,10 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         .select_all()
         .build()?;
 
+    // The Workbench menu is the committed menu map (menu.rs): ui-dispatch items start
+    // disabled until the liveness rule enables them.
+    let (workbench, workbench_items) = menu::build_workbench_menu(app.handle())?;
+
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
@@ -127,6 +149,7 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
     let mut menu = MenuBuilder::new(app)
         .item(&file)
         .item(&edit)
+        .item(&workbench)
         .item(&view)
         .item(&window);
     if cfg!(target_os = "macos") {
@@ -135,10 +158,55 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         menu = menu.item(&about).separator().item(&quit);
     }
     app.set_menu(menu.build()?)?;
-    Ok(())
+    Ok(workbench_items)
+}
+
+/// The liveness rule: every 2 s, `/health` on the managed backend port + the page-load
+/// signal decide whether the ui-dispatch menu items are enabled. Both signals are
+/// shell-observed; a dead or wedged webview can only disable the menus, never fake them.
+fn spawn_liveness_rule(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = false;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let Some(state) = app.try_state::<WorkbenchItems>() else {
+                return;
+            };
+            let port = backend::backend_port(&app);
+            let healthy = port != 0 && backend::probe_health(port);
+            let page_ready = app
+                .try_state::<backend::PageReady>()
+                .map(|p| p.0.load(Ordering::Relaxed))
+                .unwrap_or(false);
+            let enabled = healthy && page_ready;
+            if enabled != last {
+                for item in &state.items {
+                    let _ = item.set_enabled(enabled);
+                }
+                state.enabled.store(enabled, Ordering::Relaxed);
+                last = enabled;
+            }
+        }
+    });
 }
 
 fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
+    // ui-dispatch items (the menu map): route into the web app's bridge, only while the
+    // liveness rule says the bridge is there. Disabled items cannot be clicked; the guard
+    // is defense against a stale event racing a liveness flip.
+    if menu::UI_ACTION_IDS.contains(&id) {
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        let ready = app
+            .try_state::<WorkbenchItems>()
+            .map(|s| s.enabled.load(Ordering::Relaxed))
+            .unwrap_or(false);
+        if ready {
+            let _ = window.eval(menu::dispatch_script(id));
+        }
+        return;
+    }
     let Some(window) = app.get_webview_window("main") else {
         return;
     };

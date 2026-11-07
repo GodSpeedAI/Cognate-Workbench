@@ -393,7 +393,7 @@ function indexHtml(): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Cognate Console</title>
+<title>Cognate Workbench</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="/astryx.css" />
