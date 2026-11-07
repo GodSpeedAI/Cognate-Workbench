@@ -56,6 +56,10 @@ returning a Cognate `Component`; many also export their input/result types and c
   `governance.approvals.list` (`GOVERNANCE_APPROVALS_LIST`), `governance.approval.resolve`
   (`GOVERNANCE_APPROVAL_RESOLVE`), backed by the typed SEA-Forge client `SeaForgeAuthority`
   (`listApprovals`, `resolveApproval`) held on [governance.ts:ExternalAuthority].
+- [caseProposeStep.ts:caseProposeStepComponent] — mounts `case.proposeStep` (agent runs only): sends the case
+  keeper's `case_add_item` over the SEA-Forge socket as the service actor (no `on_behalf_of`), with
+  `request_id = propose:<assignmentId>:<planItemId>`; `proposed_by` is stamped by the case keeper
+  ([caseProposeStep.ts:proposeStep], [caseProposeStep.ts:proposeStepFrame]).
 - [identityAdmin.ts:identityAdminComponent] — mounts `identity.session.issue`,
   `identity.session.revoke`, `identity.inspect`.
 - [modelConfigure.ts:modelConfigureComponent] — mounts `model.configure`: writes the API key secret,
