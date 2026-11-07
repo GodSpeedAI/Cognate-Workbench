@@ -2452,10 +2452,13 @@ input:focus-visible {
   align-self: flex-start;
   border: none;
   background: transparent;
-  color: var(--cg-text-muted);
+  /* D-19: a section heading, not a link-style label — the underline read as a link. */
+  color: var(--cg-text);
   font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   cursor: pointer;
-  text-decoration: underline;
   padding: 0 4px;
   /* R3 #26: was a 15px-tall target. */
   min-height: 28px;

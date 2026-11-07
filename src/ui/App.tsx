@@ -2862,6 +2862,7 @@ function MessageBubble({
   turnNumber,
   onOpenReview,
   workDetails,
+  currentAction,
   onRetry,
 }: {
   readonly message: ChatMessage;
@@ -2871,6 +2872,9 @@ function MessageBubble({
   readonly onRetry?: () => void;
   readonly onOpenReview?: (summary: EditSummary, turnNumber: number) => void;
   readonly workDetails?: WorkDetailsMode;
+  /** D-22: the running tool's action label (trace projection), so the streaming status names
+   *  what is happening instead of the vague "Deep diving". */
+  readonly currentAction?: string;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -2903,9 +2907,9 @@ function MessageBubble({
       {message.streaming ? (
         <div className="message-status-row">
           <span className="status-pill status-streaming" role="status">
-            <span className="sr-only">Deep diving for {elapsedSeconds ?? 0}s</span>
+            <span className="sr-only">{currentAction ? `${currentAction} · ${elapsedSeconds ?? 0}s` : `Deep diving for ${elapsedSeconds ?? 0}s`}</span>
           </span>
-          <span className="took-btn" aria-hidden="true">Deep diving for {elapsedSeconds ?? 0}s</span>
+          <span className="took-btn" aria-hidden="true">{currentAction ?? `Deep diving for ${elapsedSeconds ?? 0}s`}</span>
         </div>
       ) : (
         <div className="message-status-row">
@@ -3214,7 +3218,7 @@ function DeleteWorkspaceDialog({
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-heading" tabIndex={-1} ref={dialogRef}>
-        <DialogHeader title={`Delete workspace "${workspace.title}"?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
+        <DialogHeader title={`Delete workspace “${workspace.title}”?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
         <p className="dialog-copy">
           This removes <strong>{workspace.title}</strong>{workspace.sessionCount > 0 ? <> and its {workspace.sessionCount === 1 ? "1 conversation" : `${workspace.sessionCount} conversations`}</> : null} from the sidebar. Files in <code>{workspace.root}</code> are not touched, and you can add the folder again later.
         </p>
@@ -6022,7 +6026,14 @@ function AppShell() {
               ))}
               {streaming.status === "streaming" && (
                 <>
-                  <MessageBubble message={{ role: "assistant", content: streaming.text, streaming: true }} elapsedSeconds={elapsedSeconds} />
+                  <MessageBubble
+                    message={{ role: "assistant", content: streaming.text, streaming: true }}
+                    elapsedSeconds={elapsedSeconds}
+                    currentAction={(() => {
+                      const last = toolEntries[toolEntries.length - 1];
+                      return last && last.status === "running" ? toolActionLabel(last, workDetails) : undefined;
+                    })()}
+                  />
                   {streaming.retries.length > 0 && (
                     <RetryCard
                       retries={streaming.retries}
