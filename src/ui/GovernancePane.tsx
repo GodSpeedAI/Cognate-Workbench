@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useCognate } from "@godspeedai/cognate-react";
 import { copyToClipboard } from "./download.ts";
+import { ConnectHorizon } from "./ConnectHorizon.tsx";
 
 interface GovernanceStatus {
   readonly mode: "off" | "sea-forge";
@@ -402,6 +403,7 @@ export function GovernancePane({ workspaceId }: { readonly workspaceId: string |
       <GovernanceAuthority />
       <GovernanceSettlement current={current} currentError={error} />
       <GovernanceProof workspaceId={workspaceId} current={current} error={error} onDeclared={onDeclared} />
+      <ConnectHorizon />
     </>
   );
 }

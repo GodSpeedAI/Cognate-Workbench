@@ -47,6 +47,7 @@ import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
 import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
+import { connectHorizonComponent } from "./capabilities/connectHorizon.ts";
 import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
 import { MobileRemote, remoteSettingsFromEnv, hardened as remoteHardened } from "./remote/mobile.ts";
 import { buildPhoneAssets } from "./remote/assets.ts";
@@ -231,6 +232,7 @@ const GRANTED_CAPABILITIES = [
   "identity.session.issue",
   "identity.session.revoke",
   "identity.inspect",
+  "identity.connectHorizon",
   "session.setArchived",
   "session.create",
   "session.task.bind",
@@ -518,6 +520,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       identityAdminComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, semanticRefs: t8.identity }),
+      connectHorizonComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, secretsDir: join(dirname(home), "secrets"), semanticRef: t8.identity.connectHorizon }),
       sessionHistoryComponent(getService, bindings.sessionHistory.semanticRef),
       sessionCreateComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, semanticRef: redRefs["session.create"] }),
       sessionTaskBindComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: redRefs["session.task.bind"] }),

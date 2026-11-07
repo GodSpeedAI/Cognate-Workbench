@@ -135,6 +135,7 @@ import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
 import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
+import { resolveSessionLink } from "./sessionLink.ts";
 
 interface WorkspaceRow {
   readonly id: string;
@@ -5182,6 +5183,31 @@ export function App() {
     }
     if (remembered && sessions.some((s) => s.id === remembered)) void openSession(remembered);
   }, [currentWorkspaceId, sessions, activeSessionId, openSession]);
+
+  // Horizon deep link: `#sessions/<sessionId>[/<eventId>]` opens that session. The hash is the source of
+  // truth, so a reload or a link from Horizon lands on the same view. It waits until the sessions
+  // projection holds the row, and opens each distinct hash once.
+  const openedLinkRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const apply = () => {
+      const hash = window.location.hash;
+      if (openedLinkRef.current === hash) return;
+      const target = resolveSessionLink(hash, sessions);
+      if (!target) return;
+      openedLinkRef.current = hash;
+      setExpertsPanelOpen(false);
+      setPluginsPanelOpen(false);
+      setWorkbenchOpen(false);
+      void openSession(target.session.id).then(() => {
+        if (target.eventId === undefined) return;
+        // Best effort: bring the linked event into view when the transcript marks it.
+        window.setTimeout(() => document.querySelector(`[data-event-id="${CSS.escape(target.eventId!)}"]`)?.scrollIntoView({ block: "center" }), 300);
+      });
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, [sessions, openSession]);
 
   // J-SESSION-draft: pressing + creates a REAL, durable session (a `session.create` recording run,
   // folded by the `sessions` projection) before any prompt — not an in-memory UUID. Each click
