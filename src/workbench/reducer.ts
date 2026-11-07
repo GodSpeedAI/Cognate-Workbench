@@ -309,6 +309,38 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       return [{ key, value: j({ ...prev, status: "closed", closedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
     }
     // J-PREVIEW-register: the explicit, ownership-carrying dev-server registration.
+    // J-REMOTE-diagnostics: the remote control's durable diagnostics. One row (`remote/control`)
+    // carries the current state, the paired device's label (never a credential), the last bounded
+    // error and a small ring of recent transitions — the truth is this event log.
+    case "workbench.remote.state": {
+      const state = p.state;
+      if (state !== "off" && state !== "waiting" && state !== "connected") return [];
+      const prev = get("remote/control") as { readonly events?: readonly { readonly at: string; readonly text: string }[] } | undefined;
+      const deviceLabel = typeof p.deviceLabel === "string" && p.deviceLabel.trim() ? p.deviceLabel.trim().slice(0, 60) : undefined;
+      const text = state === "connected" && deviceLabel ? `Connected (${deviceLabel})` : `Connection ${state}`;
+      const ring = [...(prev?.events ?? []), { at: recordedAt, text }].slice(-8);
+      return [{
+        key: "remote/control",
+        value: j({
+          ...(prev ?? {}),
+          state,
+          ...(deviceLabel ? { deviceLabel } : {}),
+          ...(state !== "connected" ? { deviceLabel: null } : {}),
+          updatedAt: recordedAt,
+          events: ring,
+        }),
+      }];
+    }
+    case "workbench.remote.error": {
+      if (typeof p.message !== "string" || !p.message.trim()) return [];
+      const prev = get("remote/control") as { readonly events?: readonly { readonly at: string; readonly text: string }[] } | undefined;
+      const message = p.message.trim().slice(0, 200);
+      const ring = [...(prev?.events ?? []), { at: recordedAt, text: `Error: ${message}` }].slice(-8);
+      return [{
+        key: "remote/control",
+        value: j({ ...(prev ?? {}), lastError: message, lastErrorAt: recordedAt, updatedAt: recordedAt, events: ring }),
+      }];
+    }
     case "workbench.preview.registered": {
       const row = {
         previewId: String(p.previewId),

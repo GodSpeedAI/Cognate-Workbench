@@ -221,5 +221,10 @@ export const WORKBENCH_EVENTS = [
   // ownership-carrying; readiness is probed, never assumed.
   "workbench.preview.registered",
   "workbench.preview.stopped",
+  // J-REMOTE-diagnostics: remote-control transitions only — state changes (start/refresh/stop/
+  // pairing, with the device's operator label) and bounded pairing errors. Never the 2 s/5 s
+  // status polls, never a pairing secret, link, challenge or credential.
+  "workbench.remote.state",
+  "workbench.remote.error",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

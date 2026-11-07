@@ -915,6 +915,19 @@ Instance j_session_pin of "CanonicalJourney" {
     variants: "pin then restart, still pinned first; pin then archive (the archive filter still governs visibility); unpin restores the ordinary sort order; pinning an unknown session id is refused; multiple pinned sessions keep their relative recency order"
 }
 
+Instance j_remote_diagnostics of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workbench.remote.record",
+    evidence_class: "declared",
+    initiating_condition: "Remote control misbehaves and the operator needs to know what happened after the dialog closed or the app restarted",
+    journey_id: "J-REMOTE-diagnostics",
+    precondition: "The remote control surface exists (status, start, refresh, stop and phone pairing)",
+    purpose: "Make remote-control transitions durable so diagnostics survive dialog close and app restart, without recording polling traffic or pairing secrets",
+    settlement: "Every remote state change, pairing and error is a bounded workbench.remote.* event folded into the workbench projection's remote row, the Remote panel renders that durable history, the row never holds a pairing secret or link, polls are never recorded, and the history survives reload and restart",
+    steps: "the server-side remote surface transitions (start, refresh, stop, phone pairing, pairing error) -> the recorder emits the bounded workbench.remote.* event -> the workbench projection folds it into the remote row's state and recent-transition ring -> the Remote panel renders the durable transitions beside the live status -> the operator copies a report that includes them",
+    variants: "start then stop records both transitions; a pairing records the device label, never a credential or challenge; an error records a bounded message; closing the dialog loses nothing; a restart preserves the history; the 2 s and 5 s polls record nothing"
+}
+
 Instance j_prefs_shortcuts of "CanonicalJourney" {
     actor: "User",
     capabilities: "settings.changeShortcuts",
@@ -1819,6 +1832,11 @@ Entity "TerminalSession"
 Entity "BrowserSession"
 
 Entity "DevPreview"
+
+// J-REMOTE-diagnostics: the phone-remote control surface. Its durable facts are the bounded
+// transition family (`workbench.remote.*`): state changes, pairing, bounded errors — never the
+// status polls, never a pairing secret, link, challenge or credential.
+Entity "RemoteControl"
 
 Resource "PageFeedback" units
 

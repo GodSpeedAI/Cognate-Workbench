@@ -62,6 +62,7 @@ export const WORKBENCH_CAPABILITY_IDS = [
   "steer.pending",
   "feedback.record",
   "workbench.seed",
+  "workbench.remote.record",
 ] as const;
 export type WorkbenchCapabilityId = (typeof WORKBENCH_CAPABILITY_IDS)[number];
 
@@ -545,6 +546,20 @@ export function workbenchComponent(options: {
         const id = `fb-${randomUUID().slice(0, 8)}`;
         await record([{ type: "workbench.feedback.recorded", payload: { id, feedback: input.feedback, ...(input.taskId ? { taskId: input.taskId } : {}) } as unknown as Json }]);
         return { feedbackId: id };
+      });
+
+      // ---- Remote diagnostics (F2, J-REMOTE-diagnostics) ---------------------------------------------
+      // The bounded transition family only: state changes (with the device's operator label)
+      // and bounded pairing errors. Polls, secrets, links, challenges and credentials are
+      // refused — the recorder in src/remote/mobile.ts already emits exactly this family, and
+      // this handler is the validated surface for anything else that needs it.
+      provide("workbench.remote.record", async (input: { readonly events: readonly { readonly type: string; readonly payload: Json }[] }) => {
+        const allowed: ReadonlySet<string> = new Set(["workbench.remote.state", "workbench.remote.error"]);
+        for (const event of input.events) {
+          if (!allowed.has(event.type)) throw new Error(`workbench.remote.record: ${event.type} is outside the remote diagnostics family`);
+        }
+        await record(input.events.map((e) => ({ type: e.type, payload: e.payload })));
+        return { recorded: input.events.length };
       });
 
       // ---- Seed (idempotent): the catalog, example bindings and the two reference workflows -------------

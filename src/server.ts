@@ -1007,6 +1007,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     service: governedService,
     system: SYSTEM_CALLER,
     operatorIdentityId: operatorIdentity.id,
+    record: (events) => recordWorkbenchEvents(runtime.service, SYSTEM_CALLER, events),
     assets: () => {
       if (!phoneAssets) {
         const building = buildPhoneAssets(appCss);

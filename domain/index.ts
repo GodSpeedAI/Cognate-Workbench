@@ -278,6 +278,10 @@ export const WORKBENCH_ANCHORS: Readonly<Record<string, string>> = {
   // governed move mutation, anchored on the same `Task` entity as `task.create`.
   "task.list": "Task",
   "task.move": "Task",
+  // F2 (J-REMOTE-diagnostics): the bounded remote-control transition family, anchored on the
+  // `RemoteControl` entity (the events are `workbench.remote.*`, folded by the workbench
+  // projection into the `remote/control` row).
+  "workbench.remote.record": "RemoteControl",
 };
 
 export function workbenchBindings(domain: Domain): readonly CapabilityBinding[] {

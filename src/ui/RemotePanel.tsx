@@ -2,6 +2,7 @@
 // persistent indicator while remote is on. Closing the dialog never stops remote; Stop does.
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { remoteFetch } from "./remoteFetch.ts";
+import { useProjection } from "@godspeedai/cognate-react";
 import { PhoneIcon } from "./icons.tsx";
 import { DialogHeader } from "./shell/DialogHeader.tsx";
 
@@ -106,6 +107,14 @@ export function buildRemoteReport(input: {
 
 export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // J-REMOTE-diagnostics: the durable transition history is the workbench projection's
+  // `remote/control` row; it survives dialog close and app restart. The in-memory `events`
+  // below remain the live feedback layer for the moments before the fold lands.
+  const workbenchRows = useProjection("workbench");
+  const durable = workbenchRows?.find((r) => r.key === "remote/control" || r.key.endsWith("/remote/control"))?.value as
+    | { readonly state?: string; readonly lastError?: string; readonly events?: readonly { readonly at: string; readonly text: string }[] }
+    | undefined;
+  const durableEvents: readonly DiagEvent[] = (durable?.events ?? []).map((e) => ({ at: Date.parse(e.at), text: e.text }));
   const [events, setEvents] = useState<readonly DiagEvent[]>([]);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
   const [reportCopied, setReportCopied] = useState(false);
@@ -220,8 +229,8 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
           </dl>
           <p className="remote-diag-events-title">Recent events</p>
           <ul className="remote-diag-events" aria-label="Recent events">
-            {events.length === 0 && <li>No events yet</li>}
-            {[...events].reverse().map((e) => (
+            {(durableEvents.length > 0 ? [...durableEvents].reverse() : [...events].reverse()).length === 0 && <li>No events yet</li>}
+            {(durableEvents.length > 0 ? [...durableEvents] : [...events]).reverse().map((e) => (
               <li key={`${e.at}-${e.text}`}>
                 <time>{new Date(e.at).toLocaleTimeString()}</time> {e.text}
               </li>
@@ -230,7 +239,7 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
           <button
             type="button"
             onClick={() => {
-              const report = buildRemoteReport({ status, route: routeRef.current, lastError, events, reachable: phase.kind === "ready", at: new Date() });
+              const report = buildRemoteReport({ status, route: routeRef.current, lastError, events: durableEvents.length > 0 ? durableEvents : events, reachable: phase.kind === "ready", at: new Date() });
               void navigator.clipboard.writeText(report).then(() => setReportCopied(true), () => setReportCopied(false));
             }}
           >
