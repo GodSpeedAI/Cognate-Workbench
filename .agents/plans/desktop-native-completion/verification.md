@@ -301,3 +301,31 @@ ledger's open BUILD rows.
 under load) **passes isolated in 2.44 s**, proving the D-15 dialog change live, and
 `J-EXPERT-WORKSPACE-ADMISSION` is the same host-concurrency flake classified at the B5
 boundary (isolated PASS, twice). The D track is green.
+
+## F track — the two BUILD rows (2026-11-07)
+
+Both feature rows landed model-first, per the ledger's first steps and the building-with-cognate
+sequence (validated journey → explicit binding → capability → projection → surface → journey test):
+
+- **F1 Session Pin** (`3596abc`) — `J-SESSION-pin` validated in the SEA model (0 violations);
+  `session.setPinned` anchored on `Session` (`bindSessionPin`); the deterministic `agent.config`
+  run records `session.pinned`, which the `sessions` projection folds and carries across the
+  turn-rebuild folds exactly like the archive flag; `orderSessions` floats pinned sessions to
+  the top of their list under both sort orders (recency-ordered within the pinned block); the
+  row menu gains Pin to top/Unpin with a quiet pinned glyph. `test/J-SESSION-pin.test.ts` (New)
+  proves durability across restart, reversibility, sort-independent ordering (both orders
+  asserted) and unknown-id refusal.
+- **F2 Durable remote diagnostics** (`b9c7d9b`) — `J-REMOTE-diagnostics` validated with a new
+  `RemoteControl` entity beside the collaboration surfaces (the anchor probe showed no `Workbench`
+  entity exists — the model gained the honest one); bounded `workbench.remote.state`/`.error`
+  family folded into the workbench projection's `remote/control` row (state, device label, bounded
+  last error, 8-transition ring); the recorder injects into `MobileRemote` via `RemoteHost.record`
+  at start/refresh/stop/pairing/pairing-refusal only — never the 2 s/5 s polls, never a secret,
+  link, challenge or credential; `workbench.remote.record` validates the family boundary; the
+  Remote dialog renders the durable history (surviving dialog close and restart) with the
+  in-memory notes as the live fallback. `test/J-REMOTE-diagnostics.test.ts` (New) proves the
+  transitions record, the polls record nothing, and the history survives a full restart.
+
+The settled context rows are thereby closed: Pin is no longer the donor-parity gap, and remote
+diagnostics are no longer dialog-memory-only. F3 (downloads) and F4 (drag-and-drop) remain
+recorded DEFERs.
