@@ -42,6 +42,21 @@ pub fn backend_port(app: &AppHandle) -> u16 {
         .unwrap_or(0)
 }
 
+/// True when the shell spawned the backend it is serving from (false on the reuse path,
+/// where the backend belongs to its own owner). The close contract (design §2) is scoped by
+/// this: closing the shell stops what it started and never touches another owner's server.
+pub fn shell_owned_backend(app: &AppHandle) -> bool {
+    app.try_state::<BackendHandle>()
+        .map(|handle| {
+            handle
+                .child
+                .lock()
+                .map(|guard| guard.is_some())
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
 /// Entry point called from setup: resolves the backend, then opens a window.
 pub fn launch(app: AppHandle) {
     let resource_root = if cfg!(debug_assertions) {
@@ -311,6 +326,8 @@ fn append_log_raw(log: &Path, text: &str) {
 fn open_main_window(app: &AppHandle, port: u16) -> tauri::Result<()> {
     let url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/"))
         .expect("localhost URL always parses");
+    let nav_app = app.clone();
+    let new_window_app = app.clone();
     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title("Cognate Workbench")
         .inner_size(1440.0, 920.0)
@@ -327,8 +344,42 @@ fn open_main_window(app: &AppHandle, port: u16) -> tauri::Result<()> {
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         })
+        .on_navigation(move |url| {
+            // The external-link contract (design §2): loopback stays in-app; every other
+            // host opens in the system browser via the opener plugin (Rust-invoked only —
+            // no capability grant to web content), http(s) only.
+            let host = url.host_str().unwrap_or("");
+            if host == "127.0.0.1" || host == "localhost" {
+                return true;
+            }
+            open_externally(&nav_app, url.clone());
+            false
+        })
+        .on_new_window(move |url, _| {
+            // No in-app popups: target="_blank" links to other hosts open in the system
+            // browser; anything else (blob previews, foreign schemes) is denied — the web
+            // app's own honest fallback text covers the blocked cases.
+            let host = url.host_str().unwrap_or("");
+            let external = matches!(url.scheme(), "http" | "https")
+                && host != "127.0.0.1"
+                && host != "localhost";
+            if external {
+                open_externally(&new_window_app, url.clone());
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
         .build()?;
     Ok(())
+}
+
+fn open_externally(app: &AppHandle, url: tauri::Url) {
+    use tauri_plugin_opener::OpenerExt;
+    if let Err(error) = app.opener().open_url(url.as_str(), None::<&str>) {
+        append_log(
+            &data_home().join("desktop-shell.log"),
+            &format!("[shell] could not open {url} externally: {error}\n"),
+        );
+    }
 }
 
 fn open_error_window(app: &AppHandle, reason: &str, log: &Path) {

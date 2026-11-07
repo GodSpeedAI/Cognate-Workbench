@@ -131,3 +131,43 @@ Append-only. Every entry: date, exact command, result, evidence notes.
 - Regression: `test/J-DESKTOP-launch.test.ts` + `test/J-PREFS-shortcuts.test.ts` +
   `test/ui-terminal.test.tsx` → 13 pass; `test/E2E-ui-shell.test.ts` → 2 pass; `just smoke` →
   73 pass; `bun run typecheck` clean; `just tauri-guards` → capability manifest empty.
+
+## B4 — Desktop contract (2026-11-06)
+
+- **Fail-closed close guard** (`lib.rs close_requested`): scoped by `backend::shell_owned_backend`
+  (New — the reuse path closes the shell and leaves the backend with its owner, exactly the
+  implemented reuse semantics now contractual). Shell-owned: `/health` probe + the in-flight
+  signal; confirm dialog (plugin-dialog, Rust-invoked, no webview grant) on in-flight OR
+  probe-failure OR unknown state; confirmed → `window.destroy()` → the normal ExitRequested
+  shutdown (SIGTERM, pg0 stop, lock release); declined → `prevent_close`. **Interim signal
+  recorded**: until B5 lands the `/health` run counts, in-flight is the window title's B3 state
+  grammar with unknown → in-flight — fail-closed under both readings; known-gaps row added.
+- **Attention cue**: the shell-watch thread (renamed from liveness-rule) reads the window title
+  each 2 s; a strict-parsed waiting-on-you state while unfocused raises
+  `request_user_attention` on the transition only. Title parse failure = no cue (fail-open by
+  contract for cues).
+- **External links**: `on_navigation` — loopback stays in-app, every other host opens in the
+  system browser via tauri-plugin-opener (Rust-invoked) and the navigation is blocked;
+  `on_new_window` — no in-app popups, external hosts open externally, blob/foreign schemes
+  denied (the web app's honest fallback text covers them).
+- **`--app` fallback close**: the entry template gains `SHELL_KIND_PLACEHOLDER`
+  (substituted at boot from `COGNATE_SHELL` in both composition paths — dev rebuild and the
+  packaged bundle) and installs a beforeunload guard conditioned on `chromium-app`, consulting
+  `window.__wbInFlight` (maintained by App.tsx next to the title cue). `shellKindForEnv` (New)
+  parses the env; package.ts stages the placeholder.
+- **Downloads**: ledger F3 revised to DEFER with the honest data-flow rationale (the export
+  content is client-held, not URL-addressable; moving content web→shell would breach the
+  channel rules); known-gaps row added. `color-scheme` was already present on both theme
+  blocks (verified `app.css:12,:121`) — no change needed.
+- **Gates**: `cargo fmt --check` clean, clippy 0 warnings, `cargo test` 7/7; `bun run
+  typecheck` clean; smoke 73/73; `test/E2E-desktop-bridge.test.ts` + `test/J-DESKTOP-launch.test.ts`
+  7 pass; smoke harness re-run PASS (the guard leaves idle SIGTERM closes untouched — the
+  dialog only guards the window-close path).
+- **Real-window pass (WSLg, X11-forced)**: the debug shell maps a real window
+  (`xwininfo`: `0x600004 "Cognate Workbench"` with the expected class), spawns the sidecar,
+  backend ready; title reads the composed idle form. **Recorded for the C-tranche manual
+  row**: menu-click and dialog-interaction passes need xdotool (absent here); whether the
+  page title propagates to the GTK window title on a state change (idle → running) is
+  observable only with such a pass — implemented-per-code until then, per the platform
+  honesty rule. Note: the shell only maps a window under `GDK_BACKEND=x11` in this WSLg
+  session (default Wayland attempt renders no X11 mapping) — recorded for the E2 Jetson run.

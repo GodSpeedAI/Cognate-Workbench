@@ -348,7 +348,17 @@ function buildActionPolicy(): ActionPolicy {
 // A packaged build ships its desktop bundle prebuilt with this placeholder where the boot token goes,
 // so no release artifact contains a per-boot secret. The server substitutes the live token at boot.
 export const BOOT_TOKEN_PLACEHOLDER = "__COGNATE_BOOT_TOKEN__";
-export const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string) => `
+/** Staged where the boot token goes; substituted at boot from `COGNATE_SHELL`. The desktop
+ *  close contracts read it: "chromium-app" installs the beforeunload guard, the Tauri shell
+ *  runs its own fail-closed close guard instead. */
+export const SHELL_KIND_PLACEHOLDER = "__COGNATE_SHELL_KIND__";
+/** The desktop surface this boot serves: "chromium-app" for the `--app` fallback, "" for a
+ *  plain browser/CLI boot, "tauri@<version>" inside the Tauri shell (B5 reports it in /health). */
+export function shellKindForEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const shell = env.COGNATE_SHELL ?? "";
+  return shell.startsWith("chromium-app") ? "chromium-app" : shell.startsWith("tauri") ? shell : "";
+}
+export const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string, shellKind: string = "") => `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@godspeedai/cognate-client";
@@ -372,6 +382,21 @@ setRemoteFetch((path, init) => fetch(path, { ...init, headers: { ...(init?.heade
 // Surfaces that cannot set headers on their transport (websockets) present the same bearer as
 // their first message; the server resolves it against the durable session ledger like any request.
 setBootToken(authToken);
+
+// Desktop close contract (desktop-native-completion B4): in the Chromium --app fallback the
+// browser owns the close chrome, so the page asks before leaving while work is in flight
+// (window.__wbInFlight, maintained by App.tsx next to the title cue). The Tauri shell runs
+// its own fail-closed close guard server-side and never consults this handler.
+const shellKind = ${JSON.stringify(shellKind)};
+if (shellKind === "chromium-app") {
+  const wbWindow = window as unknown as { __wbInFlight?: boolean };
+  window.addEventListener("beforeunload", (event) => {
+    if (wbWindow.__wbInFlight) {
+      event.preventDefault();
+      event.returnValue = " ";
+    }
+  });
+}
 
 const root = document.getElementById("root");
 
@@ -945,12 +970,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let bundleJs: string;
   if (packaged) {
     bundleJs = (await Bun.file(resourcePath("dist", "web", "app.js")).text())
-      .replaceAll(JSON.stringify(BOOT_TOKEN_PLACEHOLDER), JSON.stringify(operatorSession.token));
+      .replaceAll(JSON.stringify(BOOT_TOKEN_PLACEHOLDER), JSON.stringify(operatorSession.token))
+      .replaceAll(JSON.stringify(SHELL_KIND_PLACEHOLDER), JSON.stringify(shellKindForEnv()));
   } else {
     const generatedDir = resourcePath(".generated");
     await mkdir(generatedDir, { recursive: true });
     const entryPath = join(generatedDir, "entry.tsx");
-    await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token));
+    await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token, shellKindForEnv()));
     const build = await Bun.build({ entrypoints: [entryPath], target: "browser", format: "esm" });
     if (!build.success) throw new Error(`server: failed to bundle the UI: ${build.logs.map((log) => String(log)).join("; ")}`);
     bundleJs = await build.outputs[0]!.text();

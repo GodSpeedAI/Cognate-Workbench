@@ -185,6 +185,26 @@ Development authentication does not establish a production listener or hostile-u
 See [Linux contained workspaces](linux-contained-workspaces.md) for the explicit child-world
 configuration, refusal behavior and remaining limits.
 
+## Desktop shell (Tauri) — recorded limits from the desktop-native-completion work
+
+These are the packaged desktop shell's honest limits, each from the EGM-reviewed design
+(`.agents/plans/desktop-native-completion/design.md`). None is presented as solved.
+
+- **Downloads are not wired in the desktop shell.** The Blob/`anchor.download` export path
+  (`src/ui/download.ts`) is expected to be dead inside the Tauri webview (WebKitGTK needs an
+  embedder download handler; Tauri wires none). The working paths are clipboard copy (the
+  shell's loopback origin is a secure context) and the browser/CLI surfaces, where the anchor
+  download works. Dispositioned DEFER in the mission's dispositions ledger; revisit on a real
+  operator job.
+- **The close guard's in-flight signal is interim.** The fail-closed close confirmation
+  consults the server-side `/health` run counts only once the B5 tranche lands them; until
+  then it reads the window title's state grammar (B3) and treats an unparseable title as
+  in-flight — fail-closed in both cases, never trusting the page.
+- **Live-window rows verified on WSLg are enumerated per tranche** in the mission's
+  `verification.md`; anything not verified on a real device is recorded as
+  implemented-per-docs in the final platform-honesty matrix (menu clicks, dialog
+  interactions, and Wayland title sync need a real interaction pass).
+
 ## Session / Workspace / Task RED journeys — recorded limits
 
 The five formerly red suites (`test/*red.test.ts`, `test/E2E-workspace-session-ux.red.test.ts`)

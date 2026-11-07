@@ -40,6 +40,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(single)
         .plugin(window_state)
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(Mutex::new(1.0f64));
             app.manage(backend::PageReady::default());
@@ -59,6 +61,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
+            tauri::RunEvent::WindowEvent { label, event, .. } => {
+                if label == "main" {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        close_requested(app, api);
+                    }
+                }
+            }
             tauri::RunEvent::ExitRequested { .. } => {
                 if let Some(handle) = app.try_state::<backend::BackendHandle>() {
                     backend::shutdown(&handle);
@@ -70,6 +79,53 @@ pub fn run() {
                 }
             }
             _ => {}
+        });
+}
+
+/// The fail-closed close guard (design §2), scoped by backend ownership:
+/// - reused backend: the shell exits; the backend keeps its own owner — nothing to confirm.
+/// - shell-owned backend: confirm before close whenever work is in flight OR the server
+///   state cannot be read (probe failure, unknown state). A dead or wedged webview can
+///   never suppress the confirm, because the signal comes from the server side, not the
+///   page. Until B5 lands the `/health` run counts, the interim in-flight signal is the
+///   window title's own state grammar (B3) — a strictly weaker but fail-closed stand-in;
+///   an unparseable title reads as in-flight.
+fn close_requested(app: &tauri::AppHandle, api: tauri::CloseRequestApi) {
+    if !backend::shell_owned_backend(app) {
+        return; // reused backend: closing the shell leaves it with its owner
+    }
+    let port = backend::backend_port(app);
+    let healthy = port != 0 && backend::probe_health(port);
+    let in_flight = match app.get_webview_window("main").and_then(|w| w.title().ok()) {
+        Some(title_text) => match title::parse_title(&title_text) {
+            Some(title::TitleState::Idle) => false,
+            Some(_) => true,
+            None => true, // unknown title → fail closed
+        },
+        None => true, // no window title readable → fail closed
+    };
+    if healthy && !in_flight {
+        return; // idle and healthy: close proceeds
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let app = app.clone();
+    api.prevent_close();
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .message("A run is in flight or its state is unknown. Quit and stop the agent run?")
+        .title("Quit Cognate Workbench")
+        .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancelCustom(
+            "Quit and stop".to_string(),
+            "Keep working".to_string(),
+        ))
+        .show(move |confirmed| {
+            if confirmed {
+                // destroy() bypasses the close-request guard; ExitRequested then runs the
+                // normal shutdown (SIGTERM, pg0 stop, lock release).
+                let _ = window.destroy();
+            }
         });
 }
 
@@ -161,12 +217,16 @@ fn build_menu(app: &tauri::App) -> tauri::Result<Vec<MenuItem<tauri::Wry>>> {
     Ok(workbench_items)
 }
 
-/// The liveness rule: every 2 s, `/health` on the managed backend port + the page-load
-/// signal decide whether the ui-dispatch menu items are enabled. Both signals are
-/// shell-observed; a dead or wedged webview can only disable the menus, never fake them.
+/// The shell watch: every 2 s, (1) the menu-liveness rule — `/health` on the managed
+/// backend port + the page-load signal decide whether the ui-dispatch menu items are
+/// enabled (both signals shell-observed; a dead or wedged webview can only disable the
+/// menus, never fake them) — and (2) the attention cue — a title that parses to a
+/// waiting-on-you state while the window is unfocused raises one user-attention request,
+/// on the transition only, so an unfocused cockpit still summons its operator.
 fn spawn_liveness_rule(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut last = false;
+        let mut attention_out = false;
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let Some(state) = app.try_state::<WorkbenchItems>() else {
@@ -185,6 +245,25 @@ fn spawn_liveness_rule(app: tauri::AppHandle) {
                 }
                 state.enabled.store(enabled, Ordering::Relaxed);
                 last = enabled;
+            }
+
+            // Attention cue (design §2): title is the human cue; fail-open by contract —
+            // a missed cue is harmless, a wrong one would not be, so only a strict parse
+            // of a waiting-on-you state fires, and only on the unfocused transition.
+            if let Some(window) = app.get_webview_window("main") {
+                let focused = window.is_focused().unwrap_or(true);
+                let wants_attention = match window.title().ok().as_deref().map(title::parse_title) {
+                    Some(Some(state)) => !matches!(state, title::TitleState::Idle),
+                    _ => false,
+                };
+                let should = wants_attention && !focused;
+                if should && !attention_out {
+                    use tauri::UserAttentionType;
+                    let _ = window.request_user_attention(Some(UserAttentionType::Informational));
+                }
+                attention_out = should;
+            } else {
+                attention_out = false;
             }
         }
     });

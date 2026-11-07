@@ -5433,6 +5433,9 @@ function AppShell() {
           ...(ambiguousContinuation ? [{ kind: "reconciliation" } satisfies TitleState] : []),
         ];
     document.title = composeTitle(highestTitleState(states));
+    // The Chromium --app fallback's beforeunload guard (B4) consults this flag; the entry
+    // template installs that listener only when the boot's shell kind is "chromium-app".
+    (window as unknown as { __wbInFlight?: boolean }).__wbInFlight = !showHero && states.some((s) => s.kind !== "idle");
   }, [showHero, pendingApproval, planReviewContinuation, governanceContinuation, ambiguousContinuation, streaming.status]);
   const contextBar = currentWorkspaceId ? (
     <ComposerBar

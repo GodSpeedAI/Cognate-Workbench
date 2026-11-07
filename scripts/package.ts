@@ -19,7 +19,7 @@ import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PG0_DIGESTS, PG0_VERSION, POSTGRES_VERSION, pg0Url } from "./pg0-pins.ts";
-import { BOOT_TOKEN_PLACEHOLDER, BROWSER_ENTRY_TEMPLATE, LOCAL_OPERATOR } from "../src/server.ts";
+import { BOOT_TOKEN_PLACEHOLDER, BROWSER_ENTRY_TEMPLATE, LOCAL_OPERATOR, SHELL_KIND_PLACEHOLDER } from "../src/server.ts";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 import { buildDeb, buildMacInstaller, buildWindowsInstaller } from "./installers.ts";
 
@@ -60,7 +60,7 @@ export async function stageShareTree(repo: string, share: string, bunTarget: str
   const generated = join(repo, ".generated");
   await mkdir(generated, { recursive: true });
   const entryPath = join(generated, "entry.tsx");
-  await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, BOOT_TOKEN_PLACEHOLDER));
+  await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, BOOT_TOKEN_PLACEHOLDER, SHELL_KIND_PLACEHOLDER));
   const web = join(share, "dist", "web");
   await mkdir(web, { recursive: true });
   await writeFile(join(web, "app.js"), await bundle(entryPath));
