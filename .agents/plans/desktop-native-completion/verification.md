@@ -58,3 +58,37 @@ Append-only. Every entry: date, exact command, result, evidence notes.
 - Not done here, deliberately: decision rows for `docs/known-gaps.md` (boundary rule, Windows
   limitations, AppImage record, `--app` close outcome) land with their implementing tranches
   (B3/B4/B5) so known-gaps records gaps that exist, not decisions pending approval.
+
+## B1 + B2 — CI scaffold + packaged smoke harness (2026-11-06)
+
+- B1 (`6b7ac38`): shared DomainForge binding composite action; `package.yml` consumes it;
+  `verify.yml` gains the per-commit `tauri-linux` job (cargo fmt/clippy/test in `src-tauri/` +
+  `bun run tauri build --debug --no-bundle`) with the domainforge pin aligned to 0.21.2; new
+  `tauri.yml` five-platform RC matrix (macos-15 for darwin-arm64 per the owner's platform table)
+  with the Rust 1.95 MSRV Jetson gate. Local proof of the exact CI commands: `cargo fmt --check`
+  clean, `cargo clippy --all-targets` 0 warnings (after moving `backend.rs`'s test module to the
+  file end and `cargo fmt`), `cargo test` 2/2, and the debug build built
+  `src-tauri/target/debug/cognate-workbench-shell`.
+- B2: `scripts/qualify-tauri.sh` (single file — the `qualify-tauri-lib.sh` split is deferred
+  until a second consumer exists; recorded deviation), `just tauri-guards`, `just tauri-smoke`,
+  and the T2 `COGNATE_TEST_SIDECAR` mode in `test/helpers.ts` (facade `app`: url/stop/token/
+  runtime.service; deeper AppServer surface honestly absent).
+- `just tauri-guards` → "generated capability manifest empty (zero-grant)".
+- `just tauri-smoke --shell src-tauri/target/debug/cognate-workbench-shell` → PASS end to end:
+  launch, port parsed from desktop-shell.log, /health ok with the semantic model, second
+  instance exited while the first kept serving (single-instance focus), SIGTERM → sidecar down
+  + bundled pg0 stopped + server.lock released, relaunch → clean respawn with the lock
+  re-created, final close clean. (Harness fixes while proving: the data home is pinned via
+  COGNATE_WORKBENCH_HOME because debug builds hardcode the checkout's `.data`; the health
+  probe returns the body, not the port; the deb binary finder excludes the resources tree.)
+- T2 proof: `bun scripts/tauri-sidecar.ts` staged the compiled sidecar + resources;
+  `COGNATE_TEST_SIDECAR=…/cognate-workbench-x86_64-unknown-linux-gnu COGNATE_TEST_SIDECAR_RESOURCES=… bun test test/E2E-terminal.test.ts`
+  → **1 pass / 0 fail in real Chromium against the packaged backend** (19.3 s).
+- Bundle mode: `bun run tauri build --bundles deb` → `Cognate Workbench_0.1.0_amd64.deb`
+  (71.86 MiB); `just tauri-smoke --bundle …` → PASS (all launch/close rows, packaged shell).
+- **Coexistence pass fails as designed-predicted**: both the Tauri deb and the standalone CLI
+  deb claim `Package: cognate-workbench` (verified with `dpkg-deb -f` on both artifacts). This
+  is the B5 package-identity row's evidence; the row fixes it by giving the shell deb a
+  distinct identity, after which this pass goes green.
+- Also proven this tranche: `bun scripts/package.ts bun-linux-x64 linux-x64` still produces the
+  standalone package (sha256 `87d5c5c9…`) — the standalone pipeline is untouched.

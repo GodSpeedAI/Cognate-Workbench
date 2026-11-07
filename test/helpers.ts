@@ -59,11 +59,91 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
   }
 }
 
+/**
+ * T2 sidecar mode (desktop-native-completion B2): when `COGNATE_TEST_SIDECAR` names a compiled
+ * Workbench binary, `bootApp` spawns THAT binary (`start`) against the given home instead of
+ * starting the server in-process — so a journey suite exercises the shipped backend and UI, not
+ * the dev server. Optional `COGNATE_TEST_SIDECAR_RESOURCES` points it at a staged resource tree
+ * (a deb's share/cognate-workbench); unset, the binary resolves its own resources.
+ *
+ * The returned `app` is a facade, not the in-process `AppServer`: `url`, `stop()`,
+ * `operatorSessionToken` (the boot's browser session, extracted from the served `/app.js` — the
+ * packaged server runs the production posture, so no dev token exists to mint) and
+ * `runtime.service` (the Connect RPC surface) are real; anything deeper (settlement, in-process
+ * store handles) is unavailable by construction. Suites also relying on the in-process dev
+ * posture (`uncontained-local`, `devAuth`) are out of T2 scope by design: the packaged app runs
+ * its default posture.
+ */
 export async function bootApp(home: string): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
-  const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
-  const transport = connectTransport(app.url);
-  const service = createRemoteRuntimeService(transport, () => devToken(LOCAL_OPERATOR));
+  const sidecar = process.env.COGNATE_TEST_SIDECAR;
+  if (!sidecar) {
+    const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
+    const transport = connectTransport(app.url);
+    const service = createRemoteRuntimeService(transport, () => devToken(LOCAL_OPERATOR));
+    const client = createClient({ service, caller: LOCAL_OPERATOR });
+    return { app, client };
+  }
+
+  // Reserve a port the same way the Tauri shell does: bind, read, release, pass explicitly.
+  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const port = listener.port;
+  listener.stop(true);
+
+  const child = Bun.spawn({
+    cmd: [sidecar, "start"],
+    env: {
+      ...process.env,
+      PORT: String(port),
+      COGNATE_NO_WINDOW: "1",
+      ...(process.env.COGNATE_TEST_SIDECAR_RESOURCES
+        ? { COGNATE_RESOURCE_DIR: process.env.COGNATE_TEST_SIDECAR_RESOURCES }
+        : {}),
+    },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  // Readiness: poll /health; if the process dies first, surface its output.
+  const url = `http://127.0.0.1:${port}`;
+  let healthy = false;
+  for (let i = 0; i < 300; i++) {
+    if (child.exitCode !== null || child.signalCode !== null) break;
+    try {
+      const response = await fetch(`${url}/health`);
+      if ((await response.text()).includes('"ok":true')) {
+        healthy = true;
+        break;
+      }
+    } catch {
+      // not up yet
+    }
+    await Bun.sleep(1000);
+  }
+  if (!healthy) {
+    const [out, err] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    child.kill();
+    throw new Error(`sidecar ${sidecar} did not become healthy on ${url}\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`);
+  }
+
+  // The boot's browser session bearer, substituted into the served bundle at boot.
+  const appJs = await (await fetch(`${url}/app.js`)).text();
+  const tokenMatch = appJs.match(/"wbs1\.[^"]+"/);
+  if (!tokenMatch) throw new Error(`sidecar /app.js carries no boot token`);
+  const token = tokenMatch[0].replaceAll('"', "");
+
+  const transport = connectTransport(url);
+  const service = createRemoteRuntimeService(transport, () => token);
   const client = createClient({ service, caller: LOCAL_OPERATOR });
+  const app = {
+    url,
+    operatorSessionToken: token,
+    runtime: { service },
+    stop: async () => {
+      child.kill();
+      await child.exited;
+    },
+  } as unknown as AppServer;
   return { app, client };
 }
 
