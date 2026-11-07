@@ -47,14 +47,16 @@ describe("E2E Experts and Teams", () => {
         const activate = page.getByRole("button", { name: "Activate Team" });
         expect(await activate.isDisabled()).toBe(true);
 
-        await page.getByLabel("Add Specialist").selectOption("product-manager");
+        await page.getByRole("button", { name: /^Add Specialist/ }).click();
+        await page.getByRole("menuitemradio", { name: "Product Manager" }).click();
         await page.getByRole("button", { name: "Make Orchestrator" }).waitFor();
         await page.getByRole("button", { name: "Make Orchestrator" }).click();
         await page.waitForFunction(() => {
           const button = [...document.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Activate Team");
           return button instanceof HTMLButtonElement && !button.disabled;
         });
-        await page.getByLabel("Add Specialist").selectOption("builder");
+        await page.getByRole("button", { name: /^Add Specialist/ }).click();
+        await page.getByRole("menuitemradio", { name: "Builder", exact: true }).click();
         await page.getByRole("button", { name: "Private conversation" }).last().waitFor();
         await page.getByRole("button", { name: "Activate Team" }).click();
         await page.getByText("Accepts work through its Orchestrator.").waitFor();
@@ -63,7 +65,8 @@ describe("E2E Experts and Teams", () => {
 
         await page.getByRole("button", { name: "Open Team conversation" }).click();
         await page.getByLabel("Message the Team").fill("hello again");
-        await page.getByLabel("Mention a Specialist").selectOption("builder");
+        await page.getByRole("button", { name: /^Mention a Specialist/ }).click();
+        await page.getByRole("menuitemradio", { name: "Builder", exact: true }).click();
         expect(await page.getByLabel("Message the Team").inputValue()).toContain("@Builder");
         await page.getByRole("button", { name: "Send message" }).click();
         await page.getByText(/hello again/).waitFor({ timeout: 15_000 });
@@ -142,15 +145,24 @@ describe("E2E Experts and Teams", () => {
         await page.getByRole("button", { name: "Send message" }).click();
         await page.locator(".experts-transcript").getByText("solo-history-marker", { exact: true }).waitFor();
         await page.getByText("Handoff and evidence", { exact: true }).waitFor({ timeout: 20_000 });
-        const soloOption = await page.locator('[aria-label="Conversation history"] option').filter({ hasText: "solo-history-marker" }).getAttribute("value");
-        expect(soloOption).toBeTruthy();
+        const openHistory = async () => {
+          const trigger = page.getByRole("button", { name: /^Conversation history/ });
+          await trigger.click();
+          return trigger;
+        };
+
+        await openHistory();
+        const soloRow = page.getByRole("menuitemradio").filter({ hasText: "solo-history-marker" });
+        await soloRow.waitFor();
+        await page.keyboard.press("Escape");
 
         await page.reload();
         await openExperts();
         await page.getByRole("button", { name: /Solo Analyst Copy/ }).click();
         await page.getByRole("button", { name: "Open solo conversation" }).click();
-        await page.locator(`[aria-label="Conversation history"] option[value="${soloOption}"]`).waitFor({ state: "attached" });
-        await page.getByLabel("Conversation history").selectOption(soloOption!);
+        await openHistory();
+        await soloRow.waitFor();
+        await soloRow.click();
         await page.locator(".experts-transcript").getByText("solo-history-marker", { exact: true }).waitFor();
 
         await page.getByRole("button", { name: /Cognate Team/ }).click();
@@ -160,25 +172,32 @@ describe("E2E Experts and Teams", () => {
         await page.getByRole("button", { name: "Send message" }).click();
         await page.locator(".experts-transcript").getByText("private-history-marker", { exact: true }).waitFor();
         await page.getByText("Handoff and evidence", { exact: true }).last().waitFor({ timeout: 20_000 });
-        const privateOption = await page.locator('[aria-label="Conversation history"] option').filter({ hasText: "private-history-marker" }).getAttribute("value");
-        expect(privateOption).toBeTruthy();
+        await openHistory();
+        const privateRow = page.getByRole("menuitemradio").filter({ hasText: "private-history-marker" });
+        await privateRow.waitFor();
+        await page.keyboard.press("Escape");
 
         await page.reload();
         await openExperts();
         await page.getByRole("button", { name: /Cognate Team/ }).click();
         const reopenedBuilder = page.getByRole("list", { name: "Team members" }).locator("li").filter({ hasText: "Builder" });
         await reopenedBuilder.getByRole("button", { name: "Private conversation" }).click();
-        await page.locator(`[aria-label="Conversation history"] option[value="${privateOption}"]`).waitFor({ state: "attached" });
-        await page.getByLabel("Conversation history").selectOption(privateOption!);
+        await openHistory();
+        await privateRow.waitFor();
+        await privateRow.click();
         await page.locator(".experts-transcript").getByText("private-history-marker", { exact: true }).waitFor();
         await page.getByRole("button", { name: /Builder/ }).first().click();
         await page.getByRole("button", { name: "Open solo conversation" }).click();
-        const soloHistory = await page.locator('[aria-label="Conversation history"] option').allInnerTexts();
+        await openHistory();
+        const soloHistory = await page.getByRole("menuitemradio").allInnerTexts();
+        await page.keyboard.press("Escape");
         expect(soloHistory.join(" ")).not.toContain("private-history-marker");
         expect((await page.locator(".experts-transcript").innerText())).not.toContain("private-history-marker");
         await page.getByRole("button", { name: /Cognate Team/ }).click();
         await page.getByRole("button", { name: "Open Team conversation" }).click();
-        const teamHistory = await page.locator('[aria-label="Conversation history"] option').allInnerTexts();
+        await openHistory();
+        const teamHistory = await page.getByRole("menuitemradio").allInnerTexts();
+        await page.keyboard.press("Escape");
         expect(teamHistory.join(" ")).not.toContain("private-history-marker");
         expect((await page.locator(".experts-transcript").innerText())).not.toContain("private-history-marker");
         expect(errors).toEqual([]);
