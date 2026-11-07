@@ -74,6 +74,8 @@ export interface Assignment {
   /** J-TASK-expert-provenance: the Task this Assignment serves, when the operator named one —
    * inherited by delegated children; distinct from the Assignment's own run lineage. */
   taskId: string | null;
+  /** Stage 6: the id of the Assignment this one reviews; null for ordinary work (and for data saved before this field). */
+  reviews: string | null;
   execution: ExpertExecution; runId: string | null; handoff: Handoff | null;
   reconciled: boolean; review: { verdict: "revision" | "accept" | "escalate"; rationale: string; evidence: string[]; by: string } | null;
   effects?: Record<string,{commitmentId:string;state:string;tool:string;resolvedBy?:string}>;

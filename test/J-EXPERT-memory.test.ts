@@ -103,3 +103,65 @@ test("J-EXPERT-MEMORY: provenance and scope isolate personal, private-Team and s
     expect(reopened.messages.some(m=>m.text.includes("Create a source for private Team context"))).toBe(true);
   });
 }, 60_000);
+
+test("J-EXPERT-MEMORY: review step context excludes the author's memory", async () => {
+  await withExpertApp(collaborationResponder, async (testApp) => {
+    await configureDefaultRoutes(testApp);
+    const authored = await completedAssignment(testApp, { expertId: "builder", teamId: "cognate-team", message: "Do the work that will be reviewed." });
+    expect(authored.reviews).toBeNull();
+    const other = await completedAssignment(testApp, { expertId: "critic", teamId: "cognate-team", message: "Unrelated critic work." });
+    await invoke(testApp, "expert.memory.write", {
+      id: "memory:shared:by-builder", expertId: "builder", teamId: "cognate-team", scope: "team", kind: "assertion",
+      text: "Builder shared claim.", sources: [other.id],
+    });
+    await invoke(testApp, "expert.memory.write", {
+      id: "memory:shared:from-work", expertId: "critic", teamId: "cognate-team", scope: "team", kind: "observation",
+      text: "Observation sourced from the reviewed work.", sources: [authored.id],
+    });
+    await invoke(testApp, "expert.memory.write", {
+      id: "memory:shared:neutral", expertId: "critic", teamId: "cognate-team", scope: "team", kind: "assertion",
+      text: "Neutral team convention.", sources: [other.id],
+    });
+    const started = await invoke(testApp, "expert.converse", {
+      expertId: "critic", teamId: "cognate-team", workspaceId: testApp.workspaceId, requestId: "review-step-1",
+      message: "Review the builder's work.", reviews: authored.id,
+    }) as { assignmentId: string };
+    const review = await waitForAssignment(testApp, started.assignmentId, (a: Assignment) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status));
+    expect(review.reviews).toBe(authored.id);
+    const context = review.execution.context.map((m) => m.content).join("\n");
+    expect(context).not.toContain("Builder shared claim.");
+    expect(context).not.toContain("Observation sourced from the reviewed work.");
+    expect(context).toContain("Neutral team convention.");
+  });
+}, 60_000);
+
+test("J-EXPERT-MEMORY: critic role still starts clean", async () => {
+  await withExpertApp(collaborationResponder, async (testApp) => {
+    await configureDefaultRoutes(testApp);
+    const authored = await completedAssignment(testApp, { expertId: "builder", teamId: "cognate-team", message: "Create private builder context." });
+    await invoke(testApp, "expert.memory.write", {
+      id: "memory:private:builder:clean", expertId: "builder", teamId: "cognate-team", scope: "private-team", kind: "observation",
+      text: "Builder private clean-start note.", sources: [authored.id],
+    });
+    const critic = await completedAssignment(testApp, { expertId: "critic", teamId: "cognate-team", message: "Ordinary critic turn." });
+    expect(critic.reviews).toBeNull();
+    expect(critic.execution.context.map((m) => m.content).join("\n")).not.toContain("Builder private clean-start note.");
+    const started = await invoke(testApp, "expert.converse", {
+      expertId: "critic", teamId: "cognate-team", workspaceId: testApp.workspaceId, requestId: "review-step-clean", message: "Review it.", reviews: authored.id,
+    }) as { assignmentId: string };
+    const review = await waitForAssignment(testApp, started.assignmentId, (a: Assignment) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status));
+    expect(review.execution.context.map((m) => m.content).join("\n")).not.toContain("Builder private clean-start note.");
+  });
+}, 60_000);
+
+test("J-EXPERT-MEMORY: an explicit assignment id is deterministic and cannot be reused", async () => {
+  await withExpertApp(collaborationResponder, async (testApp) => {
+    await configureDefaultRoutes(testApp);
+    const input = { id: "assign:case_1:step_1", expertId: "builder", workspaceId: testApp.workspaceId, message: "Do step one." };
+    const first = await invoke(testApp, "expert.converse", { ...input, requestId: "assign:case_1:step_1" }) as { assignmentId: string };
+    expect(first.assignmentId).toBe("assign:case_1:step_1");
+    const retry = await invoke(testApp, "expert.converse", { ...input, requestId: "assign:case_1:step_1" }) as { assignmentId: string };
+    expect(retry.assignmentId).toBe(first.assignmentId);
+    await expect(invoke(testApp, "expert.converse", { ...input, requestId: "other-request" })).rejects.toThrow(/identity already exists/);
+  });
+}, 60_000);
