@@ -43,8 +43,32 @@ trap cleanup EXIT
 echo "== qualify-tauri: mode=$MODE"
 
 if [ "$MODE" = bundle ]; then
+  # CI passes a quoted glob (one bundle per job); resolve it before use.
+  # Resolve the caller's (quoted) glob to exactly one bundle — NUL-safe for the spaces in
+  # the deb's product name.
+  mapfile -d '' bundle_matches < <(compgen -G "$BUNDLE" | while IFS= read -r f; do printf '%s\0' "$f"; done)
+  [ "${#bundle_matches[@]}" = 1 ] || { echo "FAIL: --bundle matched ${#bundle_matches[@]} files, expected one: $BUNDLE"; exit 1; }
+  BUNDLE="${bundle_matches[0]}"
+  [ -f "$BUNDLE" ] || { echo "FAIL: bundle not found: $BUNDLE"; exit 1; }
+  echo "bundle: $BUNDLE"
   mkdir -p "$WORK/install"
-  dpkg-deb -x "$BUNDLE" "$WORK/install"
+  case "$BUNDLE" in
+    *.deb)
+      dpkg-deb -x "$BUNDLE" "$WORK/install"
+      ;;
+    *.dmg)
+      # macOS: mount the read-only image, lift the .app out, unmount.
+      MNT="$WORK/dmg"
+      mkdir -p "$MNT"
+      hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$BUNDLE" >/dev/null
+      APP="$(find "$MNT" -maxdepth 2 -name '*.app' | head -1)"
+      [ -n "$APP" ] || { hdiutil detach "$MNT" >/dev/null 2>&1 || true; echo "FAIL: no .app in $BUNDLE"; exit 1; }
+      cp -R "$APP" "$WORK/install/"
+      hdiutil detach "$MNT" >/dev/null
+      ;;
+    *)
+      echo "FAIL: unsupported bundle type: $BUNDLE (deb or dmg)"; exit 1 ;;
+  esac
   # The shell is the executable that is neither the staged sidecar (a rust triple in its
   # name) nor anything under the resources tree (pg0 et al).
   SHELL_BIN="$(find "$WORK/install" -type f -executable \
@@ -189,6 +213,7 @@ echo "final close clean"
 # --- 6. Package-identity pass (optional) -------------------------------------
 if [ -n "$COEXIST" ]; then
   [ "$MODE" = bundle ] || { echo "FAIL: --coexist requires --bundle <shell-deb>"; exit 1; }
+  case "$BUNDLE" in *.deb) ;; *) echo "FAIL: --coexist compares debs; got $BUNDLE"; exit 1 ;; esac
   SHELL_PKG="$(dpkg-deb -f "$BUNDLE" Package)"
   CLI_PKG="$(dpkg-deb -f "$COEXIST" Package)"
   [ "$SHELL_PKG" != "$CLI_PKG" ] || { echo "FAIL: both debs claim package '$SHELL_PKG' — collision"; exit 1; }

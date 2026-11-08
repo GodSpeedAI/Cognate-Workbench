@@ -62,6 +62,34 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # ---- T1 packaged smoke — macOS launches the .app in the runner's GUI session ----
+      - name: T1 packaged smoke (launch, health, single-instance, close-cleanup, respawn)
+        if: runner.os == 'macOS'
+        run: WB_TAURI_CHECK_IDENTITY=1 scripts/qualify-tauri.sh --bundle "src-tauri/target/release/bundle/dmg/*.dmg"
+
+      # ---- T1 packaged smoke (desktop-native-completion B2 harness) — Linux, under Xvfb ----
+      - name: Install Xvfb (T1/T2)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends xvfb
+      - name: T1 packaged smoke (launch, health, single-instance, close-cleanup, respawn)
+        if: runner.os == 'Linux'
+        run: WB_TAURI_CHECK_IDENTITY=1 scripts/qualify-tauri.sh --bundle "src-tauri/target/release/bundle/deb/*.deb" --xvfb
+      # ---- T2 sidecar journey (E2E-terminal against the packaged sidecar, not the dev server) ----
+      - name: Install Chromium (T2)
+        if: runner.os == 'Linux'
+        run: bun x playwright install --with-deps chromium
+      - name: T2 sidecar journey (E2E-terminal against the packaged sidecar)
+        if: runner.os == 'Linux'
+        run: |
+          DEB="$(ls src-tauri/target/release/bundle/deb/*.deb)"
+          EXTRACT="$RUNNER_TEMP/t2-install"
+          dpkg-deb -x "$DEB" "$EXTRACT"
+          SIDECAR="$(find "$EXTRACT" -type f -name '*-unknown-linux-gnu' | head -1)"
+          RESOURCES="$(find "$EXTRACT" -type d -name 'cognate-workbench' -path '*share*' | head -1)"
+          [ -n "$SIDECAR" ] && [ -n "$RESOURCES" ]
+          export COGNATE_TEST_SIDECAR="$SIDECAR" COGNATE_TEST_SIDECAR_RESOURCES="$RESOURCES"
+          xvfb-run -a bun test test/E2E-terminal.test.ts
+
   msrv:
     # The Jetson gate: the shell must compile under the device's toolchain version
     # (Rust 1.95) before the Jetson runbook promises the build works there. A real
