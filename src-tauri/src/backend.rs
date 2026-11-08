@@ -154,6 +154,13 @@ fn start_backend(resource_root: Option<PathBuf>) -> Result<Started, BackendError
     command
         .env("PORT", port.to_string())
         .env("COGNATE_NO_WINDOW", "1")
+        // The shell identity on /health (B5): the sidecar reports which surface spawned this
+        // boot. The --app surface sets its own in cli.ts; the Tauri shell does it here, from
+        // the crate version (kept in step with package.json's 0.1.0).
+        .env(
+            "COGNATE_SHELL",
+            concat!("tauri@", env!("CARGO_PKG_VERSION")),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
