@@ -77,7 +77,8 @@ if [ "$MODE" = bundle ]; then
   # installed) and pg0 under resources/ — the triple and exact-name exclusions and the
   # deterministic sort pick the right one regardless of filesystem order (the B5 pass
   # happened to land on the right file; CI's did not).
-  SHELL_BIN="$(find "$WORK/install" -type f -executable \
+  # -perm -0100 instead of -executable: macOS's BSD find has no -executable primary.
+  SHELL_BIN="$(find "$WORK/install" -type f -perm -0100 \
     ! -path '*/resources/*' \
     ! -name 'cognate-workbench' \
     ! -name '*-unknown-linux-gnu*' ! -name '*-apple-darwin*' ! -name '*-pc-windows-msvc*' | LC_ALL=C sort | head -1)"
