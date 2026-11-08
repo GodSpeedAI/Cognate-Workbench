@@ -69,11 +69,15 @@ if [ "$MODE" = bundle ]; then
     *)
       echo "FAIL: unsupported bundle type: $BUNDLE (deb or dmg)"; exit 1 ;;
   esac
-  # The shell is the executable that is neither the staged sidecar (a rust triple in its
-  # name) nor anything under the resources tree (pg0 et al).
+  # The shell is the mainBinaryName binary (`cognate-workbench-shell`). The bundle also
+  # carries the externalBin sidecar as `cognate-workbench` (its rust triple is stripped when
+  # installed) and pg0 under resources/ — the triple and exact-name exclusions and the
+  # deterministic sort pick the right one regardless of filesystem order (the B5 pass
+  # happened to land on the right file; CI's did not).
   SHELL_BIN="$(find "$WORK/install" -type f -executable \
     ! -path '*/resources/*' \
-    ! -name '*-unknown-linux-gnu*' ! -name '*-apple-darwin*' ! -name '*-pc-windows-msvc*' | head -1)"
+    ! -name 'cognate-workbench' \
+    ! -name '*-unknown-linux-gnu*' ! -name '*-apple-darwin*' ! -name '*-pc-windows-msvc*' | LC_ALL=C sort | head -1)"
   [ -n "$SHELL_BIN" ] || { echo "FAIL: no shell binary found in $BUNDLE"; exit 1; }
   echo "shell binary: $SHELL_BIN"
 fi
