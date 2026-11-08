@@ -88,7 +88,7 @@ jobs:
           # cognate-workbench next to the main binary. (A failing [ -n ] && [ -n ] would NOT
           # abort under set -e — fail explicitly.)
           SIDECAR="$(find "$EXTRACT" -type f -name 'cognate-workbench' | head -1)"
-          RESOURCES="$(find "$EXTRACT" -type d -name 'cognate-workbench' -path '*share*' | head -1)"
+          RESOURCES="$(find "$EXTRACT" -type d -name 'cognate-workbench' -path '*resources*' | head -1)"
           if [ -z "$SIDECAR" ] || [ -z "$RESOURCES" ]; then
             echo "sidecar=$SIDECAR resources=$RESOURCES"
             exit 1
