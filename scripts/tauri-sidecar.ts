@@ -66,8 +66,12 @@ const pg0 = await stageShareTree(repo, resources, bunTarget);
 
 // 2. Compiled server sidecar under Tauri's externalBin name.
 const exe = join(binaries, `cognate-workbench-${rustTriple}${exeSuffix}`);
+// ssh2's optional `cpu-features` dep resolves to an unbuilt .node binding when the package is
+// installed but its (untrusted) build script never ran — a fresh CI install hits exactly that.
+// The binding is optional at runtime (ssh2 try/catches its absence; this host has never had it),
+// so the compile externalizes the whole package instead of statically resolving it.
 const compile = Bun.spawn(
-  [process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe],
+  [process.execPath, "build", "--compile", "--external", "cpu-features", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe],
   { cwd: repo, stdout: "inherit", stderr: "inherit" },
 );
 if ((await compile.exited) !== 0) throw new Error(`tauri-sidecar: bun build --compile failed for ${bunTarget}`);
