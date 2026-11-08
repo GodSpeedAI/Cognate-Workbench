@@ -46,7 +46,10 @@ if [ "$MODE" = bundle ]; then
   # CI passes a quoted glob (one bundle per job); resolve it before use.
   # Resolve the caller's (quoted) glob to exactly one bundle — NUL-safe for the spaces in
   # the deb's product name.
-  mapfile -d '' bundle_matches < <(compgen -G "$BUNDLE" | while IFS= read -r f; do printf '%s\0' "$f"; done)
+  bundle_matches=()
+  # bash 3.2 (macOS) has no mapfile; compgen emits one match per line, so a plain read loop
+  # preserves the spaces in the product name.
+  while IFS= read -r f; do [ -n "$f" ] && bundle_matches+=("$f"); done < <(compgen -G "$BUNDLE")
   [ "${#bundle_matches[@]}" = 1 ] || { echo "FAIL: --bundle matched ${#bundle_matches[@]} files, expected one: $BUNDLE"; exit 1; }
   BUNDLE="${bundle_matches[0]}"
   [ -f "$BUNDLE" ] || { echo "FAIL: bundle not found: $BUNDLE"; exit 1; }
@@ -206,6 +209,10 @@ for _ in $(seq 1 35); do
   sleep 1
 done
 [ -z "$(pg0_pid)" ] || { echo "FAIL: bundled pg0 still running after shell close (pid $(pg0_pid))"; exit 1; }
+for _ in $(seq 1 30); do
+  [ ! -e "$DATA_HOME/server.lock" ] && break
+  sleep 1
+done
 [ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: server.lock not released"; tail -20 "$WORK/shell-first.out" 2>/dev/null; exit 1; }
 curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 \
   && { echo "FAIL: backend port still answering after close"; exit 1; }
@@ -225,7 +232,11 @@ for _ in $(seq 1 45); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 1; don
 SHELL_PID=""
 for _ in $(seq 1 35); do [ -z "$(pg0_pid)" ] && break; sleep 1; done
 [ -z "$(pg0_pid)" ] || { echo "FAIL: pg0 survived the final close"; exit 1; }
-[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: lock survived the final close"; exit 1; }
+for _ in $(seq 1 30); do
+  [ ! -e "$DATA_HOME/server.lock" ] && break
+  sleep 1
+done
+[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: lock survived the final close"; tail -20 "$WORK/shell-second.out" 2>/dev/null; exit 1; }
 echo "final close clean"
 
 # --- 6. Package-identity pass (optional) -------------------------------------
