@@ -297,10 +297,18 @@ All 17 open A2 rows dispositioned, five fix commits plus three recorded as alrea
 `DEBT.md` reconciled; F1 (session Pin) and F2 (remote diagnostics durability) remain the
 ledger's open BUILD rows.
 
-**D-row boundary gate** (2026-11-07): **1599 pass / 2 fail** — `J-WS-delete` (32.4 s deadline
-under load) **passes isolated in 2.44 s**, proving the D-15 dialog change live, and
-`J-EXPERT-WORKSPACE-ADMISSION` is the same host-concurrency flake classified at the B5
-boundary (isolated PASS, twice). The D track is green.
+**D-row boundary gate** (2026-11-07, classification CORRECTED 2026-11-08): **1599 pass /
+2 fail** — `J-EXPERT-WORKSPACE-ADMISSION` is the documented host-concurrency flake (isolated
+PASS, twice). But the failure titled "J-WS-delete E2E workspace delete confirmation" was
+**misclassified here as a host-load flake**: the isolated re-run used the wrong file —
+`test/J-WS-delete.test.ts` passes, while the actual failure was `test/E2E-ui-production.test.ts`
+whose copy of the journey matches the dialog by a straight-quote regex that D-15's curly-quote
+title broke. A real regression, carried undetected through the S-track and F-track gates
+(their "J-WS-delete flake" rows are the same misclassification) and surfaced by CI's full
+suite. Fixed with the regex (and the CI rustfmt/clippy component gap found in the same run);
+`test/E2E-ui-production.test.ts` green locally after the fix. Lesson recorded: an isolated
+re-run must re-run the file that failed, identified by the log's error location, not by the
+test title.
 
 ## F track — the two BUILD rows (2026-11-07)
 
@@ -330,10 +338,11 @@ The settled context rows are thereby closed: Pin is no longer the donor-parity g
 diagnostics are no longer dialog-memory-only. F3 (downloads) and F4 (drag-and-drop) remain
 recorded DEFERs.
 
-**F-track boundary gate** (2026-11-07): **1603 pass / 2 fail** — `J-CHECKOUT-lifecycle`
-(2 s deadline under full-gate load) **passes isolated 7/7**, and `J-WS-delete` is the same
-host-concurrency flake classified at the D-row boundary (isolated PASS 2.44 s). The F track
-is green; the ledger's BUILD rows are closed.
+**F-track boundary gate** (2026-11-07, classification CORRECTED 2026-11-08): **1603 pass /
+2 fail** — `J-CHECKOUT-lifecycle` (2 s deadline under full-gate load) **passes isolated 7/7**
+(genuine flake). The "J-WS-delete" failure was the D-15 regression misclassified at the
+D-row boundary (see the corrected entry above), not a flake. With the regression fixed, the
+F track is green; the ledger's BUILD rows are closed.
 
 ## C — Native UX convergence (recorded 2026-11-07)
 
