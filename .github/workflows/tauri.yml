@@ -84,9 +84,15 @@ jobs:
           DEB="$(ls src-tauri/target/release/bundle/deb/*.deb)"
           EXTRACT="$RUNNER_TEMP/t2-install"
           dpkg-deb -x "$DEB" "$EXTRACT"
-          SIDECAR="$(find "$EXTRACT" -type f -name '*-unknown-linux-gnu' | head -1)"
+          # The deb strips the externalBin's rust triple at install: the sidecar is the bare
+          # cognate-workbench next to the main binary. (A failing [ -n ] && [ -n ] would NOT
+          # abort under set -e — fail explicitly.)
+          SIDECAR="$(find "$EXTRACT" -type f -name 'cognate-workbench' | head -1)"
           RESOURCES="$(find "$EXTRACT" -type d -name 'cognate-workbench' -path '*share*' | head -1)"
-          [ -n "$SIDECAR" ] && [ -n "$RESOURCES" ]
+          if [ -z "$SIDECAR" ] || [ -z "$RESOURCES" ]; then
+            echo "sidecar=$SIDECAR resources=$RESOURCES"
+            exit 1
+          fi
           export COGNATE_TEST_SIDECAR="$SIDECAR" COGNATE_TEST_SIDECAR_RESOURCES="$RESOURCES"
           xvfb-run -a bun test test/E2E-terminal.test.ts
 
