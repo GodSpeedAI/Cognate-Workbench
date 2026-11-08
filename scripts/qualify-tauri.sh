@@ -129,13 +129,25 @@ wait_port_in_log() {
   echo "FAIL: desktop-shell.log never named a backend port"; tail -40 "$LOG" 2>/dev/null || true; return 1
 }
 
+# One shared virtual display for the whole run (T1 semantics: both instances on the same
+# desktop, like a real machine). Per-launch xvfb-run gave the second WebKitGTK instance a
+# fresh display and it aborted mid single-instance handshake.
+if [ "$XVFB" = 1 ] && [ -z "${DISPLAY:-}" ]; then
+  XVFB_DISPLAY=":$$"
+  Xvfb "$XVFB_DISPLAY" -screen 0 1280x800x24 >/dev/null 2>&1 &
+  XVFB_PID=$!
+  while [ ! -S "/tmp/.X11-unix/X${XVFB_DISPLAY#:}" ]; do sleep 0.2; done
+  export DISPLAY="$XVFB_DISPLAY"
+  cleanup() {
+    [ -n "$SHELL_PID" ] && kill -TERM "$SHELL_PID" 2>/dev/null || true
+    [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null || true
+    rm -rf "$WORK"
+  }
+  echo "Xvfb on $DISPLAY (pid $XVFB_PID)"
+fi
+
 launch_shell() {
-  local log_line
-  if [ "$XVFB" = 1 ] && [ -z "${DISPLAY:-}" ]; then
-    xvfb-run -a "$SHELL_BIN" > "$WORK/shell-$1.out" 2>&1 &
-  else
-    "$SHELL_BIN" > "$WORK/shell-$1.out" 2>&1 &
-  fi
+  "$SHELL_BIN" > "$WORK/shell-$1.out" 2>&1 &
   SHELL_PID=$!
   echo "launched shell pid $SHELL_PID ($1)"
 }
@@ -175,6 +187,8 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$SECOND_EXITED" = 1 ] || { echo "FAIL: second instance did not exit (single-instance focus expected)"; exit 1; }
+wait "$SECOND_PID" || { echo "FAIL: second instance crashed instead of focusing (exit $?):"; tail -20 "$WORK/shell-second.out"; exit 1; }
+echo "second instance focus-exited cleanly"
 curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null || { echo "FAIL: first backend unhealthy after second launch"; exit 1; }
 echo "second instance exited; first backend still serving (single-instance focus)"
 
@@ -192,7 +206,7 @@ for _ in $(seq 1 35); do
   sleep 1
 done
 [ -z "$(pg0_pid)" ] || { echo "FAIL: bundled pg0 still running after shell close (pid $(pg0_pid))"; exit 1; }
-[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: server.lock not released"; exit 1; }
+[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: server.lock not released"; tail -20 "$WORK/shell-first.out" 2>/dev/null; exit 1; }
 curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 \
   && { echo "FAIL: backend port still answering after close"; exit 1; }
 echo "close: sidecar down, pg0 stopped, lock released"
