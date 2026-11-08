@@ -8,6 +8,13 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react/pure";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import React, { useState } from "react";
 import { RemoteDialog } from "../src/ui/RemotePanel.tsx";
+import { CognateProvider } from "@godspeedai/cognate-react";
+
+/** The dialog reads the workbench projection (J-REMOTE-diagnostics); this test stubs the
+ *  projection store — focus behaviour is what is under test, not the data. */
+const stubClient = {
+  projection: () => ({ subscribe: () => () => {}, get: () => undefined }),
+} as never;
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(async () => {
@@ -37,7 +44,11 @@ function Parent() {
 
 describe("remote dialog focus", () => {
   test("a parent re-render does not move focus away from a control inside the dialog", async () => {
-    const ui = render(<Parent />);
+    const ui = render(
+      <CognateProvider client={stubClient}>
+        <Parent />
+      </CognateProvider>,
+    );
     const close = ui.getByRole("button", { name: "Close remote control" });
     await act(async () => {
       close.focus();

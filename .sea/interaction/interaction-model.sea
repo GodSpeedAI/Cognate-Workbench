@@ -902,6 +902,32 @@ Instance j_session_archive of "CanonicalJourney" {
     variants: "archive then restart, still archived; archive the currently open session; unarchive while hidden behind the filter; archiving never deletes turns or events"
 }
 
+Instance j_session_pin of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.setPinned",
+    evidence_class: "declared",
+    initiating_condition: "A conversation the operator returns to repeatedly sinks below newer activity in the sidebar",
+    journey_id: "J-SESSION-pin",
+    precondition: "The session exists in the sessions projection",
+    purpose: "Let the operator keep a conversation at the top of its sidebar list, independent of the active sort order, without touching its history",
+    settlement: "The pinned flag is recorded as an event, the sessions projection folds it, the sidebar lists pinned sessions first regardless of the active sort order, the flag survives reload and restart, and no history is deleted",
+    steps: "user chooses Pin on a session row menu -> the pin is recorded as an event -> the sessions projection folds it -> the sidebar floats the session to the top of its list -> Unpin on the same menu reverses it",
+    variants: "pin then restart, still pinned first; pin then archive (the archive filter still governs visibility); unpin restores the ordinary sort order; pinning an unknown session id is refused; multiple pinned sessions keep their relative recency order"
+}
+
+Instance j_remote_diagnostics of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workbench.remote.record",
+    evidence_class: "declared",
+    initiating_condition: "Remote control misbehaves and the operator needs to know what happened after the dialog closed or the app restarted",
+    journey_id: "J-REMOTE-diagnostics",
+    precondition: "The remote control surface exists (status, start, refresh, stop and phone pairing)",
+    purpose: "Make remote-control transitions durable so diagnostics survive dialog close and app restart, without recording polling traffic or pairing secrets",
+    settlement: "Every remote state change, pairing and error is a bounded workbench.remote.* event folded into the workbench projection's remote row, the Remote panel renders that durable history, the row never holds a pairing secret or link, polls are never recorded, and the history survives reload and restart",
+    steps: "the server-side remote surface transitions (start, refresh, stop, phone pairing, pairing error) -> the recorder emits the bounded workbench.remote.* event -> the workbench projection folds it into the remote row's state and recent-transition ring -> the Remote panel renders the durable transitions beside the live status -> the operator copies a report that includes them",
+    variants: "start then stop records both transitions; a pairing records the device label, never a credential or challenge; an error records a bounded message; closing the dialog loses nothing; a restart preserves the history; the 2 s and 5 s polls record nothing"
+}
+
 Instance j_prefs_shortcuts of "CanonicalJourney" {
     actor: "User",
     capabilities: "settings.changeShortcuts",
@@ -1794,4 +1820,76 @@ Instance j_harness_unavailable of "CanonicalJourney" {
     settlement: "A missing CLI refuses the binding with its install hint; a CLI that is not signed in ends the turn as a failed turn naming the CLI and its sign-in command; a rate or usage limit, a crash or a nonzero exit ends the turn as a failed turn with a readable message; the Workbench never substitutes the native agent for a failed harness turn",
     steps: "bind or turn is attempted -> the CLI is missing, the CLI reports an authentication error, a limit or exits abnormally -> the failure is classified -> the binding is refused or the turn fails with the hint",
     variants: "remote, contained, SSH and WSL workspaces are refused until a streaming process port exists upstream; SEA-Forge governance on refuses harness binding"
+}
+
+// J-TERMINAL-* / J-BROWSER-* / J-PREVIEW-*: the desktop collaboration surfaces. `TerminalSession`
+// is an ephemeral PTY-backed interactive session in a selected execution world; `BrowserSession`
+// is one managed browser context that a person and an agent operate in turn; `DevPreview` is a
+// registered development-server preview bound to a workspace. Only their metadata and transitions
+// are durable — stream bytes, video frames and page contents are never persisted.
+Entity "TerminalSession"
+
+Entity "BrowserSession"
+
+Entity "DevPreview"
+
+// J-REMOTE-diagnostics: the phone-remote control surface. Its durable facts are the bounded
+// transition family (`workbench.remote.*`): state changes, pairing, bounded errors — never the
+// status polls, never a pairing secret, link, challenge or credential.
+Entity "RemoteControl"
+
+Resource "PageFeedback" units
+
+Flow "PageFeedback" from "User" to "OperatorAgent" quantity 1
+
+Instance j_terminal_session of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "terminal.open, terminal.close",
+    evidence_class: "proposed",
+    initiating_condition: "The operator wants to run interactive commands or full-screen terminal programs in one of the Workbench's execution worlds beside the conversation",
+    journey_id: "J-TERMINAL-session",
+    precondition: "A workspace is selected whose world is connected; the terminal is a human surface: agents keep tool.bash and cannot open, attach to or steer a terminal",
+    purpose: "Give the operator a real interactive terminal (PTY) per execution world whose lifetime the operator controls and whose stream never enters the durable log or agent context",
+    settlement: "Each open terminal is one PTY in the chosen world, labelled with its world and workspace; the operator resizes it, runs interactive programs, detaches without terminating, reattaches with bounded scrollback restored, and terminates it explicitly including its process group; a dead session is rendered dead after a restart; opening or attaching with another identity is refused; only metadata and transitions are recorded as events",
+    steps: "operator opens the terminal surface -> terminal.open validates the operator, the world and containment and creates the PTY -> the terminal connects over an authenticated stream -> the operator types and the world answers -> terminal.close terminates the process group and records the transition -> or the surface detaches and the process keeps running until reattached or closed",
+    variants: "local worlds under the contained posture stay open to the operator because the posture constrains agent effects, not the operator's own machine; SSH terminals verify the host key and reuse stored credentials; WSL terminals run through the established WSL provider; idle sessions are reaped after a configurable idle timeout; a world that disconnects ends its terminals as failed with the reason; scrollback is bounded and is not written to the event log"
+}
+
+Instance j_browser_session of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "browser.open, browser.navigate, browser.snapshot, browser.screenshot, browser.input, browser.control, browser.close",
+    evidence_class: "proposed",
+    initiating_condition: "The operator or the agent needs to see and operate a real web page or a running development application inside the Workbench",
+    journey_id: "J-BROWSER-session",
+    precondition: "A browser backend is available on the server host; browser content is untrusted: it reaches the panel only as recorded observations and streamed frames and can never invoke Workbench authority",
+    purpose: "Give person and agent one managed browser session: the same live page, one control owner at a time, screenshots and accessibility snapshots as recorded evidence",
+    settlement: "The session streams its live viewport to the panel; human input and agent operations address the same session and are attributed separately; control has one owner at a time with explicit handoff and refusal of conflicting writes; navigation, snapshots and screenshots are recorded; only http(s) navigation is offered; closing the session disposes the browser process; a crashed or disconnected session renders dead, never live",
+    steps: "operator opens the browser panel -> browser.open creates a managed session -> navigation by the operator (browser.navigate) or the agent shows the same page -> input goes through the single control owner -> browser.snapshot records an accessibility snapshot with element references -> browser.screenshot records visual evidence -> browser.close disposes the session",
+    variants: "browser.control names the one controller — a person or the agent — and changing it is a recorded handoff; while the agent holds control, human input on the streamed viewport is refused with the reason, and while the person holds it, the agent's actuation is refused though its reads stay available; agent-driven navigation during agent control; navigating invalidates element references; localhost applications open directly; a refused navigation is explained, never silently blank; several isolated sessions may exist at once"
+}
+
+Instance j_browser_inspect of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "browser.inspect, browser.annotate",
+    evidence_class: "proposed",
+    initiating_condition: "The operator wants to point at a specific element of the page the agent is working on and say what should change",
+    journey_id: "J-BROWSER-inspect",
+    precondition: "A browser session is open with the page loaded; inspect mode is a human act",
+    purpose: "Turn an element selection into compact structured feedback the agent can act on, with evidence, without dumping the page into the model context",
+    settlement: "In inspect mode hovering identifies elements and clicking selects rather than activates; the selection records URL, page identity, role, tag, accessible name, visible text, rectangle, viewport, selector candidates, ancestry, computed styles, a screenshot crop and a timestamp; the operator attaches a note, edits or dismisses it, and submits it to the active agent conversation; the annotation is durable, shows which element it refers to, and is marked stale by later navigation; page text is treated as data, never as instructions",
+    steps: "operator switches to inspect mode -> hover outlines elements in the live page -> clicking captures the element context -> the operator attaches a note -> browser.annotate records the annotation with evidence -> submitting sends the structured feedback into the conversation and the task's evidence",
+    variants: "source-location hints when the dev framework exposes them are labelled best-effort and otherwise the DOM context stands in; a stale annotation after navigation says so; annotations survive reload and restart as durable records; before/after comparison uses recorded screenshots when available"
+}
+
+Instance j_preview_register of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "preview.register, preview.stop, browser.open",
+    evidence_class: "proposed",
+    initiating_condition: "An agent (or the operator) starts a development server for the workspace and the running application should be previewed in the Workbench browser",
+    journey_id: "J-PREVIEW-register",
+    precondition: "The server runs in a connected execution world; the port is loopback-reachable or forwarded; a preview is registered explicitly, never scraped out of process output alone",
+    purpose: "Connect governed development-server execution to the shared browser so previewing needs no manual steps and no stdout scraping as the mechanism",
+    settlement: "The registration records the URL, the workspace, the owning session or task and the process; readiness is probed before the preview opens; the browser opens the registered URL; refreshing after changes is explicit; server and browser errors are shown; stopping the owning task or session or calling preview.stop ends the preview and cleans up the process where the Workbench owns it; a server in an SSH or WSL world is reached by forwarding, never by binding a public interface",
+    steps: "the agent starts the dev server through governed execution -> preview.register records the URL and ownership -> readiness is probed -> the browser opens the preview -> after changes the preview is refreshed -> preview.stop or the owning session's end cleans up",
+    variants: "stdout detection may decorate an explicit registration but never invents one; an unreachable port is refused with the reason; restarting the server re-registers; several previews may be registered, one is open at a time"
 }

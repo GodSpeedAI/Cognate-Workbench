@@ -78,9 +78,12 @@ describe("E2E workbench cockpit", () => {
         await waitUntil("skills chip", async () => /1 skills/.test(await chip(page, "Skills").innerText()));
 
         // Authority: the plane is explicit. Allow writes and shell, and protect the file under test.
+        // The S1 conversion: the grant selects are MenuSelects — open by the announced name, pick the row.
         await chip(page, "Authority").click();
-        await page.locator("#auth-fs-write").selectOption("yes");
-        await page.locator("#auth-shell-run").selectOption("yes");
+        await page.getByRole("button", { name: "Workspace write: no" }).click();
+        await page.getByRole("menuitemradio", { name: "yes" }).click();
+        await page.getByRole("button", { name: "Run shell commands: no" }).click();
+        await page.getByRole("menuitemradio", { name: "yes" }).click();
         await page.locator("#auth-protected-paths").fill("src/greet.ts");
         await page.locator(".wb-contract-editor").getByRole("button", { name: "Save" }).click();
         await waitUntil("authority chip", async () => /write/.test(await chip(page, "Authority").innerText()));
@@ -154,9 +157,13 @@ describe("E2E workbench cockpit", () => {
         await shot(page, "e2e-06-review-blocked-independent-check");
         // Record the independent check through the cockpit's own form.
         const form = page.locator(".wb-ledger-form");
-        await form.locator("select").nth(0).selectOption("independent-check");
-        await form.locator("select").nth(1).selectOption("pass");
-        await form.locator("select").nth(2).selectOption({ label: "totals match an independent calculation" }).catch(() => form.locator("select").nth(2).selectOption({ index: 2 }));
+        // S6 conversion: the ledger form's selects are MenuSelects — open by announced name, pick the row.
+        await form.getByRole("button", { name: /^Kind:/ }).click();
+        await page.getByRole("menuitemradio", { name: "independent-check" }).click();
+        await form.getByRole("button", { name: /^Status:/ }).click();
+        await page.getByRole("menuitemradio", { name: "Pass" }).click();
+        await form.getByRole("button", { name: /^Criterion/ }).click();
+        await page.getByRole("menuitemradio", { name: "totals match an independent calculation" }).click();
         await form.locator("textarea, input[type=text]").first().fill("totals match the independent calculation");
         await form.getByRole("button", { name: "Record" }).click();
         await notice(page).getByText("Evidence recorded.").waitFor();

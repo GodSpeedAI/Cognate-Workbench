@@ -10,6 +10,7 @@ import type { Json } from "@godspeedai/cognate-events";
 import { canMerge, checkoutStatusText, mergeOutcomeText, suggestBranchName, type BranchListLike } from "../../workbench/checkoutUi.ts";
 import type { WorktreeStatus } from "../../workbench/gitOps.ts";
 import { errorText } from "./data.ts";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 type Notice = { readonly kind: "error" | "warn" | "ok"; readonly text: string } | undefined;
 
@@ -229,14 +230,14 @@ export function CheckoutChip({ workspaceId, taskId, taskTitle, locked }: Checkou
           ) : (
             <label>
               Start from
-              <select value={base} onChange={(event) => setBase(event.currentTarget.value)} aria-label="Start from branch">
-                {(branches?.branches ?? []).map((branch) => (
-                  <option key={branch} value={branch}>
-                    {branch}
-                    {branch === branches?.default ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
+              <MenuSelect
+                ariaLabel="Start from branch"
+                value={base}
+                variant="field"
+                placement="down"
+                options={(branches?.branches ?? []).map((branch) => ({ value: branch, label: branch === branches?.default ? `${branch} (default)` : branch }))}
+                onPick={(v) => setBase(v)}
+              />
             </label>
           )}
           <span className="wb-muted">Created as {finalName} beside the repository; this conversation&apos;s turns then run there.</span>

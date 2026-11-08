@@ -204,5 +204,27 @@ export const WORKBENCH_EVENTS = [
   // The truth is this event log; the `task-checkout-bindings` projection rows are derived.
   "workbench.checkout.bound",
   "workbench.checkout.removed",
+  // J-TERMINAL-session: metadata and transitions of interactive terminal sessions. Stream
+  // bytes are deliberately absent — the durable log never records what a terminal printed.
+  "workbench.terminal.opened",
+  "workbench.terminal.closed",
+  // J-BROWSER-session: metadata and transitions of the shared browser sessions. Page content,
+  // frames and cookies are never persisted — only which session exists, where it points and
+  // who holds control.
+  "workbench.browser.opened",
+  "workbench.browser.navigated",
+  "workbench.browser.control.changed",
+  "workbench.browser.screenshot",
+  "workbench.browser.annotated",
+  "workbench.browser.closed",
+  // J-PREVIEW-register: governed dev-server previews. The registration is explicit and
+  // ownership-carrying; readiness is probed, never assumed.
+  "workbench.preview.registered",
+  "workbench.preview.stopped",
+  // J-REMOTE-diagnostics: remote-control transitions only — state changes (start/refresh/stop/
+  // pairing, with the device's operator label) and bounded pairing errors. Never the 2 s/5 s
+  // status polls, never a pairing secret, link, challenge or credential.
+  "workbench.remote.state",
+  "workbench.remote.error",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];

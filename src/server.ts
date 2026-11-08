@@ -1,6 +1,7 @@
 // Single Bun process: runtime + Connect RuntimeService + bundled React UI + CSS.
 // See docs/explanation/why-single-bun-process.md for why this is a hand-composed
 // `createRuntime` rather than `createHarness`.
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -19,7 +20,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -43,10 +44,20 @@ import { createSettlementOrchestrator } from "./settlement/orchestrator.ts";
 import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/realitytrace.ts";
 import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
-import { agentConfigAgent } from "./agents/agentConfig.ts";
+import { agentConfigAgent, AGENT_CONFIG } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { agentHarnessAgent } from "./agents/agentHarness.ts";
 import { harnessComponent } from "./capabilities/harness.ts";
+import { terminalComponent } from "./capabilities/terminal.ts";
+import { TerminalService } from "./terminal/service.ts";
+import { localTerminalPort, wslTerminalPort } from "./terminal/local.ts";
+import { sshTerminalPort } from "./terminal/ssh.ts";
+import { terminalWsController, type TerminalSocketData } from "./terminal/wsController.ts";
+import type { Json } from "@godspeedai/cognate-events";
+import { browserComponent } from "./capabilities/browser.ts";
+import { BrowserService } from "./browser/service.ts";
+import { agentBrowserProvider } from "./browser/agentBrowser.ts";
+import { browserWsController, type BrowserSocketData } from "./browser/wsController.ts";
 import { HarnessDetector, type HarnessHostEnv } from "./agents/harness/detect.ts";
 import { HarnessSessionHost } from "./agents/harness/sessions.ts";
 import { sessionHarnessBindingsProjection } from "./projections/sessionHarnessBindings.ts";
@@ -79,6 +90,9 @@ import { subagentStartComponent } from "./capabilities/subagentStart.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
+import { sessionPinComponent } from "./capabilities/sessionPin.ts";
+import { previewComponent } from "./capabilities/preview.ts";
+import { PreviewService } from "./preview/service.ts";
 import { sessionRenameComponent } from "./capabilities/sessionRename.ts";
 import { providerManageComponent } from "./capabilities/providerManage.ts";
 import { providerSwitchComponent } from "./capabilities/providerSwitch.ts";
@@ -246,12 +260,17 @@ const GRANTED_CAPABILITIES = [
   "identity.inspect",
   "session.setArchived",
   "session.rename",
+  "session.setPinned",
   "session.create",
   "session.task.bind",
   "agent.harness.list",
   "session.harness.bind",
   "session.harness.resolve",
   "harness.turn.advance",
+  // J-TERMINAL / J-BROWSER / J-PREVIEW: desktop collaboration surfaces. The mutating members
+  // (terminal.open/close, browser.input, browser.close, preview.stop) are operator-only inside
+  // the component; agent-invocable browser reads are added deliberately in the browser phase.
+  ...Object.keys(SURFACES_CAPABILITY_ANCHORS),
   "workspace.directory.suggest",
   "workspace.files.list",
   "workspace.file.read",
@@ -331,7 +350,17 @@ function buildActionPolicy(): ActionPolicy {
 // A packaged build ships its desktop bundle prebuilt with this placeholder where the boot token goes,
 // so no release artifact contains a per-boot secret. The server substitutes the live token at boot.
 export const BOOT_TOKEN_PLACEHOLDER = "__COGNATE_BOOT_TOKEN__";
-export const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string) => `
+/** Staged where the boot token goes; substituted at boot from `COGNATE_SHELL`. The desktop
+ *  close contracts read it: "chromium-app" installs the beforeunload guard, the Tauri shell
+ *  runs its own fail-closed close guard instead. */
+export const SHELL_KIND_PLACEHOLDER = "__COGNATE_SHELL_KIND__";
+/** The desktop surface this boot serves: "chromium-app" for the `--app` fallback, "" for a
+ *  plain browser/CLI boot, "tauri@<version>" inside the Tauri shell (B5 reports it in /health). */
+export function shellKindForEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const shell = env.COGNATE_SHELL ?? "";
+  return shell.startsWith("chromium-app") ? "chromium-app" : shell.startsWith("tauri") ? shell : "";
+}
+export const BROWSER_ENTRY_TEMPLATE = (caller: { readonly tenant: string; readonly actorId: string }, authToken: string, shellKind: string = "") => `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@godspeedai/cognate-client";
@@ -340,6 +369,7 @@ import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { App } from "../src/ui/App.tsx";
 import { setRemoteFetch } from "../src/ui/remoteFetch.ts";
+import { setBootToken } from "../src/ui/bootToken.ts";
 import { coalesceProjectionReads } from "../src/ui/coalesceReads.ts";
 
 const caller = { tenant: ${JSON.stringify(caller.tenant)}, actor: { id: ${JSON.stringify(caller.actorId)}, kind: "user" } };
@@ -351,6 +381,24 @@ const service = coalesceProjectionReads(createRemoteRuntimeService(transport, ()
 const client = createClient({ service, caller });
 // Mobile remote control: the desktop's own loopback calls to /remote/* carry this boot session bearer.
 setRemoteFetch((path, init) => fetch(path, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), authorization: "Bearer " + authToken } }));
+// Surfaces that cannot set headers on their transport (websockets) present the same bearer as
+// their first message; the server resolves it against the durable session ledger like any request.
+setBootToken(authToken);
+
+// Desktop close contract (desktop-native-completion B4): in the Chromium --app fallback the
+// browser owns the close chrome, so the page asks before leaving while work is in flight
+// (window.__wbInFlight, maintained by App.tsx next to the title cue). The Tauri shell runs
+// its own fail-closed close guard server-side and never consults this handler.
+const shellKind = ${JSON.stringify(shellKind)};
+if (shellKind === "chromium-app") {
+  const wbWindow = window as unknown as { __wbInFlight?: boolean };
+  window.addEventListener("beforeunload", (event) => {
+    if (wbWindow.__wbInFlight) {
+      event.preventDefault();
+      event.returnValue = " ";
+    }
+  });
+}
 
 const root = document.getElementById("root");
 
@@ -372,7 +420,7 @@ function indexHtml(): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Cognate Console</title>
+<title>Cognate Workbench</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="/astryx.css" />
@@ -437,6 +485,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const worldBindings = bindExecutionWorlds(domain);
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
+  const pinRefs = bindSessionPin(domain);
   const gapRefs = bindConformanceGaps(domain);
   const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
@@ -456,6 +505,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // J-CHECKOUT-EXECUTION / J-CHECKOUT-LIFECYCLE); see CHECKOUT_CAPABILITY_ANCHORS in domain/index.ts.
   const checkoutRefs = bindCheckoutCapabilities(domain);
   const harnessRefs = bindHarnessCapabilities(domain);
+  // J-TERMINAL / J-BROWSER / J-PREVIEW: the desktop collaboration surfaces (terminal PTYs,
+  // the shared browser, dev-server previews); see SURFACES_CAPABILITY_ANCHORS in domain/index.ts.
+  const surfaceRefs = bindSurfaceCapabilities(domain);
   const harnessDetector = new HarnessDetector(options.harnessHost ?? {});
   const harnessHost = new HarnessSessionHost(harnessDetector);
 
@@ -518,6 +570,49 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // instance can be handed to any future surface that needs to resolve a catalog entry, and so an
   // additional `PluginSource` can be registered at boot without touching the capability.
   const pluginRegistry = new PluginRegistry();
+  // J-TERMINAL-session: live PTY sessions are ephemeral, in-memory state. The durable truth is
+  // the workbench.terminal.* events the terminal capabilities record; this registry dies with
+  // the process and stale projection rows render as what they are (sessions of an earlier run).
+  const terminalService = new TerminalService({
+    ports: { local: localTerminalPort(), wsl: wslTerminalPort(), ssh: sshTerminalPort() },
+  });
+  // J-BROWSER-session: managed shared browser sessions behind the agent-browser provider.
+  const browserService = new BrowserService({ provider: agentBrowserProvider() });
+  // J-PREVIEW-register: governed dev-server previews, reachable across worlds (SSH by forward).
+  const previewService = new PreviewService({
+    // Every stop path folds the same durable event (owner-ended cleanup included).
+    recordStopped: async (view, reason) => {
+      const { runId } = await getService().startRun(SYSTEM_CALLER, {
+        agent: AGENT_CONFIG,
+        input: { kind: "workbench.recorded", events: [{ type: "workbench.preview.stopped", payload: { previewId: view.previewId, reason } }] } as unknown as import("@godspeedai/cognate-events").Json,
+        idempotencyKey: randomUUID(),
+        correlationId: `preview/${view.previewId}`,
+      });
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const run = await getService().getRun(SYSTEM_CALLER, { runId });
+        if (run.status === "completed") return;
+        if (run.status === "failed" || run.status === "cancelled") throw new Error(`preview: recording the stop failed (${run.status})`);
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      throw new Error("preview: recording the stop timed out");
+    },
+  });
+  const previewWorldKindFor = (worldId: string): "local" | "ssh" | "wsl" | undefined => {
+    if (worldId === "local") return "local";
+    return executionWorlds.get(worldId)?.kind as "local" | "ssh" | "wsl" | undefined;
+  };
+  const terminalConnectionFor = async (worldId: string): Promise<{ readonly connection: Json } | undefined> => {
+    // The world record folds asynchronously after connect; a capability-time read right behind a
+    // fresh connect races the fold. Bound the wait instead of failing the first caller.
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      const rows = (await getService().readProjection(SYSTEM_CALLER, { name: "execution-worlds" })).rows;
+      const row = rows.find(entry => entry.key === `record/${worldId}`)?.value as { readonly connection: Json } | undefined;
+      if (row) return { connection: row.connection };
+      if (Date.now() > deadline) return undefined;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  };
 
   let pollApprovals: (() => Promise<number>) | undefined;
   const runtime: Runtime = await createRuntime({
@@ -542,6 +637,31 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     actions: buildActionPolicy(),
     agents: [agentConfigAgent, agentCodingAgent, agentHarnessAgent, agentCognitiveAgent, agentExpert],
     components: [
+      terminalComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        registry: executionWorlds,
+        service: terminalService,
+        home,
+        connectionFor: terminalConnectionFor,
+        semanticRefs: surfaceRefs,
+      }),
+      browserComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        service: browserService,
+        evidenceDir: join(home, "browser-evidence"),
+        semanticRefs: surfaceRefs,
+      }),
+      previewComponent({
+        getService,
+        systemCaller: SYSTEM_CALLER,
+        service: previewService,
+        connectionFor: terminalConnectionFor,
+        worldKindFor: previewWorldKindFor,
+        home,
+        semanticRefs: surfaceRefs,
+      }),
       runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
@@ -571,8 +691,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       settingsChangeComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: [...usage2.settingsChange, t8.containment], shortcutsSemanticRef: t11["settings.changeShortcuts"] }),
       workspaceManageComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: usage3 }),
       workbenchComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRefs: workbenchRefs, getKnownWorkspaceIds: () => knownWorkspaceIds }),
-      sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"] }),
+      sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"], onArchived: (sessionId, archived) => (archived ? previewService.stopForOwner({ sessionId }) : Promise.resolve([])) }),
       sessionRenameComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.rename"] }),
+      sessionPinComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: pinRefs["session.setPinned"] }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       secretsBackendDescribeComponent({ describe: () => secretsBackend, semanticRef: t11["secrets.backend.describe"] }),
       configFileComponent({ home, getService, systemCaller: SYSTEM_CALLER, readSemanticRef: t11["config.file.read"], applySemanticRef: t11["config.file.apply"] }),
@@ -821,6 +942,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     console.warn("[cognate-workbench] dev auth ARMED: client-claimed bearer identities are trusted; never use this posture in production");
   }
   registerRuntimeService(connectRouter, governedService, { authenticate, maxJsonDepth: 32 });
+  // J-TERMINAL-session: the terminal stream endpoint. First-message auth (the browser cannot set
+  // headers on a websocket and the token never travels in a URL), then the service binds the
+  // socket to one session whose owner must match the token's identity.
+  const terminalWs = terminalWsController({
+    service: terminalService,
+    authenticate: async (token) => await authenticate(new Headers({ authorization: `Bearer ${token}` })),
+  });
+  const browserWs = browserWsController({
+    service: browserService,
+    authenticate: async (token) => await authenticate(new Headers({ authorization: `Bearer ${token}` })),
+  });
   const connectHandlersByPath = new Map<string, (req: Request) => Promise<Response>>();
   for (const uHandler of connectRouter.handlers) {
     connectHandlersByPath.set(uHandler.requestPath, (request) => createFetchHandler(uHandler, { httpVersion: "1.1" })(request).then(response => {
@@ -842,12 +974,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let bundleJs: string;
   if (packaged) {
     bundleJs = (await Bun.file(resourcePath("dist", "web", "app.js")).text())
-      .replaceAll(JSON.stringify(BOOT_TOKEN_PLACEHOLDER), JSON.stringify(operatorSession.token));
+      .replaceAll(JSON.stringify(BOOT_TOKEN_PLACEHOLDER), JSON.stringify(operatorSession.token))
+      .replaceAll(JSON.stringify(SHELL_KIND_PLACEHOLDER), JSON.stringify(shellKindForEnv()));
   } else {
     const generatedDir = resourcePath(".generated");
     await mkdir(generatedDir, { recursive: true });
     const entryPath = join(generatedDir, "entry.tsx");
-    await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token));
+    await writeFile(entryPath, BROWSER_ENTRY_TEMPLATE({ tenant: LOCAL_OPERATOR.tenant, actorId: LOCAL_OPERATOR.actor.id }, operatorSession.token, shellKindForEnv()));
     const build = await Bun.build({ entrypoints: [entryPath], target: "browser", format: "esm" });
     if (!build.success) throw new Error(`server: failed to bundle the UI: ${build.logs.map((log) => String(log)).join("; ")}`);
     bundleJs = await build.outputs[0]!.text();
@@ -855,11 +988,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // A packaged build serves the Astryx stylesheets from its share directory, copied there at build time.
   const cssPaths = packaged ? [resourcePath("dist", "web", "astryx.css"), resourcePath("dist", "web", "theme.css")] : stylesheetPaths();
   const appCssPath = resourcePath("src", "ui", "app.css");
+  // xterm.js's stylesheet ships with the package; dev reads it from node_modules, packaged builds
+  // get it copied to dist/web (scripts/package.ts). Without it the terminal renders unstyled.
+  const xtermCssPath = packaged ? resourcePath("dist", "web", "xterm.css") : resourcePath("node_modules", "@xterm", "xterm", "css", "xterm.css");
   // The workbench cockpit's styles are layered after app.css: shared primitives first, then each
   // component's layout-only sheet (the server concatenates; components never import CSS).
   const WORKBENCH_CSS = ["base", "contract", "tasks", "review", "skills", "workflow", "automation", "cockpit"];
   const cssParts: string[] = [];
-  for (const file of [appCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css"), resourcePath("src", "ui", "inspector", "inspector.css")]) {
+  for (const file of [appCssPath, xtermCssPath, ...WORKBENCH_CSS.map((n) => resourcePath("src", "ui", "workbench", `${n}.css`)), resourcePath("src", "ui", "experts", "experts.css"), resourcePath("src", "ui", "inspector", "inspector.css")]) {
     if (existsSync(file)) cssParts.push(await Bun.file(file).text());
   }
   const appCss = cssParts.join("\n");
@@ -871,6 +1007,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     service: governedService,
     system: SYSTEM_CALLER,
     operatorIdentityId: operatorIdentity.id,
+    record: (events) => recordWorkbenchEvents(runtime.service, SYSTEM_CALLER, events),
     assets: () => {
       if (!phoneAssets) {
         const building = buildPhoneAssets(appCss);
@@ -907,7 +1044,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     "cross-origin-resource-policy": "same-origin",
     ...headers,
   });
-  const server = Bun.serve({
+  const server = Bun.serve<TerminalSocketData>({
     port: options.port,
     hostname: "127.0.0.1",
     idleTimeout: 0,
@@ -916,8 +1053,56 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       const refusal = loopbackRefusal(request.headers);
       if (refusal) return new Response(refusal.reason, { status: refusal.status, headers: hardened() });
       const url = new URL(request.url);
+      // Terminal stream upgrade: same-origin only (loopbackRefusal above already refused
+      // non-loopback Origins), then the controller demands first-message authentication.
+      if (url.pathname === "/terminal/stream") {
+        const session = url.searchParams.get("session");
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" || !session) {
+          return new Response("websocket upgrade required", { status: 426, headers: hardened() });
+        }
+        const upgraded = server.upgrade(request, { data: { authed: false, sessionId: session, surface: "terminal" } });
+        if (upgraded) return undefined;
+        return new Response("upgrade failed", { status: 500, headers: hardened() });
+      }
+      if (url.pathname === "/browser/stream") {
+        const session = url.searchParams.get("session");
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket" || !session) {
+          return new Response("websocket upgrade required", { status: 426, headers: hardened() });
+        }
+        const upgraded = server.upgrade(request, { data: { authed: false, sessionId: session, surface: "browser" } });
+        if (upgraded) return undefined;
+        return new Response("upgrade failed", { status: 500, headers: hardened() });
+      }
       if (url.pathname === "/health") {
-        return Response.json({ ok: true, semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest }, execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined } }, { headers: hardened() });
+        // The desktop shell's machine inputs (desktop-native-completion B5): which surface
+        // spawned this boot, and the server-side state the fail-closed close guard reads.
+        // Counts fold from the sessions projection; a failed read leaves them undefined and
+        // the shell's guard treats absent counts as unknown — fail-closed. The watchdog's
+        // liveness check only reads `ok`, so a projection hiccup never flaps the menus.
+        const shell = shellKindForEnv();
+        let runsInFlight: number | undefined;
+        let pendingApprovals: number | undefined;
+        try {
+          const rows = (await runtime.service.readProjection(SYSTEM_CALLER, { name: "sessions" })).rows;
+          const states = rows
+            .map((row) => (typeof row.value === "object" && row.value !== null ? (row.value as { lastStatus?: unknown; waitingType?: unknown }) : undefined))
+            .filter((value): value is { lastStatus?: unknown; waitingType?: unknown } => value !== undefined);
+          runsInFlight = states.filter((state) => state.lastStatus === "running").length;
+          pendingApprovals = states.filter((state) => state.lastStatus === "waiting" && (state.waitingType === "tool-approval" || state.waitingType === "governance-approval")).length;
+        } catch {
+          // unknown counts; the close guard decides fail-closed
+        }
+        return Response.json(
+          {
+            ok: true,
+            semantic: { objects: domain.projection.objects.length, digest: domain.projection.source.digest },
+            execution: { posture: executionPosture, linuxContainmentConfigured: containmentConfig !== undefined },
+            ...(shell ? { shell } : {}),
+            ...(runsInFlight !== undefined ? { runsInFlight } : {}),
+            ...(pendingApprovals !== undefined ? { pendingApprovals } : {}),
+          },
+          { headers: hardened() },
+        );
       }
       if (url.pathname.startsWith("/cognate.v1.RuntimeService/")) {
         const handler = connectHandlersByPath.get(url.pathname);
@@ -940,6 +1125,22 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }) });
       return new Response("not found", { status: 404, headers: hardened() });
     },
+    websocket: {
+      open: (ws) => {
+        void terminalWs.open(ws as never);
+        void browserWs.open(ws as never);
+      },
+      message: (ws, message) => {
+        const surface = (ws.data as TerminalSocketData & BrowserSocketData).surface;
+        void (surface === "browser"
+          ? browserWs.message(ws as never, message)
+          : terminalWs.message(ws as never, message));
+      },
+      close: (ws) => {
+        terminalWs.close(ws as never);
+        browserWs.close(ws as never);
+      },
+    },
   });
 
   return {
@@ -951,6 +1152,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     operatorSessionToken: operatorSession.token,
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
+      await terminalService.dispose();
+      await browserService.dispose();
       await harnessHost.shutdown();
       eventsController.abort();
       await remote.close();

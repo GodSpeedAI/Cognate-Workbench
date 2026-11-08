@@ -6,10 +6,10 @@ import type { StoredEvent } from "@godspeedai/cognate-events";
 import { LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
 import type { AcceptanceCriterion, TaskContract } from "../src/workbench/types.ts";
 import type { TaskRecord } from "../src/workbench/state.ts";
-import { bootApp, bootAimock, withTempHome, type MockModel } from "./helpers.ts";
+import { aimockChatRequests, bootApp, bootAimock, withTempHome, type MockModel } from "./helpers.ts";
 import { makeWorkspace } from "../fixtures/workspace/make-workspace.ts";
 
-export { LOCAL_OPERATOR, bootApp, bootAimock, withTempHome };
+export { LOCAL_OPERATOR, aimockChatRequests, bootApp, bootAimock, withTempHome };
 export type { AppServer, MockModel };
 export type Client = Awaited<ReturnType<typeof bootApp>>["client"];
 

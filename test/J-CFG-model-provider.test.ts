@@ -7,7 +7,7 @@ import postgres from "postgres";
 import { schemaFor, postgresUrl } from "../src/store.ts";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { bootApp, bootAimock, withTempHome } from "./helpers.ts";
+import { bootApp, bootAimock, storeUrlForTest, withTempHome } from "./helpers.ts";
 import { startServer, LOCAL_OPERATOR } from "../src/server.ts";
 
 interface CurrentConfig {
@@ -66,7 +66,7 @@ describe("J-CFG-model-provider", () => {
         // Scan the durable store for the secret. It must not appear anywhere (PostgreSQL: query the
         // app's schema directly — payloads, metadata, records, and derived folds).
         const schema = schemaFor(home);
-        const url = postgresUrl();
+        const url = await storeUrlForTest();
         const scan = postgres(url, { max: 1, onnotice: () => {} });
         try {
           const t = (name: string) => scan`${scan(schema)}.${scan(name)}`;

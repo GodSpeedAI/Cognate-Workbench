@@ -12,11 +12,11 @@ import { join } from "node:path";
 import { createClient } from "@godspeedai/cognate-client";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
-import { openPostgresStore } from "@godspeedai/cognate-store-postgres";
+import { openPostgresStore, resolvePg0Url } from "@godspeedai/cognate-store-postgres";
 import type { ModelProvider } from "@godspeedai/cognate-capabilities";
 import type { RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
-import { postgresUrl, schemaFor } from "../src/store.ts";
+import { schemaFor } from "../src/store.ts";
 import { readExperts } from "../src/experts/state.ts";
 
 const SYSTEM = { actor: { id: "system", kind: "system" as const }, tenant: LOCAL_OPERATOR.tenant };
@@ -93,7 +93,11 @@ async function interruptedRun(home: string, serversOpened: AppServer[]): Promise
 
 async function cleanup(home: string, servers: AppServer[]): Promise<void> {
   for (const server of servers) await server.stop().catch(() => {});
-  const cleaner = await openPostgresStore({ url: postgresUrl(), schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
+  // The schema lives where the servers put it: the same resolution `storeConfigFor` uses
+  // (env URL, else the shared development pg0 instance) — not a hardcoded port, which used
+  // to silently connect to whatever PostgreSQL happened to be listening there.
+  const cleanupUrl = process.env.COGNATE_POSTGRES_URL ?? (await resolvePg0Url({ name: process.env.COGNATE_PG0_NAME ?? "cognate-dev" }));
+  const cleaner = await openPostgresStore({ url: cleanupUrl, schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
   await cleaner.dropSchema();
   await cleaner.close();
   await rm(home, { recursive: true, force: true });

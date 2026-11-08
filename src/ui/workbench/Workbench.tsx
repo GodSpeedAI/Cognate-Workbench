@@ -27,6 +27,7 @@ import { WorkerReturnForm } from "./WorkerReturnForm.tsx";
 import { WorkflowGraph } from "./WorkflowGraph.tsx";
 import type { FocusRef } from "../../workbench/focus.ts";
 import { useWbRow, useWbRows, useWorkbenchActions, type Notice } from "./data.ts";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 type Tab = "tasks" | "workflows" | "capabilities" | "automations";
 const TABS: readonly { readonly id: Tab; readonly label: string }[] = [
@@ -458,32 +459,32 @@ function WorkflowsTab({ workspaceId, act, onFocus }: { workspaceId: string; act:
       <div className="wb-btn-row">
         <div className="wb-field">
           <label htmlFor="wb-wf-pick">Workflow</label>
-          <select
+          <MenuSelect
             id="wb-wf-pick"
+            ariaLabel="Workflow"
             value={def?.id ?? ""}
-            onChange={(e) => {
-              setDefId(e.currentTarget.value);
+            variant="field"
+            placement="down"
+            options={defs.map((d) => ({ value: d.id, label: `${d.value.name} (v${d.value.version})` }))}
+            onPick={(id) => {
+              setDefId(id);
               setInstId(undefined);
               setNodeId(undefined);
             }}
-          >
-            {defs.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.value.name} (v{d.value.version})
-              </option>
-            ))}
-          </select>
+          />
         </div>
         {mine.length > 0 && (
           <div className="wb-field">
             <label htmlFor="wb-wf-inst">Instance</label>
-            <select id="wb-wf-inst" value={inst?.id ?? ""} onChange={(e) => setInstId(e.currentTarget.value)}>
-              {mine.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.id}
-                </option>
-              ))}
-            </select>
+            <MenuSelect
+              id="wb-wf-inst"
+              ariaLabel="Instance"
+              value={inst?.id ?? ""}
+              variant="field"
+              placement="down"
+              options={mine.map((i) => ({ value: i.id, label: i.id }))}
+              onPick={(id) => setInstId(id)}
+            />
           </div>
         )}
         <button type="button" className={inst ? "wb-btn" : "wb-btn primary"} onClick={() => def && void act.call("workflow.instantiate", { workflowId: def.id, workspaceId }, "Workflow instance started.")}>
@@ -623,16 +624,19 @@ function MoveTaskControl({ task, sessionId, act }: { task: TaskRecord & { readon
       <span className="wb-muted">Currently visible in: <strong>{currentScope}</strong>{boundConversations.length > 0 ? ` · bound in ${boundConversations.length} conversation${boundConversations.length === 1 ? "" : "s"}` : " · no conversation has it active"}</span>
       <label className="wb-field">
         <span className="wb-muted">Destination</span>
-        <select aria-label="Move destination" value={destination} onChange={(e) => setDestination(e.currentTarget.value)}>
-          <option value="">Choose a destination…</option>
-          {(task.scope ?? "workspace") === "session" && <option value="workspace">This workspace — promote it</option>}
-          {(task.scope ?? "workspace") !== "session" && sessionId && <option value="session">This session</option>}
-          {others.map((w) => (
-            <option key={w.id} value={w.id}>
-              Workspace: {w.title}
-            </option>
-          ))}
-        </select>
+        <MenuSelect
+          ariaLabel="Move destination"
+          value={destination}
+          variant="field"
+          placement="down"
+          options={[
+            { value: "", label: "Choose a destination…" },
+            ...((task.scope ?? "workspace") === "session" ? [{ value: "workspace", label: "This workspace — promote it" }] : []),
+            ...((task.scope ?? "workspace") !== "session" && sessionId ? [{ value: "session", label: "This session" }] : []),
+            ...others.map((w) => ({ value: w.id, label: `Workspace: ${w.title}` })),
+          ]}
+          onPick={(v) => setDestination(v)}
+        />
       </label>
       {target && (
         <p className="wb-muted wb-scope-hint" role="status">

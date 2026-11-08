@@ -209,6 +209,161 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       }
       return writes;
     }
+    case "workbench.terminal.opened": {
+      const row = {
+        sessionId: String(p.sessionId),
+        worldId: String(p.worldId),
+        worldKind: String(p.worldKind),
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        ...(typeof p.workspaceLabel === "string" ? { workspaceLabel: p.workspaceLabel } : {}),
+        cwd: String(p.cwd),
+        shell: String(p.shell),
+        status: "running",
+        openedAt: recordedAt,
+        ...(typeof p.ownerActorId === "string" ? { ownerActorId: p.ownerActorId } : {}),
+      };
+      return [{ key: `terminal/${row.sessionId}`, value: j(row) }];
+    }
+    case "workbench.terminal.closed": {
+      const sessionId = String(p.sessionId);
+      const key = `terminal/${sessionId}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{
+        key,
+        value: j({
+          ...prev,
+          status: "exited",
+          closedAt: recordedAt,
+          reason: String(p.reason ?? "exit"),
+          ...(p.exitCode === null || typeof p.exitCode === "number" ? { exitCode: p.exitCode } : {}),
+          ...(typeof p.message === "string" ? { message: p.message } : {}),
+        }),
+      }];
+    }
+    case "workbench.browser.opened": {
+      const row = {
+        sessionId: String(p.sessionId),
+        providerId: String(p.providerId),
+        ...(typeof p.url === "string" ? { url: p.url } : {}),
+        ...(typeof p.title === "string" ? { title: p.title } : {}),
+        controller: "human",
+        status: "running",
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        openedAt: recordedAt,
+        screenshots: [] as unknown[],
+        annotations: [] as unknown[],
+        navigations: 0,
+      };
+      return [{ key: `browser/${row.sessionId}`, value: j(row) }];
+    }
+    case "workbench.browser.navigated": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; navigations?: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, url: String(p.url), ...(typeof p.title === "string" ? { title: p.title } : {}), navigatedAt: recordedAt, navigations: (typeof prev.navigations === "number" ? prev.navigations : 0) + 1 }) }];
+    }
+    case "workbench.browser.control.changed": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, controller: String(p.controller), controllerActorId: typeof p.actorId === "string" ? p.actorId : undefined, controlChangedAt: recordedAt }) }];
+    }
+    case "workbench.browser.screenshot": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; screenshots?: unknown[] } | undefined;
+      if (!prev) return [];
+      const screenshots = [...(prev.screenshots ?? []), { path: String(p.path), ...(typeof p.url === "string" ? { url: p.url } : {}), takenAt: recordedAt }];
+      return [{ key, value: j({ ...prev, screenshots }) }];
+    }
+    // J-BROWSER-inspect: the durable annotation. Page-derived context is bounded here (the
+    // capability already bounds it; the fold re-bounds defensively) and is data, not instructions.
+    case "workbench.browser.annotated": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; annotations?: unknown[] } | undefined;
+      if (!prev) return [];
+      const element = (p.element ?? {}) as { [k: string]: unknown };
+      const annotation = {
+        annotationId: String(p.annotationId),
+        note: String(p.note),
+        url: String(p.url),
+        ...(typeof p.capturedAt === "string" ? { capturedAt: String(p.capturedAt) } : {}),
+        ...(typeof p.navigationsAtCapture === "number" ? { navigationsAtCapture: p.navigationsAtCapture } : {}),
+        ...(typeof p.evidencePath === "string" ? { evidencePath: p.evidencePath } : {}),
+        element: {
+          tag: String(element.tag ?? ""),
+          role: String(element.role ?? ""),
+          ...(typeof element.name === "string" ? { name: element.name.slice(0, 120) } : {}),
+          ...(typeof element.text === "string" ? { text: element.text.slice(0, 200) } : {}),
+        },
+        candidates: Array.isArray(p.candidates) ? (p.candidates as unknown[]).slice(0, 8) : [],
+        annotatedAt: recordedAt,
+      };
+      const annotations = [...(prev.annotations ?? []).slice(-19), annotation];
+      return [{ key, value: j({ ...prev, annotations }) }];
+    }
+    case "workbench.browser.closed": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, status: "closed", closedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
+    }
+    // J-PREVIEW-register: the explicit, ownership-carrying dev-server registration.
+    // J-REMOTE-diagnostics: the remote control's durable diagnostics. One row (`remote/control`)
+    // carries the current state, the paired device's label (never a credential), the last bounded
+    // error and a small ring of recent transitions — the truth is this event log.
+    case "workbench.remote.state": {
+      const state = p.state;
+      if (state !== "off" && state !== "waiting" && state !== "connected") return [];
+      const prev = get("remote/control") as { readonly events?: readonly { readonly at: string; readonly text: string }[] } | undefined;
+      const deviceLabel = typeof p.deviceLabel === "string" && p.deviceLabel.trim() ? p.deviceLabel.trim().slice(0, 60) : undefined;
+      const text = state === "connected" && deviceLabel ? `Connected (${deviceLabel})` : `Connection ${state}`;
+      const ring = [...(prev?.events ?? []), { at: recordedAt, text }].slice(-8);
+      return [{
+        key: "remote/control",
+        value: j({
+          ...(prev ?? {}),
+          state,
+          ...(deviceLabel ? { deviceLabel } : {}),
+          ...(state !== "connected" ? { deviceLabel: null } : {}),
+          updatedAt: recordedAt,
+          events: ring,
+        }),
+      }];
+    }
+    case "workbench.remote.error": {
+      if (typeof p.message !== "string" || !p.message.trim()) return [];
+      const prev = get("remote/control") as { readonly events?: readonly { readonly at: string; readonly text: string }[] } | undefined;
+      const message = p.message.trim().slice(0, 200);
+      const ring = [...(prev?.events ?? []), { at: recordedAt, text: `Error: ${message}` }].slice(-8);
+      return [{
+        key: "remote/control",
+        value: j({ ...(prev ?? {}), lastError: message, lastErrorAt: recordedAt, updatedAt: recordedAt, events: ring }),
+      }];
+    }
+    case "workbench.preview.registered": {
+      const row = {
+        previewId: String(p.previewId),
+        worldId: String(p.worldId),
+        worldKind: String(p.worldKind),
+        viewUrl: String(p.viewUrl),
+        originUrl: String(p.originUrl),
+        status: "ready",
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        ...(typeof p.ownerSessionId === "string" ? { ownerSessionId: p.ownerSessionId } : {}),
+        ...(typeof p.ownerTaskId === "string" ? { ownerTaskId: p.ownerTaskId } : {}),
+        ...(typeof p.ownerRunId === "string" ? { ownerRunId: p.ownerRunId } : {}),
+        ...(typeof p.pid === "number" ? { pid: p.pid } : {}),
+        registeredAt: recordedAt,
+      };
+      return [{ key: `preview/${row.previewId}`, value: j(row) }];
+    }
+    case "workbench.preview.stopped": {
+      const key = `preview/${String(p.previewId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, status: "stopped", stoppedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
+    }
     default:
       return [];
   }

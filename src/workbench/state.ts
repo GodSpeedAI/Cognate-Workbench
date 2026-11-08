@@ -102,4 +102,79 @@ export interface BlockedRecord {
   readonly reason: string;
 }
 
+/** J-TERMINAL-session: the durable metadata of one interactive terminal session. */
+export interface TerminalRow {
+  readonly sessionId: string;
+  readonly worldId: string;
+  readonly worldKind: string;
+  readonly workspaceId?: string;
+  readonly workspaceLabel?: string;
+  readonly worldLabel?: string;
+  readonly cwd: string;
+  readonly shell: string;
+  readonly status: "running" | "exited";
+  readonly openedAt: string;
+  readonly closedAt?: string;
+  readonly reason?: string;
+  readonly exitCode?: number | null;
+  readonly message?: string;
+  readonly ownerActorId?: string;
+}
+
+/** J-BROWSER-inspect: one durable element annotation. `navigationsAtCapture` is the staleness
+ *  token — the row's `navigations` counter passing it means later navigation moved the page. */
+export interface BrowserAnnotationRow {
+  readonly annotationId: string;
+  readonly note: string;
+  readonly url: string;
+  readonly capturedAt?: string;
+  readonly navigationsAtCapture?: number;
+  readonly evidencePath?: string;
+  readonly element: { readonly tag: string; readonly role: string; readonly name?: string; readonly text?: string };
+  readonly candidates: readonly { readonly kind: string; readonly value: string }[];
+  readonly annotatedAt: string;
+}
+
+/** J-BROWSER-session: the durable metadata of one shared browser session. */
+export interface BrowserRow {
+  readonly sessionId: string;
+  readonly providerId: string;
+  readonly url?: string;
+  readonly title?: string;
+  readonly controller: "human" | "agent";
+  readonly status: "running" | "closed";
+  readonly workspaceId?: string;
+  readonly openedAt: string;
+  readonly navigatedAt?: string;
+  readonly closedAt?: string;
+  readonly reason?: string;
+  readonly screenshots?: readonly { readonly path: string; readonly url?: string; readonly takenAt: string }[];
+  readonly annotations?: readonly BrowserAnnotationRow[];
+  /** J-BROWSER-inspect: monotonic navigations folded from browser.navigated events. */
+  readonly navigations?: number;
+}
+
+/** J-PREVIEW-register: one governed development-server preview. */
+export interface PreviewRow {
+  readonly previewId: string;
+  readonly worldId: string;
+  readonly worldKind: string;
+  readonly viewUrl: string;
+  readonly originUrl: string;
+  readonly status: "ready" | "stopped";
+  readonly workspaceId?: string;
+  readonly ownerSessionId?: string;
+  readonly ownerTaskId?: string;
+  readonly ownerRunId?: string;
+  readonly pid?: number;
+  readonly registeredAt: string;
+  readonly stoppedAt?: string;
+  readonly reason?: string;
+}
+
+/** Staleness of an annotation against its row: later navigation (by counter or by URL) marks it. */
+export const annotationIsStale = (annotation: BrowserAnnotationRow, row: BrowserRow): boolean =>
+  (annotation.navigationsAtCapture !== undefined && (row.navigations ?? 0) > annotation.navigationsAtCapture) ||
+  (annotation.navigationsAtCapture === undefined && row.url !== undefined && row.url !== annotation.url);
+
 export type { EvidenceEntry, Inbox, WorkflowDefinition };

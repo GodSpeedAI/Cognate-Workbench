@@ -1,6 +1,7 @@
 // Operator reconciliation card for an interrupted agent capability call (`ambiguous-invocation`).
 // The step was NOT repeated after the restart; only the operator can record what actually happened.
 import { useState } from "react";
+import { MenuSelect } from "./shell/MenuSelect.tsx";
 
 export function AmbiguousStepCard({
   capability,
@@ -40,10 +41,17 @@ export function AmbiguousStepCard({
       >
         <label>
           Observed outcome
-          <select value={outcome} onChange={(event) => setOutcome(event.currentTarget.value as "succeeded" | "failed")}>
-            <option value="failed">{modelCall ? "Retry the model call" : "Step did not complete"}</option>
-            {!modelCall && <option value="succeeded">Step completed</option>}
-          </select>
+          <MenuSelect
+          ariaLabel="Observed outcome"
+          value={outcome}
+          variant="field"
+          placement="down"
+          options={[
+            { value: "failed", label: modelCall ? "Retry the model call" : "Step did not complete" },
+            ...(!modelCall ? [{ value: "succeeded" as const, label: "Step completed" }] : []),
+          ]}
+          onPick={(v) => setOutcome(v)}
+        />
         </label>
         <label>
           What did you observe?

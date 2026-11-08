@@ -278,6 +278,10 @@ export const WORKBENCH_ANCHORS: Readonly<Record<string, string>> = {
   // governed move mutation, anchored on the same `Task` entity as `task.create`.
   "task.list": "Task",
   "task.move": "Task",
+  // F2 (J-REMOTE-diagnostics): the bounded remote-control transition family, anchored on the
+  // `RemoteControl` entity (the events are `workbench.remote.*`, folded by the workbench
+  // projection into the `remote/control` row).
+  "workbench.remote.record": "RemoteControl",
 };
 
 export function workbenchBindings(domain: Domain): readonly CapabilityBinding[] {
@@ -320,6 +324,21 @@ export const TRANCHE11_ANCHORS: readonly (readonly [string, string])[] = [
   ["plugin.install", "Plugin"],
   ["plugin.uninstall", "Plugin"],
 ];
+
+/**
+ * F1 (J-SESSION-pin): the session row menu's Pin affordance (the design's donor-parity half of
+ * D-23), anchored on the `Session` entity the archive/rename capabilities already use.
+ */
+export const SESSION_PIN_ANCHORS: readonly (readonly [string, string])[] = [
+  ["session.setPinned", "Session"],
+];
+
+export function bindSessionPin(domain: Domain) {
+  const bindings = SESSION_PIN_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} session-pin contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}
 
 export function tranche11Bindings(domain: Domain): readonly CapabilityBinding[] {
   return TRANCHE11_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
@@ -559,6 +578,44 @@ export function bindHarnessCapabilities(domain: Domain): Readonly<Record<string,
   if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} harness contracts, got ${contracts.length}`);
   const unbound = contracts.find((contract) => !contract.semanticRef);
   if (unbound) throw new Error(`domain: harness capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
+/**
+ * J-TERMINAL-session / J-BROWSER-session / J-BROWSER-inspect / J-PREVIEW-register: the desktop
+ * collaboration surfaces. Terminal lifecycle anchors on `TerminalSession` (a human surface: agents
+ * keep tool.bash and never hold a PTY). Browser observation, control and element feedback anchor on
+ * `BrowserSession` (an annotation is a fact about a browser session's page; the durable feedback
+ * handed to the agent is the PageFeedback flow). Development-server registration anchors on
+ * `DevPreview`.
+ */
+export const SURFACES_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "terminal.open": "TerminalSession",
+  "terminal.close": "TerminalSession",
+  "browser.open": "BrowserSession",
+  "browser.close": "BrowserSession",
+  "browser.navigate": "BrowserSession",
+  "browser.snapshot": "BrowserSession",
+  "browser.screenshot": "BrowserSession",
+  "browser.input": "BrowserSession",
+  "browser.control": "BrowserSession",
+  "browser.inspect": "BrowserSession",
+  "browser.annotate": "BrowserSession",
+  "preview.register": "DevPreview",
+  "preview.stop": "DevPreview",
+};
+
+export function bindSurfaceCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(SURFACES_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} surface contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: surface capability ${unbound.id} has no SemanticRef`);
   return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
     Record<string, CapabilityContract["semanticRef"]>
   >;

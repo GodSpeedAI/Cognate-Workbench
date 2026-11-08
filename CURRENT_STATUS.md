@@ -1,3 +1,153 @@
+# Current status — revision 42
+
+The **desktop-native-completion** mission's D and F tracks are closed, and Milestone C is
+recorded — this revision covers the recovered session's continuation.
+
+**Recovery.** The previous session stalled in model-stream timeouts at 2026-11-06 23:42 with
+its whole B5 change set uncommitted. The tree was verified against the mission's recorded
+evidence, the gates re-run, and B5 landed (`3ed0337` + evidence refresh `37d2c5d`; rev 41).
+
+**D track — the dispositions ledger, executed.** The global gate landed first: MenuSelect's
+trigger accessible name now carries the current value with a full engine-independent keyboard
+contract, pinned by `test/ui-menu-select.test.tsx` (12 tests, `d5ec3fd`). Then all **42 native
+selects** converted across the nine ledger batches S1–S9, one commit each with its E2E delta,
+closed by the standing `native-select-guard` test. All **17 open A2 D-rows** dispositioned:
+14 fixed across five commits, three recorded as already landed (D-16, D-34, D-13's stray
+theme icon); `DEBT.md` reconciled.
+
+**F track — both BUILD rows, model-first.** F1 **session Pin** (`3596abc`): `J-SESSION-pin`
+validated in the SEA model → `session.setPinned` anchored on `Session` → `session.pinned`
+folded by the `sessions` projection (carried across turn rebuilds) → pinned-first
+sort-independent ordering → row-menu Pin/Unpin with a pinned glyph → journey test proving
+restart durability, reversibility and refusal. F2 **durable remote diagnostics** (`b9c7d9b`):
+`J-REMOTE-diagnostics` validated with a new `RemoteControl` entity → bounded
+`workbench.remote.state`/`.error` family folded into the workbench projection's
+`remote/control` row → the recorder injected into `MobileRemote` at transitions and pairing
+refusals only (never the polls, never secrets) → durable history rendered in the Remote
+dialog → journey test proving polls record nothing and history survives restart.
+
+**Milestone C recorded** (`d105c65`): per-platform menu conventions verified — no divergences
+found (the macOS Edit/Window roles ship by construction; the no-accelerator deviation is
+documented); the WSLg real-window rows recorded; the menu-click/dialog rows explicitly
+BLOCKED on xdotool (passworded sudo) until a device pass. **OQ1 resolved by the owner**
+(`ed8f583`): the B4 title cue stays the canonical approval-waiting surface; the notification
+plugin is not shipped.
+
+**E1 dispatched with owner authorization.** The push was initially rejected — 895 MB of
+accidentally committed `dist-package/` packaging artifacts (regenerable output of
+`scripts/package.ts`, now gitignored) sat in the unpushed history; a history rewrite of the
+unpushed range removed them. The branch is pushed, PR #28 is ready for review, and the
+five-platform `tauri` matrix is running on tag `v0.1.0-rc1`.
+
+**Verified.** Boundary gates at every tranche with per-failure isolated classification:
+1586/1 → 1600/1 → 1599/2 → 1603/2 (all failures the documented host-concurrency class;
+`J-CHECKOUT-lifecycle` and `J-WS-delete` pass isolated, the admission E2E flake classified
+twice). `domainforge validate` + `fmt --check` after every model change: 0 violations. Rust
+gates: fmt clean, clippy 0 warnings, `cargo test` 7/7.
+
+**Next.** E1: record the matrix results per OS/arch/SHA/checksum. E2: the Jetson runbook is
+the operator's. E3: platform-honesty report, drift re-run, final reconciliation (rev 43).
+
+---
+
+# Current status — revision 41
+
+Milestone B of the **desktop-native-completion** mission is complete — the whole Tauri desktop
+foundation, B1 through B5, landed on `feat/desktop-terminal-browser`.
+
+**The B-tranche.** B1 CI scaffold (five-platform `tauri.yml` RC matrix — windows-2022 x64,
+macos-15 ARM, macos-15-intel x64, ubuntu-22.04 x64, ubuntu-22.04-arm aarch64 — with the Rust
+1.95 Jetson MSRV gate, plus a per-commit tauri-linux fmt/clippy/test job in `verify.yml`);
+B2 packaged smoke harness (`scripts/qualify-tauri.sh`, `just tauri-guards`/`tauri-smoke`, the
+T2 `COGNATE_TEST_SIDECAR` mode); B3 shell↔web seam protocol (the frozen `__wbShell` bridge,
+the two-side-pinned title grammar, the committed six-action menu map with the
+`/health`+page-load liveness rule); B4 desktop contract (fail-closed close guard scoped by
+backend ownership, title-transition attention cue, external-link routing via the opener,
+`--app` beforeunload confirm, downloads DEFER); B5 lifecycle hardening: startup budgets
+(180 s first boot / 60 s steady — measured 4 s on this host) with a graceful SIGTERM stop on
+readiness timeout instead of the SIGKILL that orphaned pg0; a 5 s `/health` watchdog
+(two-failure threshold) covering spawned-exit **and** hung-or-reused backends with a recovery
+surface that names the owner and the relaunch move; handle-before-wait so an early quit always
+has a kill path; 5 MB `desktop-shell.log` rotation; `/health` machine inputs (`shell`,
+`runsInFlight`, `pendingApprovals`) folded server-side from the sessions projection with
+absent counts fail-closed; the close guard switched to that machine authority (the B3 title
+signal retired to the attention cue); package identity `cognate-workbench-shell` distinct
+from the CLI's deb — proven non-overlapping by the coexistence smoke pass; `appimage` removed
+from bundle targets on the recorded linuxdeploy/FUSE failure; `--app` surface identity
+`chromium-app@<version>`; and the operator-executed Jetson AGX Orin qualification runbook
+(`docs/jetson-qualification.md`) for E2.
+
+**Also this revision:** the `postgresUrl()` environment-coupling test class is fixed —
+`test/helpers.ts` gains `storeUrlForTest()` (the same resolution `storeConfigFor` uses: env
+URL, else the shared development pg0 instance) and three suites that opened stores or scanned
+schemas directly no longer dial whatever PostgreSQL happens to listen on 5432. The previous
+B5 boundary run was 1582 pass / 5 fail; the fixes closed its three environment-coupled
+failures.
+
+**Verified.** Commits `6b7ac38` (B1), `78c4bb2` (B2), `daeb97a` (B3), `06c366a` (B4), this
+commit (B5). Debug-shell and packaged-deb qualifications PASS; the B5 coexistence run proves
+`packages distinct … no overlapping file paths`. Rust gates: fmt clean, clippy 0 warnings,
+`cargo test` 7/7. Full `just verify` at the boundary: **1586 pass / 1 fail** — the one
+failure (`J-EXPERT-WORKSPACE-ADMISSION`) hits the 22 s E2E deadline under full-gate load and
+passes isolated in 9.76 s: the documented host-concurrency flake class, not a product bug.
+
+**Next.** The D parallel track (per-panel native-select batches, the Pin affordance, remote
+diagnostics — the ledger's BUILD rows), then Milestone C (native UX convergence), then
+Milestone E (five-platform CI green, installer verification, the platform-honesty matrix, the
+Jetson E2 run, a drift re-run, and the final report as revision 42).
+
+---
+
+# Current status — revision 40
+
+Milestone A of the **desktop-native-completion** mission is complete: the EGM sequence ran end to
+end over the Tauri desktop completion effort, and the doc reconciliation the drift report demanded
+has landed (this revision).
+
+**Reconciliation.** The markdown had sat at revision 36 while the JSONL ledger carried three
+unreconciled revisions: **37** — the UI production-readiness pass (PandaCode-style UI with Cognate
+identity, 1564-test gate green at `04f648d`, report at `.agents/reports/ui-production-readiness/`);
+**38** — desktop-terminal-browser T4–T9 (PTY terminal service, docked xterm panel, shared managed
+browser sessions); **39** — T10–T11 + T12 core (inspect+annotate, governed previews across worlds,
+the end-to-end mission journey), including three product bugs found and fixed while proving it
+(execution-world connection-resolver key matcher, owner-ended preview cleanup durability, the
+inspect click-kill). All three remain recorded in full in `.agents/CURRENT_STATUS.jsonl`. The
+Tauri 2 desktop shell has been the primary desktop surface since `4ac47c1` on
+`feat/desktop-terminal-browser`; the Chromium `--app` window remains the CLI fallback.
+
+**The EGM Milestone A artifacts** (`.agents/plans/desktop-native-completion/`): scoped drift
+report (`2026-11-06_DRIFT_REPORT.md`); six-lens Goldfish brainstorm brief (`concepts_brief.md`);
+the reviewed design (`design.md`); the five-stage review reports and their consolidation
+(`zoom_out_report.md`, `comprehension_report.md`, `critic_report.md`,
+`intermediate_zoom_out_report.md`, `consolidated_review_report.md`); the owner-adjudicated
+resolution (`goldfish_review_report.md` — 17 PROPOSE FIX applied, C17 decided in-mission); and
+the post-resolution verification pass (`verification-pass.md`). The load-bearing corrections the
+review forced: a fail-closed `/health` close guard scoped by backend ownership (the title channel
+demoted to a human cue), a canonical zero-grant channel list, the Ctrl+Alt+N shortcut default
+kept on every surface, downloads/DnD/Pin/remote-diagnostics routed through the dispositions
+ledger, and tiered T1/T2/T3 packaged qualification. The design is the implementation contract
+pending the owner's Milestone A sign-off; the architectural tranches (B3+) wait for it.
+
+**Verified.** Commits `36cecea` (EGM artifacts), `e72723b` (resolution), `f133139` (verification
+pass + corrections). Five review stages completed with every requested reviewer reporting; the
+verification pass confirmed C1–C18 incorporated and found one new ground-truth error (the
+contract panel's selects are driven by `E2E-workbench`), fixed in the same pass.
+
+**This revision's doc reconciliation.** `src-tauri/README.md` shutdown text corrected (30 s grace
++ 45 s wedge failsafe — the 10 s figure documented the bug `96f7fb0` fixed); `src/README.md`
+counts corrected (38 mounted capability components, 18 public projections) with subsystem entries
+for `src/terminal/`, `src/browser/`, `src/preview/`; the sibling
+desktop-terminal-browser `architecture.md` baseline corrections (event count, App.tsx size,
+single-instance focus wording, T1-baseline markers); `DESIGN.md`'s nonexistent `tokens.css`
+reference corrected to `app.css`; and EGM contract READMEs created for the three new subsystem
+directories per the revision-34 bootstrap convention.
+
+**Next.** Owner sign-off on `design.md`, then the dispositions ledger (A3) and the CI scaffold
+(B1). The Jetson prerequisite (`libwebkit2gtk-4.1-0`, available in Ubuntu repos as 2.50.4) remains
+an operator-authorized device change.
+
+---
+
 # Current status — revision 36
 
 Standalone packages for Linux (x64, arm64), macOS (arm64, x64) and Windows (x64) are built and

@@ -13,6 +13,7 @@ import { describeSecretBackend } from "./secrets.ts";
 import { parseDevAuth, startServer } from "./server.ts";
 import { EXECUTION_POSTURE_ENV } from "./executionPosture.ts";
 import { findAppBrowser, launchAppWindow, openDefaultBrowser } from "./desktopWindow.ts";
+import packageJson from "../package.json";
 
 const LOCK_FILE = "server.lock";
 
@@ -73,8 +74,21 @@ async function acquireHomeLock(home: string, port: number): Promise<() => Promis
   if (prior) console.log(`[cognate-workbench] recovering from an interrupted owner (pid ${prior.pid}); its database is reused, not reinitialised`);
   await writeFile(file, JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }) + "\n", { mode: 0o600 });
   return async () => {
-    const current = await readJson<{ pid: number }>(file);
-    if (current?.pid === process.pid) await rm(file, { force: true });
+    let current: { pid: number } | undefined;
+    try {
+      current = await readJson<{ pid: number }>(file);
+    } catch (error) {
+      console.log(`[cognate-workbench] lock release: unreadable lock (${String(error).slice(0, 120)}); removing it anyway`);
+      await rm(file, { force: true });
+      return;
+    }
+    if (current?.pid === process.pid) {
+      await rm(file, { force: true });
+    } else {
+      // The lock names someone else (an interrupted second owner took over mid-shutdown, or
+      // the file was rewritten); removing a live owner's lock would break the one-owner rule.
+      console.log(`[cognate-workbench] lock release: lock names pid ${current?.pid ?? "?"}, not this pid ${process.pid}; left in place`);
+    }
   };
 }
 
@@ -129,7 +143,10 @@ async function start(): Promise<Running> {
     if (bundled && (await stopBundledDatabase(process.env.COGNATE_PG0_BIN!, home))) {
       console.log(`[cognate-workbench] bundled database "${pg0Name}" stopped (owned by this data home)`);
     }
+    // The E1 smoke caught intermittent runs where everything above completed but the lock
+    // file survived; each step names itself so a stuck run shows where it stopped.
     await releaseLock();
+    console.log(`[cognate-workbench] ${signal}: data-home lock released; exiting`);
     process.exit(0);
   })();
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
@@ -167,6 +184,10 @@ async function runningInstance(home: string): Promise<string | undefined> {
 /** The desktop entry: one server per home, shown in its own application window; closing the window quits the server. */
 async function launch(): Promise<number> {
   const home = homeOf();
+  // Which desktop surface is serving (desktop-native-completion B4/B5): the `--app` window's
+  // server reports "chromium-app@<version>" so the served page installs its own beforeunload
+  // close guard and /health carries the surface identity. The Tauri shell sets "tauri@<version>".
+  process.env.COGNATE_SHELL = process.env.COGNATE_SHELL ?? `chromium-app@${packageJson.version}`;
   const noWindow = process.env.COGNATE_NO_WINDOW === "1";
   const browser = noWindow ? undefined : findAppBrowser(process.platform, process.env);
 

@@ -30,8 +30,9 @@ describe("ExpertEditor", () => {
     expect(html).toContain("Create Expert");
     expect(html).toContain('for="expert-name"');
     expect(html).toContain("Model route");
+    // The provider MenuSelect announces its current value (the S7 conversion); the route
+    // options themselves are proven selectable by the E2E provider-route journey.
     expect(html).toContain("mock · mock-model");
-    expect(html).toContain("local · local-coder");
     expect(html).toContain("Allowed capabilities");
     expect(html).toContain("Read files");
     expect(html).toContain("Return result, abstain or decline");

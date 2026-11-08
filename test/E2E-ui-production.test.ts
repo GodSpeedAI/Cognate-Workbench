@@ -92,7 +92,8 @@ describe("J-WS-delete E2E workspace delete confirmation", () => {
           await page.getByRole("menuitem", { name: "Delete workspace" }).click();
         };
         await open();
-        const dialog = page.getByRole("dialog", { name: /Delete workspace "alpha-proj"\?/ });
+        // D-15: the dialog title uses the app's curly-quote pair — the name matches accordingly.
+        const dialog = page.getByRole("dialog", { name: /Delete workspace “alpha-proj”\?/ });
         await dialog.waitFor();
         expect(await dialog.textContent()).toMatch(/Files in .*alpha-proj.* are not touched/);
         await shot(page, "t4-delete-confirm");

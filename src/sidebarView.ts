@@ -22,6 +22,9 @@ export interface SessionRow {
   readonly accessMode?: string;
   /** Durable archive flag (T11). Absent means not archived. */
   readonly archived?: boolean;
+  /** Durable pin flag (F1, J-SESSION-pin). Absent means not pinned; pinned sessions float to the
+   *  top of their list regardless of the active sort order. */
+  readonly pinned?: boolean;
 }
 
 export interface WorkspaceRow {
@@ -51,13 +54,17 @@ export function applyArchiveFilter(rows: readonly SessionRow[], filter: ArchiveF
   return rows.filter((s) => s.archived !== true);
 }
 
-/** "Order by" — manual keeps the projection's own order; last-updated sorts `updatedAt` descending. */
+/** "Order by" — manual keeps the projection's own order; last-updated sorts `updatedAt` descending.
+ *  Either way (F1, J-SESSION-pin): pinned sessions float to the top, sort-independent — within the
+ *  pinned block the recency order holds. */
 export const ORDER_BY_OPTIONS = ["manual", "last-updated"] as const;
 export type OrderBy = (typeof ORDER_BY_OPTIONS)[number];
 
 export function orderSessions(rows: readonly SessionRow[], orderBy: OrderBy): readonly SessionRow[] {
-  if (orderBy !== "last-updated") return rows;
-  return [...rows].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  const sorted = orderBy === "last-updated" ? [...rows].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)) : rows;
+  const pinned = sorted.filter((s) => s.pinned === true);
+  if (pinned.length === 0) return sorted;
+  return [...pinned, ...sorted.filter((s) => s.pinned !== true)];
 }
 
 /** Case-insensitive match on the session's title (or its "New Session" placeholder) or its id. An

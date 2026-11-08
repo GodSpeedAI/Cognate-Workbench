@@ -1,0 +1,27 @@
+name: 'Build DomainForge napi binding'
+description: >-
+  Build the pinned DomainForge cdylib natively for this platform (the npm package
+  ships only the linux-x64 binding) and install it beside the JS loader under the
+  name that loader expects. Requires: bun with `bun install` already run (the
+  version pin is read from node_modules) and a Rust toolchain.
+inputs:
+  binding:
+    description: 'napi binding triple, e.g. linux-arm64-gnu, darwin-arm64, win32-x64-msvc'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: dtolnay/rust-toolchain@1.99.0
+    - name: Build DomainForge ${{ inputs.binding }} binding
+      shell: bash
+      env:
+        BINDING: ${{ inputs.binding }}
+      run: |
+        set -euo pipefail
+        DF_VERSION="$(bun -e 'console.log(require("./node_modules/@godspeedai/domainforge/package.json").version)')"
+        git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
+        cargo build --release --locked --manifest-path "$RUNNER_TEMP/domainforge/domainforge-core/Cargo.toml" --features typescript,three_valued_logic --lib
+        LIB="$(find "$RUNNER_TEMP/domainforge/target/release" -maxdepth 1 \( -name 'domainforge_core.dll' -o -name 'libdomainforge_core.so' -o -name 'libdomainforge_core.dylib' \) | head -1)"
+        test -n "$LIB"
+        cp "$LIB" "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/domainforge-core.$BINDING.node"
+        bun -e 'console.log("domainforge", process.argv[1], process.argv[2], "sha256:", new Bun.CryptoHasher("sha256").update(require("fs").readFileSync(process.argv[3])).digest("hex"))' "$DF_VERSION" "$BINDING" "$LIB"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, ReactNode } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
@@ -119,8 +119,9 @@ import {
   SplitViewIcon,
   StopIcon,
   TerminalIcon,
+  GlobeIcon,
   TrashIcon,
-} from "./icons.tsx";
+  PinIcon, } from "./icons.tsx";
 import {
   ARCHIVE_FILTER_LABELS,
   GROUP_BY_LABELS,
@@ -148,11 +149,18 @@ import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
 import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
+import { registerShellBridge } from "./shell/desktopBridge.ts";
+import { composeTitle, highestTitleState, type TitleState } from "./titleStatus.ts";
 import { CloseButton, DialogHeader } from "./shell/DialogHeader.tsx";
 import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
 import { ToastProvider, useToast } from "./shell/Toast.tsx";
 import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
 import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
+// J-TERMINAL/J-BROWSER: the dock surfaces load on first open (React.lazy). Their module graph
+// includes the xterm renderer and the browser panel; keeping them out of the initial chunk keeps
+// every non-dock page load light — measurable in the UI E2Es under parallel load.
+const TerminalPanel = lazy(() => import("./terminal/TerminalPanel.tsx").then((m) => ({ default: m.TerminalPanel })));
+const BrowserPanel = lazy(() => import("./browser/BrowserPanel.tsx").then((m) => ({ default: m.BrowserPanel })));
 import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
 import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
@@ -450,6 +458,7 @@ export function SessionRowButton({
   onToggleArchive,
   onRename,
   onCopyPath,
+  onTogglePin,
 }: {
   readonly session: SessionRow;
   readonly active: boolean;
@@ -462,8 +471,11 @@ export function SessionRowButton({
   readonly onRename?: () => void;
   /** Copies the workspace folder path (client-only). Omitted: no Copy workspace path item. */
   readonly onCopyPath?: () => void;
+  /** Toggles the durable pin (F1, J-SESSION-pin). Omitted: no Pin item. */
+  readonly onTogglePin?: () => void;
 }) {
   const archived = session.archived === true;
+  const pinned = session.pinned === true;
   const label = session.title || "New Session";
   // A waiting run is labelled by what it is blocked on: an interrupted step needs operator
   // reconciliation (never an approval); other known non-approval waits name their type.
@@ -498,7 +510,9 @@ export function SessionRowButton({
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
         <span className={`session-status-dot${status ? ` is-${status}` : ""}`} aria-hidden="true" title={statusLabel} />
         <span className="session-row-title">
-          {planPending ? "Plan awaiting review " : needsReconciliation ? "Needs reconciliation " : otherWait ? `Waiting: ${otherWait} ` : waiting ? "Waiting for approval " : ""}
+          {/* D-24: the wait/reconcile prefixes duplicated the row's own badge and made the
+           *  title truncate mid-name; the badge + status dot + tooltip carry the signal. */}
+          {planPending ? "Plan awaiting review " : ""}
           {label}
           {archived ? " (archived)" : ""}
         </span>
@@ -521,6 +535,7 @@ export function SessionRowButton({
         )}
         {status === "running" && <span className="sr-only">Running</span>}
         {status === "failed" && <span className="sr-only">Last run failed</span>}
+        {pinned && <span className="session-pin-tag" title="Pinned to the top" aria-label="Pinned"><PinIcon aria-hidden="true" /></span>}
         <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
       </button>
       <div className="session-row-menu-wrap" ref={menuRef}>
@@ -537,6 +552,20 @@ export function SessionRowButton({
         </button>
         {menuOpen && (
           <div role="menu" className="workspace-actions-menu session-row-menu">
+            {onTogglePin && (
+              <button
+                type="button"
+                role="menuitem"
+                aria-label={pinned ? `Unpin ${label}` : `Pin ${label} to the top`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onTogglePin();
+                }}
+              >
+                {pinned ? <UndoIcon /> : <PinIcon />}
+                {pinned ? "Unpin" : "Pin to top"}
+              </button>
+            )}
             {onRename && (
               <button
                 type="button"
@@ -2362,17 +2391,8 @@ export function ReviewPanel({
         <span className="review-panel-stat">
           +{summary.additions} -{summary.deletions}
         </span>
-        <button type="button" className="review-toolbar-btn" aria-pressed={lineWrap} onClick={() => setLineWrap((v) => !v)}>
-          Line wrap
-        </button>
-        <button
-          type="button"
-          className="review-toolbar-btn"
-          aria-pressed={showLocation}
-          onClick={() => setShowLocation((v) => !v)}
-        >
-          Show file location
-        </button>
+        {/* D-26: the text toggles and the open-actions collapsed into one options menu — the
+         *  toolbar kept wrapping to two rows at 340 px. Toggles render as checkable items. */}
         <button
           type="button"
           className="review-toolbar-btn"
@@ -2380,10 +2400,17 @@ export function ReviewPanel({
           aria-expanded={openMenu === "more"}
           onClick={() => setOpenMenu((v) => (v === "more" ? undefined : "more"))}
         >
-          More ways to open
+          Options
         </button>
         {openMenu === "more" && (
           <div role="menu" className="review-more-menu">
+            <button type="button" role="menuitemcheckbox" aria-checked={lineWrap} onClick={() => setLineWrap((v) => !v)}>
+              {lineWrap ? "✓ " : ""}Line wrap
+            </button>
+            <button type="button" role="menuitemcheckbox" aria-checked={showLocation} onClick={() => setShowLocation((v) => !v)}>
+              {showLocation ? "✓ " : ""}Show file location
+            </button>
+            <hr />
             <button type="button" role="menuitem" onClick={() => void copyPath(summary.file_path, "Path")}>
               Copy path
             </button>
@@ -2854,6 +2881,7 @@ function MessageBubble({
   turnNumber,
   onOpenReview,
   workDetails,
+  currentAction,
   onRetry,
 }: {
   readonly message: ChatMessage;
@@ -2863,6 +2891,9 @@ function MessageBubble({
   readonly onRetry?: () => void;
   readonly onOpenReview?: (summary: EditSummary, turnNumber: number) => void;
   readonly workDetails?: WorkDetailsMode;
+  /** D-22: the running tool's action label (trace projection), so the streaming status names
+   *  what is happening instead of the vague "Deep diving". */
+  readonly currentAction?: string;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -2895,9 +2926,9 @@ function MessageBubble({
       {message.streaming ? (
         <div className="message-status-row">
           <span className="status-pill status-streaming" role="status">
-            <span className="sr-only">Deep diving for {elapsedSeconds ?? 0}s</span>
+            <span className="sr-only">{currentAction ? `${currentAction} · ${elapsedSeconds ?? 0}s` : `Deep diving for ${elapsedSeconds ?? 0}s`}</span>
           </span>
-          <span className="took-btn" aria-hidden="true">Deep diving for {elapsedSeconds ?? 0}s</span>
+          <span className="took-btn" aria-hidden="true">{currentAction ?? `Deep diving for ${elapsedSeconds ?? 0}s`}</span>
         </div>
       ) : (
         <div className="message-status-row">
@@ -3206,7 +3237,7 @@ function DeleteWorkspaceDialog({
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-heading" tabIndex={-1} ref={dialogRef}>
-        <DialogHeader title={`Delete workspace "${workspace.title}"?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
+        <DialogHeader title={`Delete workspace “${workspace.title}”?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
         <p className="dialog-copy">
           This removes <strong>{workspace.title}</strong>{workspace.sessionCount > 0 ? <> and its {workspace.sessionCount === 1 ? "1 conversation" : `${workspace.sessionCount} conversations`}</> : null} from the sidebar. Files in <code>{workspace.root}</code> are not touched, and you can add the folder again later.
         </p>
@@ -4346,6 +4377,35 @@ function AppShell() {
   const inspector = useInspector();
   const isMobile = useMediaQuery("(max-width: 760px)");
   const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
+  // J-TERMINAL-session: the docked working surface (terminal today; browser with its phase).
+  // The dock is a view of a server-side session — height is the only local preference.
+  const [surface, setSurface] = useState<"none" | "terminal" | "browser">("none");
+  const [surfaceMaximized, setSurfaceMaximized] = useState(false);
+  const [surfaceHeight, setSurfaceHeight] = useState<number>(() => {
+    const raw = Number(localStorage.getItem("cognate.surface.height"));
+    return Number.isFinite(raw) && raw >= 180 && raw <= 800 ? raw : 320;
+  });
+  const setSurfaceHeightPersisted = useCallback((px: number) => {
+    const clamped = Math.round(Math.max(180, Math.min(800, px)));
+    setSurfaceHeight(clamped);
+    try { localStorage.setItem("cognate.surface.height", String(clamped)); } catch { /* storage may be unavailable */ }
+  }, []);
+  const toggleSurface = useCallback((next: "terminal" | "browser") => {
+    setSurface((current) => (current === next ? "none" : next));
+    setSurfaceMaximized(false);
+  }, []);
+  const startSurfaceResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = surfaceHeight;
+    const move = (moveEvent: PointerEvent) => setSurfaceHeightPersisted(startHeight + (startY - moveEvent.clientY));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, [surfaceHeight, setSurfaceHeightPersisted]);
   const setSidebarWidth = useCallback((w: number) => {
     setSidebarWidthState(w);
     try {
@@ -4826,6 +4886,12 @@ function AppShell() {
   };
   const shortcutOverridesRef = useRef(settings.shortcuts);
   shortcutOverridesRef.current = settings.shortcuts;
+  // The Tauri shell dispatches menu actions into this bridge (desktop-native-completion B3);
+  // in a browser or CLI context nothing registers it and the shell is not there to call it.
+  // Handlers are read live on every dispatch so the bridge always routes to the current map.
+  useEffect(() => {
+    registerShellBridge(() => actionHandlers.current);
+  }, []);
   const escapeStateRef = useRef({ showSettings, drawerOpen: false, closeDrawer: () => {} });
   escapeStateRef.current = { showSettings, drawerOpen: isMobile && !collapsed, closeDrawer: () => setCollapsed(true) };
   useEffect(() => {
@@ -5287,6 +5353,14 @@ function AppShell() {
   const showHero =
     Boolean(currentWorkspaceId) && transcript.length === 0 && streaming.status === "idle" && !activeRunId;
   const sessionTurns = transcript.filter((m) => m.role === "assistant").length;
+  // D-25: one turn counter. The diff header's "Review · turn N" used the raw transcript index
+  // (user messages counted), so it read "turn 2" while the composer said "1 turn". Both now
+  // count assistant turns.
+  const turnOrdinals = new Map<number, number>();
+  let assistantTurnCounter = 0;
+  transcript.forEach((m, i) => {
+    if (m.role === "assistant") turnOrdinals.set(i, ++assistantTurnCounter);
+  });
   const sessionSteps = transcript.reduce((sum, m) => sum + (m.stepCount ?? 0), 0);
 
   // ---- One source of truth for the center view -------------------------------------------------
@@ -5376,6 +5450,24 @@ function AppShell() {
     [client, activeSessionId],
   );
   const agentLocked = Boolean(activeRunId) || streaming.status === "streaming" || Boolean(pendingApproval);
+  // The window title is the shell's one sanctioned web→shell cue (desktop-native-completion
+  // B3): states and counts only, never session content. Precedence (approval →
+  // reconciliation → waiting → running) is titleStatus's documented contract, and the format
+  // is a two-sided, test-pinned grammar the shell parses strictly.
+  useEffect(() => {
+    const states: TitleState[] = showHero
+      ? [{ kind: "idle" }]
+      : [
+          streaming.status === "streaming" ? { kind: "running" } : { kind: "idle" },
+          ...(pendingApproval ? [{ kind: "approval", count: 1 } satisfies TitleState] : []),
+          ...(planReviewContinuation || governanceContinuation ? [{ kind: "waiting" } satisfies TitleState] : []),
+          ...(ambiguousContinuation ? [{ kind: "reconciliation" } satisfies TitleState] : []),
+        ];
+    document.title = composeTitle(highestTitleState(states));
+    // The Chromium --app fallback's beforeunload guard (B4) consults this flag; the entry
+    // template installs that listener only when the boot's shell kind is "chromium-app".
+    (window as unknown as { __wbInFlight?: boolean }).__wbInFlight = !showHero && states.some((s) => s.kind !== "idle");
+  }, [showHero, pendingApproval, planReviewContinuation, governanceContinuation, ambiguousContinuation, streaming.status]);
   const contextBar = currentWorkspaceId ? (
     <ComposerBar
       agentChip={<AgentChip harnesses={harnessList.harnesses} choice={agentChoice} locked={agentLocked} error={agentBindError} onChange={changeAgent} onOpenSettings={() => openSettings("agents")} />}
@@ -5640,6 +5732,13 @@ function AppShell() {
                     {...(harnessBindings.get(session.id)?.harnessId ? { harnessLabel: agentLabel(harnessList.harnesses, harnessBindings.get(session.id)!.harnessId) } : {})}
                     onOpen={() => openSession(session.id)}
                     onRename={() => setRenameSessionFor({ id: session.id, title: session.title })}
+                    onTogglePin={() => {
+                      const pinned = session.pinned === true;
+                      void client
+                        .invoke("session.setPinned", { sessionId: session.id, pinned: !pinned } as never)
+                        .then(() => toast.show(pinned ? "Session unpinned" : "Session pinned to the top"))
+                        .catch((e) => console.error("session.setPinned failed", e));
+                    }}
                     {...(workspaces.find((w) => w.id === session.workspaceId)?.root
                       ? {
                           onCopyPath: () => {
@@ -5844,14 +5943,40 @@ function AppShell() {
             />
           }
           trailing={
-            inSession && subagentRows.length > 0 ? (
+            <>
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "terminal" ? " active" : ""}`}
+                  aria-pressed={surface === "terminal"}
+                  aria-label={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  title={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  onClick={() => toggleSurface("terminal")}
+                >
+                  <TerminalIcon />
+                </button>
+              )}
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "browser" ? " active" : ""}`}
+                  aria-pressed={surface === "browser"}
+                  aria-label={surface === "browser" ? "Hide browser" : "Show browser"}
+                  title={surface === "browser" ? "Hide browser" : "Show browser"}
+                  onClick={() => toggleSurface("browser")}
+                >
+                  <GlobeIcon />
+                </button>
+              )}
+              {inSession && subagentRows.length > 0 ? (
               <div className="subagent-count-wrap">
                 <button type="button" className="subagent-count-btn" aria-expanded={subagentsExpanded} onClick={() => setSubagentsExpanded((v) => !v)}>
                   {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
                 </button>
                 {subagentsExpanded && <SubagentTree rows={subagentRows} onOpen={(row) => openSubagent(row.toolCallId)} />}
               </div>
-            ) : undefined
+            ) : undefined}
+            </>
           }
           inspectorOpen={inspector.open}
           onToggleInspector={inspector.toggleInspector}
@@ -5925,7 +6050,7 @@ function AppShell() {
                 <MessageBubble
                   key={index}
                   message={message}
-                  turnNumber={index + 1}
+                  turnNumber={turnOrdinals.get(index) ?? 1}
                   onOpenReview={openReviewPanel}
                   workDetails={workDetails}
                   {...(message.failed && index === transcript.length - 1 && streaming.status !== "streaming"
@@ -5935,7 +6060,14 @@ function AppShell() {
               ))}
               {streaming.status === "streaming" && (
                 <>
-                  <MessageBubble message={{ role: "assistant", content: streaming.text, streaming: true }} elapsedSeconds={elapsedSeconds} />
+                  <MessageBubble
+                    message={{ role: "assistant", content: streaming.text, streaming: true }}
+                    elapsedSeconds={elapsedSeconds}
+                    currentAction={(() => {
+                      const last = toolEntries[toolEntries.length - 1];
+                      return last && last.status === "running" ? toolActionLabel(last, workDetails) : undefined;
+                    })()}
+                  />
                   {streaming.retries.length > 0 && (
                     <RetryCard
                       retries={streaming.retries}
@@ -6010,6 +6142,53 @@ function AppShell() {
             )}
           </>
         )}
+        {surface === "browser" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Browser dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize browser dock" onPointerDown={startSurfaceResize} />
+            )}
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the browser panel…</p></div>}
+            >
+              <BrowserPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+                onSendToConversation={(message) => void send(message)}
+              />
+            </Suspense>
+          </section>
+        )}
+        {surface === "terminal" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Terminal dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize terminal dock" onPointerDown={startSurfaceResize} />
+            )}
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the terminal…</p></div>}
+            >
+              <TerminalPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                worldId={currentWorkspace?.executionWorldId ?? "local"}
+                worldLabel={currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId)?.label ?? currentWorkspace.executionWorldId : "Local"}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+              />
+            </Suspense>
+          </section>
+        )}
       </main>
       <Inspector sidebarWidth={isMobile || collapsed ? 0 : sidebarWidth} />
       <InspectorTab id="context" label="Context" icon={<InfoIcon />} order={10}>
@@ -6028,7 +6207,7 @@ function AppShell() {
             <p className="cf-h">File changes in this session</p>
             <ul className="inspector-list">
               {transcript.flatMap((message, index) =>
-                (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => ({ summary, turn: index + 1 })),
+                (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => ({ summary, turn: turnOrdinals.get(index) ?? 1 })),
               ).map(({ summary, turn }) => (
                 <li key={`${turn}-${summary.file_path}`}>
                   <button type="button" className="inspector-list-row" onClick={() => setOpenReview({ summary, turnNumber: turn })}>

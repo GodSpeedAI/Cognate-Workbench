@@ -185,6 +185,36 @@ Development authentication does not establish a production listener or hostile-u
 See [Linux contained workspaces](linux-contained-workspaces.md) for the explicit child-world
 configuration, refusal behavior and remaining limits.
 
+## Desktop shell (Tauri) — recorded limits from the desktop-native-completion work
+
+These are the packaged desktop shell's honest limits, each from the EGM-reviewed design
+(`.agents/plans/desktop-native-completion/design.md`). None is presented as solved.
+
+- **Downloads are not wired in the desktop shell.** The Blob/`anchor.download` export path
+  (`src/ui/download.ts`) is expected to be dead inside the Tauri webview (WebKitGTK needs an
+  embedder download handler; Tauri wires none). The working paths are clipboard copy (the
+  shell's loopback origin is a secure context) and the browser/CLI surfaces, where the anchor
+  download works. Dispositioned DEFER in the mission's dispositions ledger; revisit on a real
+  operator job.
+- **Notifications are not shipped — the title cue is canonical.** The OQ1 gate (design §"Notifications") resolved 2026-11-07 with the owner: the B4 attention cue (window title grammar + transition flash) is the approval-waiting surface; the OS notification plugin is not built. The in-app cards remain the only approve/deny surface, so no OS surface can ever claim an action it cannot perform. The gate can be reopened by the operator.
+- **The close guard reads the server's own counts.** Since the B5 tranche the fail-closed
+  close confirmation consults `/health`'s `runsInFlight`/`pendingApprovals` (the machine
+  authority): healthy + both counts present + both zero → close proceeds; anything else —
+  work in flight, missing counts (failed projection read), dead backend → the confirm
+  dialog. The page is never trusted; a wedged webview cannot suppress the confirm. (The B3
+  title grammar remains as the human attention cue only.)
+- **AppImage is not a supported bundle target.** linuxdeploy's AppImage tooling fails in
+  FUSE-less CI/container environments (the B2 qualification log records the failure), so
+  `bundle.targets` ships `deb` (Linux x64 + arm64), `nsis` (Windows) and `app`/`dmg`
+  (macOS). The desktop shell's package identity is distinct from the CLI's
+  (`cognate-workbench-shell` vs `cognate-workbench` — proven non-overlapping by the B5
+  smoke run); the operator installs the CLI package separately when both surfaces are
+  wanted.
+- **Live-window rows verified on WSLg are enumerated per tranche** in the mission's
+  `verification.md`; anything not verified on a real device is recorded as
+  implemented-per-docs in the final platform-honesty matrix (menu clicks, dialog
+  interactions, and Wayland title sync need a real interaction pass).
+
 ## Session / Workspace / Task RED journeys — recorded limits
 
 The five formerly red suites (`test/*red.test.ts`, `test/E2E-workspace-session-ux.red.test.ts`)

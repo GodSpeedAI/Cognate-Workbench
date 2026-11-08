@@ -19,9 +19,8 @@ describe("AmbiguousStepCard", () => {
   test("offers an observed-outcome select defaulting to failed, a required observation field and the record button", () => {
     const html = renderToStaticMarkup(<AmbiguousStepCard capability="tool.bash" busy={false} onReconcile={() => {}} />);
     expect(html).toContain("Observed outcome");
-    expect(html).toMatch(/<option value="failed" selected="">/);
+    expect(html).toContain('aria-label="Observed outcome: Step did not complete"');
     expect(html).toContain("Step did not complete");
-    expect(html).toContain("Step completed");
     expect(html).toContain("What did you observe?");
     expect(html).toMatch(/<textarea required=""/);
     expect(html).toContain("Record reconciliation");
@@ -32,7 +31,7 @@ describe("AmbiguousStepCard", () => {
     const html = renderToStaticMarkup(<AmbiguousStepCard capability="expert.model.generate" modelCall busy={false} onReconcile={() => {}} />);
     expect(html).toContain("Retry the model call");
     expect(html).not.toContain("Step completed");
-    expect(html).not.toContain('value="succeeded"');
+    expect(html).not.toContain("Step completed");
     expect(html).toContain("no external effect to confirm");
   });
 

@@ -55,25 +55,13 @@ jobs:
           choco install nsis -y --no-progress
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files (x86)\NSIS'
 
-      # @godspeedai/domainforge 0.21.2 ships only the linux-x64 napi binding. Every other platform builds
-      # the pinned tag's napi cdylib natively with cargo (no Node or Python step), then installs it beside
-      # the JS loader under the name that loader expects.
-      - uses: dtolnay/rust-toolchain@1.99.0
-        if: matrix.binding != 'linux-x64-gnu'
+      # @godspeedai/domainforge ships only the linux-x64 napi binding. Every other platform builds
+      # the pinned tag's napi cdylib natively via the shared composite action.
       - name: Build DomainForge ${{ matrix.binding }} binding
         if: matrix.binding != 'linux-x64-gnu'
-        shell: bash
-        env:
-          BINDING: ${{ matrix.binding }}
-        run: |
-          set -euo pipefail
-          DF_VERSION="$(bun -e 'console.log(require("./node_modules/@godspeedai/domainforge/package.json").version)')"
-          git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
-          cargo build --release --locked --manifest-path "$RUNNER_TEMP/domainforge/domainforge-core/Cargo.toml" --features typescript,three_valued_logic --lib
-          LIB="$(find "$RUNNER_TEMP/domainforge/target/release" -maxdepth 1 \( -name 'domainforge_core.dll' -o -name 'libdomainforge_core.so' -o -name 'libdomainforge_core.dylib' \) | head -1)"
-          test -n "$LIB"
-          cp "$LIB" "$GITHUB_WORKSPACE/node_modules/@godspeedai/domainforge/domainforge-core.$BINDING.node"
-          bun -e 'console.log("domainforge", process.argv[1], process.argv[2], "sha256:", new Bun.CryptoHasher("sha256").update(require("fs").readFileSync(process.argv[3])).digest("hex"))' "$DF_VERSION" "$BINDING" "$LIB"
+        uses: ./.github/actions/domainforge-binding
+        with:
+          binding: ${{ matrix.binding }}
 
       - name: Build package
         run: bun scripts/package.ts ${{ matrix.target }} ${{ matrix.tag }}

@@ -24,9 +24,11 @@ test("native schedule controls and evidence usage work on desktop and mobile",as
       await page.goto(app.app.url,{waitUntil:"domcontentloaded"});
       await page.getByRole("button",{name:"Experts and Teams",exact:true}).click();
       await page.getByRole("button",{name:"Schedules",exact:true}).click();
-      await page.getByRole("combobox",{name:/^Active expert/}).selectOption("builder");
+      await page.getByRole("button",{name:/^Active expert/}).click();
+      await page.getByRole("menuitemradio",{name:"Builder",exact:true}).click();
       await page.getByLabel("Objective",{exact:true}).fill("Create the scheduled verification receipt.");
-      await page.getByLabel("Recurrence",{exact:true}).selectOption("once");
+      await page.getByRole("button",{name:/^Recurrence:/}).click();
+      await page.getByRole("menuitemradio",{name:"Once"}).click();
       await page.getByLabel("Due instant (ISO with timezone)",{exact:true}).fill(new Date(Date.now()-500).toISOString());
       await page.getByRole("button",{name:"Save schedule",exact:true}).click();
       await page.getByText("Schedule saved. Native Expert work will begin only when its occurrence is due.",{exact:true}).waitFor();
@@ -91,7 +93,7 @@ test("a human live update is pending during inference and incorporated into the 
       await page.getByText("Applied the revised Q3 source.",{exact:true}).first().waitFor();
       expect(saw).toBe(true);
       expect((await page.locator(".experts-transcript").innerText())).toContain("incorporated");
-      await page.waitForFunction(()=>document.querySelector<HTMLSelectElement>('select[aria-label="Conversation history"]')?.selectedOptions[0]?.textContent?.includes("3 messages"));
+      await page.getByRole("button",{name:/^Conversation history: .*3 messages/}).waitFor();
       await page.screenshot({path:join(import.meta.dir,"..","screenshots","experts-debt","live-inbox-desktop.png")});
     }finally{release();await browser.close();}
   });
@@ -123,7 +125,8 @@ test("loaded personal memory clears when selecting another Expert or Team scope"
       expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);
       await page.getByRole("button",{name:"Load scoped memory",exact:true}).click();
       await page.getByText("Builder personal scope sentinel",{exact:true}).waitFor();
-      await page.getByRole("combobox",{name:"Memory scope",exact:true}).selectOption("cognate-team");
+      await page.getByRole("button",{name:/^Memory scope/}).click();
+      await page.getByRole("menuitemradio",{name:"Cognate Team context"}).click();
       expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);
       await page.getByRole("button",{name:"Load scoped memory",exact:true}).click();
       expect(await page.getByText("Builder personal scope sentinel",{exact:true}).count()).toBe(0);

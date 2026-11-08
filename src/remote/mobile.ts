@@ -46,6 +46,10 @@ export interface RemoteHost {
   readonly operatorIdentityId: string;
   /** The phone bundle and its stylesheet, built once per process. */
   readonly assets: () => Promise<{ readonly js: string; readonly css: string }>;
+  /** J-REMOTE-diagnostics: durably records the bounded `workbench.remote.*` transition family.
+   *  Fire-and-forget from the remote's perspective — a failed recording never breaks the control
+   *  path, and the polls never call this. */
+  readonly record?: (events: readonly { readonly type: string; readonly payload: Json }[]) => Promise<void>;
 }
 
 export interface RemoteStatus {
@@ -113,6 +117,13 @@ export class MobileRemote {
 
   constructor(private readonly host: RemoteHost, private readonly settings: RemoteSettings) {}
 
+  /** One bounded diagnostics event, best-effort (J-REMOTE-diagnostics). */
+  private diag(type: "workbench.remote.state" | "workbench.remote.error", payload: Json): void {
+    const record = this.host.record;
+    if (!record) return;
+    void record([{ type, payload }]).catch(() => undefined);
+  }
+
   get publicBase(): string {
     return this.settings.publicUrl ?? `http://localhost:${this.port}`;
   }
@@ -144,6 +155,7 @@ export class MobileRemote {
     await this.revokeDevices("remote: restarted");
     if (!this.server) this.listen();
     this.pairing.start(Date.now(), floor);
+    this.diag("workbench.remote.state", { state: "waiting" });
     return this.status();
   }
 
@@ -152,6 +164,7 @@ export class MobileRemote {
     if (!this.server) return this.start();
     this.pairing.refresh(Date.now());
     await this.revokeAll("remote: refresh");
+    this.diag("workbench.remote.state", { state: "waiting" });
     return this.status();
   }
 
@@ -163,6 +176,7 @@ export class MobileRemote {
     this.streams.clear();
     this.server?.stop(true);
     this.server = undefined;
+    this.diag("workbench.remote.state", { state: "off" });
     return this.status();
   }
 
@@ -275,7 +289,10 @@ export class MobileRemote {
     if (!this.limiter.allow("redeem", 10)) return json({ error: "rate" }, 429);
     const body = await this.body(request);
     const result = this.pairing.redeem(body?.secret, Date.now());
-    if (!result.ok) return json({ error: result.reason }, 400);
+    if (!result.ok) {
+      this.diag("workbench.remote.error", { message: `pairing link refused (${result.reason})` });
+      return json({ error: result.reason }, 400);
+    }
     const userId = randomBytes(16);
     return json({ ticket: result.ticket, options: registrationOptions({ challenge: result.challenge, rpId: this.rpId, userId, userName: "operator" }) });
   }
@@ -297,6 +314,7 @@ export class MobileRemote {
       draft.devices[id] = device;
       draft.audit.push({ at: now, deviceId: id, command: "pair", commandId: "pairing", outcome: "paired" });
     });
+    this.diag("workbench.remote.state", { state: "connected", deviceLabel: label });
     return json({ ok: true, device: { label } }, 200, { "set-cookie": sessionCookie(issued.token) });
   }
 
@@ -319,7 +337,10 @@ export class MobileRemote {
     const { state } = await readRemoteState(this.host.service, this.host.system);
     const device = Object.values(state.devices).find((d) => d.credentialId === credential?.id && d.revokedAt === null && d.generation === this.pairing.generation);
     if (!device) return json({ error: "passkey" }, 401);
-    const result = await verifyAssertion(credential as never, { challenge, origin: this.origin, rpId: this.rpId, publicKey: device.publicKey, signCount: device.signCount });
+    const result = await verifyAssertion(credential as never, { challenge, origin: this.origin, rpId: this.rpId, publicKey: device.publicKey, signCount: device.signCount }).catch((error: unknown) => {
+      this.diag("workbench.remote.error", { message: error instanceof WebAuthnError ? "passkey verification failed" : "passkey verification failed (unexpected)" });
+      throw error;
+    });
     if (device.sid) await revokeSession(this.host.service, this.host.system, device.sid, "remote: re-authenticated").catch(() => undefined);
     const issued = await issueSession(this.host.service, this.host.system, { identityId: this.host.operatorIdentityId, ttlMs: REMOTE_SESSION_TTL_MS, cause: `mobile remote: ${device.id}` });
     const now = new Date().toISOString();
