@@ -68,6 +68,12 @@ if [ "$MODE" = bundle ]; then
       [ -n "$APP" ] || { hdiutil detach "$MNT" >/dev/null 2>&1 || true; echo "FAIL: no .app in $BUNDLE"; exit 1; }
       cp -R "$APP" "$WORK/install/"
       hdiutil detach "$MNT" >/dev/null
+      # The bundler ad-hoc signs the main binary but not the externalBin sidecar (tauri-apps
+      # discussion #2269) — an unsigned sidecar refuses to exec on modern macOS, which reads
+      # exactly like a readiness timeout (the shell runs, the backend never comes up). Strip
+      # quarantine and ad-hoc re-sign the whole bundle before launching.
+      xattr -dr com.apple.quarantine "$WORK/install" 2>/dev/null || true
+      codesign --force --deep -s - "$WORK/install/"*.app 2>/dev/null || true
       ;;
     *)
       echo "FAIL: unsupported bundle type: $BUNDLE (deb or dmg)"; exit 1 ;;
@@ -197,20 +203,21 @@ curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null || { echo "FAIL: first back
 echo "second instance exited; first backend still serving (single-instance focus)"
 
 # --- 3. Close: SIGTERM → sidecar down, pg0 stopped, lock released ------------
+# The product's stop grace is 60 s (90 s wedge failsafe); the waits outlast it.
 kill -TERM "$SHELL_PID"
-for _ in $(seq 1 45); do
+for _ in $(seq 1 90); do
   kill -0 "$SHELL_PID" 2>/dev/null || break
   sleep 1
 done
-kill -0 "$SHELL_PID" 2>/dev/null && { echo "FAIL: shell survived SIGTERM (45 s)"; exit 1; }
+kill -0 "$SHELL_PID" 2>/dev/null && { echo "FAIL: shell survived SIGTERM (90 s)"; exit 1; }
 SHELL_PID=""
 assert_no_sidecar
-for _ in $(seq 1 35); do
+for _ in $(seq 1 60); do
   [ -z "$(pg0_pid)" ] && break
   sleep 1
 done
 [ -z "$(pg0_pid)" ] || { echo "FAIL: bundled pg0 still running after shell close (pid $(pg0_pid))"; exit 1; }
-for _ in $(seq 1 30); do
+for _ in $(seq 1 60); do
   [ ! -e "$DATA_HOME/server.lock" ] && break
   sleep 1
 done
@@ -229,11 +236,11 @@ echo "respawn healthy on port $PORT2 with lock re-created"
 
 # --- 5. Final close ----------------------------------------------------------
 kill -TERM "$SHELL_PID"
-for _ in $(seq 1 45); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 1; done
+for _ in $(seq 1 90); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 1; done
 SHELL_PID=""
 for _ in $(seq 1 35); do [ -z "$(pg0_pid)" ] && break; sleep 1; done
 [ -z "$(pg0_pid)" ] || { echo "FAIL: pg0 survived the final close"; exit 1; }
-for _ in $(seq 1 30); do
+for _ in $(seq 1 60); do
   [ ! -e "$DATA_HOME/server.lock" ] && break
   sleep 1
 done

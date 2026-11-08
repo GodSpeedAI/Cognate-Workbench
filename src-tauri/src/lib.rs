@@ -137,9 +137,9 @@ fn install_signal_handlers(app: tauri::AppHandle) {
             backend::log_shell(&format!("signal {signal}: shutting down"));
             app.exit(0);
             // If the event loop is wedged, do not leave the backend behind — but outlast the
-            // sidecar's 30 s shutdown grace so the database stop is never cut short.
+            // sidecar's 60 s shutdown grace so the database stop is never cut short.
             std::thread::spawn(|| {
-                std::thread::sleep(std::time::Duration::from_secs(45));
+                std::thread::sleep(std::time::Duration::from_secs(90));
                 std::process::exit(0);
             });
         }

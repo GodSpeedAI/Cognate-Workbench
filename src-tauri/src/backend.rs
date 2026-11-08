@@ -624,8 +624,13 @@ fn terminate(child: &mut Child) {
     }
     // The sidecar's clean stop covers app teardown (terminal/browser/preview disposal) AND the
     // bundled database's own stop. Ten seconds SIGKILLed it mid-cleanup, leaving an orphaned
-    // pg0 behind — observed on this host. Thirty seconds covers a checkpointing database.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // pg0 behind — observed on this host. Thirty seconds covers a checkpointing database here,
+    // but the E1 CI smoke found it expiring on cold, loaded machines (the grace SIGKILL fired
+    // and the lock orphaned; see the mission verification log). Sixty seconds keeps the
+    // database stop safely inside the grace on slow hosts; the wedge failsafe in lib.rs (90 s)
+    // stays strictly above it. A hard kill is still self-healing: the next boot takes over a
+    // lock whose owner died and reuses the database (interrupted-shutdown recovery).
+    let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         match child.try_wait() {
             Ok(Some(_)) | Err(_) => return,

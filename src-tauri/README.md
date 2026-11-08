@@ -17,14 +17,16 @@ zoom, window state, single-instance behavior, and a startup-failure error window
 - Readiness: the shell polls `/health` until `ok:true` — a first boot (no `database/` in
   the data home; the bundled database initializes) gets a 180 s budget, a steady boot
   60 s. Readiness logs the measured time against the budget. A timed-out backend is
-  asked to stop cleanly (the same SIGTERM + 30 s database-stop grace as shutdown —
+  asked to stop cleanly (the same SIGTERM + 60 s database-stop grace as shutdown —
   SIGKILLing it mid-initdb would orphan pg0) and the error surface carries the sidecar's
   own stderr tail.
-- Shutdown: on exit the spawned child gets SIGTERM (30 s grace, then SIGKILL; a 45 s
-  wedge failsafe covers a hung event loop after an external SIGTERM/SIGINT). The 30 s
-  grace exists because the sidecar's clean stop covers app teardown AND the bundled
-  database's own stop — a shorter window SIGKILLed it mid-cleanup and orphaned pg0
-  (observed, fixed in `96f7fb0`). On Windows there is no portable SIGTERM for a
+- Shutdown: on exit the spawned child gets SIGTERM (60 s grace, then SIGKILL; a 90 s
+  wedge failsafe covers a hung event loop after an external SIGTERM/SIGINT). The grace
+  exists because the sidecar's clean stop covers app teardown AND the bundled database's
+  own stop — a shorter window SIGKILLed it mid-cleanup and orphaned pg0 (observed, fixed
+  in `96f7fb0` at 30 s; the E1 CI smoke found 30 s expiring on cold, loaded machines and
+  the timers were raised together in `f9c23fe`'s aftermath). On Windows there is no
+  portable SIGTERM for a
   detached child, so the process is terminated directly — the same clean-stop gap the
   standalone package documents for Windows; the bundled database stop on Windows
   remains unverified.
