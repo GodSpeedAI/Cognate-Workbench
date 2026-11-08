@@ -464,3 +464,16 @@ included), T2 on both Linux platforms, Windows bundle-only, msrv green. The harn
 landed in this phase: NUL-safe glob resolution, shared Xvfb, crash-vs-focus-exit detection,
 lock-release waits, bash 3.2/BSD-find portability, stderr-routed forensics, the bundle-layout
 dump, and the deterministic main-binary selection.
+
+## Operator Windows test — first real-device finding (2026-11-08, fixed in a600e32)
+
+The owner's Windows test found what the CI matrix could not: the sidecar spawned with a
+**visible console window**, and closing that window killed the backend with
+STATUS_CONTROL_C_EXIT (0xc000013a) — surfacing the (correct) watchdog error window. Fix:
+`CREATE_NO_WINDOW` (0x08000000) on the sidecar spawn, so the backend runs as a windowless
+background process whose output still reaches the shell through the piped stdout/stderr. The
+windows-x64 matrix job compiles the cfg(windows) block and shipped the fixed installer
+(run 42508158049, 6/6 green; installer
+`63068ae56db29be64ccb0b510e6dbbe8f73eab329c31c220d6f76cc7511d6749`). The runtime behaviour on
+a real Windows desktop (no console window; clean start/stop; the Windows shutdown gap that
+docs already record) stays implemented-per-docs until the operator's next pass.
