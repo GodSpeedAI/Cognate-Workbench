@@ -64,12 +64,39 @@ pub fn launch(app: AppHandle) {
     let resource_root = if cfg!(debug_assertions) {
         None
     } else {
-        // Must mirror the layout tauri.conf.json declares under bundle.resources:
-        // src-tauri/resources/cognate-workbench lands at <resource dir>/resources/cognate-workbench.
-        app.path()
-            .resource_dir()
-            .ok()
-            .map(|dir| dir.join("resources").join("cognate-workbench"))
+        // Probe the layouts tauri.conf.json's bundle.resources can produce: the deb/nsis
+        // installs put src-tauri/resources/cognate-workbench at <resource
+        // dir>/resources/cognate-workbench; macOS .app bundles have been observed to resolve
+        // differently (the E1 darwin run hit the fallback and reported pg0 missing). Pick the
+        // layout that exists; log the probe so a future layout change names itself. The data
+        // home is created first — log_shell appends into it and a silent failed append hid
+        // the probe result from the E1 forensics.
+        let _ = fs::create_dir_all(data_home());
+        match app.path().resource_dir() {
+            Ok(dir) => {
+                let candidates = [
+                    dir.join("resources").join("cognate-workbench"),
+                    dir.join("cognate-workbench"),
+                ];
+                candidates
+                    .into_iter()
+                    .find(|candidate| candidate.join("MANIFEST.json").exists())
+                    .inspect(|chosen| {
+                        log_shell(&format!("resource root: {}", chosen.display()));
+                    })
+                    .or_else(|| {
+                        log_shell(&format!(
+                            "resource probe failed: no MANIFEST.json under {}",
+                            dir.display()
+                        ));
+                        None
+                    })
+            }
+            Err(error) => {
+                log_shell(&format!("resource_dir() unavailable: {error}"));
+                None
+            }
+        }
     };
     app.manage(BackendHandle {
         child: Mutex::new(None),
@@ -535,9 +562,11 @@ fn spawn_watchdog(app: AppHandle, log: PathBuf) {
             };
             let mut shell_owned = false;
             {
+                // A poisoned lock means another thread panicked holding it — recover the
+                // guard rather than abandoning the watchdog (and the backend with it).
                 let mut guard = match state.child.lock() {
                     Ok(guard) => guard,
-                    Err(_) => return,
+                    Err(poisoned) => poisoned.into_inner(),
                 };
                 match guard.as_mut() {
                     Some(child) => {
@@ -599,11 +628,18 @@ fn spawn_watchdog(app: AppHandle, log: PathBuf) {
 }
 
 /// Stop the spawned backend gracefully. Reused backends are left to their owner.
+///
+/// A poisoned mutex must not skip the stop: the E1 CI forensics showed a watchdog thread
+/// panicking while holding the child lock (an error window opened off the main thread under
+/// load), after which every `if let Ok(lock)` shutdown silently no-opped and the backend
+/// outlived its shell with the lock held. Recover the inner guard instead.
 pub fn shutdown(handle: &tauri::State<'_, BackendHandle>) {
-    if let Ok(mut guard) = handle.child.lock() {
-        if let Some(mut child) = guard.take() {
-            terminate(&mut child);
-        }
+    let mut guard = match handle.child.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(mut child) = guard.take() {
+        terminate(&mut child);
     }
 }
 

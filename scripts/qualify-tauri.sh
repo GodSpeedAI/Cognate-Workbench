@@ -74,6 +74,10 @@ if [ "$MODE" = bundle ]; then
       # quarantine and ad-hoc re-sign the whole bundle before launching.
       xattr -dr com.apple.quarantine "$WORK/install" 2>/dev/null || true
       codesign --force --deep -s - "$WORK/install/"*.app 2>/dev/null || true
+      # Name the bundle's actual layout once in the log: the resource probe inside the shell
+      # logs through the data home, which does not exist until the backend starts.
+      echo "[bundle layout]" >&2
+      find "$WORK/install" -maxdepth 4 | head -40 >&2
       ;;
     *)
       echo "FAIL: unsupported bundle type: $BUNDLE (deb or dmg)"; exit 1 ;;

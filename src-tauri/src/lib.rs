@@ -135,7 +135,15 @@ fn install_signal_handlers(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         if let Some(signal) = signals.forever().next() {
             backend::log_shell(&format!("signal {signal}: shutting down"));
+            // Stop the backend here, not only through the exit event: the E1 CI forensics
+            // showed a shell that exited on SIGTERM with its backend still alive and the
+            // lock held, so the exit-event shutdown cannot be the only path. shutdown() is
+            // idempotent (an empty handle no-ops), so the exit event's call stays safe.
+            if let Some(state) = app.try_state::<backend::BackendHandle>() {
+                backend::shutdown(&state);
+            }
             app.exit(0);
+            // (shutdown() recovers a poisoned mutex itself; see backend.rs.)
             // If the event loop is wedged, do not leave the backend behind — but outlast the
             // sidecar's 60 s shutdown grace so the database stop is never cut short.
             std::thread::spawn(|| {
