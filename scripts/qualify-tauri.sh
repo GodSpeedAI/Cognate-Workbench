@@ -117,6 +117,18 @@ pg0_pid() {
   "$pg0" info --name "$name" 2>/dev/null | awk '/PID:/ {print $2; exit}' || true
 }
 
+# Failure forensics: the shell's own stdout/stderr, the sidecar log tail, the lock's
+# contents (it names the pid that should have cleaned up) and the live process table.
+dump_forensics() {
+  echo "--- forensics ($1) ---"
+  for out in "$WORK"/shell-*.out; do
+    [ -f "$out" ] && { echo "[$out]"; tail -25 "$out"; }
+  done
+  [ -f "$LOG" ] && { echo "[desktop-shell.log tail]"; tail -25 "$LOG"; }
+  [ -e "$DATA_HOME/server.lock" ] && { echo "[server.lock]"; cat "$DATA_HOME/server.lock"; }
+  echo "[processes]"; ps aux | grep -i "cognate\|pg0\|postgres" | grep -v grep | head -10 || true
+}
+
 wait_health() {
   local port="$1" deadline=$((SECONDS + 90)) body=""
   while [ $SECONDS -lt $deadline ]; do
@@ -124,7 +136,9 @@ wait_health() {
     case "$body" in *'"ok":true'*) echo "$body"; return 0 ;; esac
     sleep 1
   done
-  echo "FAIL: /health never answered on port $port"; tail -40 "$LOG" || true; return 1
+  echo "FAIL: /health never answered on port $port"
+  dump_forensics "health timeout" || true
+  return 1
 }
 
 wait_port_in_log() {
@@ -136,7 +150,9 @@ wait_port_in_log() {
     fi
     sleep 1
   done
-  echo "FAIL: desktop-shell.log never named a backend port"; tail -40 "$LOG" 2>/dev/null || true; return 1
+  echo "FAIL: desktop-shell.log never named a backend port"
+  dump_forensics "readiness timeout" || true
+  return 1
 }
 
 # One shared virtual display for the whole run (T1 semantics: both instances on the same
@@ -221,7 +237,7 @@ for _ in $(seq 1 60); do
   [ ! -e "$DATA_HOME/server.lock" ] && break
   sleep 1
 done
-[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: server.lock not released"; tail -20 "$WORK/shell-first.out" 2>/dev/null; exit 1; }
+[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: server.lock not released"; dump_forensics "row-3 lock" || true; exit 1; }
 curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 \
   && { echo "FAIL: backend port still answering after close"; exit 1; }
 echo "close: sidecar down, pg0 stopped, lock released"
@@ -244,7 +260,7 @@ for _ in $(seq 1 60); do
   [ ! -e "$DATA_HOME/server.lock" ] && break
   sleep 1
 done
-[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: lock survived the final close"; tail -20 "$WORK/shell-second.out" 2>/dev/null; exit 1; }
+[ ! -e "$DATA_HOME/server.lock" ] || { echo "FAIL: lock survived the final close"; dump_forensics "final-close lock" || true; exit 1; }
 echo "final close clean"
 
 # --- 6. Package-identity pass (optional) -------------------------------------
