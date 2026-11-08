@@ -398,3 +398,36 @@ verification log's earlier misclassification corrected (`10ecd0f`).
 T1/T2 packaged smoke rows per platform remain local-Linux-only (the yml ships the skeleton;
 per-platform smoke steps are the next E-phase work). Jetson E2 awaits the operator's device
 pass with the arm64 deb above.
+
+## E1 phase two — T1/T2 smoke in the matrix (2026-11-08, matrix run 42446953932)
+
+The matrix jobs grew the packaged smoke: **T1** (the B2 harness: launch → health → identity →
+single-instance → close-cleanup → respawn → final close) on Linux under one shared Xvfb and on
+macOS from the dmg, and **T2** (the E2E-terminal journey against the packaged sidecar, not the
+dev server) on Linux. Results at `a4eff7b`:
+
+- **linux-arm64: T1 + T2 fully green** — the Jetson-target artifact is smoke-proven on
+  ubuntu-22.04-arm.
+- **windows-x64 + msrv: green** (Windows T1/T2 remain bundle-only, recorded honestly).
+- **linux-x64: every T1 row green except the final close** — consistently across three runs:
+  the backend's clean stop exceeded the shell's 30 s stop grace under runner load, so the
+  grace SIGKILL fired and the lock file orphaned (row 3's close passes; only the final one,
+  ~30 s after a fresh respawn on a cold runner, trips it). This is a **real shutdown-grace
+  finding** of the same class `96f7fb0` fixed, needing a product decision (the grace and the
+  45 s wedge failsafe are coupled timers — raising one without the other needs the design's
+  call), not a harness workaround. Recorded, not masked.
+- **darwin (both): T1 launches the .app but the readiness row times out** — the harness
+  extracts the .app from the dmg and launches it (bash 3.2 + BSD-find fixes landed in
+  `6614ff1`/`a4eff7b`); the process starts but never writes the backend port to
+  desktop-shell.log within 90 s. Most plausible: Gatekeeper/quarantine on the unsigned,
+  hdiutil-mounted binary, or a session-window-server constraint on runners — needs an
+  iterative macOS debugging pass this environment cannot reproduce. Recorded BLOCKED.
+
+**Harness fixes landed in this phase**: deterministic main-binary selection (the deb also
+installs the triple-stripped externalBin sidecar as bare `cognate-workbench`; B5's local pass
+had been order-lucky), NUL-safe glob resolution for the product name's spaces, the T2
+extraction against the real deb layout (`usr/bin/cognate-workbench` +
+`usr/lib/Cognate Workbench Shell/resources`), one shared Xvfb per run (per-launch displays
+made the second WebKitGTK instance abort mid single-instance handshake — misread as
+focus-exit), crash-vs-focus-exit detection, lock-release waits, and the bash 3.2/BSD-find
+portability.
