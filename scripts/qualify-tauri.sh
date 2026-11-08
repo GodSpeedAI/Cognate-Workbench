@@ -120,13 +120,16 @@ pg0_pid() {
 # Failure forensics: the shell's own stdout/stderr, the sidecar log tail, the lock's
 # contents (it names the pid that should have cleaned up) and the live process table.
 dump_forensics() {
-  echo "--- forensics ($1) ---"
+  # Everything to stderr: the wait_* callers run inside $( ) command substitutions, where
+  # stdout is captured into the variable and never reaches the log.
+  echo "--- forensics ($1) ---" >&2
   for out in "$WORK"/shell-*.out; do
-    [ -f "$out" ] && { echo "[$out]"; tail -25 "$out"; }
+    [ -f "$out" ] && { echo "[$out]" >&2; tail -25 "$out" >&2; }
   done
-  [ -f "$LOG" ] && { echo "[desktop-shell.log tail]"; tail -25 "$LOG"; }
-  [ -e "$DATA_HOME/server.lock" ] && { echo "[server.lock]"; cat "$DATA_HOME/server.lock"; }
-  echo "[processes]"; ps aux | grep -i "cognate\|pg0\|postgres" | grep -v grep | head -10 || true
+  [ -f "$LOG" ] && { echo "[desktop-shell.log tail]" >&2; tail -25 "$LOG" >&2; }
+  [ -e "$DATA_HOME/server.lock" ] && { echo "[server.lock]" >&2; cat "$DATA_HOME/server.lock" >&2; }
+  echo "[processes]" >&2
+  ps aux | grep -i "cognate\|pg0\|postgres" | grep -v grep | head -10 >&2 || true
 }
 
 wait_health() {
@@ -136,7 +139,7 @@ wait_health() {
     case "$body" in *'"ok":true'*) echo "$body"; return 0 ;; esac
     sleep 1
   done
-  echo "FAIL: /health never answered on port $port"
+  echo "FAIL: /health never answered on port $port" >&2
   dump_forensics "health timeout" || true
   return 1
 }
@@ -150,7 +153,7 @@ wait_port_in_log() {
     fi
     sleep 1
   done
-  echo "FAIL: desktop-shell.log never named a backend port"
+  echo "FAIL: desktop-shell.log never named a backend port" >&2
   dump_forensics "readiness timeout" || true
   return 1
 }
