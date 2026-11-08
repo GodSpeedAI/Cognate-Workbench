@@ -64,39 +64,43 @@ pub fn launch(app: AppHandle) {
     let resource_root = if cfg!(debug_assertions) {
         None
     } else {
-        // Probe the layouts tauri.conf.json's bundle.resources can produce: the deb/nsis
-        // installs put src-tauri/resources/cognate-workbench at <resource
-        // dir>/resources/cognate-workbench; macOS .app bundles have been observed to resolve
-        // differently (the E1 darwin run hit the fallback and reported pg0 missing). Pick the
-        // layout that exists; log the probe so a future layout change names itself. The data
-        // home is created first — log_shell appends into it and a silent failed append hid
-        // the probe result from the E1 forensics.
+        // Probe the layouts the bundles produce, relative to the running executable — not
+        // through Tauri's resource_dir(), which the E1 darwin run showed can fail outright
+        // ("unknown path") even with the resources correctly bundled. The deb/nsis installs
+        // place the tree at <resource dir>/resources/cognate-workbench; macOS .app bundles
+        // at <bundle>/Contents/Resources/resources/cognate-workbench (the E1 layout dump).
+        // The standalone share/ layout (exe_dir/../share) is the last resort. First candidate
+        // containing MANIFEST.json wins; the data home is created first because log_shell
+        // appends into it (a silent failed append hid earlier probe results).
         let _ = fs::create_dir_all(data_home());
-        match app.path().resource_dir() {
-            Ok(dir) => {
-                let candidates = [
-                    dir.join("resources").join("cognate-workbench"),
-                    dir.join("cognate-workbench"),
-                ];
-                candidates
-                    .into_iter()
-                    .find(|candidate| candidate.join("MANIFEST.json").exists())
-                    .inspect(|chosen| {
-                        log_shell(&format!("resource root: {}", chosen.display()));
-                    })
-                    .or_else(|| {
-                        log_shell(&format!(
-                            "resource probe failed: no MANIFEST.json under {}",
-                            dir.display()
-                        ));
-                        None
-                    })
-            }
-            Err(error) => {
-                log_shell(&format!("resource_dir() unavailable: {error}"));
-                None
-            }
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(|parent| parent.to_path_buf()));
+        let tauri_resource_dir = app.path().resource_dir().ok();
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(dir) = tauri_resource_dir {
+            candidates.push(dir.join("resources").join("cognate-workbench"));
+            candidates.push(dir.join("cognate-workbench"));
         }
+        if let Some(dir) = &exe_dir {
+            // macOS .app: <bundle>/Contents/MacOS -> <bundle>/Contents/Resources/...
+            candidates.push(dir.join("../Resources/resources/cognate-workbench"));
+            candidates.push(dir.join("../Resources/cognate-workbench"));
+            // Standalone share/ layout (deb/usr installs without Tauri, and the CLI package).
+            candidates.push(dir.join("../share/cognate-workbench"));
+        }
+        let chosen = candidates
+            .iter()
+            .find(|candidate| candidate.join("MANIFEST.json").exists())
+            .cloned();
+        match &chosen {
+            Some(root) => log_shell(&format!("resource root: {}", root.display())),
+            None => log_shell(&format!(
+                "resource probe failed: no MANIFEST.json in any candidate (exe_dir: {})",
+                exe_dir.map(|d| d.display().to_string()).unwrap_or_default()
+            )),
+        }
+        chosen
     };
     app.manage(BackendHandle {
         child: Mutex::new(None),
