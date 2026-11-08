@@ -431,3 +431,36 @@ extraction against the real deb layout (`usr/bin/cognate-workbench` +
 made the second WebKitGTK instance abort mid single-instance handshake — misread as
 focus-exit), crash-vs-focus-exit detection, lock-release waits, and the bash 3.2/BSD-find
 portability.
+
+## E1 phase three — the two findings resolved (2026-11-08, matrix run 42503577625: 6/6 green)
+
+**The linux-x64 final-close mechanism, named and fixed.** The failure forensics (the harness
+now dumps both shells' output, the sidecar log tail, the lock contents and the process table
+on every row failure) showed: backend and postgres alive, lock intact, shell gone, and none
+of the sidecar's shutdown lines. A watchdog thread had panicked **while holding the
+BackendHandle mutex** (it opens its error window off the main thread), poisoning it — after
+which every shutdown's `if let Ok(lock)` silently skipped the backend stop. Fix: all lock
+sites recover the poisoned guard (`poisoned.into_inner()`), so the stop is unconditional.
+Green on the next run and the run after. The 60 s/90 s timers from the earlier finding stand
+(they address the cold-start duration; the poison fix addresses the orphaning mechanism).
+
+**The darwin readiness mechanism, named and fixed.** Two layers:
+1. The bundler ad-hoc signs the .app's main binary but **not the externalBin sidecar**
+   (tauri-apps discussion #2269) — an unsigned sidecar refuses to exec on modern macOS,
+   reading exactly like the observed readiness timeout. The harness strips quarantine and
+   ad-hoc deep re-signs the extracted bundle before launching.
+2. With the sidecar execing, the run failed one level deeper: **Tauri's `resource_dir()`
+   itself returned "unknown path"** on the CI runner (named by the probe's own log once the
+   data home was pre-created for it) — the shell passed no `COGNATE_RESOURCE_DIR`, the
+   sidecar fell back to the standalone `Contents/share/` layout and reported pg0 missing.
+   The bundle-layout dump (now in the harness log) showed the tree at
+   `Contents/Resources/resources/cognate-workbench`. Fix: resource resolution probes
+   relative to the running executable (Tauri dir, both .app layouts, the standalone share/
+   layout), first MANIFEST.json wins, every outcome logged — no dependency on the Tauri
+   path API.
+
+**Result: matrix run 42503577625 — 6/6 green**, T1 on all four POSIX platforms (identity row
+included), T2 on both Linux platforms, Windows bundle-only, msrv green. The harness fixes
+landed in this phase: NUL-safe glob resolution, shared Xvfb, crash-vs-focus-exit detection,
+lock-release waits, bash 3.2/BSD-find portability, stderr-routed forensics, the bundle-layout
+dump, and the deterministic main-binary selection.
