@@ -182,6 +182,16 @@ fn start_backend(resource_root: Option<PathBuf>) -> Result<Started, BackendError
     })?;
 
     let mut command = backend_command();
+    // Windows gives a spawned console-subsystem process its own console window; closing that
+    // window kills the backend with STATUS_CONTROL_C_EXIT (0xc000013a) — reported from the
+    // operator's Windows test. CREATE_NO_WINDOW keeps the backend a background process; its
+    // output still reaches the shell through the piped stdout/stderr below.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     command
         .env("PORT", port.to_string())
         .env("COGNATE_NO_WINDOW", "1")
