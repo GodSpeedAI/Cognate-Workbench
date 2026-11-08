@@ -364,3 +364,37 @@ F track is green; the ledger's BUILD rows are closed.
   design: the notification plugin ships only if the operator finds the B4 title cue
   insufficient for the approval-waiting path in their own use. Nothing is implemented
   pre-gate; the known-gaps row carries the current truth.
+
+## E1 — Five-platform matrix on tag v0.1.0-rc1 (2026-11-08)
+
+**Matrix run 42430168441 (tag `v0.1.0-rc1` = `10ecd0f`): 6/6 green** — linux-x64,
+linux-arm64, darwin-arm64, darwin-x64, windows-x64, and the msrv Jetson gate (the shell
+compiles under the device's Rust 1.95). **PR verify run 42432136501 (`e6d45d8`): green**
+(full suite on CI's ubuntu host, 15m52s). clean-install green on every ref. Artifacts
+uploaded per platform (30-day retention); downloaded checksums (SHA256):
+
+- linux-arm64 `Cognate Workbench Shell_0.1.0_arm64.deb`
+  `5e6d822b4d6d7082a213bf904c28c40f6ef6c5c4bce0578de0cb76ffcc267ae3`
+- linux-x64 `Cognate Workbench Shell_0.1.0_amd64.deb`
+  `c7626b801b12b47a77653e937a715395076fe1881fd3a24e7123cebc8e6a0eca`
+- windows-x64 `Cognate Workbench Shell_0.1.0_x64-setup.exe`
+  `ace3be30c2c6223834ccc61e637c1702833850bb44542da1650b7b66d688a5f3`
+- darwin-arm64 `Cognate Workbench Shell_0.1.0_aarch64.dmg`
+  `8cea43cbcd0cf7a5b1be389f442077ffc3c075189051b62209d862a76fd3e492`
+- darwin-x64 `Cognate Workbench Shell_0.1.0_x64.dmg`
+  `cd2d7124370077041ba89073bdd5f246c5bc5e800b71d04b728d2a1b031808a4`
+
+**E1's gate deltas, fixed in flight** (all first-seen in CI, each reproduced and understood):
+(1) 895 MB of committed `dist-package/` artifacts blocked the push — history rewrite of the
+unpushed range + gitignore (the packaging output never belongs in git). (2) ssh2's optional
+`cpu-features` resolves to an unbuilt `.node` on fresh installs — the sidecar compile
+externalizes it (`bb40f99`). (3) `tauri.conf`'s externalBin contract needs the staged sidecar
+for any cargo step — msrv and verify.yml's tauri-linux gained staging steps (`bb40f99`,
+`e6d45d8`). (4) CI's minimal Rust profile lacks rustfmt/clippy — components added
+(`10ecd0f`). (5) The D-15 curly-quote regression surfaced by CI's full suite — fixed and the
+verification log's earlier misclassification corrected (`10ecd0f`).
+
+**Recorded honestly:** the matrix jobs prove compile + bundle + artifact per platform; the
+T1/T2 packaged smoke rows per platform remain local-Linux-only (the yml ships the skeleton;
+per-platform smoke steps are the next E-phase work). Jetson E2 awaits the operator's device
+pass with the arm64 deb above.
