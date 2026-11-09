@@ -19,6 +19,30 @@ host-concurrency flake class in `CURRENT_STATUS.md`).
 | Adapter mount timeout | 30 s | dispatcher's explicit choice (kernel default is 2 s, adapter-supplied) |
 | Retained versions before prune | 3 | stated; revisit only with a journey that needs deeper history |
 
+## Owner-condition gates (added at reconciliation; bind the affected tranches)
+
+*   [ ] **P — marker evidence (condition 3):** the remediation marker is written by the
+    evidence run against the real booted app and carries
+    `{workbenchBuild, suiteDigest, recordedAt}`; a mismatched-build marker refuses
+    `capability.runtime.enable` (asserted).
+*   [ ] **T1 — substrate scope (condition 3):** the index suite asserts state-machine
+    semantics only; no activation/dispatcher behavior tests in T1 (plan-conformance check).
+*   [ ] **T1 — GC reference rule (condition 4):** prune refuses versions referenced by any
+    activation row (persistent or session-scoped), any in-flight reference, or any open
+    spawn-ledger entry; referenced-but-beyond-retention versions survive (asserted).
+*   [ ] **T2 — governance integration (condition 1):** under `COGNATE_GOVERNANCE=sea-forge`,
+    a bundle invoke is decided consistently with built-in treatment (authority request with
+    full target identification); escalation parks and resumes via the existing machinery;
+    no bypass path exists (call-site inventory covers the dispatcher).
+*   [ ] **T3 — containment enforcement probes (condition 2):** per supported world, actual
+    OS enforcement observed from inside a probe payload — bubblewrap namespace +
+    `--unshare-all` isolation; `prlimit` caps applied; uncontained local/SSH/WSL recorded as
+    not OS-confined; executable-payload availability per world matches the verified matrix;
+    skills/data capabilities unaffected by posture on every world.
+*   [ ] **T3 — identity alignment (condition 5):** grant records carry provenance fields;
+    no new identity authority exists outside the workbench-local layer; `docs/known-gaps.md`
+    carries the unified-identity migration responsibilities entry.
+
 ## Tranche P — §1.6 remediation + decision-record substrate
 
 *   [ ] `test/J-CAP-prerequisite.test.ts` green: the refusal matrix (clamp across the full

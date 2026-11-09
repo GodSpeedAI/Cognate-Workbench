@@ -523,10 +523,34 @@ self-contained. Timing per OQ-B.
 **1.7 The enablement gate.** The operator-only `capability.runtime.enable` command writes
 `workbench.capability_runtime.enabled` via the lifecycleRecorder and **refuses unless**:
 (a) the `workbench.capability_runtime.remediation_verified` marker is present in the fold
-(written by the P verification journey's evidence run on pass — family and writer owned in
-the Detailed Plan, item 10) and (b) the store is a supported single-committing-process
-backend (§1.5). Boot reads both markers fold-first; absent or failing = bundles never mount;
-fail-closed.
+and (b) the store is a supported single-committing-process backend (§1.5). Boot reads both
+markers fold-first; absent or failing = bundles never mount; fail-closed.
+**Marker evidence binding (owner condition 3):** a marker written by a test into its own
+database is not deployment evidence. The remediation marker is written by the P
+verification journey's evidence run **against the real booted application** (the
+`test/wb-helpers.ts` boot path, not an isolated store fixture) and carries
+`{workbenchBuild: commitSha + packageVersion, suiteDigest, recordedAt}`; the §1.7 predicate
+and the boot read **validate the marker's build identity against the running runtime** — a
+marker from a different build refuses enablement (stale evidence is no evidence), so the
+marker is tied to versioned deployment evidence and cannot be manufactured by touching the
+store alone. **Test ownership (condition 3):** T1's index suite stays limited to
+substrate-level state-machine semantics (index, folds, CAS — no dispatcher dependencies);
+activation/dispatcher behavior tests land in T2 with the implementation, as already
+sequenced (§9.5).
+
+**Identity alignment (owner condition 5).** The unified Cognate/SEA-Forge human-agent
+identity design is the destination; this feature creates no second permanent identity and
+no second consequential-delegation authority. Per-agent principals (§1.1) and authority
+grants are a **local enforcement layer**: principal ids are workbench derivations of
+existing registry identities (`wb-agent:<expertId>` from the Experts registry; the operator
+principal remains the existing user-kind root), grant records carry provenance and are
+re-issuable, and grants govern **local capability operations only** — they never authorize
+SEA-Forge-level consequential approvals, which stay with the human operator through the
+existing `on_behalf_of` gateway (§2.4). Migration responsibilities, recorded in
+`docs/known-gaps.md` at implementation (item 54): when the unified identity architecture
+lands, principals map onto unified identities and grants re-issue under them (the grant
+record's provenance fields are the migration inputs); until then the single-operator
+authenticator remains the security boundary, unchanged.
 
 ### 2. The enforcement topology
 
@@ -649,10 +673,32 @@ design, not the test.
     in v1**.
 *   **Session-scoped expiry:** durable session binding; archive-expiry and boot-expiry are
     terminal (§1.5).
-*   **Governance-mode interplay:** when the SEA-Forge external authority is enabled (the
-    runtime governance mode configured via `COGNATE_SEA_FORGE_OPERATOR`,
-    `src/capabilities/governance.ts`), bundle invocations are **refused** in v1 (the
-    external authority knows nothing of activations); mirroring is post-v1.
+*   **Governance-mode integration (owner condition 1):** when the SEA-Forge external
+    authority is enabled (`COGNATE_GOVERNANCE=sea-forge` + `COGNATE_SEA_FORGE_OPERATOR`,
+    `src/capabilities/governance.ts`), bundle invocations are **not refused** — they
+    integrate through the runtime Governor exactly as built-in capability invokes do, which
+    is the smallest correct path consistent with the unified identity/authority
+    architecture: the Governor decides every non-system-read invoke
+    (`governed-operation.ts` — `isSystemRead` passes only `thread.state.read`); a
+    dispatcher-tool invocation carries the full target identification ({capabilityId, tool,
+    arguments}) in its request, so SEA-Forge decides with complete visibility and its
+    escalate/constrained dispositions park and resume through the existing operator
+    `on_behalf_of` machinery — governed actions cannot bypass SEA-Forge. The dispatcher's
+    own §1.4 decision runs inside and is recorded; its outcome attaches as
+    **`AuthorityClaims`** (the runtime's bounded, flat, JSON-scalar evidence channel,
+    carried in the authority_request extension) wherever the invoke path admits them.
+    **Recorded cost:** under governance, ordinary reads (`skill.load`, `tools.list`)
+    round-trip like any non-system-read invoke — that is the platform's uniform
+    governance semantics for every capability, not a bundle-specific regression; the
+    consequence-classification extension that would let contracts declare
+    `governanceClass: read | consequential` (consulted by the Governor, reads passing
+    local-only) is upstream proposal #6 (§10) — never a bypass. A governance-mode journey
+    variant (on j_cap_refusal) asserts the integrated behavior: bundle invoke → authority
+    decision consistent with built-in treatment; escalation parks and resumes unchanged.
+    If T2/T3 investigation finds the Governor cannot carry the evidence or the round-trip
+    cost is unacceptable to the owner, the fallback is the recorded deployment limitation
+    (governance mode on = capability runtime disabled at enablement, a release gate in
+    `docs/known-gaps.md`) — never silent.
 
 **2.5 The generic dynamic-tool invocation contract.** The standing dispatcher tool ids
 suffice for new tools in v1 — no per-tool application code:
@@ -774,8 +820,14 @@ refuses state-inconsistent transitions (unmatched-row precedent).
 3. **Register** — the payload **materializes into an immutable version directory**
    (`<bundleStore>/<capabilityId>/<versionHash>/` under the app data home — the app home is
    refused to contained executables, so the store is unreachable from payloads); **pruning
-   fires here**: retention = active + 3 versions, oldest pruned beyond retention, recorded
-   as `workbench.bundles.pruned`. Nothing runs.
+   fires here**: retention = active + 3 versions. **GC reference rule (owner condition
+   4):** a version directory is prunable only when it is (a) not the active version, (b)
+   referenced by **no activation row** — persistent or session-scoped (checked against the
+   authority index at prune time), (c) carrying **zero in-flight references** (the
+   per-version counter), (d) backing **no running spawn-ledger process** (its ledger
+   entries show no open spawn), and (e) beyond retention. Any surviving reference refuses
+   the prune (recorded); referenced versions live until their references end, however far
+   beyond retention that is. Nothing runs.
 4. **Activate** — ceiling computed; adapter component constructed and mounted (30 s explicit
    timeout, dispose-on-failure, per-capability child scope, per-version handle); the
    activate closure registers the interpreter; **activation commits only after ACTIVE + CAS
@@ -887,6 +939,20 @@ close on this world") — an inaccurate record is a recorded core violation surf
 mode. Long-lived spawned processes do not hold exec-shaped slots: a dedicated long-lease
 slot class with a per-world cap (folded into the same `containment:aggregate:v1` accounting
 thread); caps enforcement comes from the matrix row, not the exec-lease timeout.
+
+**Containment verification rule (owner condition 2).** Filesystem access through provider
+ports is **scoping, not confinement**: a path-scoped port call bounds what the wrapper
+does on the payload's behalf; it does not confine the spawned executable's own syscalls.
+Executable-payload availability per world is therefore determined by **verified OS-level
+enforcement**, probed at spawn registration and re-probed on provider re-register
+(bubblewrap: namespace + `--unshare-all` isolation observed from inside a probe payload;
+`prlimit`: caps observed applied; uncontained local, SSH, and WSL: no OS confinement of
+payload syscalls — port-level scoping and host-process discipline only). Where a required
+restriction cannot be OS-enforced on that world, **executable payloads are unavailable
+there** (spawn refuses, recorded) unless the world's posture record explicitly authorizes
+the weaker posture; **skills and other non-executable capabilities remain fully usable on
+every world** — containment gates executable payloads only, never data/skill payload
+kinds. The enforcement probes are T3 verification rows (verification.md), not assumptions.
 
 **6.3 The spawn-ledger protocol (record-before-spawn).** The wrapper writes the **intent
 record** (`capability.mcp.spawn.intended` — carrying spawn parameters **with secret
@@ -1039,7 +1105,11 @@ kernel-observation bridge recorder; the enablement gate; the shared operator gua
 
 Upstream proposals (post-v1, none blocking): `AuthorizationRequest` context fields; native
 tool-catalog dynamism; a kernel drain primitive; a durable kernel event sink; projection
-re-read amplification (already recorded, `docs/known-gaps.md:225`).
+re-read amplification (already recorded, `docs/known-gaps.md:225`); **governance
+consequence-classification** — a per-contract `governanceClass: read | consequential`
+the Governor consults so ordinary local capability operations skip authority round trips
+under sea-forge while consequential actions keep the full external decision (condition 1's
+read-cost fix; until it lands, reads govern like every other non-system-read invoke).
 
 ### 11. Risks & Mitigations
 
