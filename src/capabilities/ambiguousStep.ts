@@ -55,7 +55,10 @@ export function ambiguousStepComponent(options: {
       fiber.provide(contract, async (raw, ctx) => {
         // An agent must never reconcile its own ambiguous effect: only a direct human operator,
         // outside any run, may record what happened.
-        if (ctx.actor.kind !== "user" || ctx.runId) throw new Error("Only a direct human operator may reconcile an interrupted run step");
+        if (ctx.actor.kind !== "user" || ctx.runId) {
+          await (ctx as { emit?: (t: string, p: unknown) => Promise<void> | void }).emit?.("authority.decision.recorded", { decisionId: ["refusal:run.invocation.reconcile", Date.now()].join(":"), point: "operator-guard", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: "run.invocation.reconcile", outcome: "refused", reasonCode: "operator-only" });
+          throw new Error("Only a direct human operator may reconcile an interrupted run step");
+        }
         const input = validateInput(raw);
         const service = options.getService();
         const caller = { actor: ctx.actor, tenant: ctx.tenant };

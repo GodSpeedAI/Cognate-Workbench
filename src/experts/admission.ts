@@ -171,7 +171,7 @@ export function teamAdmissionKeys(state: ExpertState, assignmentId: string): rea
 
 /** Pure predicate over the native run view and authoritative Experts snapshot. */
 export function assertModelOnlyExpertRun(run: RunView, state: ExpertState, systemActorId: string): boolean {
-  if (run.agent !== EXPERT_AGENT || run.startedBy !== systemActorId) deny("run is not system-started agent.expert");
+  if (run.agent !== EXPERT_AGENT) deny("run is not system-started agent.expert");
   if (run.status !== "running" && run.status !== "waiting") deny("run is not active");
   if (!run.runId || !run.tenant) deny("run identity is incomplete");
 
@@ -186,6 +186,13 @@ export function assertModelOnlyExpertRun(run: RunView, state: ExpertState, syste
   if (!assignment || !isUnfinished(assignment) || assignment.attempt !== attempt) deny("assignment attempt is stale or terminal");
   if (assignment.runId !== null && assignment.runId !== run.runId) deny("assignment belongs to another run");
   if (assignment.execution.assignmentId !== assignment.id || assignment.execution.expertId !== assignment.expertId) deny("frozen execution identity does not match assignment");
+  // Capability-bundles tranche P (§1.1): the starter is the system lineage or the assignment's
+  // responsible agent principal (`wb-agent:<expertId>`, started by the completion bridge) —
+  // checked after the assignment is authoritative so the principal is derived from the
+  // registry record, never from run input.
+  if (run.startedBy !== systemActorId && run.startedBy !== `wb-agent:${assignment.expertId}`) {
+    deny("run is not system-started agent.expert");
+  }
 
   const expert = state.experts[assignment.expertId];
   if (!expert || expert.lifecycle !== "active") deny("Expert is no longer active");

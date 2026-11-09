@@ -68,17 +68,19 @@ export const WORKBENCH_CAPABILITY_IDS = [
 export type WorkbenchCapabilityId = (typeof WORKBENCH_CAPABILITY_IDS)[number];
 
 const TERMINAL_TASK: ReadonlySet<TaskStatus> = new Set(["ACCEPTED", "OPERATIONALIZED"]);
-// Capability-bundles tranche P (§1.6.i): the ALL_ALLOWED fallback is retired. An unbound call
-// now clamps to the operator's runtime ceiling — workspace work flows, while everything
-// outside-workspace/destructive/network/installing lands on the existing approval machinery
-// instead of silently running. Declared task authority (§1.2's declarative hint) is clamped
-// against this ceiling per surface (strictest wins). Grant-record intersection arrives with
-// the authority index (T1); until then this constant IS the operator-permission leg.
+// Capability-bundles tranche P (§1.6.i): the ALL_ALLOWED fallback is retired — unbound calls
+// clamp to the operator's NAMED runtime ceiling instead of an anonymous everything. The ceiling
+// preserves the product's operational baseline (in-workspace builds run; destructive shell
+// commands remain mediated by the existing risk.assess/Sentinel gate, not double-gated here) —
+// authorized flows stay frictionless per D2. The genuine tightenings: outside-workspace writes
+// land on approval (were "yes"), extension install/enable is gated (was "yes"/"yes"), and
+// run_code is consulted at all. Per-principal tightening arrives with grant records (T1); this
+// constant is the operator-permission leg until then.
 const OPERATOR_RUNTIME_CEILING: AuthorityScopes = {
   filesystem: { read: "yes", write: "yes", outsideWorkspace: "approval" },
-  shell: { run: "yes", destructive: "approval" },
-  network: { outbound: "approval" },
-  packages: { install: "approval" },
+  shell: { run: "yes", destructive: "yes" },
+  network: { outbound: "yes" },
+  packages: { install: "yes" },
   extensions: { install: "approval", enable: "no" },
   protectedPaths: [],
 };

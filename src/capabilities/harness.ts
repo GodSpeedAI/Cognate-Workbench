@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import type { Json } from "@godspeedai/cognate-events";
 import type { CapabilityContract, Component, SemanticRef } from "@godspeedai/cognate-kernel-api";
+import { requireOperator } from "../workbench/operatorGuard.ts";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import { findHarness, isPermissionMode, postureFor, type HarnessPermissionMode } from "../agents/harness/catalog.ts";
@@ -111,7 +112,10 @@ export function harnessComponent(options: {
         return out as unknown as Json;
       });
 
-      fiber.provide(contract("session.harness.bind"), async (raw) => {
+      fiber.provide(contract("session.harness.bind"), async (raw, ctx) => {
+        // Capability-bundles tranche P (§1.6.iv): binding an external agent CLI to a session decides
+        // which harness executes — a human act, refused (and recorded) from inside any run.
+        await requireOperator(ctx, "session.harness.bind", (event) => (ctx.runId ? (ctx as { emit?: (t: string, p: unknown) => Promise<void> }).emit?.(event.type, event.payload) : Promise.resolve()));
         const input = raw as HarnessBindInput;
         if (typeof input.sessionId !== "string" || !input.sessionId.trim()) throw new Error("session.harness.bind: a sessionId is required");
         const session = await sessionRow(input.sessionId);

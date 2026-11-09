@@ -12,6 +12,7 @@ import type { Json } from "@godspeedai/cognate-events";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import type { BrowserService } from "../browser/service.ts";
+import { operatorOnly } from "../workbench/operatorGuard.ts";
 
 export interface BrowserCapabilityOptions {
   readonly getService: () => RuntimeService;
@@ -21,12 +22,6 @@ export interface BrowserCapabilityOptions {
   readonly evidenceDir: string;
   readonly semanticRefs: Readonly<Record<string, SemanticRef | undefined>>;
 }
-
-const operatorOnly = (ctx: HandlerContext, capability: string): void => {
-  if (ctx.actor.kind !== "user" || ctx.runId) {
-    throw new Error(`${capability}: only a direct human operator may ${capability}`);
-  }
-};
 
 const ownerOf = (ctx: HandlerContext): { tenant: string; actorId: string } => ({ tenant: ctx.tenant, actorId: ctx.actor.id });
 
@@ -64,7 +59,7 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
     ],
     activate(fiber) {
       fiber.provide({ id: "browser.open", version: "1.0.0", semanticRef: ref("browser.open") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.open");
+        await operatorOnly(ctx, "browser.open");
         const input = rawInput as { readonly url?: unknown; readonly workspaceId?: unknown };
         if (input.url !== undefined && (typeof input.url !== "string" || !/^https?:\/\//.test(input.url))) {
           throw new Error("browser.open: url must be an http(s) URL when given");
@@ -85,7 +80,7 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       });
 
       fiber.provide({ id: "browser.navigate", version: "1.0.0", semanticRef: ref("browser.navigate") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.navigate");
+        await operatorOnly(ctx, "browser.navigate");
         const input = rawInput as { readonly sessionId?: unknown; readonly url?: unknown };
         if (typeof input.sessionId !== "string" || typeof input.url !== "string") {
           throw new Error("browser.navigate: sessionId and url are required");
@@ -102,14 +97,14 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       });
 
       fiber.provide({ id: "browser.snapshot", version: "1.0.0", semanticRef: ref("browser.snapshot") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.snapshot");
+        await operatorOnly(ctx, "browser.snapshot");
         const input = rawInput as { readonly sessionId?: unknown };
         if (typeof input.sessionId !== "string") throw new Error("browser.snapshot: a sessionId is required");
         return options.service.snapshot(input.sessionId);
       });
 
       fiber.provide({ id: "browser.screenshot", version: "1.0.0", semanticRef: ref("browser.screenshot") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.screenshot");
+        await operatorOnly(ctx, "browser.screenshot");
         const input = rawInput as { readonly sessionId?: unknown };
         if (typeof input.sessionId !== "string") throw new Error("browser.screenshot: a sessionId is required");
         const view = options.service.list(ownerOf(ctx)).find(entry => entry.sessionId === input.sessionId);
@@ -127,7 +122,7 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       });
 
       fiber.provide({ id: "browser.control", version: "1.0.0", semanticRef: ref("browser.control") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.control");
+        await operatorOnly(ctx, "browser.control");
         const input = rawInput as { readonly sessionId?: unknown; readonly controller?: unknown };
         if (typeof input.sessionId !== "string" || (input.controller !== "human" && input.controller !== "agent")) {
           throw new Error("browser.control: sessionId and controller ('human' | 'agent') are required");
@@ -144,7 +139,7 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       });
 
       fiber.provide({ id: "browser.inspect", version: "1.0.0", semanticRef: ref("browser.inspect") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.inspect");
+        await operatorOnly(ctx, "browser.inspect");
         const input = rawInput as { readonly sessionId?: unknown; readonly enable?: unknown; readonly capture?: unknown; readonly verify?: unknown };
         if (typeof input.sessionId !== "string") throw new Error("browser.inspect: a sessionId is required");
         // Re-resolve a capture's selector candidates (a read, available regardless of mode).
@@ -173,7 +168,7 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       });
 
       fiber.provide({ id: "browser.annotate", version: "1.0.0", semanticRef: ref("browser.annotate") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.annotate");
+        await operatorOnly(ctx, "browser.annotate");
         const input = rawInput as {
           readonly sessionId?: unknown;
           readonly note?: unknown;
@@ -225,7 +220,7 @@ export function browserComponent(options: BrowserCapabilityOptions): Component {
       });
 
       fiber.provide({ id: "browser.close", version: "1.0.0", semanticRef: ref("browser.close") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "browser.close");
+        await operatorOnly(ctx, "browser.close");
         const input = rawInput as { readonly sessionId?: unknown };
         if (typeof input.sessionId !== "string") throw new Error("browser.close: a sessionId is required");
         await options.service.close(input.sessionId);

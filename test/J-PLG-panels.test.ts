@@ -1,10 +1,10 @@
-// Journey J-PLG-panels (usage pass U4, reference-behavior-matrix.md §14–15): agent presets are a
+// Journey J-PLG-panels (usage pass U4, reference-behavior-matrix.md Â§14â15): agent presets are a
 // durable default for new sessions and a real per-turn tool-catalog scope. Covers: the
 // `settings.changePreset` capability's durability across a full runtime restart and validation;
 // the preset's tool-catalog effect (the recorded `model.generate` invocation carries exactly the
-// preset's tools — minimal ⇒ [bash], ptc ⇒ includes run_code); the fail-closed "unknown tool"
+// preset's tools â minimal â [bash], ptc â includes run_code); the fail-closed "unknown tool"
 // path when a fixture calls a tool outside the preset (the reference's Standard-mode run_code
-// behavior, §6.2); and the `sessions` projection folding the preset into the row's mode badge.
+// behavior, Â§6.2); and the `sessions` projection folding the preset into the row's mode badge.
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -32,7 +32,7 @@ describe("J-PLG-panels", () => {
         await client.invoke("settings.changePreset", { preset: "ptc" });
 
         // The default preset rides the composer's sends: a run WITH the preset gets exactly the
-        // ptc catalog (read/edit/bash/todo_write/exit_plan_mode/subagent/run_code) — verified
+        // ptc catalog (read/edit/bash/todo_write/exit_plan_mode/subagent/run_code) â verified
         // structurally off the recorded `model.generate` invocation's input.
         const sessionId = randomUUID();
         const run = await client.startRun(
@@ -53,9 +53,12 @@ describe("J-PLG-panels", () => {
         }
         const tools = (invocation!.payload as { input: { tools: { name: string }[] } }).input.tools.map((t) => t.name).sort();
         expect(tools).toContain("run_code");
-        expect(tools).toHaveLength(7);
+        // Capability-bundles tranche P (Â§2.4): the dispatcher ids are standing catalog members.
+        expect(tools).toHaveLength(9);
+        expect(tools).toContain("capability_invoke");
+        expect(tools).toContain("skill_load");
 
-        // minimal scopes to bash only — the same fixture message gets a bash-only catalog.
+        // minimal scopes to bash only â the same fixture message gets a bash-only catalog.
         const sessionIdMin = randomUUID();
         const runMin = await client.startRun(
           "agent.coding",
@@ -74,7 +77,9 @@ describe("J-PLG-panels", () => {
           }
         }
         const toolsMin = (invocationMin!.payload as { input: { tools: { name: string }[] } }).input.tools.map((t) => t.name).sort();
-        expect(toolsMin).toEqual(["bash"]);
+        // Capability-bundles tranche P (§2.4): the dispatcher ids are standing members of the
+        // minimal preset too — bash remains the only direct workspace tool.
+        expect(toolsMin).toEqual(["bash", "capability_invoke", "skill_load"]);
 
         // The sessions rows fold each session's preset into the mode-badge field.
         const sessionRows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "sessions" })).rows;
@@ -107,7 +112,7 @@ describe("J-PLG-panels", () => {
         const { workspaceId } = (await client.invoke("workspace.select", { path: ws })) as { readonly workspaceId: string };
 
         // The approval fixture's first tool call is run_code; under `standard` it is not in the
-        // catalog — the call fails closed with `Error: unknown tool "run_code"` (§6.2's observed
+        // catalog â the call fails closed with `Error: unknown tool "run_code"` (Â§6.2's observed
         // Standard-mode wording), the text feeds back, and the run still completes.
         const sessionId = randomUUID();
         const run = await client.startRun(
@@ -122,7 +127,7 @@ describe("J-PLG-panels", () => {
         }
         const final = await app.runtime.service.getRun(LOCAL_OPERATOR, { runId: run.runId });
         expect(final.status).toBe("completed");
-        // No approval continuation may open — run_code never reached the gate.
+        // No approval continuation may open â run_code never reached the gate.
         expect(await app.runtime.service.listContinuations(LOCAL_OPERATOR, { runId: run.runId })).toHaveLength(0);
         // The fail-closed wording rides the tool.call.failed event (the model's own final text is
         // the follow-up fixture's reply, not the error).

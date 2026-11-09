@@ -129,7 +129,10 @@ export function governanceComponent(options: {
       fiber.provide(resolve, async (raw, ctx) => {
         // Only a direct human operator, outside any run, may answer an escalation: an agent must never
         // approve its own consequential action.
-        if (ctx.actor.kind !== "user" || ctx.runId) throw new Error("Only a direct human operator may resolve a SEA-Forge approval");
+        if (ctx.actor.kind !== "user" || ctx.runId) {
+          await (ctx as { emit?: (t: string, p: unknown) => Promise<void> | void }).emit?.("authority.decision.recorded", { decisionId: ["refusal:governance.approval.resolve", Date.now()].join(":"), point: "operator-guard", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: "governance.approval.resolve", outcome: "refused", reasonCode: "operator-only" });
+          throw new Error("Only a direct human operator may resolve a SEA-Forge approval");
+        }
         const a = require();
         const input = validateResolve(raw);
         const response = await seaForgeCall(a.socketPath, {

@@ -16,6 +16,7 @@ import * as nodePath from "node:path";
 import type { ExecutionWorldProvider, ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
+import { operatorOnly } from "../workbench/operatorGuard.ts";
 
 export const MAX_LIST_ENTRIES = 500;
 export const MAX_READ_BYTES = 512 * 1024;
@@ -73,10 +74,6 @@ export function languageFor(name: string): string | undefined {
   if (dot < 0) return undefined;
   return LANGUAGES[lower.slice(dot + 1)];
 }
-
-const operatorOnly = (ctx: HandlerContext, capability: string): void => {
-  if (ctx.actor.kind !== "user" || ctx.runId) throw new Error(`${capability}: only a direct human operator may browse workspace files`);
-};
 
 export function workspaceFilesComponent(options: {
   readonly registry: ExecutionWorldRegistry;
@@ -171,7 +168,7 @@ export function workspaceFilesComponent(options: {
     activate(fiber) {
       fiber.provide(listContract, async (rawInput, ctx): Promise<WorkspaceFilesListResult> => {
         const capability = "workspace.files.list";
-        operatorOnly(ctx, capability);
+        await operatorOnly(ctx, capability);
         const input = (rawInput ?? {}) as WorkspaceFilesListInput;
         const scope = await scopeFor(capability, input.workspaceId);
         const rel = cleanRelative(capability, input.path, true);
@@ -218,7 +215,7 @@ export function workspaceFilesComponent(options: {
 
       fiber.provide(readContract, async (rawInput, ctx): Promise<WorkspaceFileReadResult> => {
         const capability = "workspace.file.read";
-        operatorOnly(ctx, capability);
+        await operatorOnly(ctx, capability);
         const input = (rawInput ?? {}) as WorkspaceFileReadInput;
         const scope = await scopeFor(capability, input.workspaceId);
         const rel = cleanRelative(capability, input.path, false);

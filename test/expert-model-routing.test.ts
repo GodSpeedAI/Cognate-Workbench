@@ -191,7 +191,10 @@ describe("J-EXPERT-SOLO and J-TEAM-DELEGATE model routing", () => {
       { role: "user", content: "Assess the change." },
     ]);
     expect(modelCall?.input.request.instructions).toContain(execution.instructions);
-    expect(modelCall?.input.request.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "expert_return"]);
+    // Capability-bundles tranche P (§2.1A): the dispatcher ids are standing members of every
+    // expert-eligible catalog — the expert's own authorityTools allowlist still gates the direct
+    // edit/bash/run_code tools, and the dispatcher is the bundle authority boundary itself.
+    expect(modelCall?.input.request.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "capability_invoke", "skill_load", "expert_return"]);
     expect(emitted.some((entry) => entry.type === "message.completed" && entry.payload.text === result.text)).toBe(true);
   });
 

@@ -19,6 +19,7 @@ import { openSecretStore } from "../secrets.ts";
 import { localTerminalPort, wslTerminalPort } from "../terminal/local.ts";
 import { sshTerminalPort, type SshConnectionFacts } from "../terminal/ssh.ts";
 import type { TerminalService } from "../terminal/service.ts";
+import { operatorOnly } from "../workbench/operatorGuard.ts";
 
 export interface TerminalCapabilityOptions {
   readonly getService: () => RuntimeService;
@@ -30,12 +31,6 @@ export interface TerminalCapabilityOptions {
   readonly connectionFor: (worldId: string) => Promise<{ readonly connection: Json } | undefined>;
   readonly semanticRefs: Readonly<Record<string, SemanticRef | undefined>>;
 }
-
-const operatorOnly = (ctx: HandlerContext, capability: string): void => {
-  if (ctx.actor.kind !== "user" || ctx.runId) {
-    throw new Error(`${capability}: only a direct human operator may use the terminal`);
-  }
-};
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
@@ -91,7 +86,7 @@ export function terminalComponent(options: TerminalCapabilityOptions): Component
     ],
     activate(fiber) {
       fiber.provide({ id: "terminal.open", version: "1.0.0", semanticRef: ref("terminal.open") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "terminal.open");
+        await operatorOnly(ctx, "terminal.open");
         const input = rawInput as { readonly workspaceId?: unknown; readonly cwd?: unknown; readonly cols?: unknown; readonly rows?: unknown };
         if (typeof input.workspaceId !== "string" || !input.workspaceId.trim()) {
           throw new Error("terminal.open: a workspaceId is required");
@@ -169,7 +164,7 @@ export function terminalComponent(options: TerminalCapabilityOptions): Component
       });
 
       fiber.provide({ id: "terminal.close", version: "1.0.0", semanticRef: ref("terminal.close") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "terminal.close");
+        await operatorOnly(ctx, "terminal.close");
         const input = rawInput as { readonly sessionId?: unknown };
         if (typeof input.sessionId !== "string" || !input.sessionId.trim()) {
           throw new Error("terminal.close: a sessionId is required");

@@ -354,7 +354,14 @@ function buildPolicy(): Policy {
 function buildActionPolicy(): ActionPolicy {
   return {
     authorize: (request) => {
-      if (request.action === "run.start" && request.resource === EXPERT_AGENT && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
+      // Capability-bundles tranche P (§1.1): expert runs start from the completion bridge — the
+      // system lineage (pre-P runs) or the responsible agent principal `wb-agent:<expertId>`.
+      // The assignment-authority check itself lives in the invocation binding (ExpertsService.
+      // invocation re-validates the assignment, attempt and principal per call); this rule pins
+      // WHO may start the run at all.
+      const expertBridgeCaller = (request.caller.actor.kind === "system" && request.caller.actor.id === SYSTEM_CALLER.actor.id)
+        || (request.caller.actor.kind === "agent" && request.caller.actor.id.startsWith("wb-agent:") && request.caller.tenant === LOCAL_OPERATOR.tenant);
+      if (request.action === "run.start" && request.resource === EXPERT_AGENT && !expertBridgeCaller) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
       if (request.action === "thread.state.update" && (request.resource === EXPERTS_THREAD || request.resource.startsWith("experts:partition:") || request.resource === SCHEDULES_THREAD) && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Experts and schedule state mutations require validated capabilities"};
       // T8: the identity/session ledger and the aggregate containment ledger are system-owned
       // truth. A session (or any non-system caller) writing them directly could forge an operator

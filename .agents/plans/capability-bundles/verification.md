@@ -45,16 +45,37 @@ host-concurrency flake class in `CURRENT_STATUS.md`).
 
 ## Tranche P — §1.6 remediation + decision-record substrate
 
-*   [ ] `test/J-CAP-prerequisite.test.ts` green: the refusal matrix (clamp across the full
-    tool catalog incl. `run_code`; per-agent principals at every start site in the item 7
-    table; the shared operator guard at all ten sites; `session.harness.bind` refusal;
-    policy agent branch incl. grant intersection), every refusal asserted from
-    `authority.decision.recorded` with reason code + deciding point.
-*   [ ] `workbench.capability_runtime.remediation_verified` written by the suite's evidence
-    run on pass (the §1.7 gate's input).
-*   [ ] Dispatcher tool ids present in `TOOL_DEFS`/`PRESET_TOOLS`/`EXPERT_TOOL_DEFS`; a
-    dispatcher-id call before T2 returns the structured "no eligible provider" refusal.
-*   [ ] `just verify` green at the P boundary; E-phase (rev 43) settled before P begins.
+*   [x] `test/J-CAP-prerequisite.test.ts` green (6/6): the user-kind masquerade refused and
+    durably recorded at the workbench human gates (guard evidence row with point/reason
+    code/run id); ALL_ALLOWED retired — unbound and declared-outside-workspace scopes clamp
+    to the operator runtime ceiling (approval, not allow) while in-workspace work flows;
+    run_code joins the authority plane (deny without a shell grant, record for governed
+    allows); subagent children run under derived per-agent principals
+    (`wb-agent:coding` lineage provenance); the remediation marker records versioned build
+    evidence (commit SHA + package version + suite digest) through the real recording path;
+    decision records fold into the workbench projection.
+*   [x] Guard adoption: the shared guard (`src/workbench/operatorGuard.ts`) replaces the
+    kind-only/inline checks across the operator-only surfaces — workbench human gates,
+    settlement, taskCheckout, containedWorkspace (asserted message preserved),
+    workspaceFiles, browser, terminal, governance, ambiguousStep, expertEffect, and the
+    `session.harness.bind` operator-only convention with in-run recorded refusal.
+*   [x] Dispatcher tool ids present in `TOOL_DEFS`/`PRESET_TOOLS`/`EXPERT_TOOL_DEFS`; a
+    dispatcher-id call before T2 fails closed (policy deny — the id is deliberately absent
+    from `GRANTED_CAPABILITIES` until the T2 mount adds it, per design item 32).
+*   [x] Policy agent branch: responsible-agent principals run the granted set minus the
+    human-decision surfaces; expert runs start under `wb-agent:<expertId>` lineage.
+*   [ ] `just verify` green at the P boundary — **in flight**; result recorded on completion.
+*   Recorded deviations: (a) chat/mobile-run principals stay operator in P (client-API run
+    starter is the authenticated HTTP session; per-agent chat principals land in T2 with the
+    dispatcher's attribution surface; the masquerade hole is closed by the runId guard
+    regardless); (b) the policy-refusal hook emission (trace rows 3/4 refusal records from
+    the sync kernel policy) lands with the authority index in T1 — policy denials refuse
+    fail-closed today but are not yet durably recorded; (c) the operator runtime ceiling
+    preserves the operational baseline (shell/network/install "yes" per pre-P parity,
+    destructive mediation unchanged at the existing risk.assess/Sentinel gate) — per-principal
+    tightening arrives with grant records in T1; (d) E-phase/rev-43 settlement was recorded
+    as the P start gate; implementation began on the owner's explicit instruction while
+    E-phase completes concurrently.
 
 ## Tranche M — SEA model change + plugin-era files
 

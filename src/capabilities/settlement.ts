@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
+import { operatorOnly } from "../workbench/operatorGuard.ts";
 import type { Json, StoredEvent } from "@godspeedai/cognate-events";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import { PROOF_DECLARED, SETTLEMENT_EVIDENCE, SETTLEMENT_RECORDED, workspaceRoot } from "../settlement/orchestrator.ts";
@@ -95,7 +96,7 @@ export function settlementComponent(options: {
     provides: [declare, declareContract, current, status],
     activate(fiber) {
       fiber.provide(declare, async (raw, ctx) => {
-        operatorOnly(ctx, PROOF_DECLARE);
+        await operatorOnly(ctx, PROOF_DECLARE);
         if (mode === "swe_seed") throw new Error(`${PROOF_DECLARE}: refused under ${ENV_PROOF_SOURCE}=swe_seed; declare the proof from a SWE_SEED contract with ${PROOF_DECLARE_CONTRACT}`);
         const proof = validateProof(raw);
         if (!options.getKnownWorkspaceIds().has(proof.workspaceId)) throw new Error(`${PROOF_DECLARE}: unknown workspace ${proof.workspaceId}`);
@@ -103,7 +104,7 @@ export function settlementComponent(options: {
         return { ...proof, appliesTo: "runs that start after this declaration" };
       });
       fiber.provide(declareContract, async (raw, ctx) => {
-        operatorOnly(ctx, PROOF_DECLARE_CONTRACT);
+        await operatorOnly(ctx, PROOF_DECLARE_CONTRACT);
         const input = validateProofContract(raw);
         if (!options.getKnownWorkspaceIds().has(input.workspaceId)) throw new Error(`${PROOF_DECLARE_CONTRACT}: unknown workspace ${input.workspaceId}`);
         const bin = options.sweSeed?.bin;
@@ -117,7 +118,7 @@ export function settlementComponent(options: {
         return { ...proof, source: { ...exported.source }, appliesTo: "runs that start after this declaration" } as unknown as Json;
       });
       fiber.provide(current, async (raw, ctx) => {
-        operatorOnly(ctx, PROOF_CURRENT);
+        await operatorOnly(ctx, PROOF_CURRENT);
         const v = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
         // Without a workspace the answer is the settlement configuration alone (declared: null).
         if (v.workspaceId !== undefined && (typeof v.workspaceId !== "string" || !v.workspaceId)) throw new Error(`${PROOF_CURRENT}: workspaceId must be a non-empty string`);
@@ -138,7 +139,7 @@ export function settlementComponent(options: {
         } as unknown as Json;
       });
       fiber.provide(status, async (raw, ctx) => {
-        operatorOnly(ctx, SETTLEMENT_STATUS);
+        await operatorOnly(ctx, SETTLEMENT_STATUS);
         const v = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
         const runId = typeof v.runId === "string" ? v.runId : undefined;
         const sessionId = typeof v.sessionId === "string" ? v.sessionId : undefined;

@@ -252,7 +252,10 @@ export function expertEffectComponent(options: {
         throw new ExpertEffectReconciliationRequired(record.id, completed?.state ?? "missing outcome", completed?.lastError ?? undefined);
       });
       fiber.provide(resolveContract, async (raw, ctx) => {
-        if (ctx.actor.kind !== "user" || ctx.runId) throw new Error("Only a direct human operator may reconcile Expert effects");
+        if (ctx.actor.kind !== "user" || ctx.runId) {
+          await (ctx as { emit?: (t: string, p: unknown) => Promise<void> | void }).emit?.("authority.decision.recorded", { decisionId: ["refusal:expert.effect.resolve", Date.now()].join(":"), point: "operator-guard", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: "expert.effect.resolve", outcome: "refused", reasonCode: "operator-only" });
+          throw new Error("Only a direct human operator may reconcile Expert effects");
+        }
         const value = asRecord(raw);
         if (typeof value.assignmentId !== "string" || typeof value.toolCallId !== "string" || typeof value.reason !== "string" || !value.reason.trim()) throw new Error("Effect reconciliation requires an assignment, effect key, and reason");
         if (value.outcome !== "succeeded" && value.outcome !== "failed") throw new Error("Effect reconciliation outcome must be succeeded or failed");
