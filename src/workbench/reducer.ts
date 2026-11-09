@@ -364,6 +364,19 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       if (!prev) return [];
       return [{ key, value: j({ ...prev, status: "stopped", stoppedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
     }
+    // Capability-bundles tranche P: durable enforcement decisions (the P evidence matrix) and the
+    // runtime enablement markers. Decision rows are append-only audit, keyed by the emitter's
+    // decisionId; enablement rows are singletons the §1.7 predicate reads.
+    case "authority.decision.recorded": {
+      const decisionId = typeof p.decisionId === "string" && p.decisionId ? p.decisionId : `${recordedAt}-${eventId}`;
+      return [{ key: `decision/${decisionId}`, value: j({ ...p, recordedAt }) }];
+    }
+    case "workbench.capability_runtime.enabled": {
+      return [{ key: "runtime/enablement", value: j({ enabled: true, recordedAt }) }];
+    }
+    case "workbench.capability_runtime.remediation_verified": {
+      return [{ key: "runtime/remediation", value: j({ ...p, recordedAt }) }];
+    }
     default:
       return [];
   }

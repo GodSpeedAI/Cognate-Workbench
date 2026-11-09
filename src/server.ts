@@ -302,6 +302,24 @@ const GRANTED_CAPABILITIES = [
 ];
 
 function buildPolicy(): Policy {
+  // Capability-bundles tranche P (§1.6.v): agent principals (kind "agent") are the responsible
+  // actors for expert and subagent runs. The branch allows the granted set minus the surfaces
+  // that are human decisions by construction — the fine-grained gate is the shared operator
+  // guard inside each handler; this is the single policy point for agent-run access.
+  const OPERATOR_ONLY_POLICY_IDS: ReadonlySet<string> = new Set([
+    "governance.approval.resolve", "governance.approvals.list",
+    "identity.session.issue", "identity.session.revoke", "identity.inspect",
+    "task.review.decide", "authority.elevate",
+    "workspace.proof.declare", "workspace.proof.declare_contract", "settlement.status",
+    "world.settle", "method.accept",
+    "execution.world.connect", "execution.world.disconnect",
+    "onboarding.dismiss", "model.configure", "provider.delete", "secret.put",
+    "session.setArchived", "session.rename", "session.setPinned",
+    "plugin.install", "plugin.uninstall", "config.file.apply",
+    "workspace.rename", "workspace.delete",
+    "git.checkout.attach", "git.checkout.merge", "git.checkout.remove", "git.checkout.recreate",
+    "session.harness.bind",
+  ]);
   return rulePolicy(
     "deepseek-harness-app",
     [
@@ -318,6 +336,14 @@ function buildPolicy(): Policy {
           && request.actor.id === LOCAL_OPERATOR.actor.id
           && GRANTED_CAPABILITIES.includes(request.capability.id)) {
           return { allow: true, policyId: "deepseek-harness-app", reason: `operator may invoke ${request.capability.id}` };
+        }
+        // §1.6.v: responsible-agent principals run the granted workbench surface minus human
+        // decisions; per-principal grant intersection arrives with the authority index (T1).
+        if (request.actor.kind === "agent"
+          && request.tenant === LOCAL_OPERATOR.tenant
+          && GRANTED_CAPABILITIES.includes(request.capability.id)
+          && !OPERATOR_ONLY_POLICY_IDS.has(request.capability.id)) {
+          return { allow: true, policyId: "deepseek-harness-app", reason: `agent principal may invoke ${request.capability.id}` };
         }
         return undefined;
       },

@@ -226,5 +226,30 @@ export const WORKBENCH_EVENTS = [
   // status polls, never a pairing secret, link, challenge or credential.
   "workbench.remote.state",
   "workbench.remote.error",
+  // Capability-bundles tranche P (§1.5/§1.6/§1.7): durable enforcement decisions and runtime
+  // enablement evidence. Decision rows are the P evidence matrix; the runtime markers gate
+  // extensible-runtime enablement on versioned remediation evidence (§1.7).
+  "authority.decision.recorded",
+  "workbench.capability_runtime.enabled",
+  "workbench.capability_runtime.remediation_verified",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];
+
+// Capability-bundles tranche P: the durable enforcement-decision record (§2.3's evidence
+// matrix). Emitters: the harness tool loop, the dispatcher (T2), the governed spawn boundary
+// (T3), the shared operator guard, and the subagent narrowing check.
+export interface AuthorityDecisionRecord {
+  readonly decisionId: string;
+  readonly point: "tool-loop" | "dispatcher" | "spawn-boundary" | "operator-guard" | "policy" | "narrowing";
+  readonly actorId: string;
+  readonly actorKind: string;
+  readonly capability: string;
+  readonly operation?: string;
+  readonly outcome: "refused" | "allowed";
+  readonly reasonCode: string;
+  readonly reason: string;
+  readonly runId?: string;
+  readonly taskId?: string;
+}
+/** Why an activation is suspended; `resumed` clears exactly one named reason (§1.5). */
+export type SuspensionReason = "operator-yank" | "grant-revoked" | "grant-expired" | "integrity" | "safe-mode";

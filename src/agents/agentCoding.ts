@@ -35,10 +35,16 @@ export const AGENT_CODING = "agent.coding";
 export type AgentPreset = "standard" | "ptc" | "minimal";
 
 export const PRESET_TOOLS: Readonly<Record<AgentPreset, readonly string[]>> = {
-  standard: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent"],
-  ptc: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent", "run_code"],
-  minimal: ["bash"],
+  standard: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent", "capability_invoke", "skill_load"],
+  ptc: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent", "run_code", "capability_invoke", "skill_load"],
+  minimal: ["bash", "capability_invoke", "skill_load"],
 };
+
+// Capability-bundles tranche P (§2.4): the dispatcher's standing model-facing tool ids. The
+// dispatcher itself mounts in T2; until then a call resolves through the generic
+// `tool.<name>` fallthrough to a capability id that exists nowhere — the kernel's structured
+// unavailable refusal, fail-closed by construction (§2.4's P-to-T2 interim behavior).
+export const DISPATCHER_TOOL_NAMES = ["capability_invoke", "skill_load"] as const;
 
 export function isAgentPreset(value: unknown): value is AgentPreset {
   return typeof value === "string" && (value === "standard" || value === "ptc" || value === "minimal");
@@ -310,6 +316,19 @@ export const TOOL_DEFS: ToolDefinition[] = [
       required: ["code"],
     },
   },
+  // Capability-bundles tranche P (§2.5): the dispatcher's standing tool ids. Every bundle tool
+  // and skill rides through these two — no per-tool application code, ever. The dispatcher
+  // capability mounts in T2; until then invocation fails closed (policy + no provider).
+  {
+    name: "capability_invoke",
+    description: "Invoke an installed capability's tool: tools.list discovers tools; tool.invoke runs one (e.g. an MCP tool). Args: {capabilityId, op?, tool?, arguments?}.",
+    inputSchema: { type: "object", properties: { capabilityId: { type: "string" }, op: { type: "string", enum: ["tools.list", "tool.invoke"] }, tool: { type: "string" }, arguments: { type: "object" } }, required: ["capabilityId"], additionalProperties: false },
+  },
+  {
+    name: "skill_load",
+    description: "Load a skill document from an installed capability (composition guides are entry documents: load the guide before first use of a capability). Args: {capabilityId, skillId}.",
+    inputSchema: { type: "object", properties: { capabilityId: { type: "string" }, skillId: { type: "string" } }, required: ["capabilityId", "skillId"], additionalProperties: false },
+  },
 ];
 
 /** Tools surfaced only to Expert executions whose persisted capability allowlist includes them. */
@@ -346,7 +365,7 @@ function toolsForExpert(execution: NonNullable<AgentCodingInput["expertExecution
   // Expert agents do not inherit the generic subagent escape hatch. Delegation is a governed
   // Team capability and appears only as team_delegate when that exact authority is granted.
   const eligible = [...TOOL_DEFS.filter((tool) => tool.name !== "subagent"), ...EXPERT_TOOL_DEFS]
-    .filter((tool) => allowed.has(tool.name));
+    .filter((tool) => allowed.has(tool.name) || (DISPATCHER_TOOL_NAMES as readonly string[]).includes(tool.name));
   // Returning this assignment is intrinsic to every Expert run and has no authority outside that
   // run's registered assignment; expose the typed outcome even on older/custom profiles.
   const returnTool = EXPERT_TOOL_DEFS.find((tool) => tool.name === "expert_return");
@@ -621,17 +640,24 @@ export const agentCodingAgent: AgentDefinition = {
         }
         // Authority plane (V-003): protected evidence is enforced structurally here, before the tool
         // can run, not left to prompt prose. `authority.check` is a recorded invocation.
+        // Capability-bundles tranche P (§1.6.i/§2.3 row 1): the plane now covers run_code too, and
+        // every refusal (plus the newly governed run_code allows) records
+        // `authority.decision.recorded` — the P evidence matrix the enablement gate consumes.
         let taskApproval = false;
-        if (call.name === "edit" || call.name === "bash") {
+        if (call.name === "edit" || call.name === "bash" || call.name === "run_code") {
           const verdict = (await ctx.invoke("authority.check", { workspaceId, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}), tool: call.name, args } as unknown as Json)) as unknown as AuthorityVerdict;
           if (verdict.outcome === "deny") {
             if (verdict.rule.startsWith("protected-evidence")) {
               await ctx.emit("workbench.protection.blocked", { workspaceId, tool: call.name, path: verdict.path ?? "", pattern: verdict.pattern ?? "", reason: verdict.reason, sessionId, ...(verdict.taskId ? { taskId: verdict.taskId } : {}) } as unknown as Json);
             }
+            await ctx.emit("authority.decision.recorded", { decisionId: call.id, point: "tool-loop", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: `tool.${call.name}`, outcome: "refused", reasonCode: verdict.rule, reason: verdict.reason, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}) } as unknown as Json);
             const blocked = `Error: blocked by authority (${verdict.rule}): ${verdict.reason}`;
             await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: blocked });
             messages.push({ role: "tool", content: blocked, toolCallId: call.id });
             continue;
+          }
+          if (call.name === "run_code") {
+            await ctx.emit("authority.decision.recorded", { decisionId: call.id, point: "tool-loop", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: "tool.run_code", outcome: "allowed", reasonCode: verdict.rule, reason: verdict.reason, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}) } as unknown as Json);
           }
           taskApproval = verdict.outcome === "approval";
         }

@@ -40,8 +40,19 @@ export function subagentStartComponent(options: {
         const prefix = `${parentRunId}:`;
         const id = input.key.startsWith(prefix) ? input.key.slice(prefix.length) : input.key;
         const service = options.getService();
+        // Capability-bundles tranche P (§1.1): a subagent child runs under its parent's agent
+        // principal — lineage narrows authority (never widens it); the ceiling mechanism arrives
+        // with the authority index (T1). The runtime records only the starter's id on the run
+        // view, and every expert/subagent lineage principal is an `agent`-kind id by construction
+        // (`wb-agent:*`); a parent whose starter id is not in that namespace is an operator- or
+        // system-started lineage, and the child derives the responsible coding-agent principal.
+        const parentView = await service.getRun({ actor: options.systemActor, tenant: ctx.tenant ?? "local" }, { runId: parentRunId! });
+        const parentPrincipalId = parentView.startedBy;
+        const childPrincipal = parentPrincipalId.startsWith("wb-agent:")
+          ? { id: parentPrincipalId, kind: "agent" as const }
+          : { id: "wb-agent:coding", kind: "agent" as const };
         const view = await service.startRun(
-          { actor: options.systemActor, tenant: ctx.tenant ?? "local" },
+          { actor: childPrincipal, tenant: ctx.tenant ?? "local" },
           { agent: input.agent, input: input.input, idempotencyKey: input.key, correlationId: `subagent:${parentRunId}:${id}` },
         );
         return { runId: view.runId };
