@@ -64,7 +64,12 @@ host-concurrency flake class in `CURRENT_STATUS.md`).
     from `GRANTED_CAPABILITIES` until the T2 mount adds it, per design item 32).
 *   [x] Policy agent branch: responsible-agent principals run the granted set minus the
     human-decision surfaces; expert runs start under `wb-agent:<expertId>` lineage.
-*   [ ] `just verify` green at the P boundary — **in flight**; result recorded on completion.
+*   [x] `just verify` green at the P boundary: **1,611 pass / 13 skip / 0 fail** (1,624 tests,
+    201 files, 9,638 assertions) at commit `814c63b`. Two catalog assertions updated to pin
+    the dispatcher ids as standing members (by-design §2.4 change); the expert-admission
+    predicate (`assertModelOnlyExpertRun`) derives its trusted starter from the authoritative
+    assignment record — system lineage or `wb-agent:<expertId>` — completing the §1.1
+    principal chain (bridge → invocation binding → admission → ActionPolicy).
 *   Recorded deviations: (a) chat/mobile-run principals stay operator in P (client-API run
     starter is the authenticated HTTP session; per-agent chat principals land in T2 with the
     dispatcher's attribution surface; the masquerade hole is closed by the runId guard

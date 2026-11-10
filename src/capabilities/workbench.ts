@@ -497,6 +497,12 @@ export function workbenchComponent(options: {
       // ---- Skill OS (J-WB-capability-lifecycle) ---------------------------------------------------
       provide("skill.register", async (input: { def: CapabilityContractDef }) => {
         if (!input.def?.id?.startsWith("capability.")) throw new Error('skill.register: capability ids start with "capability."');
+        // Capability-bundles tranche M (§4.4 namespace partition): seeded built-in ids are
+        // reserved — a bundle-owner registration may never shadow them; bundle ids carry owner
+        // "bundle" and a version (the deterministic reload identity).
+        const seeded = await readOne<{ def?: { owner?: string } }>(`capability/${input.def.id}`);
+        if (input.def.owner === "bundle" && seeded?.def?.owner === "builtin") throw new Error(`skill.register: ${input.def.id} is a reserved built-in id and cannot be shadowed by a bundle`);
+        if (input.def.owner === "bundle" && !input.def.version) throw new Error(`skill.register: ${input.def.id} is bundle-owned and must carry a version (manifest version + payload hash)`);
         await record([{ type: "workbench.capability.registered", payload: { def: input.def } as unknown as Json }]);
         return { capabilityId: input.def.id };
       });

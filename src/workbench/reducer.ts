@@ -377,6 +377,109 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
     case "workbench.capability_runtime.remediation_verified": {
       return [{ key: "runtime/remediation", value: j({ ...p, recordedAt }) }];
     }
+    // Capability-bundles tranche M (§8 matrix rows). Bundle/activation lifecycle rows are the
+    // authoritative capability state the authority index mirrors at boot (replay-equality is the
+    // totality proof); decision rows (tranche P) stay append-only audit.
+    case "capability.bundle.registered": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      return [{ key: `bundle/${capabilityId}`, value: j({ capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", registeredAt: recordedAt }) }];
+    }
+    case "capability.bundle.validated": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      const prev = get(`bundle/${capabilityId}`) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key: `bundle/${capabilityId}`, value: j({ ...prev, validated: true, validatedAt: recordedAt }) }];
+    }
+    case "capability.activated": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      return [{ key, value: j({ capabilityId, level, ...(session ? { sessionId: session } : {}), version: p.version ?? "", ceiling: p.ceiling ?? [], clampProvenance: p.clampProvenance ?? "operator", state: "active", suspensionReasons: [], activatedAt: recordedAt }) }];
+    }
+    case "capability.repointed": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      const retired = get(`binding-retired/${capabilityId}`) as { versions?: unknown } | undefined;
+      const priorVersion = String(p.from ?? prev.version ?? "");
+      return [
+        { key, value: j({ ...prev, version: p.to ?? prev.version, repointedAt: recordedAt }) },
+        { key: `binding-retired/${capabilityId}`, value: j({ versions: [...((retired?.versions as readonly string[]) ?? []), priorVersion] }) },
+      ];
+    }
+    case "capability.suspended": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { state?: string; suspensionReasons?: string[] } | undefined;
+      if (!prev) return [];
+      const reason = String(p.reason ?? "operator-yank");
+      const reasons = new Set(prev.suspensionReasons ?? []);
+      reasons.add(reason);
+      return [{ key, value: j({ ...prev, state: "suspended", suspensionReasons: [...reasons], suspendedAt: recordedAt, lastReason: reason }) }];
+    }
+    case "capability.resumed": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { state?: string; suspensionReasons?: string[] } | undefined;
+      if (!prev) return [];
+      const reason = String(p.clearedReason ?? "");
+      const reasons = (prev.suspensionReasons ?? []).filter((r) => r !== reason);
+      return [{ key, value: j({ ...prev, state: reasons.length === 0 ? "active" : "suspended", suspensionReasons: reasons, resumedAt: recordedAt }) }];
+    }
+    case "capability.deactivated": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, state: "dormant", suspensionReasons: [], deactivatedAt: recordedAt }) }];
+    }
+    case "capability.uninstalled": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      const prev = get(`bundle/${capabilityId}`) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key: `bundle/${capabilityId}`, value: j({ ...prev, uninstalled: true, uninstalledAt: recordedAt }) }];
+    }
+    case "capability.activation_failed":
+    case "capability.repoint_failed":
+    case "capability.validation_failed":
+    case "capability.integrity_failed": {
+      const capabilityId = String(p.capabilityId ?? "unknown");
+      return [{ key: `fault/${eventType}/${capabilityId}/${recordedAt}`, value: j({ capabilityId, kind: eventType, reason: String(p.reason ?? "unknown"), recordedAt }) }];
+    }
+    case "authority.grant.issued":
+    case "authority.grant.revoked":
+    case "authority.grant.expired": {
+      const grantId = String(p.grantId ?? "");
+      if (!grantId) return [];
+      const prev = get(`grant/${grantId}`) as { [k: string]: unknown } | undefined;
+      const revoked = eventType !== "authority.grant.issued";
+      return [{ key: `grant/${grantId}`, value: j({ ...(prev ?? { grantId }), status: revoked ? (eventType === "authority.grant.expired" ? "expired" : "revoked") : "active", recordedAt }) }];
+    }
+    case "workbench.safemode.boot_attempted": {
+      const prev = get("runtime/safemode") as { attempts?: number } | undefined;
+      return [{ key: "runtime/safemode", value: j({ attempts: (prev?.attempts ?? 0) + 1, lastAttemptAt: recordedAt }) }];
+    }
+    case "workbench.safemode.cleared": {
+      return [{ key: "runtime/safemode", value: j({ attempts: 0, clearedAt: recordedAt }) }];
+    }
+    case "workbench.bundles.pruned": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      return [{ key: `bundle-pruned/${capabilityId}/${recordedAt}`, value: j({ capabilityId, pruned: p.versions ?? [], recordedAt }) }];
+    }
     default:
       return [];
   }

@@ -17,7 +17,7 @@ import { WORKBENCH_EVENTS } from "../workbench/types.ts";
 /** Session-surface events a validated capability may record through the `session.recorded`
  *  command (J-TASK-scope/link). `session.created` and `session.archived` have their own typed
  *  commands; this list is the recording gate for everything else, mirroring `WORKBENCH_EVENTS`. */
-export const SESSION_EVENTS = ["session.task.bound", "session.harness.bound"] as const;
+export const SESSION_EVENTS = ["session.task.bound", "session.harness.bound", "session.activation"] as const;
 export type SessionEventType = (typeof SESSION_EVENTS)[number];
 
 /** The recording run is a second validation gate: a settings event that skipped the

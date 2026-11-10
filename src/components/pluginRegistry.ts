@@ -11,8 +11,15 @@
 // `settings-toggle` entry's runtime behaviour is the settings projection plus whatever gate reads
 // that key, both of which already exist; activation confirms the key is recognised.
 //
-// No downloaded code is ever evaluated. A source supplies *descriptions*; only implementations this
-// application already contains can be activated, which is the trust boundary.
+// No downloaded code is ever evaluated here. A source supplies *descriptions*; only implementations
+// this application already contains can be activated, which is THIS registry's boundary — the
+// legacy-plugin compatibility surface (tranche M re-scope, §9.1/§9.3 of
+// .agents/plans/capability-bundles/design.md). It is superseded as the Workbench's extension path
+// by the capability-bundle system: bundles extend the harness through the recorded trust model
+// (bundle-authored code never runs in-process; untrusted executables are spawned, contained
+// processes; authority is granted and derived per invocation — see the AuthorityGrant /
+// CapabilityBundle / CapabilityActivation anchors and the J-CAP-* journeys). Directory sources for
+// bundles arrive through the capability runtime (T2), not through this registry.
 
 import { TOOL_DEFS } from "../agents/agentCoding.ts";
 import { TOGGLEABLE_PLUGINS } from "../settings.ts";

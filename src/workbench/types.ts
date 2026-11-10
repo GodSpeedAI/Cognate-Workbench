@@ -135,6 +135,10 @@ export type NodeStatus = "pending" | "ready" | "running" | "blocked" | "review" 
 // ---- Skill OS (§3, §4, §17) ---------------------------------------------------------------------
 export interface CapabilityContractDef {
   readonly id: string;
+  /** Manifest version + payload content hash identity (§4.4); unset for pre-M seeded catalog rows. */
+  readonly version?: string;
+  /** Namespace owner: "builtin" (reserved, seed-only) or "bundle" (capability-runtime registered). */
+  readonly owner?: "builtin" | "bundle";
   readonly category: string;
   readonly purpose: string;
   readonly consumes: readonly string[];
@@ -232,6 +236,35 @@ export const WORKBENCH_EVENTS = [
   "authority.decision.recorded",
   "workbench.capability_runtime.enabled",
   "workbench.capability_runtime.remediation_verified",
+  // Capability-bundles tranche M (§8 matrix): bundle/activation lifecycle, grants, harness,
+  // presentation, executables (spawn ledger), safe mode, retention.
+  "capability.bundle.registered",
+  "capability.bundle.validated",
+  "capability.activated",
+  "capability.repointed",
+  "capability.suspended",
+  "capability.resumed",
+  "capability.deactivated",
+  "capability.uninstalled",
+  "capability.activation_failed",
+  "capability.repoint_failed",
+  "capability.validation_failed",
+  "capability.integrity_failed",
+  "capability.binding.retired",
+  "capability.harness.patched",
+  "capability.harness.assembled",
+  "capability.presentation.faulted",
+  "capability.mcp.spawn.intended",
+  "capability.mcp.spawned",
+  "capability.mcp.exited",
+  "capability.mcp.tool_invoked",
+  "workbench.safemode.boot_attempted",
+  "workbench.safemode.cleared",
+  "workbench.bundles.pruned",
+  "authority.grant.issued",
+  "authority.grant.revoked",
+  "authority.grant.expired",
+  "authority.level.allowances.set",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];
 

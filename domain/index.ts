@@ -679,3 +679,31 @@ export function bindT8Identity(domain: Domain) {
     containment: byId["settings.changeContainment"]!,
   };
 }
+
+/**
+ * Capability-bundles tranche M (§9.1): anchors for the dynamically extensible capability system.
+ * Grant administration anchors on `AuthorityGrant` (the operator's durable grant of specified
+ * powers to a responsible agent principal); bundle lifecycle and the runtime enablement gate
+ * anchor on `CapabilityActivation` (the activation row is the invocation-gating record); the
+ * dispatcher's model-facing tools anchor on `CapabilityBundle` (the packaging form of everything
+ * they serve). The ten J-CAP-* canonical journeys entered the catalog in this same change set.
+ */
+export const CAPABILITY_RUNTIME_ANCHORS: Readonly<Record<string, string>> = {
+  "authority.grant.issue": "AuthorityGrant",
+  "authority.grant.revoke": "AuthorityGrant",
+  "authority.grant.list": "AuthorityGrant",
+  "capability.runtime.enable": "CapabilityActivation",
+  "capability.bundle.register": "CapabilityBundle",
+  "capability.bundle.activate": "CapabilityBundle",
+  "capability.bundle.deactivate": "CapabilityBundle",
+  "capability.bundle.uninstall": "CapabilityBundle",
+  "tool.capability_invoke": "CapabilityBundle",
+  "tool.skill_load": "CapabilityBundle",
+};
+
+export function bindCapabilityRuntime(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(CAPABILITY_RUNTIME_ANCHORS).map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} capability-runtime contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}

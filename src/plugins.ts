@@ -1,4 +1,7 @@
-// Plugin catalog and lifecycle logic (T11, J-PLG-install). Pure: no React, no client, no I/O —
+// Plugin catalog and lifecycle logic (T11, J-PLG-install; tranche M re-scope: this is the
+// LEGACY-PLUGIN compatibility surface — the extension path is now the capability-bundle system,
+// whose trust model and lifecycle live in .agents/plans/capability-bundles/design.md and the
+// J-CAP-* journeys). Pure: no React, no client, no I/O —
 // unit-tested in test/workbench-plugins.test.ts.
 //
 // The honesty rule this module exists to enforce: a plugin is only toggleable when something real

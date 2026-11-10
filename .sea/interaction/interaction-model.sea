@@ -58,6 +58,21 @@ Entity "SkillCapability"
 
 Entity "CapabilityImplementation"
 
+// Capability-bundles tranche M (§9.1): the dynamically extensible capability system.
+// CapabilityBundle is the packaging/distribution form (immutable per-version payload
+// directories; content hashes are part of version identity); AuthorityGrant is the operator's
+// durable grant of specified powers to a responsible agent principal (immutable: adjustment is
+// revoke + reissue; provenance fields are the migration inputs for the unified Cognate/SEA-Forge
+// identity architecture); CapabilityActivation is a capability established at a context level
+// (version a re-pointed field; ceiling and clamp provenance immutable per §1.3; suspension
+// carries a reason set). The full lifecycle contract is design.md §1–§4 and §8's normative
+// transition×event×fold matrix.
+Entity "CapabilityBundle"
+
+Entity "AuthorityGrant"
+
+Entity "CapabilityActivation"
+
 Entity "ProtectedEvidence"
 
 Entity "EvidenceLedger"
@@ -111,10 +126,18 @@ Entity "Experiment"
 
 Entity "MethodRecommendation"
 
-// Plugins (T11). A plugin is a catalogued extension the operator can install, enable and inspect.
-// Installation registers the plugin and activates whatever implementation the catalog entry declares;
-// a catalog entry with no executable implementation installs as inert and says so, rather than
-// pretending to work. Trust is an explicit boundary: this app never executes downloaded plugin code.
+// Plugins (T11; capability-bundles tranche M re-scope). A plugin is a catalogued BUILT-IN
+// extension the operator can install, enable and inspect: only implementations this application
+// ships can ever activate, and a catalog entry with no executable implementation installs as
+// inert and says so rather than pretending to work. SUPERSEDED as the extension path by the
+// capability-bundle system (AuthorityGrant / CapabilityBundle / CapabilityActivation, journeys
+// J-CAP-*): bundles are how the Workbench gains anything not built in, under the recorded trust
+// model — bundle-authored code never runs in the application process; untrusted executables run
+// only as spawned, contained processes through execution-world ports; authority is granted by
+// the operator and derived at every invocation, never self-declared. The semantic ID is
+// preserved deliberately (compatibility bridge, D3): plugin-era durable records replay to
+// legacy Capability rows (kind legacy-plugin) under the §9.3 migration mappings, and the
+// Plugins panel remains the compatibility read-model until the capability inspector replaces it.
 Entity "Plugin"
 
 // Experts and Teams (proposed native Workbench subsystem). ExpertDefinition is reusable
@@ -1032,6 +1055,141 @@ Instance j_secrets_storage of "CanonicalJourney" {
     variants: "native store selected; no Secret Service or a locked keychain so the owner-only file is used with a stated reason; COGNATE_SECRET_STORE forces file or native; migration from secrets.json succeeds and removes the file; migration read-back mismatch keeps the file; two data homes on one machine never share keys"
 }
 
+// Capability-bundles tranche M (§9.1): j_plg_install is SUPERSEDED as the extension-install
+// journey by the J-CAP-* family below (j_cap_create/j_cap_persist carry its role forward for
+// the unified capability model). The instance is retained deliberately: legacy plugins remain
+// a compatibility surface and its settlement still holds for the built-in catalog.
+Instance j_cap_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, capability.bundle.activate, tool.capability_invoke, tool.skill_load",
+    evidence_class: "declared",
+    initiating_condition: "An operator or granted agent asks for a capability the Workbench does not have yet",
+    journey_id: "J-CAP-create",
+    precondition: "The extensible runtime is enabled (remediation evidence marker present, supported store) and the requester holds a covering grant",
+    purpose: "Make capability creation a real governed lifecycle: compose, validate, register, activate, and use — inside the live session, without a restart",
+    settlement: "A composed bundle validates (schema, requirement satisfiability, hashes, payload ceilings), materializes into an immutable version directory, registers with provenance, activates only after the handler is ACTIVE and a CAS-atomic commit, and is discoverable and invocable in the same session — descriptor metadata first, full content on load, every decision durably recorded",
+    steps: "request understood -> reusable skills and tools discovered -> missing parts composed (skills + composition guide) -> validated against schema, ceilings and satisfiability -> registered with provenance into the version store -> activated (ceiling computed and clamped, handler ACTIVE, CAS commit) -> descriptor discovery reaches the model at the next turn boundary -> an invocation exercises the capability with authority decided and recorded",
+    variants: "created by the orchestrator expert under a delegated grant with no extra approval; over-ceiling or over-budget registration refused with the limit named; schema-invalid manifest refused at validation; a call before the handler is ACTIVE refused as unavailable; a governance-mode deployment decides the invocation through the external authority like any built-in"
+}
+
+Instance j_cap_reload of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, capability.activation.repoint",
+    evidence_class: "declared",
+    initiating_condition: "An installed capability's skill or manifest changes through the governed re-hash mutation",
+    journey_id: "J-CAP-reload",
+    precondition: "The capability is active at a known version in an immutable version directory",
+    purpose: "Version changes are atomic, in-session, and never strand the previous known-good state",
+    settlement: "The replacement version mounts and verifies ACTIVE before one CAS re-point commits; new invocations resolve the new version; in-flight invocations keep their dispatch-time snapshot; the old binding is retired and conflict detection is re-run against live bindings; a failed replacement leaves version 1 executable with its payload intact",
+    steps: "governed re-hash validates and materializes the new version directory -> new handler mounted and verified -> re-point commits atomically with conflict re-check -> discovery reflects the new version at the next turn boundary -> the old handler drains its in-flight counter and is disposed",
+    variants: "j_cap_rollback: the replacement's mount fails or its CAS commit loses a concurrent race — the failed handle is disposed, the activation was never re-pointed, version 1 remains the last valid effective state with its directory untouched, and the failure is recorded with its reason"
+}
+
+Instance j_cap_mcp of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, capability.mcp.spawn.intended, capability.mcp.spawned, capability.mcp.tool_invoked",
+    evidence_class: "declared",
+    initiating_condition: "A capability declaring an MCP server is installed, started, invoked, suspended and recovered",
+    journey_id: "J-CAP-mcp",
+    precondition: "The declaring capability is authorized; the target world's execution posture is recorded per restriction",
+    purpose: "Untrusted executable payloads run only as spawned, contained processes with recorded spawn/exit/invocation evidence and per-provider honesty",
+    settlement: "The spawn intent is recorded before the process starts; the per-provider containment matrix decides — a restriction the world cannot enforce refuses the spawn unless the posture explicitly authorizes the weaker one; secrets resolve env-only and fail closed on missing keys; recorded tool invocations are distinguished from unobserved subprocess activity; suspension stops the process with the provider's true termination semantics recorded",
+    steps: "spawn intent recorded -> containment matrix evaluated against the world's posture -> process spawned through the execution-world port with env-only secrets -> tool invocations through the MCP client decided, deadline-bounded and recorded -> suspension stops the group (or records the provider's best-effort truth) -> recovery re-resolves the world and remounts from durable state",
+    variants: "parameterized over the local world and one provider-backed (SSH or WSL) world; spawn refused fail-closed when the world cannot enforce a required restriction or a secret key is missing; SSH termination recorded as best-effort channel close, never claimed as proof of process death"
+}
+
+Instance j_cap_refusal of "CanonicalJourney" {
+    actor: "Agent",
+    capabilities: "authority.check, authority.grant.issue, capability.runtime.enable",
+    evidence_class: "declared",
+    initiating_condition: "An agent attempts work beyond its granted authority, through an alternate path, or after a suspension",
+    journey_id: "J-CAP-refusal",
+    precondition: "The agent holds a limited grant; the enforcement points of design §2.3 are wired",
+    purpose: "Authority cannot be self-enlarged or bypassed — every negative case is refused at a traced enforcement point and durably recorded",
+    settlement: "Forged grants, beyond-grant capability requests, broader workspace scopes, alternate invocation paths, subagent lineage escalation, in-process bundle-code loading, system-caller laundering, and post-suspension invocations are all refused, each recorded in authority.decision.recorded with a reason code and the deciding enforcement point's identity; enablement without the remediation evidence marker is refused",
+    steps: "attempt issued -> the traced enforcement point decides from runtime-owned state -> refusal recorded with reason and deciding point -> the agent's effective authority is unchanged",
+    variants: "j_cap_enablement-gate: capability.runtime.enable is refused while the remediation evidence marker is absent or names a different build — bundles never mount fail-closed"
+}
+
+Instance j_cap_suspend of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.suspend, capability.resume",
+    evidence_class: "declared",
+    initiating_condition: "The operator yanks an active capability (or a clamp grant is revoked or expires)",
+    journey_id: "J-CAP-suspend",
+    precondition: "The capability is active with possible in-flight consequential work",
+    purpose: "Suspension is immediate at committed-event visibility and honest about in-flight work",
+    settlement: "New and queued invocations are rejected from the suspension commit onward, each refusal recorded; managed process stop is initiated synchronously with the commit and the termination outcome recorded per provider; interrupted consequential operations keep their commitment states and enter reconciliation; the suspension reason is recorded and resumption clears exactly one named reason",
+    steps: "suspend committed (the index updates synchronously) -> enforcement points refuse and record -> managed processes stopped per the payload discipline -> audit attributes every observed action -> explicit resumption clears the named reason",
+    variants: "j_cap_revoke: revoking (or the scheduler expiring) grant G commits one CAS-atomic batch suspending every activation clamped by G together with the grant record — concurrent changes fail and retry the whole batch; operator-established activations are unaffected; re-granting never silently reactivates"
+}
+
+Instance j_cap_safemode of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, workbench.safemode.boot_attempted, workbench.safemode.cleared",
+    evidence_class: "declared",
+    initiating_condition: "A broken capability or presentation extension wedges rendering or boot health",
+    journey_id: "J-CAP-safemode",
+    precondition: "Extensions are enabled; the boot budget/watchdog or the render boundary detects the failure",
+    purpose: "Recovery never depends on the broken component and never corrupts the durable registry",
+    settlement: "Safe mode boots with the known-good shell after the exclusion read (which precedes any render or mount), suspends the problematic extensions with durable fault records, and supports one-at-a-time operator re-enable; a governance-surface override attempt is refused at registration and recorded as a core violation; two failed boots keep extensions suspended until the operator-only manual clear",
+    steps: "failure detected -> exclusion read precedes render/mount -> safe mode boots with core presentation -> fault recorded durably -> operator inspects and re-enables one at a time -> manual clear recorded",
+    variants: "j_cap_present: a valid declarative panel descriptor from an installed capability renders through the slot registry in the normal path, governance surfaces untouched"
+}
+
+Instance j_cap_restart of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workbench.capability_runtime.enabled",
+    evidence_class: "declared",
+    initiating_condition: "The Workbench restarts with mixed durable capability state and a crash orphan",
+    journey_id: "J-CAP-restart",
+    precondition: "Durable state spans persistent installs, session-scoped activations, suspensions, retired bindings, plugin-era events and an unrecorded spawn",
+    purpose: "Restart restores exactly the recorded effective state — fold first, mount second",
+    settlement: "Persistent recorded state remounts; every session-scoped activation expires at boot (derived; unarchive never resurrects); the spawn-ledger sweep reconciles every intent to a recorded outcome; plugin-era events replay to their defined mappings; a bundle re-registering a built-in id is refused by the namespace partition",
+    steps: "boot folds everything -> session-bound rows expire -> spawn-ledger sweep kills and records orphans -> the active set mounts -> plugin-era history replays under the migration mappings",
+    variants: "crash between spawn and confirm reconciles to a recorded outcome (killed, or reconciled-unknown where the provider cannot prove death)"
+}
+
+Instance j_cap_source of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register",
+    evidence_class: "declared",
+    initiating_condition: "A capability bundle directory sits on a provider-backed execution world (SSH or WSL)",
+    journey_id: "J-CAP-source",
+    precondition: "The world is connected and the directory is readable through its provider port",
+    purpose: "Directory sources respect the execution-world boundary — no host filesystem assumptions",
+    settlement: "Ingestion, hashing, version-directory materialization, registration and loading behave identically to a local-world install, through provider ports with the bounded-directory guards; no host watch or host read occurs",
+    steps: "directory read through the world provider -> bounded ingest and hashing -> materialize into the version store -> register with provenance -> activate and invoke identically to local"
+}
+
+Instance j_cap_persist of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.activate, authority.grant.issue",
+    evidence_class: "declared",
+    initiating_condition: "A capability is activated persistently (across sessions) at a stated context level",
+    journey_id: "J-CAP-persist",
+    precondition: "The activator holds the covering authority for the level; level allowances are the structural v1 constants",
+    purpose: "Persistent and session-scoped authorities stay distinct, observable, and restart-true",
+    settlement: "The persistent activation survives restart per its scope; decisions taken inside and outside the level are distinguishable in authority.decision.recorded; session-scoped and persistent rows are independent — suspending one never suspends the other, and exactly one row governs any invocation",
+    steps: "persistent activation committed with its ceiling and level -> decisions in scoped and unscoped sessions recorded with the level observable -> restart restores the persistent row and expires session-bound rows"
+}
+
+Instance j_cap_harness of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.harness.patched, capability.harness.assembled",
+    evidence_class: "declared",
+    initiating_condition: "The operator asks the orchestrator to change a permitted harness behavior for the running session",
+    journey_id: "J-CAP-harness",
+    precondition: "The orchestrator holds a harness-modification grant at the surface's level (v1 surfaces: instruction patches and toolset overrides)",
+    purpose: "Permitted harness changes are authored as capabilities, applied deterministically, and demonstrably used by the next run",
+    settlement: "The authored modification validates, registers and activates in-session; the next run's assembled configuration (recorded by hash and delta) reflects the patch and override uniformly regardless of run source; overlapping modifications follow the per-surface rule (patches compose in precedence, toolset overrides are exclusive per preset); deactivation restores the prior configuration by replay",
+    steps: "modification authored and validated -> conflict-checked at activation -> committed -> the next run assembles with the patch applied and records the result -> the run demonstrably follows it -> deactivation replays back to the prior state",
+    variants: "two capabilities claiming the same exclusive surface refuse co-activation; a replace patch supersedes earlier patches for its section (last-applied wins)"
+}
+
+// Capability-bundles tranche M (§9.1): superseded as the extension-install journey by the
+// J-CAP-* family (j_cap_create / j_cap_persist carry its role in the unified model). Retained
+// deliberately: legacy plugins stay a compatibility surface and this settlement still holds
 Instance j_plg_install of "CanonicalJourney" {
     actor: "User",
     capabilities: "plugin.install, plugin.uninstall",
