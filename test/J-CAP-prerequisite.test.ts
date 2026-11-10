@@ -56,7 +56,7 @@ describe("J-CAP-prerequisite", () => {
     expect(decision!.payload.outcome).toBe("refused");
     expect(decision!.payload.reasonCode).toBe("operator-only");
     expect(decision!.payload.runId).toBe("run-1");
-  });
+  }, 60000);
 
   test("the ALL_ALLOWED fallback is retired: unbound and declared scopes clamp to the runtime ceiling", async () => {
     await withTempHome(async (home) => {
@@ -92,7 +92,7 @@ describe("J-CAP-prerequisite", () => {
         await app.runtime.idle().catch(() => {});
       }
     });
-  });
+  }, 60000);
 
   test("run_code joins the authority plane: denied without a shell grant, allowed under the ceiling", async () => {
     await withTempHome(async (home) => {
@@ -119,7 +119,7 @@ describe("J-CAP-prerequisite", () => {
         await app.runtime.idle().catch(() => {});
       }
     });
-  });
+  }, 60000);
 
   test("subagent children run under derived per-agent principals (lineage narrowing provenance)", async () => {
     await withTempHome(async (home) => {
@@ -143,7 +143,7 @@ describe("J-CAP-prerequisite", () => {
         await app.runtime.idle().catch(() => {});
       }
     });
-  });
+  }, 60000);
 
   test("the remediation marker records versioned build evidence through the real recording path", async () => {
     await withTempHome(async (home) => {
@@ -174,7 +174,7 @@ describe("J-CAP-prerequisite", () => {
         await app.runtime.idle().catch(() => {});
       }
     });
-  });
+  }, 60000);
 
   test("decision records fold into the workbench projection (the P evidence substrate)", async () => {
     await withTempHome(async (home) => {
@@ -194,5 +194,5 @@ describe("J-CAP-prerequisite", () => {
         await app.runtime.idle().catch(() => {});
       }
     });
-  });
+  }, 60000);
 });

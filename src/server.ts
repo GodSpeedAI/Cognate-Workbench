@@ -20,7 +20,10 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
+import { AuthorityIndex } from "./workbench/authorityIndex.ts";
+import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
+import { authorityGrantsComponent, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -299,6 +302,13 @@ const GRANTED_CAPABILITIES = [
   "observation.status",
   "observation.record",
   ...WORKBENCH_CAPABILITY_IDS,
+  // Capability-bundles tranche T1 (§1.2/§1.7): grant administration and the runtime enablement
+  // gate. Operator-only surfaces — the policy agent branch excludes them, and each handler is
+  // guarded by the shared operator check.
+  "authority.grant.issue",
+  "authority.grant.revoke",
+  "authority.grant.list",
+  "capability.runtime.enable",
 ];
 
 function buildPolicy(): Policy {
@@ -319,6 +329,7 @@ function buildPolicy(): Policy {
     "workspace.rename", "workspace.delete",
     "git.checkout.attach", "git.checkout.merge", "git.checkout.remove", "git.checkout.recreate",
     "session.harness.bind",
+    "authority.grant.issue", "authority.grant.revoke", "authority.grant.list", "capability.runtime.enable",
   ]);
   return rulePolicy(
     "deepseek-harness-app",
@@ -519,6 +530,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
   const pinRefs = bindSessionPin(domain);
+  // Capability-bundles tranche T1 (§2.1): the commit-synchronous authority index, the
+  // lifecycleRecorder, and the grant-administration component. The index rebuilds from the
+  // workbench fold after boot and then tracks commits synchronously; the enablement predicate
+  // reads the remediation marker fold (§1.7) and the store kind (§1.5 invariant).
+  const capabilityRuntimeRefs = bindCapabilityRuntime(domain);
   const gapRefs = bindConformanceGaps(domain);
   const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
@@ -648,6 +664,13 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   };
 
   let pollApprovals: (() => Promise<number>) | undefined;
+  let capabilityRuntimeIndex!: AuthorityIndex;
+  let capabilityRuntimeRecorder!: LifecycleRecorder;
+  const capabilityStoreKind: "pg0" | "memory" | "external-postgres" = process.env.COGNATE_POSTGRES_URL ? "external-postgres" : "pg0";
+  const isRemediationVerified = async (): Promise<boolean> => {
+    const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
+    return rows.some((r) => r.key === "runtime/remediation");
+  };
   const runtime: Runtime = await createRuntime({
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
@@ -738,6 +761,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         uninstallSemanticRef: t11["plugin.uninstall"],
         catalogSemanticRef: t11["plugin.install"],
       }),
+      authorityGrantsComponent({
+        getStore: () => runtime.store,
+        getIndex: () => capabilityRuntimeIndex,
+        tenant: LOCAL_OPERATOR.tenant,
+        isRemediationVerified,
+        storeKind: capabilityStoreKind,
+        semanticRefs: capabilityRuntimeRefs,
+      }),
     ],
     projections: [
       { projection: expertsProjection, public: true },
@@ -767,7 +798,23 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   finishServiceBoot(governedService);
   harnessHost.startReaper(async (runId) => (await governedService.getRun(SYSTEM_CALLER, { runId }).catch(() => undefined))?.status);
   experts = new ExpertsService(governedService,SYSTEM_CALLER);
+  // Capability-bundles tranche T1: the runtime exists — build the index over the store and the
+  // recorder over the same store, then rebuild the index from the workbench fold (boot-time read)
+  // and seed the operator root grant (idempotent).
+  capabilityRuntimeIndex = new AuthorityIndex(runtime.store, LOCAL_OPERATOR.tenant);
+  capabilityRuntimeRecorder = new LifecycleRecorder(runtime.store, LOCAL_OPERATOR.tenant);
+  const capabilityRuntimeBootRows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
+  await capabilityRuntimeIndex.rebuild(capabilityRuntimeBootRows.map((r) => ({ key: r.key, value: r.value })));
+  await seedOperatorRootGrant(capabilityRuntimeRecorder);
+  const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex).catch(() => {}); }, 60_000);
+  grantExpirySweep.unref?.();
+
   finishExpertsBoot(experts);
+
+  // Capability-bundles tranche T1: index rebuild (boot-time fold read — not latency-bound), the
+  // operator root-grant seed (§1.3, idempotent), the grant-administration component wiring, and
+  // the grant-expiry sweep interval (§1.5's durable scheduler, 60 s cadence, unref'd so it never
+  // holds the process open).
 
   // T8 (J-AUTH-SESSION): the durable identity ledger is the authentication truth. Boot seeds the
   // operator identity idempotently, ages expired sessions (they were already refused; the ledger's
