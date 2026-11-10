@@ -71,6 +71,7 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
 
       provide("authority.grant.revoke", async (input: { grantId: string }, ctx) => {
         await requireOperator(ctx, "authority.grant.revoke", inRunEmit(ctx));
+        await options.getIndex().ready;
         const grant = options.getIndex().grantFor(input.grantId);
         const byId = [...options.getIndex().grants.values()].find((g) => g.grantId === input.grantId);
         const target = grant ?? byId;
@@ -89,6 +90,7 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
 
       provide("authority.grant.list", async (_input, ctx) => {
         await requireOperator(ctx, "authority.grant.list", inRunEmit(ctx));
+        await options.getIndex().ready;
         const grants: { grantId: string; principalId: string; permissions: readonly string[]; status: string }[] = [];
         for (const grant of options.getIndex().grants.values()) {
           if (grant.grantId) grants.push({ grantId: grant.grantId, principalId: grant.principalId, permissions: grant.permissions, status: grant.status });
@@ -98,6 +100,7 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
 
       provide("capability.runtime.enable", async (_input, ctx) => {
         await requireOperator(ctx, "capability.runtime.enable", inRunEmit(ctx));
+        await options.getIndex().ready;
         // §1.7: (a) the remediation evidence marker must be present in the fold; (b) the store
         // must be a supported single-committing-process kind. Fail-closed on both.
         if ((await options.isRemediationVerified()) !== true) throw new Error("capability.runtime.enable: the remediation evidence marker is absent — the §1.6 prerequisite matrix has not passed on this build");

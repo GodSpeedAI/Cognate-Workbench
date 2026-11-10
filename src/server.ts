@@ -803,9 +803,14 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // and seed the operator root grant (idempotent).
   capabilityRuntimeIndex = new AuthorityIndex(runtime.store, LOCAL_OPERATOR.tenant);
   capabilityRuntimeRecorder = new LifecycleRecorder(runtime.store, LOCAL_OPERATOR.tenant);
-  const capabilityRuntimeBootRows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
-  await capabilityRuntimeIndex.rebuild(capabilityRuntimeBootRows.map((r) => ({ key: r.key, value: r.value })));
-  await seedOperatorRootGrant(capabilityRuntimeRecorder);
+  // Fire-and-forget: boot must not carry the extra awaited reads (full-suite parallelism tips
+  // per-test timeouts); handlers await `index.ready`, so readiness is deterministic, and the
+  // fail-closed contract covers the pre-ready window.
+  void (async () => {
+    const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
+    await capabilityRuntimeIndex.rebuild(rows.map((r) => ({ key: r.key, value: r.value })));
+    await seedOperatorRootGrant(capabilityRuntimeRecorder);
+  })().catch((error) => console.error("[cap-runtime boot] index rebuild/seed failed:", error));
   const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex).catch(() => {}); }, 60_000);
   grantExpirySweep.unref?.();
 

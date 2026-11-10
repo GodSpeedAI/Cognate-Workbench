@@ -38,14 +38,24 @@ const GRANT_FAMILIES = new Set(["authority.grant.issued", "authority.grant.revok
 export class AuthorityIndex {
   readonly grants = new Map<string, GrantRow>();
   readonly activations = new Map<string, ActivationRow>();
+  /** Resolves when the boot rebuild completes; index readers await it so the fire-and-forget
+   *  boot rebuild (which must not block server boot under full-suite parallelism) stays
+   *  deterministic for handlers. */
+  ready: Promise<void> = Promise.resolve();
   #sequence = 0;
   #unlisten: (() => void) | undefined;
 
   constructor(readonly store: DurableStore, readonly tenant: string) {}
 
   /** Boot: rebuild from the workbench projection fold (the reducer's rows are the fold truth),
-   *  then subscribe to the commit hook for synchronous deltas. */
-  async rebuild(rows: readonly { key: string; value: unknown }[]): Promise<void> {
+   *  then subscribe to the commit hook for synchronous deltas. Fire-and-forget from boot —
+   *  readers await `ready`. */
+  rebuild(rows: readonly { key: string; value: unknown }[]): Promise<void> {
+    this.ready = this.#rebuild(rows);
+    return this.ready;
+  }
+
+  async #rebuild(rows: readonly { key: string; value: unknown }[]): Promise<void> {
     for (const row of rows) {
       if (row.key.startsWith("activation/")) {
         const v = row.value as ActivationRow;
