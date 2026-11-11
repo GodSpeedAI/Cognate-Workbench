@@ -24,6 +24,7 @@ import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANC
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
+import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -309,6 +310,7 @@ const GRANTED_CAPABILITIES = [
   "authority.grant.revoke",
   "authority.grant.list",
   "capability.runtime.enable",
+  "capability.bundle.register",
 ];
 
 function buildPolicy(): Policy {
@@ -767,6 +769,12 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         tenant: LOCAL_OPERATOR.tenant,
         isRemediationVerified,
         storeKind: capabilityStoreKind,
+        semanticRefs: capabilityRuntimeRefs,
+      }),
+      capabilityBundlesComponent({
+        getService,
+        home,
+        tenant: LOCAL_OPERATOR.tenant,
         semanticRefs: capabilityRuntimeRefs,
       }),
     ],

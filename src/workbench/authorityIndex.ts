@@ -141,11 +141,13 @@ export class AuthorityIndex {
     return undefined;
   }
 
-  /** §4.1 row selection: session-scoped governs session invocations, else the persistent row. */
+  /** §4.1 row selection (total): an invocation bound to session S consults the session-scoped
+   *  row when one exists — whatever its state (an expired row governs and refuses); only when
+   *  no session-scoped row exists does the persistent row govern. */
   selectActivation(capabilityId: string, level: string, sessionId?: string): ActivationRow | undefined {
     if (sessionId) {
-      const row = this.activations.get(this.activationKey(capabilityId, level, sessionId));
-      if (row && row.state !== "expired" && row.state !== "retired") return row;
+      const sessionRow = this.activations.get(this.activationKey(capabilityId, level, sessionId));
+      if (sessionRow) return sessionRow;
     }
     return this.activations.get(this.activationKey(capabilityId, level, ""));
   }

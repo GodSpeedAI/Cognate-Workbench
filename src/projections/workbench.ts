@@ -10,7 +10,7 @@ export const workbenchProjection: Projection = {
   name: "workbench",
   version: "1.0.0",
   apply(event, state) {
-    if (!event.eventType.startsWith("workbench.") && !event.eventType.startsWith("authority.")) return [];
+    if (!event.eventType.startsWith("workbench.") && !event.eventType.startsWith("authority.") && !event.eventType.startsWith("capability.")) return [];
     const prefix = `${event.tenant}/`;
     return reduceWorkbench(event.eventType, event.payload, event.recordedAt, event.eventId, (key) => state.get(`${prefix}${key}`)).map((w) => ({
       key: `${prefix}${w.key}`,
