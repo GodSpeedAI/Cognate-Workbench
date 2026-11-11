@@ -25,6 +25,7 @@ import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
+import { capabilityRuntimeComponent } from "./capabilities/capabilityRuntime.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -311,6 +312,11 @@ const GRANTED_CAPABILITIES = [
   "authority.grant.list",
   "capability.runtime.enable",
   "capability.bundle.register",
+  "capability.bundle.activate",
+  "capability.bundle.deactivate",
+  "capability.bundle.uninstall",
+  "tool.capability_invoke",
+  "tool.skill_load",
 ];
 
 function buildPolicy(): Policy {
@@ -775,6 +781,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         getService,
         home,
         tenant: LOCAL_OPERATOR.tenant,
+        semanticRefs: capabilityRuntimeRefs,
+      }),
+      capabilityRuntimeComponent({
+        getKernel: () => runtime.kernel,
+        getService,
+        getRootScope: () => (runtime.kernel as unknown as { root: import("@godspeedai/cognate-kernel-api").Scope }).root,
+        tenant: LOCAL_OPERATOR.tenant,
+        recordDecision: async (event) => {
+          await capabilityRuntimeRecorder.commitBatch(String((event.payload as Record<string, unknown>).capabilityId ?? "runtime"), [event as { type: string; payload: Record<string, unknown> }]);
+        },
+        activeSet: [],
         semanticRefs: capabilityRuntimeRefs,
       }),
     ],

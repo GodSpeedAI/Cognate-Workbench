@@ -100,8 +100,8 @@ async function bootAppOnce(home: string, attempt: number): Promise<{ readonly ap
       app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (attempt < 4 && /pg0 could not start|Instance already running/.test(message)) {
-        await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+      if (attempt < 8 && /pg0 could not start|Instance already running|ECONNREFUSED|too many clients/.test(message)) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
         return bootAppOnce(home, attempt + 1);
       }
       throw error;

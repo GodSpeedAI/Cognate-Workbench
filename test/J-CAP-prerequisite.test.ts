@@ -104,6 +104,8 @@ describe("J-CAP-prerequisite", () => {
           workspaceId,
           contract: { authority: { filesystem: { read: "yes", write: "yes", outsideWorkspace: "no" }, shell: { run: "no", destructive: "no" }, network: { outbound: "no" }, packages: { install: "no" }, extensions: { install: "no", enable: "no" }, protectedPaths: [] } } as never,
         })) as { readonly taskId?: string };
+        // The projection fold is asynchronous — wait for the task row before checking authority.
+        await waitUntil("no-shell task row", async () => ((await wbRows(app)).get(`task/${denied.taskId}`) as Record<string, unknown> | undefined));
         const refused = await client.invoke("authority.check", { workspaceId, taskId: denied.taskId!, tool: "run_code", args: { code: "1+1" } } as never) as { readonly outcome: string; readonly rule: string };
         expect(refused.outcome).toBe("deny");
         expect(refused.rule).toBe("shell.run");
