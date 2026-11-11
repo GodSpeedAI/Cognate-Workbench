@@ -18,6 +18,8 @@
 import type { Component, CapabilityContract, SemanticRef, Kernel, ComponentHandle } from "@godspeedai/cognate-kernel-api";
 import type { Json } from "@godspeedai/cognate-events";
 import type { RuntimeService } from "@godspeedai/cognate-runtime-api";
+import type { LifecycleRecorder } from "../workbench/lifecycleRecorder.ts";
+import type { AuthorityIndex } from "../workbench/authorityIndex.ts";
 import { randomUUID } from "node:crypto";
 
 export interface DispatcherInterpreterInput {
@@ -53,6 +55,9 @@ export interface CapabilityRuntimeOptions {
   readonly getRootScope: () => import("@godspeedai/cognate-kernel-api").Scope;
   readonly getService: () => RuntimeService;
   readonly tenant: string;
+  /** The lifecycleRecorder (§1.5): activation commits go through it, not the normal path. */
+  readonly getRecorder: () => LifecycleRecorder;
+  readonly getIndex?: () => AuthorityIndex;
   /** Record path for enforcement decisions (§8: point A refusals always; bundle-path allows). */
   readonly recordDecision: (event: { readonly type: string; readonly payload: Json }) => Promise<void>;
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
@@ -201,15 +206,32 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
 
       // §4.2.4 activation: mount the interpreter (hot-swap discipline) and return the live
       // entry. The caller CAS-commits the activation event after ACTIVE (§4.2.4 step 4).
-      provide("capability.bundle.activate", async (input: { capabilityId: string; version: string; dir: string }, ctx: { actor: { id: string; kind: string }; runId?: string }) => {
-        const entry = await mountInterpreter(input.capabilityId, input.version, input.dir, interpreterFor(input.capabilityId, input.version, input.dir));
-        return { capabilityId: input.capabilityId, version: entry.version, state: "active" };
+      provide("capability.bundle.activate", async (input: { capabilityId: string; sessionId?: string }, ctx: { actor: { id: string; kind: string }; runId?: string }) => {
+        const capabilityId = String(input.capabilityId ?? "");
+        // Read the bundle row for version/dir (the caller passes only the capability id).
+        const rows = (await options.getService().readProjection({ actor: { id: "system", kind: "system" }, tenant: options.tenant }, { name: "workbench" })).rows;
+        const bundle = rows.find((r) => r.key === `bundle/${capabilityId}`)?.value as { version?: string; versionHash?: string; dir?: string; uninstalled?: boolean } | undefined;
+        if (!bundle?.version || bundle.uninstalled) throw new Error(`capability.bundle.activate: ${capabilityId} is not a registered, installed bundle`);
+        const dir = bundle.dir ?? "";
+        const version = bundle.versionHash ?? bundle.version;
+        const entry = await mountInterpreter(capabilityId, version, dir, interpreterFor(capabilityId, version, dir));
+        // §4.2.4 step 4: CAS-commit the activation event after ACTIVE + pre-state validation.
+        const grant = options.getIndex ? options.getIndex().grantFor(ctx.actor.id) : undefined;
+        const ceiling = (grant?.permissions ?? ["capability.invoke"]) as string[];
+        await options.getRecorder().commitBatch(capabilityId, [{
+          type: "capability.activated",
+          payload: { capabilityId, level: "user", version, ceiling, clampProvenance: grant?.grantId ?? "operator", ...(input.sessionId ? { sessionId: input.sessionId } : {}) },
+        }], `activate:${capabilityId}:${randomUUID()}`);
+        return { capabilityId, version: entry.version, state: "active" };
       });
 
       provide("capability.bundle.deactivate", async (input: { capabilityId: string }) => {
         const entry = table.get(input.capabilityId);
         if (entry && entry.inFlight > 0) throw new Error(`capability.bundle.deactivate: ${input.capabilityId} has ${entry.inFlight} in-flight call(s) — drain first`);
         table.delete(input.capabilityId);
+        await options.getRecorder().commitBatch(input.capabilityId, [
+          { type: "capability.deactivated", payload: { capabilityId: input.capabilityId } },
+        ], `deactivate:${input.capabilityId}:${randomUUID()}`);
         return { capabilityId: input.capabilityId, state: "dormant" };
       });
     },

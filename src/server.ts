@@ -790,6 +790,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         getService,
         getRootScope: () => (runtime.kernel as unknown as { root: import("@godspeedai/cognate-kernel-api").Scope }).root,
         tenant: LOCAL_OPERATOR.tenant,
+        getRecorder: () => capabilityRuntimeRecorder,
+        getIndex: () => capabilityRuntimeIndex,
         recordDecision: async (event) => {
           await capabilityRuntimeRecorder.commitBatch(String((event.payload as Record<string, unknown>).capabilityId ?? "runtime"), [event as { type: string; payload: Record<string, unknown> }]);
         },

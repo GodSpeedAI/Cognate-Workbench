@@ -383,7 +383,7 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
     case "capability.bundle.registered": {
       const capabilityId = String(p.capabilityId ?? "");
       if (!capabilityId) return [];
-      return [{ key: `bundle/${capabilityId}`, value: j({ capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", registeredAt: recordedAt }) }];
+      return [{ key: `bundle/${capabilityId}`, value: j({ capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, registeredAt: recordedAt }) }];
     }
     case "capability.bundle.validated": {
       const capabilityId = String(p.capabilityId ?? "");
