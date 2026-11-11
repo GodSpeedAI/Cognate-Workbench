@@ -12,6 +12,7 @@ test:
     bun run test
 
 verify:
+    ./.tmp/pg0/pg0 start --name cognate-dev || true
     bun run verify
 
 smoke:
