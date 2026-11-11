@@ -64,6 +64,8 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
   const contracts: CapabilityContract[] = [
     { id: "tool.capability_invoke", version: "1.0.0", semanticRef: options.semanticRefs?.["tool.capability_invoke"] },
     { id: "tool.skill_load", version: "1.0.0", semanticRef: options.semanticRefs?.["tool.skill_load"] },
+    { id: "capability.bundle.activate", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.bundle.activate"] },
+    { id: "capability.bundle.deactivate", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.bundle.deactivate"] },
   ];
   const table = new Map<string, HandlerEntry>(); // key: capabilityId (committed version governs)
   const mounted: ComponentHandle[] = [];
@@ -195,6 +197,20 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         } finally {
           entry.inFlight -= 1;
         }
+      });
+
+      // §4.2.4 activation: mount the interpreter (hot-swap discipline) and return the live
+      // entry. The caller CAS-commits the activation event after ACTIVE (§4.2.4 step 4).
+      provide("capability.bundle.activate", async (input: { capabilityId: string; version: string; dir: string }, ctx: { actor: { id: string; kind: string }; runId?: string }) => {
+        const entry = await mountInterpreter(input.capabilityId, input.version, input.dir, interpreterFor(input.capabilityId, input.version, input.dir));
+        return { capabilityId: input.capabilityId, version: entry.version, state: "active" };
+      });
+
+      provide("capability.bundle.deactivate", async (input: { capabilityId: string }) => {
+        const entry = table.get(input.capabilityId);
+        if (entry && entry.inFlight > 0) throw new Error(`capability.bundle.deactivate: ${input.capabilityId} has ${entry.inFlight} in-flight call(s) — drain first`);
+        table.delete(input.capabilityId);
+        return { capabilityId: input.capabilityId, state: "dormant" };
       });
     },
   };

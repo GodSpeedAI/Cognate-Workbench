@@ -12,7 +12,7 @@ import type { RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { randomUUID } from "node:crypto";
 import Ajv from "ajv";
 import { requireOperator } from "../workbench/operatorGuard.ts";
-import { materializeVersion, pruneVersions, scanBundle, BUNDLE_LIMITS, BundleLimitError, versionHashFor } from "./bundleStore.ts";
+import { materializeVersion, pruneVersions, scanBundle, versionDir, BUNDLE_LIMITS, BundleLimitError, versionHashFor } from "./bundleStore.ts";
 
 const registerSchema = {
   type: "object",
@@ -39,10 +39,14 @@ const registerSchema = {
   additionalProperties: false,
 } as const;
 
+const SYSTEM = { actor: { id: "system", kind: "system" as const }, tenant: "local" };
+
 const KNOWN_REQUIREMENT_KINDS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate"]);
 
 export interface CapabilityBundlesOptions {
   readonly getService: () => RuntimeService;
+  readonly lifecycleRecorder: import("../workbench/lifecycleRecorder.ts").LifecycleRecorder;
+  readonly authorityIndex: import("../workbench/authorityIndex.ts").AuthorityIndex;
   readonly home: string;
   readonly tenant: string;
   /** Live-referenced versions per capability (the GC reference rule, owner condition 4):
@@ -58,6 +62,7 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
   const validateRegister = ajv.compile(registerSchema);
   const contracts: CapabilityContract[] = [
     { id: "capability.bundle.register", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.bundle.register"] },
+    { id: "capability.bundle.uninstall", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.bundle.uninstall"] },
   ];
   const systemCaller = { actor: { id: "system", kind: "system" as const }, tenant: options.tenant };
   type RecordedEvent = { readonly type: string; readonly payload: Record<string, unknown> };
@@ -75,6 +80,9 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
     id: "capability-runtime:bundles",
     provides: contracts,
     activate(fiber) {
+      const index = options.authorityIndex;
+
+
       fiber.provide(contracts[0] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {
         const input = raw as { capabilityId?: string; sourceDir?: string; manifest?: Record<string, unknown> };
         const capabilityId = String(input.capabilityId ?? "");
@@ -113,6 +121,17 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
           ...(pruned.length > 0 ? [{ type: "workbench.bundles.pruned", payload: { capabilityId, versions: pruned } }] : []),
         ]);
         return { capabilityId, version: versionHash, dir: materialized.dir, files: materialized.files, totalBytes: materialized.totalBytes };
+      });
+
+      fiber.provide(contracts[1] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {
+        const input = raw as { capabilityId?: string };
+        const capabilityId = String(input.capabilityId ?? "");
+        await requireOperator(ctx, "capability.bundle.uninstall");
+        await index.ready;
+        const live = [...index.activations.values()].some((row) => row.capabilityId === capabilityId && row.state === "active");
+        if (live) throw new Error(`capability.bundle.uninstall: ${capabilityId} has live activations — deactivate first (zero-live rule, §1.5)`);
+        await options.lifecycleRecorder.commitBatch(capabilityId, [{ type: "capability.uninstalled", payload: { capabilityId } }], `uninstall:${capabilityId}`);
+        return { capabilityId, uninstalled: true };
       });
     },
   };

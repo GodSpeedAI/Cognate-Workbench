@@ -475,6 +475,29 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
     case "workbench.safemode.cleared": {
       return [{ key: "runtime/safemode", value: j({ attempts: 0, clearedAt: recordedAt }) }];
     }
+    case "session.activation": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = String(p.sessionId ?? "");
+      if (!capabilityId || !session) return [];
+      const key = `activation/${capabilityId}/${level}/${session}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      return [{ key, value: j({ ...(prev ?? {}), sessionId: session, sessionBoundAt: recordedAt }) }];
+    }
+    case "capability.binding.retired": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const version = String(p.version ?? "");
+      if (!capabilityId) return [];
+      return [{ key: `binding-retired/${capabilityId}/${version}`, value: j({ capabilityId, version, retiredAt: recordedAt }) }];
+    }
+    case "workbench.kernel.observed.provided":
+    case "workbench.kernel.observed.withdrawn":
+    case "workbench.kernel.observed.fiber_state": {
+      const providerId = String(p.providerId ?? "");
+      if (!providerId) return [];
+      const kind = eventType.replace("workbench.kernel.observed.", "");
+      return [{ key: `kernel-obs/${providerId}/${recordedAt}`, value: j({ providerId, kind, recordedAt }) }];
+    }
     case "workbench.bundles.pruned": {
       const capabilityId = String(p.capabilityId ?? "");
       if (!capabilityId) return [];

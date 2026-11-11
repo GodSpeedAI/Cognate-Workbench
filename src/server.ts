@@ -779,6 +779,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }),
       capabilityBundlesComponent({
         getService,
+        lifecycleRecorder: capabilityRuntimeRecorder,
+        authorityIndex: capabilityRuntimeIndex,
         home,
         tenant: LOCAL_OPERATOR.tenant,
         semanticRefs: capabilityRuntimeRefs,
