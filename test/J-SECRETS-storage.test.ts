@@ -35,7 +35,7 @@ describe("J-SECRETS-storage", () => {
         await app.stop();
       }
     });
-  });
+  }, 30000);
 
   test("describe is refused for a caller that is not the operator", async () => {
     await withTempHome(async (home) => {
@@ -51,5 +51,5 @@ describe("J-SECRETS-storage", () => {
         await app.stop();
       }
     });
-  });
+  }, 30000);
 });

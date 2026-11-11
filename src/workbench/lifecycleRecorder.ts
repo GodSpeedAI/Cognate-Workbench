@@ -54,7 +54,7 @@ export class LifecycleRecorder {
     const key = idempotencyKey ?? randomUUID();
     const outcome = await this.store.commit({
       appends: [{ streamId, expectedVersion: prior.length, events: batch }],
-      idempotency: { scope: `wb-lifecycle:${capabilityId}`, key, fingerprint: createHash("sha256").update(JSON.stringify(batch)).digest("hex") },
+      idempotency: { scope: `wb-lifecycle:${capabilityId}`, key, fingerprint: createHash("sha256").update(JSON.stringify(batch.map((e) => ({ eventType: e.eventType, payload: e.payload })))).digest("hex") },
     });
     if (outcome.kind === "duplicate") return outcome.events;
     return outcome.events;

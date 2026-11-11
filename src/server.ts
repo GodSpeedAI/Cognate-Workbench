@@ -813,12 +813,25 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   capabilityRuntimeRecorder = new LifecycleRecorder(runtime.store, LOCAL_OPERATOR.tenant);
   // Fire-and-forget: boot must not carry the extra awaited reads (full-suite parallelism tips
   // per-test timeouts); handlers await `index.ready`, so readiness is deterministic, and the
-  // fail-closed contract covers the pre-ready window.
+  // fail-closed contract covers the pre-ready window. The rebuild/seed retries the transient
+  // pg0 start-race signature (same discipline as the test-harness boot retry).
   void (async () => {
-    const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
-    await capabilityRuntimeIndex.rebuild(rows.map((r) => ({ key: r.key, value: r.value })));
-    await seedOperatorRootGrant(capabilityRuntimeRecorder);
-  })().catch((error) => console.error("[cap-runtime boot] index rebuild/seed failed:", error));
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
+        await capabilityRuntimeIndex.rebuild(rows.map((r) => ({ key: r.key, value: r.value })));
+        await seedOperatorRootGrant(capabilityRuntimeRecorder);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt >= 5 || !/pg0 could not start|Instance already running/.test(message)) {
+          console.error("[cap-runtime boot] index rebuild/seed failed:", message);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+      }
+    }
+  })();
   const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex).catch(() => {}); }, 60_000);
   grantExpirySweep.unref?.();
 

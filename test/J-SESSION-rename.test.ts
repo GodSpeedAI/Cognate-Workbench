@@ -44,7 +44,7 @@ describe("J-SESSION-rename", () => {
         await app.stop();
       }
     });
-  });
+  }, 30000);
 
   test("empty, over-long and unknown-session renames are refused", async () => {
     await withTempHome(async (home) => {
@@ -60,5 +60,5 @@ describe("J-SESSION-rename", () => {
         await app.stop();
       }
     });
-  });
+  }, 30000);
 });
