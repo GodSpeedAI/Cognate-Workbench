@@ -85,9 +85,27 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
  * its default posture.
  */
 export async function bootApp(home: string): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+  return await bootAppOnce(home, 0);
+}
+
+/** Shared pg0 instance start races are transient: under full-run parallelism, concurrent boots
+ *  race the same instance start and the losers get "Instance already running" from the pg0
+ *  binary — the instance is up moments later. Retry the boot; per-attempt failures surface
+ *  after the retries are spent. */
+async function bootAppOnce(home: string, attempt: number): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   const sidecar = process.env.COGNATE_TEST_SIDECAR;
   if (!sidecar) {
-    const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
+    let app: AppServer;
+    try {
+      app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt < 4 && /pg0 could not start|Instance already running/.test(message)) {
+        await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+        return bootAppOnce(home, attempt + 1);
+      }
+      throw error;
+    }
     const transport = connectTransport(app.url);
     const service = createRemoteRuntimeService(transport, () => devToken(LOCAL_OPERATOR));
     const client = createClient({ service, caller: LOCAL_OPERATOR });
