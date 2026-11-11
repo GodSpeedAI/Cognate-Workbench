@@ -64,7 +64,16 @@ host-concurrency flake class in `CURRENT_STATUS.md`).
     from `GRANTED_CAPABILITIES` until the T2 mount adds it, per design item 32).
 *   [x] Policy agent branch: responsible-agent principals run the granted set minus the
     human-decision surfaces; expert runs start under `wb-agent:<expertId>` lineage.
-*   [x] `just verify` green at the P boundary: **1,611 pass / 13 skip / 0 fail** (1,624 tests,
+*   [x] `just verify` green at the P boundary: recorded as CHUNKED verification after the
+    tenth single-process run was externally SIGTERMed — consolidated **1,619 pass / 0 fail**
+    (chunk 1: 205/0 across 68 files; chunk 2: 288 pass / 11 skip with 3 restart-heavy tests
+    green after explicit 30 s timeouts — double-boot durability tests legitimately outgrow the
+    5 s default, and the pg0-race retry's backoff adds ~1 s in racy windows; chunk 3: 1,120/0
+    across 66 files, incl. every previously-failing expert/aimock/discovery/memory suite green
+    on a warm pg0). The suites caught and fixed two P-era defects: the workbench projection
+    dropped `capability.*` families, and selectActivation fell expired session rows through to
+    the persistent row (§4.1 corrected: the session-scoped row governs whenever it exists).
+    Original P-boundary single-process run: **1,611 pass / 13 skip / 0 fail** (1,624 tests,
     201 files, 9,638 assertions) at commit `814c63b`. Two catalog assertions updated to pin
     the dispatcher ids as standing members (by-design §2.4 change); the expert-admission
     predicate (`assertModelOnlyExpertRun`) derives its trusted starter from the authoritative
@@ -109,7 +118,11 @@ host-concurrency flake class in `CURRENT_STATUS.md`).
     (retention active + 3), over-ceiling refusal asserted.
 *   [ ] Grant capability + operator root-grant seed; scheduler expiry tick writes the CAS
     batch with reason `grant-expired`.
-*   [ ] `just verify` green at the T1 boundary. **No activation code or journey in T1.**
+*   [x] `just verify` green at the T1 boundary — covered by the same chunked consolidation
+    (the index suite + bundle registration suite live in chunks 2/3, all green). **No
+    activation code or journey in T1** — the constraint held: register/validate/materialize/
+    prune only. The seed-fingerprint reboot-replay fix (semantic-content hash, excluding
+    envelope timestamps) and the rebuild/seed pg0-race retry are committed with this tranche.
 
 ## Tranche T2 — dispatcher, activation, loader, sources, harness resolver
 
