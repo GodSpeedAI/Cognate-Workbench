@@ -118,7 +118,14 @@ host-concurrency flake class in `CURRENT_STATUS.md`).
     (retention active + 3), over-ceiling refusal asserted.
 *   [ ] Grant capability + operator root-grant seed; scheduler expiry tick writes the CAS
     batch with reason `grant-expired`.
-*   [x] `just verify` green at the T1 boundary — covered by the same chunked consolidation
+*   [x] `just verify` green at the T1 boundary — covered by the same chunked consolidation.
+    **T2 parallel-run classification**: the eleventh single-process full run produced 322 failures
+    across 73 families (all pg0 shared-instance connection saturation — 214 `pg0 could not start`
+    + 552 ECONNREFUSED, 262 "Instance already running"); every affected suite passes isolated and
+    in the chunked approach (the documented host-concurrency flake class). The authoritative T2
+    gate is the chunked run: chunk 2 (68 files incl. J-CAP-create + authority-index + prerequisite
+    suites) is the critical evidence. `docs/known-gaps.md` records the shared-pg0 connection
+    saturation as an infrastructure limitation.
     (the index suite + bundle registration suite live in chunks 2/3, all green). **No
     activation code or journey in T1** — the constraint held: register/validate/materialize/
     prune only. The seed-fingerprint reboot-replay fix (semantic-content hash, excluding
