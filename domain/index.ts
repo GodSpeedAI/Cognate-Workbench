@@ -394,7 +394,6 @@ export const GOVERNANCE_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "governance.status": "ApprovalAuthority",
   "governance.approvals.list": "ApprovalAuthority",
   "governance.approval.resolve": "ApprovalAuthority",
-  "case.proposeStep": "ApprovalAuthority",
 };
 export function bindGovernanceCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
   const bindings = Object.entries(GOVERNANCE_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));

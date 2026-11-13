@@ -47,7 +47,6 @@ import { agentConfigAgent } from "./agents/agentConfig.ts";
 import { agentCodingAgent } from "./agents/agentCoding.ts";
 import { secretPutComponent } from "./capabilities/secretPut.ts";
 import { identityAdminComponent } from "./capabilities/identityAdmin.ts";
-import { caseProposeStepComponent } from "./capabilities/caseProposeStep.ts";
 import { connectHorizonComponent } from "./capabilities/connectHorizon.ts";
 import { aggregateContainedRegistry, CONTAINMENT_THREAD, reconcileContainmentAtBoot } from "./capabilities/aggregateContainment.ts";
 import { MobileRemote, remoteSettingsFromEnv, hardened as remoteHardened } from "./remote/mobile.ts";
@@ -514,7 +513,6 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
       governanceComponent({ authority: externalAuthority, pollApprovals: () => pollApprovals?.() ?? Promise.resolve(0), semanticRefs: governanceRefs }),
-      caseProposeStepComponent({ authority: externalAuthority, semanticRef: governanceRefs["case.proposeStep"] }),
       settlementComponent({ getService, systemCaller: SYSTEM_CALLER, getKnownWorkspaceIds: () => knownWorkspaceIds, active: Boolean(externalAuthority && realitytrace), semanticRefs: settlementRefs, sweSeed }),
       executionWorldsComponent(executionWorlds, { semanticRef: worldBindings.family }),
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: worldBindings, containmentConfig }),
