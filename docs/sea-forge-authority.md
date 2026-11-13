@@ -15,7 +15,7 @@ Off by default. A standalone Workbench is unchanged.
   the operator's behalf, and only containment keeps agent processes away from the SEA-Forge socket.
 - A SEA-Forge server with the `resources` policy filter, and Cognate SDK 0.6.2 or later, in which an approval
   governs only the operation it was granted for (Cognate PR #60).
-- DomainForge at the stack lockstep version (0.21.1) for the governed world.
+- DomainForge at the stack lockstep version (0.21.2) for the governed world.
 
 ## Identity: one OS user, two actors
 
