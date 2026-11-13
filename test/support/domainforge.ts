@@ -5,7 +5,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-export const DOMAINFORGE_LOCKSTEP = "0.21.1";
+export const DOMAINFORGE_LOCKSTEP = "0.21.2";
 
 const PINNED = join(import.meta.dir, "../../.tmp/domainforge/bin/domainforge");
 
