@@ -50,7 +50,7 @@ export function observationOutboxFor(
   return [observationIntent(event as StoredEvent, { classification: "durable_fact", capabilityId: capabilityIdOf(event as StoredEvent) })];
 }
 
-/** The pinned SXR CLI (v0.3.0, `just setup-realitytrace`), or null when absent — dev machines
+/** The pinned SXR CLI (v0.4.0, `just setup-realitytrace`), or null when absent — dev machines
  *  without the binary boot fine and the dev tools still work (observations stay queued). */
 export function defaultSxrBin(): string | undefined {
   const configured = process.env.SXR_BIN;

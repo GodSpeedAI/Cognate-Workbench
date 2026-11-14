@@ -20,7 +20,7 @@ smoke:
 # Full RealityTrace integration tests require the pinned SXR CLI.
 # Installs into this repository only; no global Rust packages are changed.
 setup-realitytrace:
-    cargo install realitytrace --version 0.3.0 --locked --root .tmp/realitytrace
+    cargo install realitytrace --version 0.4.0 --locked --root .tmp/realitytrace
 
 # Pinned DomainForge CLI (stack lockstep version) for the SEA format fidelity test. DomainForge
 # publishes no release binaries; this is its documented crates.io install, kept inside the checkout.

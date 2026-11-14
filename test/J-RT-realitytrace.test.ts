@@ -1,6 +1,6 @@
 // Journey J-RT-realitytrace (usage pass U6, Option A): the RealityTrace evidence layer enriches
 // the event-sourced trace — trace-worthy events are committed to the outbox atomically with the
-// event, delivered at-least-once to the pinned SXR CLI (v0.3.0, `just setup-realitytrace`), and
+// event, delivered at-least-once to the pinned SXR CLI (v0.4.0, `just setup-realitytrace`), and
 // the inspector reads the receipts (state + ledger position) and the SXR record's CEP correlation
 // payload back. Covers: accepted receipts with ledger positions for a tool session's events; the
 // record drill-down returning the CEP `extensions.cognate` correlation ids; and — the Option A
