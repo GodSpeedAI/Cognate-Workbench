@@ -55,7 +55,7 @@ jobs:
           choco install nsis -y --no-progress
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files (x86)\NSIS'
 
-      # @godspeedai/domainforge 0.21.2 ships only the linux-x64 napi binding. Every other platform builds
+      # @godspeedai/domainforge 0.22.0 ships only the linux-x64 napi binding. Every other platform builds
       # the pinned tag's napi cdylib natively with cargo (no Node or Python step), then installs it beside
       # the JS loader under the name that loader expects.
       - uses: dtolnay/rust-toolchain@1.99.0
