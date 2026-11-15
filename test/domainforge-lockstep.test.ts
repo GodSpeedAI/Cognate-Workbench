@@ -20,7 +20,7 @@ test("a CLI at the lockstep version passes", () => {
 
 test("another version fails fast and names the fix", () => {
   const cli = fakeCli("0.21.1");
-  try { expect(() => assertDomainforgeLockstep(cli.bin)).toThrow(/need domainforge 0\.21\.2.*just setup-domainforge/); } finally { cli.done(); }
+  try { expect(() => assertDomainforgeLockstep(cli.bin)).toThrow(/need domainforge 0\.22\.0.*just setup-domainforge/); } finally { cli.done(); }
 });
 
 test("a missing CLI fails fast", () => {
