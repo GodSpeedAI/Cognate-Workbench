@@ -3,7 +3,7 @@
 import type { ExecutionPosture } from "../executionPosture.ts";
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
-import { basename, sep } from "node:path";
+import { basename, resolve, sep } from "node:path";
 import { bubblewrapExecutionWorld, type BubblewrapExecutionWorldOptions, type ExecutionWorldProvider, type ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import type { Json } from "@godspeedai/cognate-events";
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
@@ -62,6 +62,8 @@ export interface ContainedWorkspaceOptions {
   readonly executionPosture?: ExecutionPosture;
   /** Host application data/config directory; used to prevent exposing secrets through the workspace bind. */
   readonly protectedHome?: string;
+  /** Further secret-bearing directories (for example the Horizon key directory) that a workspace root must neither contain nor sit inside. */
+  readonly protectedSecrets?: readonly string[];
   readonly semanticRefs: { readonly contained?: SemanticRef; readonly containmentInspect?: SemanticRef };
 }
 
@@ -288,6 +290,11 @@ export function containedWorkspaceComponent(options: ContainedWorkspaceOptions):
     }
     if (root === "/" || !(await stat(root)).isDirectory()) throw new Error(`${contained.id}: choose an existing dedicated directory, not the filesystem root`);
     if (inside(root, protectedHome)) throw new Error(`${contained.id}: workspace root must not contain the protected application home`);
+    for (const secret of options.protectedSecrets ?? []) {
+      // The directory may not exist yet (it is created on first use); compare its resolved path then.
+      const guarded = await realpath(secret).catch(() => resolve(secret));
+      if (inside(root, guarded) || inside(guarded, root)) throw new Error(`${contained.id}: workspace root must not overlap a protected secrets directory`);
+    }
 
     const worldId = containedWorldId(config, root);
     const workspaceId = workspaceIdFor(worldId, root);

@@ -18,6 +18,8 @@ export interface SessionHistoryInput {
   readonly sessionId: string;
   /** Exclude this run (the run currently asking for history — it has no output yet). */
   readonly excludeRunId?: string;
+  /** UI only: tag each message with its run's durable event ids (for deep links). Never set for model context. */
+  readonly includeEventIds?: boolean;
 }
 
 export function sessionHistoryComponent(getService: () => RuntimeService, semanticRef?: SemanticRef): Component {
@@ -37,22 +39,25 @@ export function sessionHistoryComponent(getService: () => RuntimeService, semant
         // reference/observations/aria's "0 tools -> 1 step" rule). Since history discards the live
         // `ToolEntry[]`, re-derive the same count from this run's own recorded `tool.call.started`
         // events instead of leaving it unset (which rendered "0 steps").
-        const messages: (ModelMessage & { readonly stepCount?: number })[] = [];
+        const messages: (ModelMessage & { readonly stepCount?: number; readonly eventIds?: readonly string[] })[] = [];
+        // Event ids are for the UI's deep links only (`includeEventIds`); the model context never carries them.
+        const withIds = input.includeEventIds === true;
         for (const run of runs) {
           if (run.runId === input.excludeRunId) continue;
           if (run.agent !== "agent.coding") continue;
-          const runInput = run.input as { readonly message?: string };
-          if (typeof runInput?.message === "string") messages.push({ role: "user", content: runInput.message });
-          if (run.status === "completed") {
-            const output = run.output as { readonly text?: string };
-            if (typeof output?.text === "string") {
-              let toolCallCount = 0;
-              for await (const event of service.events(caller, { runId: run.runId })) {
-                if (event.eventType === "tool.call.started") toolCallCount += 1;
-              }
-              messages.push({ role: "assistant", content: output.text, stepCount: toolCallCount + 1 });
+          const completedText = run.status === "completed" ? (run.output as { readonly text?: string })?.text : undefined;
+          let toolCallCount = 0;
+          const eventIds: string[] = [];
+          if (withIds || typeof completedText === "string") {
+            for await (const event of service.events(caller, { runId: run.runId })) {
+              if (event.eventType === "tool.call.started") toolCallCount += 1;
+              if (withIds) eventIds.push(event.eventId);
             }
           }
+          const ids = withIds ? { eventIds } : {};
+          const runInput = run.input as { readonly message?: string };
+          if (typeof runInput?.message === "string") messages.push({ role: "user", content: runInput.message, ...ids });
+          if (typeof completedText === "string") messages.push({ role: "assistant", content: completedText, stepCount: toolCallCount + 1, ...ids });
           const children = subagentRows
             .filter((r) => r.key.startsWith(`${run.runId}/`))
             .map((r) => r.value as unknown as SubagentRow)

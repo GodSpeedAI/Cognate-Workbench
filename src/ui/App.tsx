@@ -135,6 +135,7 @@ import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
 import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
+import { resolveSessionLink } from "./sessionLink.ts";
 
 interface WorkspaceRow {
   readonly id: string;
@@ -151,6 +152,8 @@ interface ChatMessage {
   readonly role: "user" | "assistant" | "system";
   readonly content: string;
   readonly at?: string;
+  /** Durable event ids of the run this message belongs to (from history), so a `#sessions/<id>/<eventId>` link can find it. */
+  readonly eventIds?: readonly string[];
   readonly tookMs?: number;
   readonly failed?: boolean;
   readonly cancelled?: boolean;
@@ -3469,7 +3472,7 @@ function MessageBubble({
 
   if (message.role === "system") {
     return (
-      <div className="message message-system" role="status">
+      <div className="message message-system" role="status" data-event-ids={message.eventIds?.join(" ")}>
         {message.content}
       </div>
     );
@@ -3477,7 +3480,7 @@ function MessageBubble({
 
   if (message.role === "user") {
     return (
-      <div className="message message-user">
+      <div className="message message-user" data-event-ids={message.eventIds?.join(" ")}>
         <div className="message-bubble">
           <div className="message-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
         </div>
@@ -3492,7 +3495,7 @@ function MessageBubble({
   }
 
   return (
-    <div className={`message message-assistant${message.failed ? " message-failed" : ""}`}>
+    <div className={`message message-assistant${message.failed ? " message-failed" : ""}`} data-event-ids={message.eventIds?.join(" ")}>
       {message.streaming ? (
         <div className="message-status-row">
           <span className="status-pill status-streaming" role="status">
@@ -5126,8 +5129,11 @@ export function App() {
     }
   }, []);
 
+  // The session most recently asked to open; a history response for any other session is stale and dropped.
+  const openingSessionRef = useRef<string | undefined>(undefined);
   const openSession = useCallback(
     async (sessionId: string) => {
+      openingSessionRef.current = sessionId;
       setActiveSessionId(sessionId);
       setOpenReview(undefined);
       setTraceDetail(undefined);
@@ -5147,11 +5153,13 @@ export function App() {
       // duration (`Date.now() - 0`) once the reattached run completes.
       if (stillInFlight) runStartedAtRef.current = Date.now();
       if (row) rememberSession(row.workspaceId, sessionId);
-      const history = (await client.invoke("session.history", { sessionId })) as {
+      const history = (await client.invoke("session.history", { sessionId, includeEventIds: true })) as {
         role: string;
         content: string;
         stepCount?: number;
+        eventIds?: string[];
       }[];
+      if (openingSessionRef.current !== sessionId) return;
       setTranscript(
         history.map((m) => ({
           role: m.role === "assistant" ? "assistant" : "user",
@@ -5162,6 +5170,7 @@ export function App() {
           // `sessionHistory.ts`'s `stepCount` (tool-call count + 1, matching `useToolTimeline(...)
           // .length + 1`), not the unset/`0` default that regressed `15-completed-session`.
           stepCount: m.role === "assistant" ? (m.stepCount ?? 1) : undefined,
+          ...(m.eventIds ? { eventIds: m.eventIds } : {}),
         })),
       );
     },
@@ -5174,6 +5183,8 @@ export function App() {
   // reload` show the same session instead of the empty shell.
   useEffect(() => {
     if (!currentWorkspaceId || activeSessionId) return;
+    // A pending session link wins over the remembered session.
+    if (window.location.hash.startsWith("#sessions/")) return;
     let remembered: string | null = null;
     try {
       remembered = localStorage.getItem(`cognate.lastSession.${currentWorkspaceId}`);
@@ -5182,6 +5193,42 @@ export function App() {
     }
     if (remembered && sessions.some((s) => s.id === remembered)) void openSession(remembered);
   }, [currentWorkspaceId, sessions, activeSessionId, openSession]);
+
+  // Horizon deep link: `#sessions/<sessionId>[/<eventId>]` opens that session. The hash is the source of
+  // truth, so a reload or a link from Horizon lands on the same view. It waits until the sessions
+  // projection holds the row, and opens each distinct hash once.
+  const openedLinkRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const apply = () => {
+      const hash = window.location.hash;
+      // Leaving the session route forgets the handled link, so Back to the same link opens it again.
+      if (!hash.startsWith("#sessions/")) {
+        openedLinkRef.current = undefined;
+        return;
+      }
+      if (openedLinkRef.current === hash) return;
+      const target = resolveSessionLink(hash, sessions);
+      if (!target) return;
+      openedLinkRef.current = hash;
+      setExpertsPanelOpen(false);
+      setPluginsPanelOpen(false);
+      setWorkbenchOpen(false);
+      openSession(target.session.id).then(
+        () => {
+          if (target.eventId === undefined) return;
+          // Messages carry their run's event ids (`data-event-ids`); bring the one holding the linked event into view.
+          window.setTimeout(() => document.querySelector(`[data-event-ids~="${CSS.escape(target.eventId!)}"]`)?.scrollIntoView({ block: "center" }), 300);
+        },
+        () => {
+          // A failed load stays retryable: the next hashchange or projection update tries the link again.
+          if (openedLinkRef.current === hash) openedLinkRef.current = undefined;
+        },
+      );
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, [sessions, openSession]);
 
   // J-SESSION-draft: pressing + creates a REAL, durable session (a `session.create` recording run,
   // folded by the `sessions` projection) before any prompt — not an in-memory UUID. Each click

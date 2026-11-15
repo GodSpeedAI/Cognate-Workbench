@@ -47,7 +47,7 @@ export class ExpertCompletionBridge {
           if(!isUnfinished(current))return {ok:true};
           if(current.runId && current.runId!==run.runId)throw new Error("Assignment run identity conflict");
           current.runId=run.runId;current.status="running";
-          current.execution.context=this.experts.context(s,s.experts[current.expertId]!,s.conversations[current.conversationId]!);
+          current.execution.context=this.experts.context(s,s.experts[current.expertId]!,s.conversations[current.conversationId]!,s.assignments[current.reviews ?? ""]);
           for(const mid of s.conversations[current.conversationId]!.messageIds){const m=s.messages[mid]!;if(m.recipientId===current.expertId && m.delivery==="queued" && !m.targetAssignmentId){m.targetAssignmentId=current.id;m.targetRunId=run.runId;m.inboxStatus="incorporated";m.delivery="delivered";m.incorporatedAtBoundary="assignment-start";}}
           return {ok:true};
         });
