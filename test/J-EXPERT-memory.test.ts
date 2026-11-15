@@ -118,6 +118,11 @@ test("J-EXPERT-MEMORY: review step context excludes the author's memory", async 
       id: "memory:shared:from-work", expertId: "critic", teamId: "cognate-team", scope: "team", kind: "observation",
       text: "Observation sourced from the reviewed work.", sources: [authored.id],
     });
+    // The same provenance cited by run id instead of Assignment id is excluded too.
+    await invoke(testApp, "expert.memory.write", {
+      id: "memory:shared:from-run", expertId: "critic", teamId: "cognate-team", scope: "team", kind: "observation",
+      text: "Observation citing the reviewed run.", sources: [authored.runId!],
+    });
     await invoke(testApp, "expert.memory.write", {
       id: "memory:shared:neutral", expertId: "critic", teamId: "cognate-team", scope: "team", kind: "assertion",
       text: "Neutral team convention.", sources: [other.id],
@@ -131,6 +136,7 @@ test("J-EXPERT-MEMORY: review step context excludes the author's memory", async 
     const context = review.execution.context.map((m) => m.content).join("\n");
     expect(context).not.toContain("Builder shared claim.");
     expect(context).not.toContain("Observation sourced from the reviewed work.");
+    expect(context).not.toContain("Observation citing the reviewed run.");
     expect(context).toContain("Neutral team convention.");
   });
 }, 60_000);

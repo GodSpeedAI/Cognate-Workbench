@@ -58,7 +58,7 @@ export function observationOutboxFor(
     if (!MODEL_CAPABILITIES.has(String(event.metadata?.capability ?? ""))) return [];
     refs = {
       ...(payload.input !== undefined ? { inputRef: fingerprint(payload.input) } : {}),
-      ...(payload.result !== undefined || payload.failure !== undefined ? { outputRef: fingerprint((payload.result ?? payload.failure) as Json) } : {}),
+      ...(payload.result !== undefined || payload.failure !== undefined ? { outputRef: fingerprint((payload.result !== undefined ? payload.result : payload.failure) as Json) } : {}),
     };
   } else if (event.eventType === "session.turn.started") {
     refs = { inputRef: fingerprint(event.payload) };

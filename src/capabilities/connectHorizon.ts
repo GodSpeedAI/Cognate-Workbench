@@ -4,7 +4,7 @@
 // workbench.key.json {sessionId, expiresAt} that holds no secret. The token is NEVER returned to the
 // browser: the reply is {sessionId, expiresAt} only. Same rules as identity.session.issue: a direct
 // human operator only (an agent run is refused), the operator identity only, at most 90 days.
-import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Component, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
@@ -51,9 +51,18 @@ export function connectHorizonComponent(options: ConnectHorizonOptions): Compone
         const identity = await ensureIdentity(service, options.systemCaller, { tenant: options.operatorTenant, actorId: options.operatorActorId, label: "horizon" });
         const issued = await issueSession(service, options.systemCaller, { identityId: identity.id, ttlMs: Math.round(ttlHours * 3_600_000), cause: "horizon" });
         mkdirSync(options.secretsDir, { recursive: true });
-        // Companion first: if the key write fails there is no key that the companion could misdescribe.
-        writePrivate(join(options.secretsDir, `${KEY_FILE}.json`), `${JSON.stringify({ sessionId: issued.session.sid, expiresAt: issued.session.expiresAt })}\n`);
-        writePrivate(join(options.secretsDir, KEY_FILE), `${issued.token}\n`);
+        // Companion first, then the key. If the key write fails, the previous companion is put back (or the new one
+        // removed), so the companion always describes the key actually installed.
+        const companionPath = join(options.secretsDir, `${KEY_FILE}.json`);
+        const previousCompanion = existsSync(companionPath) ? readFileSync(companionPath, "utf8") : undefined;
+        writePrivate(companionPath, `${JSON.stringify({ sessionId: issued.session.sid, expiresAt: issued.session.expiresAt })}\n`);
+        try {
+          writePrivate(join(options.secretsDir, KEY_FILE), `${issued.token}\n`);
+        } catch (error) {
+          if (previousCompanion === undefined) rmSync(companionPath, { force: true });
+          else writePrivate(companionPath, previousCompanion);
+          throw error;
+        }
         return { sessionId: issued.session.sid, expiresAt: issued.session.expiresAt };
       });
     },

@@ -41,8 +41,14 @@ test("connect-horizon writes the key with mode 0600", async () => {
     const operator = clientFor(app, app.operatorSessionToken);
     const result = (await operator.invoke("identity.connectHorizon", { ttlHours: 24 })) as { sessionId: string; expiresAt: string };
     const keyPath = join(root, "secrets", "workbench.key");
-    expect((await stat(keyPath)).mode & 0o777).toBe(0o600);
-    expect((await stat(`${keyPath}.json`)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits; existence is checked everywhere, the mode only on POSIX.
+    if (process.platform !== "win32") {
+      expect((await stat(keyPath)).mode & 0o777).toBe(0o600);
+      expect((await stat(`${keyPath}.json`)).mode & 0o777).toBe(0o600);
+    } else {
+      await stat(keyPath);
+      await stat(`${keyPath}.json`);
+    }
     const token = (await readFile(keyPath, "utf8")).trim();
     expect(token.startsWith("wbs1.")).toBe(true);
     const companion = JSON.parse(await readFile(`${keyPath}.json`, "utf8")) as Record<string, string>;

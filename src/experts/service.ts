@@ -138,8 +138,16 @@ export class ExpertsService {
   context(state: ExpertState, e: Expert, conversation: Conversation, reviewing?: Assignment): ModelMessage[] {
     // A review step starts without the reviewed author's memory, so the reviewer does not inherit the author's blind spots.
     const authorId = reviewing?.expertId;
+    // A source cites the reviewed work when it resolves to it: the Assignment id, its run id, or a message the
+    // reviewed Assignment sent or was the target of (the forms `expert.memory.write` accepts).
+    const citesReviewed = (ref: string): boolean => {
+      if (!reviewing) return false;
+      if (ref === reviewing.id || (reviewing.runId !== null && ref === reviewing.runId)) return true;
+      const msg = state.messages[ref];
+      return !!msg && (msg.assignmentId === reviewing.id || msg.targetAssignmentId === reviewing.id || (reviewing.runId !== null && msg.targetRunId === reviewing.runId));
+    };
     const notes = Object.values(state.memory).filter(m => {
-      if (reviewing && (m.expertId === authorId || m.by === authorId || m.sources.includes(reviewing.id))) return false;
+      if (reviewing && (m.expertId === authorId || m.by === authorId || m.sources.some(citesReviewed))) return false;
       if (conversation.scope === "solo") return m.scope === "personal" && m.expertId === e.id;
       return m.teamId === conversation.teamId && (m.scope === "team" || m.expertId === e.id && m.scope === "private-team");
     }).sort((a,b) => Number(b.pinned)-Number(a.pinned));
