@@ -61,7 +61,7 @@ jobs:
         with:
           toolchain: 1.99.0
 
-      # @godspeedai/domainforge 0.21.2 publishes no linux-arm64 napi binding. Build the same tag natively
+      # @godspeedai/domainforge 0.22.0 publishes no linux-arm64 napi binding. Build the same tag natively
       # (DomainForge's own release recipe, Rust 1.99.0) and install it beside the pinned JS loader.
       - name: Build DomainForge napi binding for linux-arm64
         run: |
