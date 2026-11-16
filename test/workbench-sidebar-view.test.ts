@@ -104,9 +104,9 @@ describe("group by", () => {
   const base = { sessions, workspaces, orderBy: "manual" as const, archiveFilter: "show-archived" as const, search: "" };
 
   test("labels: the WorkSpace option is workspace-sections", () => {
-    expect(GROUP_BY_LABELS["workspace-sections"]).toBe("WorkSpace");
-    expect(GROUP_BY_LABELS["workspace-tree"]).toBe("Workspace Tree");
-    expect(GROUP_BY_LABELS["in-one-list"]).toBe("In one list");
+    expect(GROUP_BY_LABELS["workspace-sections"]).toBe("Workspace");
+    expect(GROUP_BY_LABELS["workspace-tree"]).toBe("Folder tree");
+    expect(GROUP_BY_LABELS["in-one-list"]).toBe("Single list");
     expect(isGroupBy("workspace-sections")).toBe(true);
     expect(isGroupBy("nope")).toBe(false);
   });

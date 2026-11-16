@@ -2,7 +2,9 @@
 // persistent indicator while remote is on. Closing the dialog never stops remote; Stop does.
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { remoteFetch } from "./remoteFetch.ts";
+import { useProjection } from "@godspeedai/cognate-react";
 import { PhoneIcon } from "./icons.tsx";
+import { DialogHeader } from "./shell/DialogHeader.tsx";
 
 type RemoteStatus = {
   readonly state: "off" | "waiting" | "connected";
@@ -69,21 +71,86 @@ export function RemoteButton({ onOpen }: { readonly onOpen: () => void }) {
   );
 }
 
+type DiagEvent = { readonly at: number; readonly text: string };
+
+/** The origin of the pairing link (never its secret): the route a phone is told to use. */
+export function routeOf(link: string | undefined): string | undefined {
+  if (!link) return undefined;
+  try {
+    return new URL(link).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A plain-text report an operator can paste into a bug report. Contains no pairing secret. */
+export function buildRemoteReport(input: {
+  readonly status: RemoteStatus | undefined;
+  readonly route: string | undefined;
+  readonly lastError: string | undefined;
+  readonly events: readonly DiagEvent[];
+  readonly reachable: boolean;
+  readonly at: Date;
+}): string {
+  const { status } = input;
+  return [
+    `Cognate remote access report (${input.at.toISOString()})`,
+    `Connection: ${status ? status.state : "unknown"}${input.reachable ? "" : " (control endpoint unreachable)"}`,
+    `Route: ${input.route ?? "not published"}`,
+    `Generation: ${status ? status.generation : "unknown"}`,
+    `Device: ${status?.device ? `${status.device.label}, paired ${status.device.pairedAt}, last seen ${status.device.lastSeenAt ?? "never"}` : "none"}`,
+    `Last error: ${input.lastError ?? "none"}`,
+    "Recent events:",
+    ...(input.events.length ? input.events.map((e) => `  ${new Date(e.at).toISOString()} ${e.text}`) : ["  none"]),
+  ].join("\n");
+}
+
 export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // J-REMOTE-diagnostics: the durable transition history is the workbench projection's
+  // `remote/control` row; it survives dialog close and app restart. The in-memory `events`
+  // below remain the live feedback layer for the moments before the fold lands.
+  const workbenchRows = useProjection("workbench");
+  const durable = workbenchRows?.find((r) => r.key === "remote/control" || r.key.endsWith("/remote/control"))?.value as
+    | { readonly state?: string; readonly lastError?: string; readonly events?: readonly { readonly at: string; readonly text: string }[] }
+    | undefined;
+  const durableEvents: readonly DiagEvent[] = (durable?.events ?? []).map((e) => ({ at: Date.parse(e.at), text: e.text }));
+  const [events, setEvents] = useState<readonly DiagEvent[]>([]);
+  const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const [reportCopied, setReportCopied] = useState(false);
+  const routeRef = useRef<string | undefined>(undefined);
+  const lastStateRef = useRef<string | undefined>(undefined);
+  const note = useCallback((text: string) => setEvents((prev) => [...prev.slice(-7), { at: Date.now(), text }]), []);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [now, setNow] = useState(Date.now());
   const [copied, setCopied] = useState(false);
   useModal(dialogRef, onClose);
 
   const load = useCallback(async (path: "/remote/status" | "/remote/start" | "/remote/refresh" | "/remote/stop", method: "GET" | "POST") => {
-    if (method === "POST") setPhase({ kind: "preparing" });
+    if (method === "POST") {
+      setPhase({ kind: "preparing" });
+      note(`Requested ${path.replace("/remote/", "")}`);
+    }
     try {
-      setPhase({ kind: "ready", status: await readStatus(path, method) });
-    } catch {
+      const next = await readStatus(path, method);
+      const origin = routeOf(next.link);
+      if (origin) routeRef.current = origin;
+      if (next.state === "off") routeRef.current = undefined;
+      if (lastStateRef.current !== next.state) {
+        note(`Connection ${lastStateRef.current ? `${lastStateRef.current} to ` : ""}${next.state}`);
+        lastStateRef.current = next.state;
+      }
+      setLastError(undefined);
+      setPhase({ kind: "ready", status: next });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setLastError((prev) => {
+        if (prev !== message) note(`Error: ${message}`);
+        return message;
+      });
       setPhase((prev) => (prev.kind === "ready" ? { kind: "restoring" } : { kind: "unreachable" }));
     }
-  }, []);
+  }, [note]);
 
   useEffect(() => {
     void load("/remote/status", "GET");
@@ -110,7 +177,7 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
   return (
     <div className="modal-backdrop">
       <div className="modal remote-dialog" role="dialog" aria-modal="true" aria-labelledby="remote-heading" tabIndex={-1} ref={dialogRef}>
-        <h2 id="remote-heading">Control from your phone</h2>
+        <DialogHeader title="Control from your phone" titleId="remote-heading" closeLabel="remote control" onClose={onClose} />
         {phase.kind === "loading" && <p role="status">Checking remote control…</p>}
         {phase.kind === "preparing" && <p role="status">Preparing remote access…</p>}
         {phase.kind === "restoring" && <p role="status">Restoring connection…</p>}
@@ -150,9 +217,35 @@ export function RemoteDialog({ onClose }: { readonly onClose: () => void }) {
             </div>
           </>
         )}
-        <div className="remote-actions">
-          <button type="button" onClick={onClose}>Close</button>
-        </div>
+        <section className="remote-diag" aria-label="Diagnostics">
+          <h3>Diagnostics</h3>
+          <dl>
+            <dt>Connection</dt>
+            <dd>{phase.kind === "unreachable" || phase.kind === "restoring" ? "Control endpoint unreachable" : status ? status.state : "Checking"}</dd>
+            <dt>Route</dt>
+            <dd>{routeRef.current ?? "Not published"}</dd>
+            <dt>Last error</dt>
+            <dd>{lastError ?? "None"}</dd>
+          </dl>
+          <p className="remote-diag-events-title">Recent events</p>
+          <ul className="remote-diag-events" aria-label="Recent events">
+            {(durableEvents.length > 0 ? [...durableEvents].reverse() : [...events].reverse()).length === 0 && <li>No events yet</li>}
+            {(durableEvents.length > 0 ? [...durableEvents] : [...events]).reverse().map((e) => (
+              <li key={`${e.at}-${e.text}`}>
+                <time>{new Date(e.at).toLocaleTimeString()}</time> {e.text}
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => {
+              const report = buildRemoteReport({ status, route: routeRef.current, lastError, events: durableEvents.length > 0 ? durableEvents : events, reachable: phase.kind === "ready", at: new Date() });
+              void navigator.clipboard.writeText(report).then(() => setReportCopied(true), () => setReportCopied(false));
+            }}
+          >
+            {reportCopied ? "Report copied" : "Copy report"}
+          </button>
+        </section>
       </div>
     </div>
   );

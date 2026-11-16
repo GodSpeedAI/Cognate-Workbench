@@ -1,11 +1,21 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { act, cleanup, render, waitFor } from "@testing-library/react/pure";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom, releaseDom } from "./dom-env.ts";
 import React from "react";
-import { RuntimeExecutionStatus, type RuntimeExecutionInspection } from "../src/ui/experts/RuntimeExecutionStatus.tsx";
+import type { RuntimeExecutionInspection } from "../src/ui/experts/RuntimeExecutionStatus.tsx";
 import { runtimeExecutionComponent } from "../src/capabilities/runtimeExecution.ts";
 
-beforeAll(() => GlobalRegistrator.register());
+// react-dom must load after the DOM globals exist (see ui-contained-workspace.test.tsx).
+let act: typeof import("@testing-library/react/pure").act;
+let cleanup: typeof import("@testing-library/react/pure").cleanup;
+let render: typeof import("@testing-library/react/pure").render;
+let waitFor: typeof import("@testing-library/react/pure").waitFor;
+let RuntimeExecutionStatus: typeof import("../src/ui/experts/RuntimeExecutionStatus.tsx").RuntimeExecutionStatus;
+
+beforeAll(async () => {
+  registerDom();
+  ({ act, cleanup, render, waitFor } = await import("@testing-library/react/pure"));
+  ({ RuntimeExecutionStatus } = await import("../src/ui/experts/RuntimeExecutionStatus.tsx"));
+});
 afterEach(async () => {
   await act(async () => {
     cleanup();
@@ -17,7 +27,7 @@ afterAll(async () => {
     cleanup();
     await Promise.resolve();
   });
-  await GlobalRegistrator.unregister();
+  await releaseDom();
 });
 
 describe("J-EXPERT-MODEL-PARALLEL runtime inspection", () => {

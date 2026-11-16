@@ -2,10 +2,11 @@
 // Attention order (not equal cards): DESTINATION, PRESENT, DEVIATION, NEXT MOVE, SETTLEMENT, then
 // conditionally AUTHORITY, SEARCH, METHOD RECOMMENDATION and the recorded REALITY. It renders only
 // what the server derives from durable events (`case.derive`); focus is ephemeral and never truth.
+import { InspectorEmpty } from "./shell/Inspector.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCognate, useProjection } from "@godspeedai/cognate-react";
 import { shortHash } from "../cognitive/canonical.ts";
-import { parseRef, type FocusContext } from "../cognitive/focus.ts";
+import { type FocusContext } from "../cognitive/focus.ts";
 import { validateSurface, type Block, type Surface } from "../cognitive/surface.ts";
 import { publishToWebMcp, toolsForFocus, type AttentionBackend } from "./webmcp.ts";
 
@@ -164,7 +165,9 @@ export function CognitiveFrame({ awaitingDecision }: { readonly awaitingDecision
     if (actionId === "retry_verification" && f.candidateWorldHash) setError("Retry needs the check commands; start it from the conversation so it runs under normal governance.");
   };
 
-  if (!caseId || !derived) return null;
+  if (!caseId || !derived) {
+    return <InspectorEmpty title="Nothing in focus" hint="Pick a task to see its goal, checks and next step here." />;
+  }
   const c = derived.case;
   const settledHash = derived.settledHead ?? c.baseWorldHash;
   const primary = c.field.current.find((a) => a.id === c.field.primary);
@@ -173,7 +176,7 @@ export function CognitiveFrame({ awaitingDecision }: { readonly awaitingDecision
   const failed = derived.evidence.filter((e) => !e.passed);
 
   return (
-    <aside className="right-panel cognitive-frame" role="complementary" aria-label="Cognitive frame" data-testid="cognitive-frame">
+    <div className="inspector-pane cognitive-frame" role="group" aria-label="Cognitive frame" data-testid="cognitive-frame">
       <div className="right-panel-body">
         <section aria-labelledby="cf-destination"><h2 id="cf-destination" className="cf-h">Destination</h2><p>{c.desiredOutcome}</p></section>
 
@@ -290,6 +293,6 @@ export function CognitiveFrame({ awaitingDecision }: { readonly awaitingDecision
           </ol>
         </section>
       </div>
-    </aside>
+    </div>
   );
 }

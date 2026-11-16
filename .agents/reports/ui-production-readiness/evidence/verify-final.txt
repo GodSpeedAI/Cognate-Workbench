@@ -1,0 +1,2186 @@
+commit 04f648d, 2026-11-01T14:40:22Z
+bun run verify
+$ bun run typecheck && bun run test
+$ tsc -p tsconfig.json
+$ bun test --timeout 15000 test
+bun test v1.4.0 (34cbb9a40)
+
+test/J-WB-grounded-feedback.test.ts:
+
+test/J-EXPERT-memory.test.ts:
+
+test/J-WB-task-contract.test.ts:
+
+test/J-T-trajectory.test.ts:
+
+test/J-HARNESS-unavailable.test.ts:
+
+test/J-COG-cleanup.test.ts:
+
+test/J-COG-attention.test.ts:
+
+test/J-G-persistence.test.ts:
+
+test/J-SESSION-rename.test.ts:
+
+test/J-COG-liveverify.test.ts:
+
+test/J-I-work-details.test.ts:
+
+test/E2E-team-admission.test.ts:
+
+test/secrets-store.test.ts:
+secrets-store: skipping real native round-trip: no usable Secret Service on this Linux session (start and unlock GNOME Keyring or KWallet): The name org.freedesktop.secrets was not provided by any .service files (code: 2)
+
+test/J-E-plan.test.ts:
+
+test/experts-capacity-attribution.test.ts:
+{"kind":"experts-capacity-attribution","capacity":8,"assignments":8,"observedProviderPeak":8,"elapsedMs":7750.2,"submitPhaseMs":4814.9,"handoffPhaseMs":2935.3,"throughputAssignmentsPerSecond":1.03,"registryCas":{"rootReads":474,"rootWrites":33,"casConflictErrors":58,"submitPhaseOnly":{"rootReads":166,"rootWrites":23,"casConflicts":58},"handoffPhaseIncludingPolling":{"rootReads":308,"rootWrites":10,"casConflicts":0},"rootReadLatency":{"count":474,"total":2741.62,"p50":4.5,"p95":13.81,"max":35.49},"rootWriteLatency":{"count":33,"total":1319.65,"p50":39.04,"p95":104.53,"max":109.61},"committedSnapshotBytes":{"count":33,"total":89562,"p50":2714,"p95":2714,"max":2714}},"materialization":{"contextBuilds":82,"contextBuild":{"count":82,"total":3.01,"p50":0.02,"p95":0.07,"max":0.56},"contextBuildShareOfElapsed":0.0004},"processRssBytes":782721024}
+{"kind":"experts-capacity-attribution","capacity":4,"assignments":8,"observedProviderPeak":4,"elapsedMs":7307.7,"submitPhaseMs":4204.5,"handoffPhaseMs":3103.2,"throughputAssignmentsPerSecond":1.09,"registryCas":{"rootReads":425,"rootWrites":32,"casConflictErrors":57,"submitPhaseOnly":{"rootReads":140,"rootWrites":19,"casConflicts":56},"handoffPhaseIncludingPolling":{"rootReads":285,"rootWrites":13,"casConflicts":1},"rootReadLatency":{"count":425,"total":1894.21,"p50":3.53,"p95":11.88,"max":17.35},"rootWriteLatency":{"count":32,"total":1306.55,"p50":37.89,"p95":86.51,"max":95.97},"committedSnapshotBytes":{"count":32,"total":86848,"p50":2714,"p95":2714,"max":2714}},"materialization":{"contextBuilds":78,"contextBuild":{"count":78,"total":1.65,"p50":0.02,"p95":0.05,"max":0.06},"contextBuildShareOfElapsed":0.0002},"processRssBytes":784125952}
+
+test/J-WB-workflow.test.ts:
+
+test/J-EXPERT-inbox.test.ts:
+
+test/E2E-ui-production.test.ts:
+
+test/J-WB-steering.test.ts:
+
+test/J-F-delegation.test.ts:
+
+test/J-H-cancellation.test.ts:
+
+test/J-B-basic-session.test.ts:
+
+test/experts-schema-fail-closed.test.ts:
+[experts] completion reconciliation failed Unsupported Experts state schema; an explicit versioned migration is required
+[experts] completion reconciliation failed Unsupported Experts state schema; an explicit versioned migration is required
+[experts] completion reconciliation failed Unsupported Experts state schema; an explicit versioned migration is required
+
+test/J-TEAM-execution.test.ts:
+
+test/J-TEAM-bounds.test.ts:
+
+test/J-WB-automation.test.ts:
+
+test/E2E-workspace-session-ux.red.test.ts:
+
+test/J-HARNESS-cancel.test.ts:
+
+test/E2E-cognitive-console.test.ts:
+
+test/J-HARNESS-approval.test.ts:
+
+test/J-CHECKOUT-parallel.test.ts:
+
+test/E2E-red-journeys-evidence.test.ts:
+
+test/J-AUTH-REBIND.test.ts:
+
+test/J-C-tool-execution.test.ts:
+
+test/aggregateContainment.test.ts:
+
+test/expert-economics.test.ts:
+
+test/J-WS2-multi-workspace.test.ts:
+
+test/J-AMBIGUOUS-RECONCILE.test.ts:
+
+test/J-CONTEXT-BUDGET-billing.test.ts:
+
+test/E2E-harness.test.ts:
+
+test/J-TASK-session-scope.red.test.ts:
+
+test/J-CFG-provider-test.test.ts:
+
+test/E2E-checkout.test.ts:
+
+test/J-WB-review-gate.test.ts:
+
+test/J-SESSION-draft-contract.red.test.ts:
+
+test/J-WS-select.test.ts:
+
+test/J-EXPERT-model-parallel.test.ts:
+
+test/J-EXEC-POSTURE.test.ts:
+
+test/J-COG-search.test.ts:
+
+test/J-D-approval.test.ts:
+
+test/J-HARNESS-remote.test.ts:
+
+test/J-MEMORY-scoped-loads.test.ts:
+[experts] completion reconciliation failed Expert partition sha256:1b0a7fcefb51c778ded24e5f37a4b981eace55681b8b053d53f5b4831b223dfa failed content verification
+[experts] completion reconciliation failed Expert partition sha256:1b0a7fcefb51c778ded24e5f37a4b981eace55681b8b053d53f5b4831b223dfa failed content verification
+[experts] completion reconciliation failed Expert partition sha256:1b0a7fcefb51c778ded24e5f37a4b981eace55681b8b053d53f5b4831b223dfa failed content verification
+
+test/J-WB-economics.test.ts:
+
+test/E2E-expert-model-parallel.test.ts:
+
+test/experts-app-capacity.test.ts:
+{"kind":"experts-app-capacity-characterization","capacity":1,"assignments":8,"observedProviderPeak":1,"elapsedMs":7173.8,"throughputAssignmentsPerSecond":1.12,"processRssBytes":1074974720}
+{"kind":"experts-app-capacity-characterization","capacity":2,"assignments":8,"observedProviderPeak":2,"elapsedMs":7041.7,"throughputAssignmentsPerSecond":1.14,"processRssBytes":1136545792}
+{"kind":"experts-app-capacity-characterization","capacity":4,"assignments":8,"observedProviderPeak":4,"elapsedMs":7738.1,"throughputAssignmentsPerSecond":1.03,"processRssBytes":1135419392}
+{"kind":"experts-app-capacity-characterization","capacity":8,"assignments":8,"observedProviderPeak":8,"elapsedMs":7234.9,"throughputAssignmentsPerSecond":1.11,"processRssBytes":1068916736}
+
+test/J-CHECKOUT-lifecycle.test.ts:
+
+test/E2E-remote-workspaces.test.ts:
+
+test/J-SET-settings.test.ts:
+
+test/J-SESSION-archive.test.ts:
+
+test/ui-contained-workspace.test.tsx:
+error: connect ECONNREFUSED 127.0.0.1:43059
+   errno: -111,
+ syscall: "connect",
+    port: 43059,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42121
+   errno: -111,
+ syscall: "connect",
+    port: 42121,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41895
+   errno: -111,
+ syscall: "connect",
+    port: 41895,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43205
+   errno: -111,
+ syscall: "connect",
+    port: 43205,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43743
+   errno: -111,
+ syscall: "connect",
+    port: 43743,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42131
+   errno: -111,
+ syscall: "connect",
+    port: 42131,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43929
+   errno: -111,
+ syscall: "connect",
+    port: 43929,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43119
+   errno: -111,
+ syscall: "connect",
+    port: 43119,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43719
+   errno: -111,
+ syscall: "connect",
+    port: 43719,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+
+test/J-WS-delete.test.ts:
+
+test/E2E-providers.test.ts:
+
+test/J-WB-protected-evidence.test.ts:
+
+test/J-SECRETS-storage.test.ts:
+
+test/J-TASK-expert-provenance.red.test.ts:
+
+test/J-PLG-install.test.ts:
+
+test/cognitive-bindings.test.ts:
+
+test/J-CFG-config-edit.test.ts:
+
+test/ui-directory-field.test.tsx:
+error: connect ECONNREFUSED 127.0.0.1:43697
+   errno: -111,
+ syscall: "connect",
+    port: 43697,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43011
+   errno: -111,
+ syscall: "connect",
+    port: 43011,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42627
+   errno: -111,
+ syscall: "connect",
+    port: 42627,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42919
+   errno: -111,
+ syscall: "connect",
+    port: 42919,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43915
+   errno: -111,
+ syscall: "connect",
+    port: 43915,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43745
+   errno: -111,
+ syscall: "connect",
+    port: 43745,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43441
+   errno: -111,
+ syscall: "connect",
+    port: 43441,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43677
+   errno: -111,
+ syscall: "connect",
+    port: 43677,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43245
+   errno: -111,
+ syscall: "connect",
+    port: 43245,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43907
+   errno: -111,
+ syscall: "connect",
+    port: 43907,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43181
+   errno: -111,
+ syscall: "connect",
+    port: 43181,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43417
+   errno: -111,
+ syscall: "connect",
+    port: 43417,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43785
+   errno: -111,
+ syscall: "connect",
+    port: 43785,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43739
+   errno: -111,
+ syscall: "connect",
+    port: 43739,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42847
+   errno: -111,
+ syscall: "connect",
+    port: 42847,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42785
+   errno: -111,
+ syscall: "connect",
+    port: 42785,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42723
+   errno: -111,
+ syscall: "connect",
+    port: 42723,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43535
+   errno: -111,
+ syscall: "connect",
+    port: 43535,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41929
+   errno: -111,
+ syscall: "connect",
+    port: 41929,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43029
+   errno: -111,
+ syscall: "connect",
+    port: 43029,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43045
+   errno: -111,
+ syscall: "connect",
+    port: 43045,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43725
+   errno: -111,
+ syscall: "connect",
+    port: 43725,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41971
+   errno: -111,
+ syscall: "connect",
+    port: 41971,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42247
+   errno: -111,
+ syscall: "connect",
+    port: 42247,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42891
+   errno: -111,
+ syscall: "connect",
+    port: 42891,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42691
+   errno: -111,
+ syscall: "connect",
+    port: 42691,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43513
+   errno: -111,
+ syscall: "connect",
+    port: 43513,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41903
+   errno: -111,
+ syscall: "connect",
+    port: 41903,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43359
+   errno: -111,
+ syscall: "connect",
+    port: 43359,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43035
+   errno: -111,
+ syscall: "connect",
+    port: 43035,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42503
+   errno: -111,
+ syscall: "connect",
+    port: 42503,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43115
+   errno: -111,
+ syscall: "connect",
+    port: 43115,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42575
+   errno: -111,
+ syscall: "connect",
+    port: 42575,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42649
+   errno: -111,
+ syscall: "connect",
+    port: 42649,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43803
+   errno: -111,
+ syscall: "connect",
+    port: 43803,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42467
+   errno: -111,
+ syscall: "connect",
+    port: 42467,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42737
+   errno: -111,
+ syscall: "connect",
+    port: 42737,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42531
+   errno: -111,
+ syscall: "connect",
+    port: 42531,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43793
+   errno: -111,
+ syscall: "connect",
+    port: 43793,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43919
+   errno: -111,
+ syscall: "connect",
+    port: 43919,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42047
+   errno: -111,
+ syscall: "connect",
+    port: 42047,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43393
+   errno: -111,
+ syscall: "connect",
+    port: 43393,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43563
+   errno: -111,
+ syscall: "connect",
+    port: 43563,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42559
+   errno: -111,
+ syscall: "connect",
+    port: 42559,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43675
+   errno: -111,
+ syscall: "connect",
+    port: 43675,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42227
+   errno: -111,
+ syscall: "connect",
+    port: 42227,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42531
+   errno: -111,
+ syscall: "connect",
+    port: 42531,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42513
+   errno: -111,
+ syscall: "connect",
+    port: 42513,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43499
+   errno: -111,
+ syscall: "connect",
+    port: 43499,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41925
+   errno: -111,
+ syscall: "connect",
+    port: 41925,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43497
+   errno: -111,
+ syscall: "connect",
+    port: 43497,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42983
+   errno: -111,
+ syscall: "connect",
+    port: 42983,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41927
+   errno: -111,
+ syscall: "connect",
+    port: 41927,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43125
+   errno: -111,
+ syscall: "connect",
+    port: 43125,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42107
+   errno: -111,
+ syscall: "connect",
+    port: 42107,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42733
+   errno: -111,
+ syscall: "connect",
+    port: 42733,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43311
+   errno: -111,
+ syscall: "connect",
+    port: 43311,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43355
+   errno: -111,
+ syscall: "connect",
+    port: 43355,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42787
+   errno: -111,
+ syscall: "connect",
+    port: 42787,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43661
+   errno: -111,
+ syscall: "connect",
+    port: 43661,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41939
+   errno: -111,
+ syscall: "connect",
+    port: 41939,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42385
+   errno: -111,
+ syscall: "connect",
+    port: 42385,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41985
+   errno: -111,
+ syscall: "connect",
+    port: 41985,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42017
+   errno: -111,
+ syscall: "connect",
+    port: 42017,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43839
+   errno: -111,
+ syscall: "connect",
+    port: 43839,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42511
+   errno: -111,
+ syscall: "connect",
+    port: 42511,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43917
+   errno: -111,
+ syscall: "connect",
+    port: 43917,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43645
+   errno: -111,
+ syscall: "connect",
+    port: 43645,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43099
+   errno: -111,
+ syscall: "connect",
+    port: 43099,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43549
+   errno: -111,
+ syscall: "connect",
+    port: 43549,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43165
+   errno: -111,
+ syscall: "connect",
+    port: 43165,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43415
+   errno: -111,
+ syscall: "connect",
+    port: 43415,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42957
+   errno: -111,
+ syscall: "connect",
+    port: 42957,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43353
+   errno: -111,
+ syscall: "connect",
+    port: 43353,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42101
+   errno: -111,
+ syscall: "connect",
+    port: 42101,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42791
+   errno: -111,
+ syscall: "connect",
+    port: 42791,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42861
+   errno: -111,
+ syscall: "connect",
+    port: 42861,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42683
+   errno: -111,
+ syscall: "connect",
+    port: 42683,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43743
+   errno: -111,
+ syscall: "connect",
+    port: 43743,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43291
+   errno: -111,
+ syscall: "connect",
+    port: 43291,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43779
+   errno: -111,
+ syscall: "connect",
+    port: 43779,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43861
+   errno: -111,
+ syscall: "connect",
+    port: 43861,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42577
+   errno: -111,
+ syscall: "connect",
+    port: 42577,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42443
+   errno: -111,
+ syscall: "connect",
+    port: 42443,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43537
+   errno: -111,
+ syscall: "connect",
+    port: 43537,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42053
+   errno: -111,
+ syscall: "connect",
+    port: 42053,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43561
+   errno: -111,
+ syscall: "connect",
+    port: 43561,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43891
+   errno: -111,
+ syscall: "connect",
+    port: 43891,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42997
+   errno: -111,
+ syscall: "connect",
+    port: 42997,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41923
+   errno: -111,
+ syscall: "connect",
+    port: 41923,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42657
+   errno: -111,
+ syscall: "connect",
+    port: 42657,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43675
+   errno: -111,
+ syscall: "connect",
+    port: 43675,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42211
+   errno: -111,
+ syscall: "connect",
+    port: 42211,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43757
+   errno: -111,
+ syscall: "connect",
+    port: 43757,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43779
+   errno: -111,
+ syscall: "connect",
+    port: 43779,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42871
+   errno: -111,
+ syscall: "connect",
+    port: 42871,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43309
+   errno: -111,
+ syscall: "connect",
+    port: 43309,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42699
+   errno: -111,
+ syscall: "connect",
+    port: 42699,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42627
+   errno: -111,
+ syscall: "connect",
+    port: 42627,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+
+test/J-CFG-provider-delete.test.ts:
+
+test/E2E-workbench.test.ts:
+
+test/J-COG-realitytrace.test.ts:
+
+test/ui-inspector-tabs.test.tsx:
+error: connect ECONNREFUSED 127.0.0.1:42005
+   errno: -111,
+ syscall: "connect",
+    port: 42005,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43897
+   errno: -111,
+ syscall: "connect",
+    port: 43897,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43573
+   errno: -111,
+ syscall: "connect",
+    port: 43573,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42175
+   errno: -111,
+ syscall: "connect",
+    port: 42175,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42449
+   errno: -111,
+ syscall: "connect",
+    port: 42449,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43031
+   errno: -111,
+ syscall: "connect",
+    port: 43031,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43269
+   errno: -111,
+ syscall: "connect",
+    port: 43269,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43565
+   errno: -111,
+ syscall: "connect",
+    port: 43565,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43565
+   errno: -111,
+ syscall: "connect",
+    port: 43565,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42753
+   errno: -111,
+ syscall: "connect",
+    port: 42753,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43917
+   errno: -111,
+ syscall: "connect",
+    port: 43917,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43805
+   errno: -111,
+ syscall: "connect",
+    port: 43805,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43485
+   errno: -111,
+ syscall: "connect",
+    port: 43485,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43223
+   errno: -111,
+ syscall: "connect",
+    port: 43223,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+
+test/J-CFG-model-provider.test.ts:
+
+test/J-CFG-provider-switch.test.ts:
+
+test/J-TEAM-evaluation.test.ts:
+
+test/J-RT-realitytrace.test.ts:
+
+test/J-TEAM-security.test.ts:
+
+test/J-PLG-panels.test.ts:
+
+test/J-AUTH-TENANT-ISOLATION.test.ts:
+
+test/J-HARNESS-session.test.ts:
+
+test/J-EXPERT-workspace-admission.test.ts:
+
+test/E2E-onboarding.test.ts:
+
+test/settlement-config.test.ts:
+
+test/J-HARNESS-detect.test.ts:
+
+test/J-AUTH-SESSION.test.ts:
+
+test/E2E-experts-debt.test.ts:
+
+test/J-SCHEDULE-execution.test.ts:
+
+test/proof-current.test.ts:
+
+test/J-WS-directory-suggest-matching.test.ts:
+
+test/J-CFG-config-path.test.ts:
+
+test/E2E-expert-workspace-admission.test.ts:
+
+test/E2E-experts.test.ts:
+
+test/J-WB-parallelism.test.ts:
+
+test/ui-runtime-execution.test.tsx:
+error: connect ECONNREFUSED 127.0.0.1:42847
+   errno: -111,
+ syscall: "connect",
+    port: 42847,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43645
+   errno: -111,
+ syscall: "connect",
+    port: 43645,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42861
+   errno: -111,
+ syscall: "connect",
+    port: 42861,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42211
+   errno: -111,
+ syscall: "connect",
+    port: 42211,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43291
+   errno: -111,
+ syscall: "connect",
+    port: 43291,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43779
+   errno: -111,
+ syscall: "connect",
+    port: 43779,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43035
+   errno: -111,
+ syscall: "connect",
+    port: 43035,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43035
+   errno: -111,
+ syscall: "connect",
+    port: 43035,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42443
+   errno: -111,
+ syscall: "connect",
+    port: 42443,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42871
+   errno: -111,
+ syscall: "connect",
+    port: 42871,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43757
+   errno: -111,
+ syscall: "connect",
+    port: 43757,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43675
+   errno: -111,
+ syscall: "connect",
+    port: 43675,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42699
+   errno: -111,
+ syscall: "connect",
+    port: 42699,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42957
+   errno: -111,
+ syscall: "connect",
+    port: 42957,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43323
+   errno: -111,
+ syscall: "connect",
+    port: 43323,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42101
+   errno: -111,
+ syscall: "connect",
+    port: 42101,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42107
+   errno: -111,
+ syscall: "connect",
+    port: 42107,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42657
+   errno: -111,
+ syscall: "connect",
+    port: 42657,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43915
+   errno: -111,
+ syscall: "connect",
+    port: 43915,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41925
+   errno: -111,
+ syscall: "connect",
+    port: 41925,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42511
+   errno: -111,
+ syscall: "connect",
+    port: 42511,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43125
+   errno: -111,
+ syscall: "connect",
+    port: 43125,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42007
+   errno: -111,
+ syscall: "connect",
+    port: 42007,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42151
+   errno: -111,
+ syscall: "connect",
+    port: 42151,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43537
+   errno: -111,
+ syscall: "connect",
+    port: 43537,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43561
+   errno: -111,
+ syscall: "connect",
+    port: 43561,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42733
+   errno: -111,
+ syscall: "connect",
+    port: 42733,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42683
+   errno: -111,
+ syscall: "connect",
+    port: 42683,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42691
+   errno: -111,
+ syscall: "connect",
+    port: 42691,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42577
+   errno: -111,
+ syscall: "connect",
+    port: 42577,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43353
+   errno: -111,
+ syscall: "connect",
+    port: 43353,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43309
+   errno: -111,
+ syscall: "connect",
+    port: 43309,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42575
+   errno: -111,
+ syscall: "connect",
+    port: 42575,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43045
+   errno: -111,
+ syscall: "connect",
+    port: 43045,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42845
+   errno: -111,
+ syscall: "connect",
+    port: 42845,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42385
+   errno: -111,
+ syscall: "connect",
+    port: 42385,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41923
+   errno: -111,
+ syscall: "connect",
+    port: 41923,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43573
+   errno: -111,
+ syscall: "connect",
+    port: 43573,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42053
+   errno: -111,
+ syscall: "connect",
+    port: 42053,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43897
+   errno: -111,
+ syscall: "connect",
+    port: 43897,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43181
+   errno: -111,
+ syscall: "connect",
+    port: 43181,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41927
+   errno: -111,
+ syscall: "connect",
+    port: 41927,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43779
+   errno: -111,
+ syscall: "connect",
+    port: 43779,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42227
+   errno: -111,
+ syscall: "connect",
+    port: 42227,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43675
+   errno: -111,
+ syscall: "connect",
+    port: 43675,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43861
+   errno: -111,
+ syscall: "connect",
+    port: 43861,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42953
+   errno: -111,
+ syscall: "connect",
+    port: 42953,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43563
+   errno: -111,
+ syscall: "connect",
+    port: 43563,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42047
+   errno: -111,
+ syscall: "connect",
+    port: 42047,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43269
+   errno: -111,
+ syscall: "connect",
+    port: 43269,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42497
+   errno: -111,
+ syscall: "connect",
+    port: 42497,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43743
+   errno: -111,
+ syscall: "connect",
+    port: 43743,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43415
+   errno: -111,
+ syscall: "connect",
+    port: 43415,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42531
+   errno: -111,
+ syscall: "connect",
+    port: 42531,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43311
+   errno: -111,
+ syscall: "connect",
+    port: 43311,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43661
+   errno: -111,
+ syscall: "connect",
+    port: 43661,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42791
+   errno: -111,
+ syscall: "connect",
+    port: 42791,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42247
+   errno: -111,
+ syscall: "connect",
+    port: 42247,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43891
+   errno: -111,
+ syscall: "connect",
+    port: 43891,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42573
+   errno: -111,
+ syscall: "connect",
+    port: 42573,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43017
+   errno: -111,
+ syscall: "connect",
+    port: 43017,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:41939
+   errno: -111,
+ syscall: "connect",
+    port: 41939,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42441
+   errno: -111,
+ syscall: "connect",
+    port: 42441,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42997
+   errno: -111,
+ syscall: "connect",
+    port: 42997,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42531
+   errno: -111,
+ syscall: "connect",
+    port: 42531,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43427
+   errno: -111,
+ syscall: "connect",
+    port: 43427,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43913
+   errno: -111,
+ syscall: "connect",
+    port: 43913,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43099
+   errno: -111,
+ syscall: "connect",
+    port: 43099,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42101
+   errno: -111,
+ syscall: "connect",
+    port: 42101,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42325
+   errno: -111,
+ syscall: "connect",
+    port: 42325,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:42715
+   errno: -111,
+ syscall: "connect",
+    port: 42715,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+error: connect ECONNREFUSED 127.0.0.1:43287
+   errno: -111,
+ syscall: "connect",
+    port: 43287,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at afterConnect (node:net:1828:39)
+      at connectError (node:net:721:19)
+
+
+test/J-CFG-model-catalog.test.ts:
+
+test/E2E-ui-shell.test.ts:
+
+test/J-PREFS-shortcuts.test.ts:
+
+test/J-TEAM-admission.test.ts:
+
+test/J-EXPERT-management.test.ts:
+
+test/governance-config.test.ts:
+
+test/J-RW-ssh-workspaces.test.ts:
+
+test/J-MEMORY-pagination.test.ts:
+
+test/J-H-provider-error.test.ts:
+
+test/E2E-mobile-remote.test.ts:
+
+test/J-PLG-toggle.test.ts:
+
+test/J-WS-files-browse.test.ts:
+
+test/J-EXPERT-OWNERSHIP-MULTI.test.ts:
+
+test/J-AIM-aimock.test.ts:
+
+test/J-WS-directory-discovery.red.test.ts:
+
+ 1551 pass
+ 13 skip
+ 0 fail
+ 9359 expect() calls
+Ran 1564 tests across 185 files. [1014.28s]
+exit 0

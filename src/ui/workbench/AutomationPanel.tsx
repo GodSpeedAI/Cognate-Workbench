@@ -8,6 +8,7 @@ import type { ExecutionSubstrate, AutomationState } from "../../workbench/types"
 import type { Schedule } from "../../workbench/automation";
 import { AUTOMATION_STATES } from "../../workbench/types";
 import { describeSchedule, substrateNote } from "../../workbench/automation";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 // @ts-ignore CSS import
 
@@ -198,36 +199,38 @@ export default function AutomationPanel({
 
                 <div className="wb-field">
                   <label htmlFor="auto-task">Source task</label>
-                  <select
+                  <MenuSelect
                     id="auto-task"
+                    ariaLabel="Source task"
                     value={formState.sourceTaskId}
-                    onChange={(e) => setFormState({ ...formState, sourceTaskId: e.target.value })}
-                  >
-                    {acceptedTasks.map((task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.title}
-                      </option>
-                    ))}
-                  </select>
+                    variant="field"
+                    placement="down"
+                    options={acceptedTasks.map((task) => ({ value: task.id, label: task.title }))}
+                    onPick={(sourceTaskId) => setFormState({ ...formState, sourceTaskId })}
+                  />
                 </div>
 
                 <div className="wb-field-row">
                   <div className="wb-field">
                     <label htmlFor="auto-weekday">Repeat</label>
-                    <select
+                    <MenuSelect
                       id="auto-weekday"
+                      ariaLabel="Repeat"
                       value={formState.weekday}
-                      onChange={(e) => setFormState({ ...formState, weekday: e.target.value })}
-                    >
-                      <option value="daily">Daily</option>
-                      <option value="0">Sunday</option>
-                      <option value="1">Monday</option>
-                      <option value="2">Tuesday</option>
-                      <option value="3">Wednesday</option>
-                      <option value="4">Thursday</option>
-                      <option value="5">Friday</option>
-                      <option value="6">Saturday</option>
-                    </select>
+                      variant="field"
+                      placement="down"
+                      options={[
+                        { value: "daily", label: "Daily" },
+                        { value: "0", label: "Sunday" },
+                        { value: "1", label: "Monday" },
+                        { value: "2", label: "Tuesday" },
+                        { value: "3", label: "Wednesday" },
+                        { value: "4", label: "Thursday" },
+                        { value: "5", label: "Friday" },
+                        { value: "6", label: "Saturday" },
+                      ]}
+                      onPick={(weekday) => setFormState({ ...formState, weekday })}
+                    />
                   </div>
 
                   <div className="wb-field">
@@ -257,18 +260,20 @@ export default function AutomationPanel({
 
                 <div className="wb-field">
                   <label htmlFor="auto-substrate">Runner</label>
-                  <select
+                  <MenuSelect
                     id="auto-substrate"
+                    ariaLabel="Runner"
                     value={formState.substrate}
-                    onChange={(e) =>
-                      setFormState({ ...formState, substrate: e.target.value as ExecutionSubstrate })
-                    }
-                  >
-                    <option value="local-desktop">local-desktop</option>
-                    <option value="local-service">local-service</option>
-                    <option value="remote-runner">remote-runner</option>
-                    <option value="cloud">cloud</option>
-                  </select>
+                    variant="field"
+                    placement="down"
+                    options={[
+                      { value: "local-desktop", label: "local-desktop" },
+                      { value: "local-service", label: "local-service" },
+                      { value: "remote-runner", label: "remote-runner" },
+                      { value: "cloud", label: "cloud" },
+                    ]}
+                    onPick={(substrate) => setFormState({ ...formState, substrate })}
+                  />
                   <div className="wb-automation-substrate-note">
                     {substrateNote(formState.substrate).note}
                   </div>
@@ -589,36 +594,38 @@ export default function AutomationPanel({
 
               <div className="wb-field">
                 <label htmlFor="auto-task">Source task</label>
-                <select
+                <MenuSelect
                   id="auto-task"
+                  ariaLabel="Source task"
                   value={formState.sourceTaskId}
-                  onChange={(e) => setFormState({ ...formState, sourceTaskId: e.target.value })}
-                >
-                  {acceptedTasks.map((task) => (
-                    <option key={task.id} value={task.id}>
-                      {task.title}
-                    </option>
-                  ))}
-                </select>
+                  variant="field"
+                  placement="down"
+                  options={acceptedTasks.map((task) => ({ value: task.id, label: task.title }))}
+                  onPick={(sourceTaskId) => setFormState({ ...formState, sourceTaskId })}
+                />
               </div>
 
               <div className="wb-field-row">
                 <div className="wb-field">
                   <label htmlFor="auto-weekday">Repeat</label>
-                  <select
+                  <MenuSelect
                     id="auto-weekday"
+                    ariaLabel="Repeat"
                     value={formState.weekday}
-                    onChange={(e) => setFormState({ ...formState, weekday: e.target.value })}
-                  >
-                    <option value="daily">Daily</option>
-                    <option value="0">Sunday</option>
-                    <option value="1">Monday</option>
-                    <option value="2">Tuesday</option>
-                    <option value="3">Wednesday</option>
-                    <option value="4">Thursday</option>
-                    <option value="5">Friday</option>
-                    <option value="6">Saturday</option>
-                  </select>
+                    variant="field"
+                    placement="down"
+                    options={[
+                      { value: "daily", label: "Daily" },
+                      { value: "0", label: "Sunday" },
+                      { value: "1", label: "Monday" },
+                      { value: "2", label: "Tuesday" },
+                      { value: "3", label: "Wednesday" },
+                      { value: "4", label: "Thursday" },
+                      { value: "5", label: "Friday" },
+                      { value: "6", label: "Saturday" },
+                    ]}
+                    onPick={(weekday) => setFormState({ ...formState, weekday })}
+                  />
                 </div>
 
                 <div className="wb-field">
@@ -648,18 +655,20 @@ export default function AutomationPanel({
 
               <div className="wb-field">
                 <label htmlFor="auto-substrate">Runner</label>
-                <select
+                <MenuSelect
                   id="auto-substrate"
+                  ariaLabel="Runner"
                   value={formState.substrate}
-                  onChange={(e) =>
-                    setFormState({ ...formState, substrate: e.target.value as ExecutionSubstrate })
-                  }
-                >
-                  <option value="local-desktop">local-desktop</option>
-                  <option value="local-service">local-service</option>
-                  <option value="remote-runner">remote-runner</option>
-                  <option value="cloud">cloud</option>
-                </select>
+                  variant="field"
+                  placement="down"
+                  options={[
+                    { value: "local-desktop", label: "local-desktop" },
+                    { value: "local-service", label: "local-service" },
+                    { value: "remote-runner", label: "remote-runner" },
+                    { value: "cloud", label: "cloud" },
+                  ]}
+                  onPick={(substrate) => setFormState({ ...formState, substrate })}
+                />
                 <div className="wb-automation-substrate-note">
                   {substrateNote(formState.substrate).note}
                 </div>

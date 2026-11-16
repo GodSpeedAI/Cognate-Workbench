@@ -17,7 +17,7 @@ import { WORKBENCH_EVENTS } from "../workbench/types.ts";
 /** Session-surface events a validated capability may record through the `session.recorded`
  *  command (J-TASK-scope/link). `session.created` and `session.archived` have their own typed
  *  commands; this list is the recording gate for everything else, mirroring `WORKBENCH_EVENTS`. */
-export const SESSION_EVENTS = ["session.task.bound"] as const;
+export const SESSION_EVENTS = ["session.task.bound", "session.harness.bound", "session.activation"] as const;
 export type SessionEventType = (typeof SESSION_EVENTS)[number];
 
 /** The recording run is a second validation gate: a settings event that skipped the
@@ -48,7 +48,7 @@ function validateSettingsPatch(patch: Partial<Record<keyof SettingsPatch, unknow
 }
 
 export type AgentConfigInput =
-  | { readonly kind: "model.configured"; readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages"; readonly model: string }
+  | { readonly kind: "model.configured"; readonly providerId: string; readonly baseURL: string; readonly protocol: "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages"; readonly model: string; readonly displayName?: string; readonly auth?: "bearer" | "none" | "api-key"; readonly apiVersion?: string; readonly prices?: { readonly inputUsdPerMillion: number; readonly outputUsdPerMillion: number } }
   /** `root` is provider-owned and opaque above the execution-world boundary; `executionWorldId`
    *  names where that root lives (see `@godspeedai/cognate-execution`). */
   | { readonly kind: "workspace.added"; readonly workspaceId: string; readonly root: string; readonly title: string; readonly executionWorldId: string }
@@ -59,7 +59,7 @@ export type AgentConfigInput =
   | { readonly kind: "workspace.renamed"; readonly workspaceId: string; readonly title: string }
   /** Usage pass U3: the sidebar's Delete workspace action — removes the record (and a current
    *  pointer to it); the workspace's sessions' events stay in history. */
-  | { readonly kind: "workspace.deleted"; readonly workspaceId: string }
+  | { readonly kind: "workspace.deleted"; readonly workspaceId: string; readonly archiveSessionIds?: readonly string[] }
   /** T11 (J-CFG-provider-delete): removes a provider configuration. The handler removes the stored
    *  secret *before* this run records the deletion, so a secret is never orphaned by a crash. */
   | { readonly kind: "provider.deleted"; readonly providerId: string }
@@ -71,6 +71,10 @@ export type AgentConfigInput =
   /** T11 (J-SESSION-archive): reversible, durable archiving of a conversation. The flag only changes
    *  sidebar visibility; no turn, run or event is ever deleted. */
   | { readonly kind: "session.archived"; readonly sessionId: string; readonly archived: boolean }
+  | { readonly kind: "session.renamed"; readonly sessionId: string; readonly title: string }
+  /** F1 (J-SESSION-pin): durable, sort-independent pinning of a conversation to the top of its
+   *  sidebar list. A view-ordering fact with event-log durability; history is untouched. */
+  | { readonly kind: "session.pinned"; readonly sessionId: string; readonly pinned: boolean }
   /** J-SESSION-draft: durable creation of a conversation identity *before* any prompt. The
    *  capability layer already validated the workspace and derived the deterministic session id;
    *  this run only records the fact. `title` is the literal pre-turn sidebar label. */
@@ -132,7 +136,9 @@ export const agentConfigAgent: AgentDefinition = {
         return { ok: true };
       }
       case "workspace.deleted": {
-        const { kind: _kind, ...payload } = command;
+        const { kind: _kind, archiveSessionIds, ...payload } = command;
+        // J-WS-delete: archive the workspace's sessions first so no moment shows them orphaned.
+        for (const sessionId of archiveSessionIds ?? []) await ctx.emit("session.archived", { sessionId, archived: true });
         await ctx.emit("workspace.deleted", payload);
         return { ok: true };
       }
@@ -172,6 +178,16 @@ export const agentConfigAgent: AgentDefinition = {
       case "session.archived": {
         const { kind: _kind, ...payload } = command;
         await ctx.emit("session.archived", payload);
+        return { ok: true };
+      }
+      case "session.renamed": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.renamed", payload);
+        return { ok: true };
+      }
+      case "session.pinned": {
+        const { kind: _kind, ...payload } = command;
+        await ctx.emit("session.pinned", payload);
         return { ok: true };
       }
       case "session.created": {

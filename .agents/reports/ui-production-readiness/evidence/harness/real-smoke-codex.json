@@ -1,0 +1,23 @@
+{
+  "at": "2026-11-01T07:20:11.615Z",
+  "results": [
+    {
+      "id": "codex",
+      "version": "codex-cli 0.163.0",
+      "mode": "ask",
+      "status": "completed",
+      "ms": 9109,
+      "reply": "READY",
+      "eventTypes": [
+        "run.started",
+        "run.invocation",
+        "session.turn.started",
+        "harness.session.recorded",
+        "run.invocation.progress",
+        "workbench.usage.recorded",
+        "message.completed",
+        "run.completed"
+      ]
+    }
+  ]
+}

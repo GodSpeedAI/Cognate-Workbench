@@ -35,7 +35,7 @@ export function RuntimeExecutionStatus({ inspect }: { readonly inspect: () => Pr
         <p className="experts-eyebrow">Host startup configuration</p>
         <h2 id="runtime-execution-heading">Native execution capacity</h2>
       </div>
-      <span className="experts-status">Read-only · COGNATE_RUN_CAPACITY</span>
+      <span className="experts-status" title="Set by the COGNATE_RUN_CAPACITY environment variable when the host starts">Read-only · set when the host starts</span>
     </div>
     {inspection ? inspection.configuredCapacity === 1 ? <>
       <p>Configured capacity: 1 run at a time</p>

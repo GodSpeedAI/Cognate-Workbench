@@ -143,3 +143,22 @@ way). No claim in one source was found to directly contradict a claim in another
   `parse --format json` and the live `@cognate/domainforge` adapter
   (`packages/domainforge/src/index.ts`, pinned to `@godspeedai/domainforge@0.18.1`). See
   `validation/domainforge-output.txt`.
+
+## Conformance pass 2026-10-31
+
+- **observed**: `J-DESKTOP-launch` behavior (single instance, app window, close stops the server) is
+  exercised against a fake Chromium-family browser on POSIX; the suite is skipped on Windows. No test
+  drives a real Edge/Chrome window or the Windows shortcut/executable, so those paths are inferred from
+  the same code, not observed.
+- **inferred**: the first-run flow in `J-A-first-use` is described from `src/ui/onboarding/FirstRun.tsx`
+  and `test/E2E-onboarding.test.ts`, which another agent is still changing. Re-check the catalog entry
+  when that work lands.
+- **unknown**: whether `onboarding.dismiss`, `execution.wsl.list`, `observation.status` and
+  `observation.record` should carry semantic bindings (see handoff "Open binding gaps"). Proposed, not
+  decided.
+- **proposed**: the model has no separate affordance/surface section. UI surfaces are recorded as
+  journeys that are pure projections (`J-UI-command-palette`, `J-UI-inspector`) with an explicit
+  "no capability of its own" settlement. If a stricter surface vocabulary is wanted, that is a model
+  change, not a grammar change.
+- **unknown**: the `J-PKG-*` journeys remain evidenced by installed-archive qualification, not by
+  `test/`. `J-WB-focus`, `J-TEAM-CONVERSE` and `J-TEAM-SETTLEMENT` have no test named after their id.

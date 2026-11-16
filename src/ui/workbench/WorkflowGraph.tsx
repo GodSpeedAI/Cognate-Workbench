@@ -7,7 +7,6 @@ import type {
 import {
   parallelLayers,
   workflowView,
-  nextTransitions,
 } from "../../workbench/workflow";
 
 // Renders workflow definition as an interactive graph with status.

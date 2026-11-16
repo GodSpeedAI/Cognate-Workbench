@@ -209,6 +209,300 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       }
       return writes;
     }
+    case "workbench.terminal.opened": {
+      const row = {
+        sessionId: String(p.sessionId),
+        worldId: String(p.worldId),
+        worldKind: String(p.worldKind),
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        ...(typeof p.workspaceLabel === "string" ? { workspaceLabel: p.workspaceLabel } : {}),
+        cwd: String(p.cwd),
+        shell: String(p.shell),
+        status: "running",
+        openedAt: recordedAt,
+        ...(typeof p.ownerActorId === "string" ? { ownerActorId: p.ownerActorId } : {}),
+      };
+      return [{ key: `terminal/${row.sessionId}`, value: j(row) }];
+    }
+    case "workbench.terminal.closed": {
+      const sessionId = String(p.sessionId);
+      const key = `terminal/${sessionId}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{
+        key,
+        value: j({
+          ...prev,
+          status: "exited",
+          closedAt: recordedAt,
+          reason: String(p.reason ?? "exit"),
+          ...(p.exitCode === null || typeof p.exitCode === "number" ? { exitCode: p.exitCode } : {}),
+          ...(typeof p.message === "string" ? { message: p.message } : {}),
+        }),
+      }];
+    }
+    case "workbench.browser.opened": {
+      const row = {
+        sessionId: String(p.sessionId),
+        providerId: String(p.providerId),
+        ...(typeof p.url === "string" ? { url: p.url } : {}),
+        ...(typeof p.title === "string" ? { title: p.title } : {}),
+        controller: "human",
+        status: "running",
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        openedAt: recordedAt,
+        screenshots: [] as unknown[],
+        annotations: [] as unknown[],
+        navigations: 0,
+      };
+      return [{ key: `browser/${row.sessionId}`, value: j(row) }];
+    }
+    case "workbench.browser.navigated": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; navigations?: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, url: String(p.url), ...(typeof p.title === "string" ? { title: p.title } : {}), navigatedAt: recordedAt, navigations: (typeof prev.navigations === "number" ? prev.navigations : 0) + 1 }) }];
+    }
+    case "workbench.browser.control.changed": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, controller: String(p.controller), controllerActorId: typeof p.actorId === "string" ? p.actorId : undefined, controlChangedAt: recordedAt }) }];
+    }
+    case "workbench.browser.screenshot": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; screenshots?: unknown[] } | undefined;
+      if (!prev) return [];
+      const screenshots = [...(prev.screenshots ?? []), { path: String(p.path), ...(typeof p.url === "string" ? { url: p.url } : {}), takenAt: recordedAt }];
+      return [{ key, value: j({ ...prev, screenshots }) }];
+    }
+    // J-BROWSER-inspect: the durable annotation. Page-derived context is bounded here (the
+    // capability already bounds it; the fold re-bounds defensively) and is data, not instructions.
+    case "workbench.browser.annotated": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown; annotations?: unknown[] } | undefined;
+      if (!prev) return [];
+      const element = (p.element ?? {}) as { [k: string]: unknown };
+      const annotation = {
+        annotationId: String(p.annotationId),
+        note: String(p.note),
+        url: String(p.url),
+        ...(typeof p.capturedAt === "string" ? { capturedAt: String(p.capturedAt) } : {}),
+        ...(typeof p.navigationsAtCapture === "number" ? { navigationsAtCapture: p.navigationsAtCapture } : {}),
+        ...(typeof p.evidencePath === "string" ? { evidencePath: p.evidencePath } : {}),
+        element: {
+          tag: String(element.tag ?? ""),
+          role: String(element.role ?? ""),
+          ...(typeof element.name === "string" ? { name: element.name.slice(0, 120) } : {}),
+          ...(typeof element.text === "string" ? { text: element.text.slice(0, 200) } : {}),
+        },
+        candidates: Array.isArray(p.candidates) ? (p.candidates as unknown[]).slice(0, 8) : [],
+        annotatedAt: recordedAt,
+      };
+      const annotations = [...(prev.annotations ?? []).slice(-19), annotation];
+      return [{ key, value: j({ ...prev, annotations }) }];
+    }
+    case "workbench.browser.closed": {
+      const key = `browser/${String(p.sessionId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, status: "closed", closedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
+    }
+    // J-PREVIEW-register: the explicit, ownership-carrying dev-server registration.
+    // J-REMOTE-diagnostics: the remote control's durable diagnostics. One row (`remote/control`)
+    // carries the current state, the paired device's label (never a credential), the last bounded
+    // error and a small ring of recent transitions — the truth is this event log.
+    case "workbench.remote.state": {
+      const state = p.state;
+      if (state !== "off" && state !== "waiting" && state !== "connected") return [];
+      const prev = get("remote/control") as { readonly events?: readonly { readonly at: string; readonly text: string }[] } | undefined;
+      const deviceLabel = typeof p.deviceLabel === "string" && p.deviceLabel.trim() ? p.deviceLabel.trim().slice(0, 60) : undefined;
+      const text = state === "connected" && deviceLabel ? `Connected (${deviceLabel})` : `Connection ${state}`;
+      const ring = [...(prev?.events ?? []), { at: recordedAt, text }].slice(-8);
+      return [{
+        key: "remote/control",
+        value: j({
+          ...(prev ?? {}),
+          state,
+          ...(deviceLabel ? { deviceLabel } : {}),
+          ...(state !== "connected" ? { deviceLabel: null } : {}),
+          updatedAt: recordedAt,
+          events: ring,
+        }),
+      }];
+    }
+    case "workbench.remote.error": {
+      if (typeof p.message !== "string" || !p.message.trim()) return [];
+      const prev = get("remote/control") as { readonly events?: readonly { readonly at: string; readonly text: string }[] } | undefined;
+      const message = p.message.trim().slice(0, 200);
+      const ring = [...(prev?.events ?? []), { at: recordedAt, text: `Error: ${message}` }].slice(-8);
+      return [{
+        key: "remote/control",
+        value: j({ ...(prev ?? {}), lastError: message, lastErrorAt: recordedAt, updatedAt: recordedAt, events: ring }),
+      }];
+    }
+    case "workbench.preview.registered": {
+      const row = {
+        previewId: String(p.previewId),
+        worldId: String(p.worldId),
+        worldKind: String(p.worldKind),
+        viewUrl: String(p.viewUrl),
+        originUrl: String(p.originUrl),
+        status: "ready",
+        ...(typeof p.workspaceId === "string" ? { workspaceId: p.workspaceId } : {}),
+        ...(typeof p.ownerSessionId === "string" ? { ownerSessionId: p.ownerSessionId } : {}),
+        ...(typeof p.ownerTaskId === "string" ? { ownerTaskId: p.ownerTaskId } : {}),
+        ...(typeof p.ownerRunId === "string" ? { ownerRunId: p.ownerRunId } : {}),
+        ...(typeof p.pid === "number" ? { pid: p.pid } : {}),
+        registeredAt: recordedAt,
+      };
+      return [{ key: `preview/${row.previewId}`, value: j(row) }];
+    }
+    case "workbench.preview.stopped": {
+      const key = `preview/${String(p.previewId)}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, status: "stopped", stoppedAt: recordedAt, reason: String(p.reason ?? "operator") }) }];
+    }
+    // Capability-bundles tranche P: durable enforcement decisions (the P evidence matrix) and the
+    // runtime enablement markers. Decision rows are append-only audit, keyed by the emitter's
+    // decisionId; enablement rows are singletons the §1.7 predicate reads.
+    case "authority.decision.recorded": {
+      const decisionId = typeof p.decisionId === "string" && p.decisionId ? p.decisionId : `${recordedAt}-${eventId}`;
+      return [{ key: `decision/${decisionId}`, value: j({ ...p, recordedAt }) }];
+    }
+    case "workbench.capability_runtime.enabled": {
+      return [{ key: "runtime/enablement", value: j({ enabled: true, recordedAt }) }];
+    }
+    case "workbench.capability_runtime.remediation_verified": {
+      return [{ key: "runtime/remediation", value: j({ ...p, recordedAt }) }];
+    }
+    // Capability-bundles tranche M (§8 matrix rows). Bundle/activation lifecycle rows are the
+    // authoritative capability state the authority index mirrors at boot (replay-equality is the
+    // totality proof); decision rows (tranche P) stay append-only audit.
+    case "capability.bundle.registered": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      return [{ key: `bundle/${capabilityId}`, value: j({ capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, registeredAt: recordedAt }) }];
+    }
+    case "capability.bundle.validated": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      const prev = get(`bundle/${capabilityId}`) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key: `bundle/${capabilityId}`, value: j({ ...prev, validated: true, validatedAt: recordedAt }) }];
+    }
+    case "capability.activated": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      return [{ key, value: j({ capabilityId, level, ...(session ? { sessionId: session } : {}), version: p.version ?? "", ceiling: p.ceiling ?? [], clampProvenance: p.clampProvenance ?? "operator", state: "active", suspensionReasons: [], activatedAt: recordedAt }) }];
+    }
+    case "capability.repointed": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      const retired = get(`binding-retired/${capabilityId}`) as { versions?: unknown } | undefined;
+      const priorVersion = String(p.from ?? prev.version ?? "");
+      return [
+        { key, value: j({ ...prev, version: p.to ?? prev.version, repointedAt: recordedAt }) },
+        { key: `binding-retired/${capabilityId}`, value: j({ versions: [...((retired?.versions as readonly string[]) ?? []), priorVersion] }) },
+      ];
+    }
+    case "capability.suspended": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { state?: string; suspensionReasons?: string[] } | undefined;
+      if (!prev) return [];
+      const reason = String(p.reason ?? "operator-yank");
+      const reasons = new Set(prev.suspensionReasons ?? []);
+      reasons.add(reason);
+      return [{ key, value: j({ ...prev, state: "suspended", suspensionReasons: [...reasons], suspendedAt: recordedAt, lastReason: reason }) }];
+    }
+    case "capability.resumed": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { state?: string; suspensionReasons?: string[] } | undefined;
+      if (!prev) return [];
+      const reason = String(p.clearedReason ?? "");
+      const reasons = (prev.suspensionReasons ?? []).filter((r) => r !== reason);
+      return [{ key, value: j({ ...prev, state: reasons.length === 0 ? "active" : "suspended", suspensionReasons: reasons, resumedAt: recordedAt }) }];
+    }
+    case "capability.deactivated": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = typeof p.sessionId === "string" ? p.sessionId : "";
+      const key = `activation/${capabilityId}/${level}${session ? `/${session}` : ""}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key, value: j({ ...prev, state: "dormant", suspensionReasons: [], deactivatedAt: recordedAt }) }];
+    }
+    case "capability.uninstalled": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      const prev = get(`bundle/${capabilityId}`) as { [k: string]: unknown } | undefined;
+      if (!prev) return [];
+      return [{ key: `bundle/${capabilityId}`, value: j({ ...prev, uninstalled: true, uninstalledAt: recordedAt }) }];
+    }
+    case "capability.activation_failed":
+    case "capability.repoint_failed":
+    case "capability.validation_failed":
+    case "capability.integrity_failed": {
+      const capabilityId = String(p.capabilityId ?? "unknown");
+      return [{ key: `fault/${eventType}/${capabilityId}/${recordedAt}`, value: j({ capabilityId, kind: eventType, reason: String(p.reason ?? "unknown"), recordedAt }) }];
+    }
+    case "authority.grant.issued":
+    case "authority.grant.revoked":
+    case "authority.grant.expired": {
+      const grantId = String(p.grantId ?? "");
+      if (!grantId) return [];
+      const prev = get(`grant/${grantId}`) as { [k: string]: unknown } | undefined;
+      const revoked = eventType !== "authority.grant.issued";
+      return [{ key: `grant/${grantId}`, value: j({ ...(prev ?? { grantId }), status: revoked ? (eventType === "authority.grant.expired" ? "expired" : "revoked") : "active", recordedAt }) }];
+    }
+    case "workbench.safemode.boot_attempted": {
+      const prev = get("runtime/safemode") as { attempts?: number } | undefined;
+      return [{ key: "runtime/safemode", value: j({ attempts: (prev?.attempts ?? 0) + 1, lastAttemptAt: recordedAt }) }];
+    }
+    case "workbench.safemode.cleared": {
+      return [{ key: "runtime/safemode", value: j({ attempts: 0, clearedAt: recordedAt }) }];
+    }
+    case "session.activation": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const level = String(p.level ?? "user");
+      const session = String(p.sessionId ?? "");
+      if (!capabilityId || !session) return [];
+      const key = `activation/${capabilityId}/${level}/${session}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      return [{ key, value: j({ ...(prev ?? {}), sessionId: session, sessionBoundAt: recordedAt }) }];
+    }
+    case "capability.binding.retired": {
+      const capabilityId = String(p.capabilityId ?? "");
+      const version = String(p.version ?? "");
+      if (!capabilityId) return [];
+      return [{ key: `binding-retired/${capabilityId}/${version}`, value: j({ capabilityId, version, retiredAt: recordedAt }) }];
+    }
+    case "workbench.kernel.observed.provided":
+    case "workbench.kernel.observed.withdrawn":
+    case "workbench.kernel.observed.fiber_state": {
+      const providerId = String(p.providerId ?? "");
+      if (!providerId) return [];
+      const kind = eventType.replace("workbench.kernel.observed.", "");
+      return [{ key: `kernel-obs/${providerId}/${recordedAt}`, value: j({ providerId, kind, recordedAt }) }];
+    }
+    case "workbench.bundles.pruned": {
+      const capabilityId = String(p.capabilityId ?? "");
+      if (!capabilityId) return [];
+      return [{ key: `bundle-pruned/${capabilityId}/${recordedAt}`, value: j({ capabilityId, pruned: p.versions ?? [], recordedAt }) }];
+    }
     default:
       return [];
   }

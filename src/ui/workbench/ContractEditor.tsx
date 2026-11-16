@@ -12,6 +12,45 @@ import type {
   AcceptanceKind,
 } from "../../workbench/types";
 import { defaultAuthority } from "../../workbench/contract";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
+
+/** The grant triple every authority scope offers (the S1 conversion's shared option set). */
+const GRANT_OPTIONS = [
+  { value: "yes", label: "yes" },
+  { value: "approval", label: "approval" },
+  { value: "no", label: "no" },
+] as const;
+
+/** One labeled authority-scope field: the S1 shape (label + grant MenuSelect) nine times over. */
+function GrantField({
+  id,
+  label,
+  value,
+  locked,
+  onPick,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly value: Grant;
+  readonly locked: boolean;
+  readonly onPick: (grant: Grant) => void;
+}) {
+  return (
+    <div className="wb-field">
+      <label htmlFor={id}>{label}</label>
+      <MenuSelect
+        id={id}
+        ariaLabel={label}
+        value={value}
+        options={GRANT_OPTIONS}
+        onPick={onPick}
+        disabled={locked}
+        variant="field"
+        placement="down"
+      />
+    </div>
+  );
+}
 
 interface Capability {
   readonly id: string;
@@ -318,207 +357,102 @@ export const ContractEditor: React.FC<ContractEditorProps> = ({
       {field === "authority" && (
         <div className="wb-contract-field-group">
           <div className="wb-field-row">
-            <div className="wb-field">
-              <label htmlFor="auth-fs-read">Workspace read</label>
-              <select
-                id="auth-fs-read"
-                value={draftAuthority.filesystem.read}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    filesystem: {
-                      ...draftAuthority.filesystem,
-                      read: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
-            <div className="wb-field">
-              <label htmlFor="auth-fs-write">Workspace write</label>
-              <select
-                id="auth-fs-write"
-                value={draftAuthority.filesystem.write}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    filesystem: {
-                      ...draftAuthority.filesystem,
-                      write: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
-            <div className="wb-field">
-              <label htmlFor="auth-fs-outside">Outside workspace</label>
-              <select
-                id="auth-fs-outside"
-                value={draftAuthority.filesystem.outsideWorkspace}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    filesystem: {
-                      ...draftAuthority.filesystem,
-                      outsideWorkspace: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
+            <GrantField
+              id="auth-fs-read"
+              label="Workspace read"
+              value={draftAuthority.filesystem.read}
+              locked={locked}
+              onPick={(read) =>
+                setDraftAuthority({ ...draftAuthority, filesystem: { ...draftAuthority.filesystem, read } })
+              }
+            />
+            <GrantField
+              id="auth-fs-write"
+              label="Workspace write"
+              value={draftAuthority.filesystem.write}
+              locked={locked}
+              onPick={(write) =>
+                setDraftAuthority({ ...draftAuthority, filesystem: { ...draftAuthority.filesystem, write } })
+              }
+            />
+            <GrantField
+              id="auth-fs-outside"
+              label="Outside workspace"
+              value={draftAuthority.filesystem.outsideWorkspace}
+              locked={locked}
+              onPick={(outsideWorkspace) =>
+                setDraftAuthority({
+                  ...draftAuthority,
+                  filesystem: { ...draftAuthority.filesystem, outsideWorkspace },
+                })
+              }
+            />
           </div>
 
           <div className="wb-field-row">
-            <div className="wb-field">
-              <label htmlFor="auth-shell-run">Run shell commands</label>
-              <select
-                id="auth-shell-run"
-                value={draftAuthority.shell.run}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    shell: {
-                      ...draftAuthority.shell,
-                      run: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
-            <div className="wb-field">
-              <label htmlFor="auth-shell-destructive">Destructive shell commands</label>
-              <select
-                id="auth-shell-destructive"
-                value={draftAuthority.shell.destructive}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    shell: {
-                      ...draftAuthority.shell,
-                      destructive: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
+            <GrantField
+              id="auth-shell-run"
+              label="Run shell commands"
+              value={draftAuthority.shell.run}
+              locked={locked}
+              onPick={(run) =>
+                setDraftAuthority({ ...draftAuthority, shell: { ...draftAuthority.shell, run } })
+              }
+            />
+            <GrantField
+              id="auth-shell-destructive"
+              label="Destructive shell commands"
+              value={draftAuthority.shell.destructive}
+              locked={locked}
+              onPick={(destructive) =>
+                setDraftAuthority({ ...draftAuthority, shell: { ...draftAuthority.shell, destructive } })
+              }
+            />
           </div>
 
           <div className="wb-field-row">
-            <div className="wb-field">
-              <label htmlFor="auth-net-outbound">Outbound network</label>
-              <select
-                id="auth-net-outbound"
-                value={draftAuthority.network.outbound}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    network: {
-                      ...draftAuthority.network,
-                      outbound: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
+            <GrantField
+              id="auth-net-outbound"
+              label="Outbound network"
+              value={draftAuthority.network.outbound}
+              locked={locked}
+              onPick={(outbound) =>
+                setDraftAuthority({ ...draftAuthority, network: { ...draftAuthority.network, outbound } })
+              }
+            />
           </div>
 
           <div className="wb-field-row">
-            <div className="wb-field">
-              <label htmlFor="auth-pkg-install">Install packages</label>
-              <select
-                id="auth-pkg-install"
-                value={draftAuthority.packages.install}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    packages: {
-                      ...draftAuthority.packages,
-                      install: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
+            <GrantField
+              id="auth-pkg-install"
+              label="Install packages"
+              value={draftAuthority.packages.install}
+              locked={locked}
+              onPick={(install) =>
+                setDraftAuthority({ ...draftAuthority, packages: { ...draftAuthority.packages, install } })
+              }
+            />
           </div>
 
           <div className="wb-field-row">
-            <div className="wb-field">
-              <label htmlFor="auth-ext-install">Install plugin</label>
-              <select
-                id="auth-ext-install"
-                value={draftAuthority.extensions.install}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    extensions: {
-                      ...draftAuthority.extensions,
-                      install: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
-            <div className="wb-field">
-              <label htmlFor="auth-ext-enable">Enable plugin</label>
-              <select
-                id="auth-ext-enable"
-                value={draftAuthority.extensions.enable}
-                onChange={(e) => {
-                  setDraftAuthority({
-                    ...draftAuthority,
-                    extensions: {
-                      ...draftAuthority.extensions,
-                      enable: e.target.value as Grant,
-                    },
-                  });
-                }}
-                disabled={locked}
-              >
-                <option value="yes">yes</option>
-                <option value="approval">approval</option>
-                <option value="no">no</option>
-              </select>
-            </div>
+            <GrantField
+              id="auth-ext-install"
+              label="Install plugin"
+              value={draftAuthority.extensions.install}
+              locked={locked}
+              onPick={(install) =>
+                setDraftAuthority({ ...draftAuthority, extensions: { ...draftAuthority.extensions, install } })
+              }
+            />
+            <GrantField
+              id="auth-ext-enable"
+              label="Enable plugin"
+              value={draftAuthority.extensions.enable}
+              locked={locked}
+              onPick={(enable) =>
+                setDraftAuthority({ ...draftAuthority, extensions: { ...draftAuthority.extensions, enable } })
+              }
+            />
           </div>
 
           <div className="wb-field">
@@ -549,24 +483,25 @@ export const ContractEditor: React.FC<ContractEditorProps> = ({
               <div className="wb-field-row">
                 <div className="wb-field">
                   <label htmlFor={`exec-role-${idx}`}>Role</label>
-                  <select
+                  <MenuSelect
                     id={`exec-role-${idx}`}
+                    ariaLabel="Role"
                     value={executor.role}
-                    onChange={(e) => {
+                    options={[
+                      { value: "primary", label: "primary" },
+                      { value: "architect", label: "architect" },
+                      { value: "worker", label: "worker" },
+                      { value: "verifier", label: "verifier" },
+                    ]}
+                    onPick={(role) => {
                       const newExecutors = [...draftExecutors];
-                      newExecutors[idx] = {
-                        ...executor,
-                        role: e.target.value as ExecutorRole,
-                      };
+                      newExecutors[idx] = { ...executor, role };
                       setDraftExecutors(newExecutors);
                     }}
                     disabled={locked}
-                  >
-                    <option value="primary">primary</option>
-                    <option value="architect">architect</option>
-                    <option value="worker">worker</option>
-                    <option value="verifier">verifier</option>
-                  </select>
+                    variant="field"
+                    placement="down"
+                  />
                 </div>
                 <div className="wb-field">
                   <label htmlFor={`exec-executor-${idx}`}>Executor</label>
@@ -588,22 +523,23 @@ export const ContractEditor: React.FC<ContractEditorProps> = ({
                 </div>
                 <div className="wb-field">
                   <label htmlFor={`exec-kind-${idx}`}>Kind</label>
-                  <select
+                  <MenuSelect
                     id={`exec-kind-${idx}`}
+                    ariaLabel="Kind"
                     value={executor.kind}
-                    onChange={(e) => {
+                    options={[
+                      { value: "llm", label: "llm" },
+                      { value: "deterministic", label: "deterministic" },
+                    ]}
+                    onPick={(kind) => {
                       const newExecutors = [...draftExecutors];
-                      newExecutors[idx] = {
-                        ...executor,
-                        kind: e.target.value as "llm" | "deterministic",
-                      };
+                      newExecutors[idx] = { ...executor, kind };
                       setDraftExecutors(newExecutors);
                     }}
                     disabled={locked}
-                  >
-                    <option value="llm">llm</option>
-                    <option value="deterministic">deterministic</option>
-                  </select>
+                    variant="field"
+                    placement="down"
+                  />
                 </div>
               </div>
               <div className="wb-field-row">
@@ -722,25 +658,26 @@ export const ContractEditor: React.FC<ContractEditorProps> = ({
             <div key={idx} className="wb-invariant-row">
               <div className="wb-field">
                 <label htmlFor={`inv-kind-${idx}`}>Kind</label>
-                <select
+                <MenuSelect
                   id={`inv-kind-${idx}`}
+                  ariaLabel="Kind"
                   value={invariant.kind}
-                  onChange={(e) => {
+                  options={[
+                    { value: "domain", label: "domain" },
+                    { value: "product", label: "product" },
+                    { value: "design", label: "design" },
+                    { value: "governance", label: "governance" },
+                    { value: "workflow", label: "workflow" },
+                  ]}
+                  onPick={(kind) => {
                     const newInvariants = [...draftInvariants];
-                    newInvariants[idx] = {
-                      ...invariant,
-                      kind: e.target.value as InvariantKind,
-                    };
+                    newInvariants[idx] = { ...invariant, kind };
                     setDraftInvariants(newInvariants);
                   }}
                   disabled={locked}
-                >
-                  <option value="domain">domain</option>
-                  <option value="product">product</option>
-                  <option value="design">design</option>
-                  <option value="governance">governance</option>
-                  <option value="workflow">workflow</option>
-                </select>
+                  variant="field"
+                  placement="down"
+                />
               </div>
               <div className="wb-field">
                 <label htmlFor={`inv-stmt-${idx}`}>Statement</label>
@@ -795,26 +732,27 @@ export const ContractEditor: React.FC<ContractEditorProps> = ({
             <div key={idx} className="wb-acceptance-row">
               <div className="wb-field">
                 <label htmlFor={`acc-kind-${idx}`}>Kind</label>
-                <select
+                <MenuSelect
                   id={`acc-kind-${idx}`}
+                  ariaLabel="Kind"
                   value={criterion.kind}
-                  onChange={(e) => {
+                  options={[
+                    { value: "test", label: "test" },
+                    { value: "independent-check", label: "independent-check" },
+                    { value: "journey", label: "journey" },
+                    { value: "audit", label: "audit" },
+                    { value: "integrity", label: "integrity" },
+                    { value: "human", label: "human" },
+                  ]}
+                  onPick={(kind) => {
                     const newAcceptance = [...draftAcceptance];
-                    newAcceptance[idx] = {
-                      ...criterion,
-                      kind: e.target.value as AcceptanceKind,
-                    };
+                    newAcceptance[idx] = { ...criterion, kind };
                     setDraftAcceptance(newAcceptance);
                   }}
                   disabled={locked}
-                >
-                  <option value="test">test</option>
-                  <option value="independent-check">independent-check</option>
-                  <option value="journey">journey</option>
-                  <option value="audit">audit</option>
-                  <option value="integrity">integrity</option>
-                  <option value="human">human</option>
-                </select>
+                  variant="field"
+                  placement="down"
+                />
               </div>
               <div className="wb-field">
                 <label htmlFor={`acc-desc-${idx}`}>Description</label>

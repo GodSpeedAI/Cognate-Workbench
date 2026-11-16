@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cognate Workbench</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font: 15px/1.6 system-ui, sans-serif;
+      background: Canvas; color: CanvasText;
+    }
+    main { max-width: 560px; padding: 32px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .reason {
+      font-family: ui-monospace, monospace; font-size: 13px;
+      padding: 12px 14px; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+      border-radius: 8px; white-space: pre-wrap; word-break: break-word;
+    }
+    p { color: color-mix(in srgb, CanvasText 75%, transparent); }
+    code {
+      font-family: ui-monospace, monospace; font-size: 13px;
+      padding: 2px 6px; border-radius: 4px;
+      background: color-mix(in srgb, CanvasText 8%, transparent);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Cognate Workbench could not start</h1>
+    <div class="reason" id="reason">Unknown startup failure.</div>
+    <p>
+      The desktop shell starts a local backend process before opening the workbench.
+      The backend log is written to <code id="log">the data home</code> under the name
+      <code>desktop-shell.log</code>. Fix the reported problem and start the application again.
+    </p>
+  </main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reason")) document.getElementById("reason").textContent = params.get("reason");
+    if (params.get("log")) document.getElementById("log").textContent = params.get("log");
+  </script>
+</body>
+</html>

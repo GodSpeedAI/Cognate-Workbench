@@ -35,10 +35,16 @@ export const AGENT_CODING = "agent.coding";
 export type AgentPreset = "standard" | "ptc" | "minimal";
 
 export const PRESET_TOOLS: Readonly<Record<AgentPreset, readonly string[]>> = {
-  standard: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent"],
-  ptc: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent", "run_code"],
-  minimal: ["bash"],
+  standard: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent", "capability_invoke", "skill_load"],
+  ptc: ["read", "edit", "bash", "todo_write", "exit_plan_mode", "subagent", "run_code", "capability_invoke", "skill_load"],
+  minimal: ["bash", "capability_invoke", "skill_load"],
 };
+
+// Capability-bundles tranche P (§2.4): the dispatcher's standing model-facing tool ids. The
+// dispatcher itself mounts in T2; until then a call resolves through the generic
+// `tool.<name>` fallthrough to a capability id that exists nowhere — the kernel's structured
+// unavailable refusal, fail-closed by construction (§2.4's P-to-T2 interim behavior).
+export const DISPATCHER_TOOL_NAMES = ["capability_invoke", "skill_load"] as const;
 
 export function isAgentPreset(value: unknown): value is AgentPreset {
   return typeof value === "string" && (value === "standard" || value === "ptc" || value === "minimal");
@@ -102,6 +108,21 @@ const MAX_TOOL_STEPS = 20;
 const MAX_MODEL_RETRIES = 5;
 const DEFAULT_RETRY_BACKOFF_MS = 300;
 
+const NETWORK_CODES = new Set(["CONNECTION_REFUSED", "DNS_FAILED", "NETWORK_ERROR"]);
+
+/** Host (with port) of the mounted provider's base URL, recorded once per failed call; "" when unknown. */
+async function providerHost(ctx: RunContext, callIndex: number, attempt: number): Promise<string> {
+  return ctx.step(`provider-host:${callIndex}:${attempt}`, async () => {
+    try {
+      const out = (await ctx.invoke("provider.list", {} as unknown as Json)) as unknown as { readonly providers?: readonly { readonly baseURL?: string; readonly isCurrent?: boolean }[] };
+      const current = out.providers?.find((p) => p.isCurrent);
+      return current?.baseURL ? new URL(current.baseURL).host : "";
+    } catch {
+      return "";
+    }
+  });
+}
+
 function retryBackoffMs(): number {
   const raw = Number(process.env.MODEL_RETRY_BACKOFF_MS);
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_RETRY_BACKOFF_MS;
@@ -133,7 +154,12 @@ function classifyModelFailure(error: InvocationFailedError): { readonly code: st
   // Fallback: message regex (backward compatibility)
   const failureMessage = failure?.message;
   const raw = typeof failureMessage === "string" ? failureMessage : error.message;
-  if (/timed out/i.test(raw)) return { code: "TIMEOUT", message: "Request timed out." };
+  if (/timed out|timeout/i.test(raw)) return { code: "TIMEOUT", message: "Request timed out." };
+  // Transport failures (no HTTP status): the provider adapters surface them as `unavailable` with
+  // "network error: <cause>" or "model request aborted or unavailable".
+  if (/ECONNREFUSED|ConnectionRefused|Unable to connect|connection refused/i.test(raw)) return { code: "CONNECTION_REFUSED", message: "The connection was refused." };
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|DNS|FailedToOpenSocket/i.test(raw)) return { code: "DNS_FAILED", message: "The provider host name could not be resolved." };
+  if (/ECONNRESET|socket|network error|aborted or unavailable|interrupted/i.test(raw) || details?.kind === "unavailable") return { code: "NETWORK_ERROR", message: "The provider could not be reached." };
   return { code: "HTTP_500", message: "Internal server error" };
 }
 
@@ -168,20 +194,38 @@ async function invokeModelGenerate(
       if (ctx.signal.aborted) throw error;
       if (!(error instanceof InvocationFailedError)) throw error;
 
-      const classified = classifyModelFailure(error);
+      let classified = classifyModelFailure(error);
+      let baseURLHost = "";
+      if (NETWORK_CODES.has(classified.code) || classified.code === "TIMEOUT") {
+        baseURLHost = await providerHost(ctx, callIndex, attempt);
+        if (baseURLHost && NETWORK_CODES.has(classified.code)) {
+          classified = { code: classified.code, message: `${classified.message.replace(/\.$/, "")} (${baseURLHost}).` };
+        }
+      }
       if(classified.code==="BUDGET_EXCEEDED"){
         await ctx.emit("turn.failed",classified as unknown as Json);
         throw new Error(classified.message);
       }
       if (attempt > MAX_MODEL_RETRIES) {
-        await ctx.emit("turn.failed", classified as unknown as Json);
+        await ctx.emit("turn.failed", { ...classified, ...(baseURLHost ? { baseURLHost } : {}) } as unknown as Json);
         throw new Error(classified.message);
       }
-      await ctx.emit("model.request.retried", { attempt, maxRetries: MAX_MODEL_RETRIES, error: classified } as unknown as Json);
+      // J-H-provider-error: every failed attempt is reported at once, with the delay before the next
+      // one. The delay is recorded first so a resumed run reports (and waits) the same value.
+      const delayMs = await ctx.step(`backoff-plan:${callIndex}:${attempt}`, async () => retryBackoffMs());
+      await ctx.emit("model.request.retried", {
+        attempt,
+        maxAttempts: MAX_MODEL_RETRIES + 1,
+        maxRetries: MAX_MODEL_RETRIES,
+        delayMs,
+        errorCode: classified.code,
+        message: classified.message,
+        baseURLHost,
+        error: classified,
+      } as unknown as Json);
       await ctx.step(`backoff:${callIndex}:${attempt}`, async () => {
-        const ms = retryBackoffMs();
-        await Bun.sleep(ms);
-        return ms;
+        await Bun.sleep(delayMs);
+        return delayMs;
       });
     }
   }
@@ -272,6 +316,19 @@ export const TOOL_DEFS: ToolDefinition[] = [
       required: ["code"],
     },
   },
+  // Capability-bundles tranche P (§2.5): the dispatcher's standing tool ids. Every bundle tool
+  // and skill rides through these two — no per-tool application code, ever. The dispatcher
+  // capability mounts in T2; until then invocation fails closed (policy + no provider).
+  {
+    name: "capability_invoke",
+    description: "Invoke an installed capability's tool: tools.list discovers tools; tool.invoke runs one (e.g. an MCP tool). Args: {capabilityId, op?, tool?, arguments?}.",
+    inputSchema: { type: "object", properties: { capabilityId: { type: "string" }, op: { type: "string", enum: ["tools.list", "tool.invoke"] }, tool: { type: "string" }, arguments: { type: "object" } }, required: ["capabilityId"], additionalProperties: false },
+  },
+  {
+    name: "skill_load",
+    description: "Load a skill document from an installed capability (composition guides are entry documents: load the guide before first use of a capability). Args: {capabilityId, skillId}.",
+    inputSchema: { type: "object", properties: { capabilityId: { type: "string" }, skillId: { type: "string" } }, required: ["capabilityId", "skillId"], additionalProperties: false },
+  },
 ];
 
 /** Tools surfaced only to Expert executions whose persisted capability allowlist includes them. */
@@ -308,7 +365,7 @@ function toolsForExpert(execution: NonNullable<AgentCodingInput["expertExecution
   // Expert agents do not inherit the generic subagent escape hatch. Delegation is a governed
   // Team capability and appears only as team_delegate when that exact authority is granted.
   const eligible = [...TOOL_DEFS.filter((tool) => tool.name !== "subagent"), ...EXPERT_TOOL_DEFS]
-    .filter((tool) => allowed.has(tool.name));
+    .filter((tool) => allowed.has(tool.name) || (DISPATCHER_TOOL_NAMES as readonly string[]).includes(tool.name));
   // Returning this assignment is intrinsic to every Expert run and has no authority outside that
   // run's registered assignment; expose the typed outcome even on older/custom profiles.
   const returnTool = EXPERT_TOOL_DEFS.find((tool) => tool.name === "expert_return");
@@ -583,17 +640,24 @@ export const agentCodingAgent: AgentDefinition = {
         }
         // Authority plane (V-003): protected evidence is enforced structurally here, before the tool
         // can run, not left to prompt prose. `authority.check` is a recorded invocation.
+        // Capability-bundles tranche P (§1.6.i/§2.3 row 1): the plane now covers run_code too, and
+        // every refusal (plus the newly governed run_code allows) records
+        // `authority.decision.recorded` — the P evidence matrix the enablement gate consumes.
         let taskApproval = false;
-        if (call.name === "edit" || call.name === "bash") {
+        if (call.name === "edit" || call.name === "bash" || call.name === "run_code") {
           const verdict = (await ctx.invoke("authority.check", { workspaceId, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}), tool: call.name, args } as unknown as Json)) as unknown as AuthorityVerdict;
           if (verdict.outcome === "deny") {
             if (verdict.rule.startsWith("protected-evidence")) {
               await ctx.emit("workbench.protection.blocked", { workspaceId, tool: call.name, path: verdict.path ?? "", pattern: verdict.pattern ?? "", reason: verdict.reason, sessionId, ...(verdict.taskId ? { taskId: verdict.taskId } : {}) } as unknown as Json);
             }
+            await ctx.emit("authority.decision.recorded", { decisionId: call.id, point: "tool-loop", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: `tool.${call.name}`, outcome: "refused", reasonCode: verdict.rule, reason: verdict.reason, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}) } as unknown as Json);
             const blocked = `Error: blocked by authority (${verdict.rule}): ${verdict.reason}`;
             await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: blocked });
             messages.push({ role: "tool", content: blocked, toolCallId: call.id });
             continue;
+          }
+          if (call.name === "run_code") {
+            await ctx.emit("authority.decision.recorded", { decisionId: call.id, point: "tool-loop", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: "tool.run_code", outcome: "allowed", reasonCode: verdict.rule, reason: verdict.reason, ...(effectiveTaskId ? { taskId: effectiveTaskId } : {}) } as unknown as Json);
           }
           taskApproval = verdict.outcome === "approval";
         }

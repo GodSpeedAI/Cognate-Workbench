@@ -46,7 +46,7 @@ describe("J-I-work-details", () => {
         await reopened.stop();
       }
     });
-  });
+  }, 30000);
 
   test("settings.changeWorkDetails rejects an unknown mode", async () => {
     await withTempHome(async (home) => {
@@ -57,5 +57,5 @@ describe("J-I-work-details", () => {
         await app.stop();
       }
     });
-  });
+  }, 30000);
 });

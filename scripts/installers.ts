@@ -50,6 +50,9 @@ export async function buildDeb(input: InstallerInput, arch: "amd64" | "arm64"): 
   await cp(join(input.prefix, "share"), join(lib, "share"), { recursive: true });
   await mkdir(join(root, "usr", "bin"), { recursive: true });
   await symlink("../lib/cognate-workbench/bin/cognate-workbench", join(root, "usr", "bin", "cognate-workbench"));
+  // Desktop launcher and icon, where the freedesktop menu looks for them (the archive's share/ tree carries the same files).
+  await cp(join(input.prefix, "share", "applications"), join(root, "usr", "share", "applications"), { recursive: true });
+  await cp(join(input.prefix, "share", "icons"), join(root, "usr", "share", "icons"), { recursive: true });
   const doc = join(root, "usr", "share", "doc", "cognate-workbench");
   await mkdir(doc, { recursive: true });
   await writeNotice(doc, input);
@@ -73,7 +76,7 @@ export async function buildDeb(input: InstallerInput, arch: "amd64" | "arm64"): 
   return file;
 }
 
-/** macOS `.pkg` (unsigned) and a `.dmg` that carries it. Installs to /usr/local, which needs administrator rights. */
+/** macOS `.pkg` (unsigned) and a `.dmg` that carries it. Installs to /usr/local plus /Applications/Cognate Workbench.app, which needs administrator rights. */
 export async function buildMacInstaller(input: InstallerInput, arch: "arm64" | "x64"): Promise<string[]> {
   const payload = join(input.out, `pkg-root-${input.tag}`);
   await rm(payload, { recursive: true, force: true });
@@ -84,6 +87,26 @@ export async function buildMacInstaller(input: InstallerInput, arch: "arm64" | "
   await mkdir(join(payload, "usr", "local", "bin"), { recursive: true });
   await symlink("../lib/cognate-workbench/bin/cognate-workbench", join(payload, "usr", "local", "bin", "cognate-workbench"));
   await writeNotice(lib, input);
+
+  // A minimal application bundle so the Workbench opens from Launchpad/Finder. No .icns is generated (no
+  // iconutil-free path without new tools); the bundle uses the generic application icon.
+  const app = join(payload, "Applications", "Cognate Workbench.app", "Contents");
+  await mkdir(join(app, "MacOS"), { recursive: true });
+  await writeFile(join(app, "Info.plist"), [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0"><dict>',
+    "<key>CFBundleName</key><string>Cognate Workbench</string>",
+    "<key>CFBundleDisplayName</key><string>Cognate Workbench</string>",
+    "<key>CFBundleIdentifier</key><string>com.godspeedai.cognate-workbench.app</string>",
+    "<key>CFBundleExecutable</key><string>launcher</string>",
+    "<key>CFBundlePackageType</key><string>APPL</string>",
+    `<key>CFBundleShortVersionString</key><string>${input.version}</string>`,
+    `<key>CFBundleVersion</key><string>${input.version}</string>`,
+    "<key>LSUIElement</key><true/>",
+    "</dict></plist>", "",
+  ].join("\n"));
+  await writeFile(join(app, "MacOS", "launcher"), '#!/bin/sh\nexec /usr/local/bin/cognate-workbench launch\n', { mode: 0o755 });
 
   const base = `cognate-workbench-${input.version}-darwin-${arch}`;
   const pkg = join(input.out, `${base}.pkg`);
@@ -97,8 +120,9 @@ export async function buildMacInstaller(input: InstallerInput, arch: "arm64" | "
   await writeFile(join(staging, "README.txt"), [
     "Cognate Workbench",
     "",
-    "Open the .pkg to install into /usr/local (administrator password required).",
-    "Then run: cognate-workbench doctor, and cognate-workbench start, and open http://127.0.0.1:3180.",
+    "Open the .pkg to install (administrator password required).",
+    "Then open Cognate Workbench from Applications: it starts the server and shows it in its own window;",
+    "closing the window quits it. From a terminal: cognate-workbench doctor, cognate-workbench launch, cognate-workbench stop.",
     "",
     "This installer is not signed or notarised. macOS will ask you to confirm it in",
     "System Settings > Privacy & Security before it opens.",
@@ -140,7 +164,8 @@ export async function buildWindowsInstaller(input: InstallerInput): Promise<stri
     `  File "${join(input.repo, "LICENSE")}"`,
     '  WriteUninstaller "$INSTDIR\\uninstall.exe"',
     '  CreateDirectory "$SMPROGRAMS\\Cognate Workbench"',
-    '  CreateShortCut "$SMPROGRAMS\\Cognate Workbench\\Start Cognate Workbench.lnk" "$INSTDIR\\bin\\cognate-workbench.exe" "start" "$INSTDIR\\bin\\cognate-workbench.exe" 0',
+    '  CreateShortCut "$SMPROGRAMS\\Cognate Workbench\\Cognate Workbench.lnk" "$INSTDIR\\bin\\cognate-workbench-desktop.exe" "" "$INSTDIR\\bin\\cognate-workbench-desktop.exe" 0',
+    '  CreateShortCut "$DESKTOP\\Cognate Workbench.lnk" "$INSTDIR\\bin\\cognate-workbench-desktop.exe" "" "$INSTDIR\\bin\\cognate-workbench-desktop.exe" 0',
     '  CreateShortCut "$SMPROGRAMS\\Cognate Workbench\\Diagnose Cognate Workbench.lnk" "$INSTDIR\\bin\\cognate-workbench.exe" "doctor" "$INSTDIR\\bin\\cognate-workbench.exe" 0',
     '  CreateShortCut "$SMPROGRAMS\\Cognate Workbench\\Uninstall.lnk" "$INSTDIR\\uninstall.exe"',
     '  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CognateWorkbench" "DisplayName" "Cognate Workbench"',
@@ -155,6 +180,7 @@ export async function buildWindowsInstaller(input: InstallerInput): Promise<stri
     '  Delete "$INSTDIR\\uninstall.exe"',
     '  RMDir /r "$INSTDIR"',
     '  RMDir /r "$SMPROGRAMS\\Cognate Workbench"',
+    '  Delete "$DESKTOP\\Cognate Workbench.lnk"',
     '  DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CognateWorkbench"',
     "  ; The data home ($LOCALAPPDATA\\CognateWorkbench) is deliberately kept: it holds durable state.",
     "SectionEnd",

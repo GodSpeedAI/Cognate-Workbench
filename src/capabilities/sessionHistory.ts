@@ -44,7 +44,7 @@ export function sessionHistoryComponent(getService: () => RuntimeService, semant
         const withIds = input.includeEventIds === true;
         for (const run of runs) {
           if (run.runId === input.excludeRunId) continue;
-          if (run.agent !== "agent.coding") continue;
+          if (run.agent !== "agent.coding" && run.agent !== "agent.harness") continue;
           const completedText = run.status === "completed" ? (run.output as { readonly text?: string })?.text : undefined;
           let toolCallCount = 0;
           const eventIds: string[] = [];

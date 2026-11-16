@@ -120,7 +120,7 @@ describe("J-CFG-provider-delete", () => {
           apiKey: "sk-secret",
         });
         await app.runtime.idle();
-        await expect(client.invoke("provider.delete", { providerId: "someone-else" })).rejects.toThrow(/not the configured provider/);
+        await expect(client.invoke("provider.delete", { providerId: "someone-else" })).rejects.toThrow(/not a stored provider/);
         // The configured provider is untouched.
         expect((await readModelConfig(app))?.providerId).toBe("mock");
         expect(await storedSecretKeys(home)).toContain("model-provider:mock");

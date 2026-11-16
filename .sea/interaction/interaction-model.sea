@@ -58,6 +58,21 @@ Entity "SkillCapability"
 
 Entity "CapabilityImplementation"
 
+// Capability-bundles tranche M (§9.1): the dynamically extensible capability system.
+// CapabilityBundle is the packaging/distribution form (immutable per-version payload
+// directories; content hashes are part of version identity); AuthorityGrant is the operator's
+// durable grant of specified powers to a responsible agent principal (immutable: adjustment is
+// revoke + reissue; provenance fields are the migration inputs for the unified Cognate/SEA-Forge
+// identity architecture); CapabilityActivation is a capability established at a context level
+// (version a re-pointed field; ceiling and clamp provenance immutable per §1.3; suspension
+// carries a reason set). The full lifecycle contract is design.md §1–§4 and §8's normative
+// transition×event×fold matrix.
+Entity "CapabilityBundle"
+
+Entity "AuthorityGrant"
+
+Entity "CapabilityActivation"
+
 Entity "ProtectedEvidence"
 
 Entity "EvidenceLedger"
@@ -111,10 +126,18 @@ Entity "Experiment"
 
 Entity "MethodRecommendation"
 
-// Plugins (T11). A plugin is a catalogued extension the operator can install, enable and inspect.
-// Installation registers the plugin and activates whatever implementation the catalog entry declares;
-// a catalog entry with no executable implementation installs as inert and says so, rather than
-// pretending to work. Trust is an explicit boundary: this app never executes downloaded plugin code.
+// Plugins (T11; capability-bundles tranche M re-scope). A plugin is a catalogued BUILT-IN
+// extension the operator can install, enable and inspect: only implementations this application
+// ships can ever activate, and a catalog entry with no executable implementation installs as
+// inert and says so rather than pretending to work. SUPERSEDED as the extension path by the
+// capability-bundle system (AuthorityGrant / CapabilityBundle / CapabilityActivation, journeys
+// J-CAP-*): bundles are how the Workbench gains anything not built in, under the recorded trust
+// model — bundle-authored code never runs in the application process; untrusted executables run
+// only as spawned, contained processes through execution-world ports; authority is granted by
+// the operator and derived at every invocation, never self-declared. The semantic ID is
+// preserved deliberately (compatibility bridge, D3): plugin-era durable records replay to
+// legacy Capability rows (kind legacy-plugin) under the §9.3 migration mappings, and the
+// Plugins panel remains the compatibility read-model until the capability inspector replaces it.
 Entity "Plugin"
 
 // Experts and Teams (proposed native Workbench subsystem). ExpertDefinition is reusable
@@ -443,15 +466,15 @@ Flow "ExpertMemoryRecord" from "Expert" to "ExpertMemory" quantity 1
 
 Instance j_a_first_use of "CanonicalJourney" {
     actor: "User",
-    capabilities: "model.configure, workspace.select, composer.enable",
+    capabilities: "model.configure, workspace.select, composer.enable, onboarding.dismiss, secret.put, model.catalog",
     evidence_class: "declared",
     initiating_condition: "User launches dsh web / opens the Cognate reconstruction for the first time",
     journey_id: "J-A-first-use",
     precondition: "No workspace selected yet; default workspace init may fail",
     purpose: "Get a first-time user from a cold launch to a usable composer",
     settlement: "Composer is enabled (no longer disabled-pending-workspace) and a routable model exists",
-    steps: "launch -> initial UI renders -> user configures a model provider (Settings -> Models) -> user chooses a workspace -> composer becomes available",
-    variants: "default-workspace auto-init succeeds (skips explicit Choose workspace step); default-workspace auto-init fails and shows defaultWorkspace.failed copy directing the user to Choose workspace"
+    steps: "launch -> initial UI renders the first-run flow (Welcome) -> Connect a model provider through the full provider form (model.configure; the key goes through secret.put, never into events) -> Choose a folder (workspace.select) -> the flow ends and the composer is available",
+    variants: "default-workspace auto-init succeeds (skips explicit Choose workspace step); default-workspace auto-init fails and shows defaultWorkspace.failed copy directing the user to Choose workspace; Configure later (or closing the flow) dismisses the remaining steps via onboarding.dismiss and lands on a friendly empty state, from which Settings -> Models and Add workspace still reach the same journeys; a reload after completion or dismissal shows no onboarding; Back returns to the previous step without losing entered values; a rejected provider form keeps the operator on the Model step with the reason"
 }
 
 Instance j_cfg_model_provider of "CanonicalJourney" {
@@ -464,7 +487,7 @@ Instance j_cfg_model_provider of "CanonicalJourney" {
     purpose: "Configure a usable model route (provider + credentials) so sessions can generate",
     settlement: "modelCatalog() lists the new route as usable; next request uses it (hot-apply, no restart)",
     steps: "open Settings -> Models -> select provider (DeepSeek, third-party, or Custom model API) -> enter credentials/base URL/protocol/model list -> save -> route becomes usable without server restart",
-    variants: "DeepSeek credential-only onboarding mode (restricted ProviderEditor) vs full custom-provider editor (base URL, API protocol, model list)"
+    variants: "DeepSeek credential-only onboarding mode (restricted ProviderEditor) vs full custom-provider editor (base URL, API protocol, model list); saving with the key left blank keeps the key already stored for that provider id, so switching model needs no key and a key is replaced only when a new one is typed; a local server (127.0.0.1/localhost or auth none) runs with no key on every protocol; Azure OpenAI authenticates with an api-key header and an api-version query on the chat protocol"
 }
 
 Instance j_ws_select of "CanonicalJourney" {
@@ -571,6 +594,19 @@ Instance j_h_cancellation of "CanonicalJourney" {
     variants: "user-initiated cancel vs injected provider-side failure (connection_reset, stream_disconnect, partial_disconnect, server_error, script_exhausted)"
 }
 
+Instance j_h_provider_error of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "model.generate, session.retry",
+    evidence_class: "observed",
+    initiating_condition: "A turn is sent while the configured model provider is failing: an HTTP error, a refused connection, an unresolvable host or a timeout",
+    journey_id: "J-H-provider-error",
+    precondition: "A model provider is configured and a session has a workspace",
+    purpose: "Make every failed model attempt visible at once with its cause and how long until the next attempt, and end the turn with a readable failure when attempts run out",
+    settlement: "Each failed attempt records a model.request.retried event immediately (attempt, maxAttempts, delayMs, errorCode, a human-readable message with no secret, and the provider host) and the wait before the next attempt is itself a recorded step; after the last attempt the turn ends with turn.failed carrying a readable message and the run is failed; a replayed or restarted run reports each attempt once; a cancelled run stops retrying",
+    steps: "operator sends a turn -> the agent calls the model -> the attempt fails -> the failure is classified into an error code and a readable message and recorded with the planned delay -> the agent waits the recorded delay and tries again -> after the last attempt the turn is recorded as failed",
+    variants: "HTTP 500 from the provider; connection refused; host name not resolved; request timed out; a transient failure that recovers on a later attempt completes the turn; a budget refusal fails at once without retries; an operator restart in the middle of the waits resumes the sequence without repeating events"
+}
+
 // ── Remote Workspaces (T1) ────────────────────────────────────────────────────────────────────
 // These ten journeys are the interaction model for the execution-world abstraction. They are
 // framework-level journeys (they apply to any Cognate app with workspaces), modeled here because
@@ -578,7 +614,7 @@ Instance j_h_cancellation of "CanonicalJourney" {
 // keep their meaning, and now settle against whichever world the selected workspace references.
 Instance j_rw_select_world of "CanonicalJourney" {
     actor: "User",
-    capabilities: "world.register, world.list, world.select",
+    capabilities: "world.register, world.list, world.select, execution.wsl.list",
     evidence_class: "proposed",
     initiating_condition: "The user wants a workspace that does not execute on the local machine",
     journey_id: "J-RW-select-world",
@@ -586,7 +622,7 @@ Instance j_rw_select_world of "CanonicalJourney" {
     purpose: "Make an execution location available to the app as a first-class, selectable world",
     settlement: "The world is registered, listed with a stable id and kind, and selectable; no workspace has been added yet",
     steps: "user declares a world (kind + provider configuration, including a secret reference rather than a secret) -> the provider validates what it can without performing work -> the world is registered and listed -> the user can select it when adding a workspace",
-    variants: "local world (always available, no configuration); ssh world (host, user, auth reference, host-key policy, optional jump chain); a world whose provider is missing fails closed and is listed as unavailable rather than silently falling back to local"
+    variants: "local world (always available, no configuration); ssh world (host, user, auth reference, host-key policy, optional jump chain); a world whose provider is missing fails closed and is listed as unavailable rather than silently falling back to local; wsl world (execution.wsl.list enumerates the distributions installed on this machine so one can be chosen)"
 }
 
 Instance j_rw_contained_workspace of "CanonicalJourney" {
@@ -863,6 +899,19 @@ Instance j_wb_focus of "CanonicalJourney" {
     variants: "explicit selection; fallback to the bound task; nothing in focus; a message that refers to nothing carries no focus line; a selection in another workspace is ignored"
 }
 
+Instance j_session_rename of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.rename",
+    evidence_class: "declared",
+    initiating_condition: "A conversation's automatic title does not say what it is about, or it is still an untitled draft",
+    journey_id: "J-SESSION-rename",
+    precondition: "The session exists in the sessions projection",
+    purpose: "Let the operator give a conversation a name of their own that survives restart and is not replaced by later prompts",
+    settlement: "The new title is recorded as an event, the sessions projection folds it, the sidebar shows it immediately, a later first prompt does not overwrite it, and no history is deleted",
+    steps: "user chooses Rename on a session row -> types a title -> the title is recorded as an event -> the sessions projection folds it -> the sidebar and header show the new title",
+    variants: "rename an untitled draft; rename after the first prompt; rename then restart, still renamed; an empty or over-long title is refused; an unknown session id is refused"
+}
+
 Instance j_session_archive of "CanonicalJourney" {
     actor: "User",
     capabilities: "session.setArchived",
@@ -876,6 +925,32 @@ Instance j_session_archive of "CanonicalJourney" {
     variants: "archive then restart, still archived; archive the currently open session; unarchive while hidden behind the filter; archiving never deletes turns or events"
 }
 
+Instance j_session_pin of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.setPinned",
+    evidence_class: "declared",
+    initiating_condition: "A conversation the operator returns to repeatedly sinks below newer activity in the sidebar",
+    journey_id: "J-SESSION-pin",
+    precondition: "The session exists in the sessions projection",
+    purpose: "Let the operator keep a conversation at the top of its sidebar list, independent of the active sort order, without touching its history",
+    settlement: "The pinned flag is recorded as an event, the sessions projection folds it, the sidebar lists pinned sessions first regardless of the active sort order, the flag survives reload and restart, and no history is deleted",
+    steps: "user chooses Pin on a session row menu -> the pin is recorded as an event -> the sessions projection folds it -> the sidebar floats the session to the top of its list -> Unpin on the same menu reverses it",
+    variants: "pin then restart, still pinned first; pin then archive (the archive filter still governs visibility); unpin restores the ordinary sort order; pinning an unknown session id is refused; multiple pinned sessions keep their relative recency order"
+}
+
+Instance j_remote_diagnostics of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workbench.remote.record",
+    evidence_class: "declared",
+    initiating_condition: "Remote control misbehaves and the operator needs to know what happened after the dialog closed or the app restarted",
+    journey_id: "J-REMOTE-diagnostics",
+    precondition: "The remote control surface exists (status, start, refresh, stop and phone pairing)",
+    purpose: "Make remote-control transitions durable so diagnostics survive dialog close and app restart, without recording polling traffic or pairing secrets",
+    settlement: "Every remote state change, pairing and error is a bounded workbench.remote.* event folded into the workbench projection's remote row, the Remote panel renders that durable history, the row never holds a pairing secret or link, polls are never recorded, and the history survives reload and restart",
+    steps: "the server-side remote surface transitions (start, refresh, stop, phone pairing, pairing error) -> the recorder emits the bounded workbench.remote.* event -> the workbench projection folds it into the remote row's state and recent-transition ring -> the Remote panel renders the durable transitions beside the live status -> the operator copies a report that includes them",
+    variants: "start then stop records both transitions; a pairing records the device label, never a credential or challenge; an error records a bounded message; closing the dialog loses nothing; a restart preserves the history; the 2 s and 5 s polls record nothing"
+}
+
 Instance j_prefs_shortcuts of "CanonicalJourney" {
     actor: "User",
     capabilities: "settings.changeShortcuts",
@@ -886,7 +961,7 @@ Instance j_prefs_shortcuts of "CanonicalJourney" {
     purpose: "Make shortcut editing real, durable and conflict-aware without intercepting typing or overriding browser-reserved chords",
     settlement: "The edited chord is durable across restart, fires its action, conflicts are reported before they are accepted, and Restore all defaults returns every editable action to its shipped chord",
     steps: "user edits a shortcut -> the chord is captured -> conflicts and reserved chords are refused with a reason -> the binding is recorded -> the chord fires the action -> restore defaults rewrites them all",
-    variants: "conflict with another action; browser-reserved chord refused; a chord that types into a text field must not fire; restore defaults with no overrides still succeeds"
+    variants: "global application shortcuts (command palette, keyboard shortcuts, new session, toggle sidebar, open settings, toggle inspector) fire from anywhere outside text entry and show their chord as a key hint wherever the action is offered; Apple platforms treat Cmd as Ctrl; New Session ships as Ctrl+Alt+N because Ctrl+N is browser-reserved; conflict with another action; browser-reserved chord refused; a chord that types into a text field must not fire; restore defaults with no overrides still succeeds"
 }
 
 Instance j_cfg_provider_delete of "CanonicalJourney" {
@@ -899,7 +974,7 @@ Instance j_cfg_provider_delete of "CanonicalJourney" {
     purpose: "Remove a provider and everything that was stored for it, without leaving an orphaned secret or a dangling active route",
     settlement: "The provider configuration and its stored secret are gone, the active route is cleared so the UI returns to the unconfigured state, and nothing later resolves to the deleted provider",
     steps: "user confirms deletion -> the provider's secret is removed -> the configuration is removed -> the active route is cleared -> Settings shows no configured provider",
-    variants: "deleting the active provider; deleting when already unconfigured refuses; a failure while removing the secret aborts before the configuration is removed"
+    variants: "deleting the active provider; deleting a stored provider that is not the active one removes only its secret and route and leaves the active route running; deleting an unknown provider refuses; a failure while removing the secret aborts before the configuration is removed"
 }
 
 Instance j_cfg_model_catalog of "CanonicalJourney" {
@@ -915,6 +990,32 @@ Instance j_cfg_model_catalog of "CanonicalJourney" {
     variants: "openai-compatible list endpoint supported; provider returns an error; protocol has no discovery; base URL empty refuses before any request"
 }
 
+Instance j_cfg_provider_switch of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "provider.list, provider.activate, model.configure",
+    evidence_class: "declared",
+    initiating_condition: "The operator has more than one stored provider and wants a different one (or a different model of the same one) to answer next",
+    journey_id: "J-CFG-provider-switch",
+    precondition: "At least one provider is stored; for a switch, a second stored provider exists",
+    purpose: "Switch the active route between stored providers and models without re-entering any API key",
+    settlement: "The chosen provider is the active route, the next run goes to it using the key already stored for it, the choice survives a restart, and no secret was read back to the client or written to an event",
+    steps: "user opens the stored providers list (provider.list: id, name, protocol, base URL, model, key stored, active) -> picks a provider (provider.activate, optionally with another model) -> the registry hot-swaps and the choice is recorded as the same model.configured fact -> the next run uses the new route",
+    variants: "switch model of the active provider with no key (model.configure with the key left blank); activate another stored provider; activate a provider that is not stored refuses; activate with an unknown model keeps the stored one when model is omitted; a provider with no stored key reports hasKey false"
+}
+
+Instance j_cfg_provider_test of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "provider.test",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants to know whether a stored provider, or a draft not yet saved, is reachable and accepts its key",
+    journey_id: "J-CFG-provider-test",
+    precondition: "A stored provider id, or a draft base URL and protocol, is present",
+    purpose: "Check connectivity and credentials with the cheapest safe request, never a paid completion",
+    settlement: "The operator sees ok with latency and model count, or a specific reason (unreachable, rejected key, bad response); the key is never returned, logged or recorded",
+    steps: "user asks to test -> the stored key (or the typed draft key) is resolved server-side -> the provider's model list is requested -> the outcome is reported with latency",
+    variants: "stored provider; unsaved draft with a typed key; local keyless server; rejected key; unreachable host; the stored key is only sent to the stored base URL"
+}
+
 Instance j_cfg_config_path of "CanonicalJourney" {
     actor: "User",
     capabilities: "config.path",
@@ -928,6 +1029,167 @@ Instance j_cfg_config_path of "CanonicalJourney" {
     variants: "file exists; file absent, the default location is still reported; the host offers no filesystem handoff, so copy is the offered action; secret values are never returned"
 }
 
+Instance j_cfg_config_edit of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "config.file.read, config.file.apply",
+    evidence_class: "declared",
+    initiating_condition: "The operator wants to view or change the configuration file from the Settings side panel",
+    journey_id: "J-CFG-config-edit",
+    precondition: "The app is running and the Settings panel is open",
+    purpose: "Let the operator edit the non-secret configuration as text, with every change validated by the same rules as the individual settings controls and applied all-or-nothing",
+    settlement: "A valid edit is recorded as the same durable settings events the controls write, the settings projection reflects it, and cognate.config.json mirrors the new rendering at mode 0600; any refusal leaves settings and file untouched and says why",
+    steps: "user opens the configuration file -> the current durable settings are rendered with a version token -> user edits the text and applies it -> the text is parsed and every changed key is validated -> all changes are recorded together -> the file on disk is rewritten atomically and a new version is returned",
+    variants: "invalid JSON is refused with line and column; an unknown settings key is refused by name; an invalid value refuses the whole edit, including valid sibling keys; a stale version is refused as a conflict; edits to the informational fields (schema, note, home, environment) are ignored and listed; an edit with no change succeeds and applies nothing; secret values are never in the text"
+}
+
+Instance j_secrets_storage of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "secrets.backend.describe, secret.put",
+    evidence_class: "declared",
+    initiating_condition: "The operator saves a provider API key, or opens Settings to see where keys are kept",
+    journey_id: "J-SECRETS-storage",
+    precondition: "The app has started and chosen a secret storage backend",
+    purpose: "Keep API keys in the operating system's secret store (Windows Credential Manager, Linux Secret Service, macOS Keychain) instead of a file, and say plainly which store is in use and why",
+    settlement: "Keys written by secret.put live only in the selected backend, scoped per data home; Settings can state the backend and, for a fallback, the reason; no secret value is in any event, projection, configuration export or capability result",
+    steps: "app starts -> the native store is probed -> it is selected, or the owner-only file is selected with a reason -> keys left in secrets.json are copied to the native store, verified by read-back, then the file is overwritten and removed -> the operator saves a key -> Settings shows the backend label",
+    variants: "native store selected; no Secret Service or a locked keychain so the owner-only file is used with a stated reason; COGNATE_SECRET_STORE forces file or native; migration from secrets.json succeeds and removes the file; migration read-back mismatch keeps the file; two data homes on one machine never share keys"
+}
+
+// Capability-bundles tranche M (§9.1): j_plg_install is SUPERSEDED as the extension-install
+// journey by the J-CAP-* family below (j_cap_create/j_cap_persist carry its role forward for
+// the unified capability model). The instance is retained deliberately: legacy plugins remain
+// a compatibility surface and its settlement still holds for the built-in catalog.
+Instance j_cap_create of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, capability.bundle.activate, tool.capability_invoke, tool.skill_load",
+    evidence_class: "declared",
+    initiating_condition: "An operator or granted agent asks for a capability the Workbench does not have yet",
+    journey_id: "J-CAP-create",
+    precondition: "The extensible runtime is enabled (remediation evidence marker present, supported store) and the requester holds a covering grant",
+    purpose: "Make capability creation a real governed lifecycle: compose, validate, register, activate, and use — inside the live session, without a restart",
+    settlement: "A composed bundle validates (schema, requirement satisfiability, hashes, payload ceilings), materializes into an immutable version directory, registers with provenance, activates only after the handler is ACTIVE and a CAS-atomic commit, and is discoverable and invocable in the same session — descriptor metadata first, full content on load, every decision durably recorded",
+    steps: "request understood -> reusable skills and tools discovered -> missing parts composed (skills + composition guide) -> validated against schema, ceilings and satisfiability -> registered with provenance into the version store -> activated (ceiling computed and clamped, handler ACTIVE, CAS commit) -> descriptor discovery reaches the model at the next turn boundary -> an invocation exercises the capability with authority decided and recorded",
+    variants: "created by the orchestrator expert under a delegated grant with no extra approval; over-ceiling or over-budget registration refused with the limit named; schema-invalid manifest refused at validation; a call before the handler is ACTIVE refused as unavailable; a governance-mode deployment decides the invocation through the external authority like any built-in"
+}
+
+Instance j_cap_reload of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, capability.activation.repoint",
+    evidence_class: "declared",
+    initiating_condition: "An installed capability's skill or manifest changes through the governed re-hash mutation",
+    journey_id: "J-CAP-reload",
+    precondition: "The capability is active at a known version in an immutable version directory",
+    purpose: "Version changes are atomic, in-session, and never strand the previous known-good state",
+    settlement: "The replacement version mounts and verifies ACTIVE before one CAS re-point commits; new invocations resolve the new version; in-flight invocations keep their dispatch-time snapshot; the old binding is retired and conflict detection is re-run against live bindings; a failed replacement leaves version 1 executable with its payload intact",
+    steps: "governed re-hash validates and materializes the new version directory -> new handler mounted and verified -> re-point commits atomically with conflict re-check -> discovery reflects the new version at the next turn boundary -> the old handler drains its in-flight counter and is disposed",
+    variants: "j_cap_rollback: the replacement's mount fails or its CAS commit loses a concurrent race — the failed handle is disposed, the activation was never re-pointed, version 1 remains the last valid effective state with its directory untouched, and the failure is recorded with its reason"
+}
+
+Instance j_cap_mcp of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, capability.mcp.spawn.intended, capability.mcp.spawned, capability.mcp.tool_invoked",
+    evidence_class: "declared",
+    initiating_condition: "A capability declaring an MCP server is installed, started, invoked, suspended and recovered",
+    journey_id: "J-CAP-mcp",
+    precondition: "The declaring capability is authorized; the target world's execution posture is recorded per restriction",
+    purpose: "Untrusted executable payloads run only as spawned, contained processes with recorded spawn/exit/invocation evidence and per-provider honesty",
+    settlement: "The spawn intent is recorded before the process starts; the per-provider containment matrix decides — a restriction the world cannot enforce refuses the spawn unless the posture explicitly authorizes the weaker one; secrets resolve env-only and fail closed on missing keys; recorded tool invocations are distinguished from unobserved subprocess activity; suspension stops the process with the provider's true termination semantics recorded",
+    steps: "spawn intent recorded -> containment matrix evaluated against the world's posture -> process spawned through the execution-world port with env-only secrets -> tool invocations through the MCP client decided, deadline-bounded and recorded -> suspension stops the group (or records the provider's best-effort truth) -> recovery re-resolves the world and remounts from durable state",
+    variants: "parameterized over the local world and one provider-backed (SSH or WSL) world; spawn refused fail-closed when the world cannot enforce a required restriction or a secret key is missing; SSH termination recorded as best-effort channel close, never claimed as proof of process death"
+}
+
+Instance j_cap_refusal of "CanonicalJourney" {
+    actor: "Agent",
+    capabilities: "authority.check, authority.grant.issue, capability.runtime.enable",
+    evidence_class: "declared",
+    initiating_condition: "An agent attempts work beyond its granted authority, through an alternate path, or after a suspension",
+    journey_id: "J-CAP-refusal",
+    precondition: "The agent holds a limited grant; the enforcement points of design §2.3 are wired",
+    purpose: "Authority cannot be self-enlarged or bypassed — every negative case is refused at a traced enforcement point and durably recorded",
+    settlement: "Forged grants, beyond-grant capability requests, broader workspace scopes, alternate invocation paths, subagent lineage escalation, in-process bundle-code loading, system-caller laundering, and post-suspension invocations are all refused, each recorded in authority.decision.recorded with a reason code and the deciding enforcement point's identity; enablement without the remediation evidence marker is refused",
+    steps: "attempt issued -> the traced enforcement point decides from runtime-owned state -> refusal recorded with reason and deciding point -> the agent's effective authority is unchanged",
+    variants: "j_cap_enablement-gate: capability.runtime.enable is refused while the remediation evidence marker is absent or names a different build — bundles never mount fail-closed"
+}
+
+Instance j_cap_suspend of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.suspend, capability.resume",
+    evidence_class: "declared",
+    initiating_condition: "The operator yanks an active capability (or a clamp grant is revoked or expires)",
+    journey_id: "J-CAP-suspend",
+    precondition: "The capability is active with possible in-flight consequential work",
+    purpose: "Suspension is immediate at committed-event visibility and honest about in-flight work",
+    settlement: "New and queued invocations are rejected from the suspension commit onward, each refusal recorded; managed process stop is initiated synchronously with the commit and the termination outcome recorded per provider; interrupted consequential operations keep their commitment states and enter reconciliation; the suspension reason is recorded and resumption clears exactly one named reason",
+    steps: "suspend committed (the index updates synchronously) -> enforcement points refuse and record -> managed processes stopped per the payload discipline -> audit attributes every observed action -> explicit resumption clears the named reason",
+    variants: "j_cap_revoke: revoking (or the scheduler expiring) grant G commits one CAS-atomic batch suspending every activation clamped by G together with the grant record — concurrent changes fail and retry the whole batch; operator-established activations are unaffected; re-granting never silently reactivates"
+}
+
+Instance j_cap_safemode of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register, workbench.safemode.boot_attempted, workbench.safemode.cleared",
+    evidence_class: "declared",
+    initiating_condition: "A broken capability or presentation extension wedges rendering or boot health",
+    journey_id: "J-CAP-safemode",
+    precondition: "Extensions are enabled; the boot budget/watchdog or the render boundary detects the failure",
+    purpose: "Recovery never depends on the broken component and never corrupts the durable registry",
+    settlement: "Safe mode boots with the known-good shell after the exclusion read (which precedes any render or mount), suspends the problematic extensions with durable fault records, and supports one-at-a-time operator re-enable; a governance-surface override attempt is refused at registration and recorded as a core violation; two failed boots keep extensions suspended until the operator-only manual clear",
+    steps: "failure detected -> exclusion read precedes render/mount -> safe mode boots with core presentation -> fault recorded durably -> operator inspects and re-enables one at a time -> manual clear recorded",
+    variants: "j_cap_present: a valid declarative panel descriptor from an installed capability renders through the slot registry in the normal path, governance surfaces untouched"
+}
+
+Instance j_cap_restart of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workbench.capability_runtime.enabled",
+    evidence_class: "declared",
+    initiating_condition: "The Workbench restarts with mixed durable capability state and a crash orphan",
+    journey_id: "J-CAP-restart",
+    precondition: "Durable state spans persistent installs, session-scoped activations, suspensions, retired bindings, plugin-era events and an unrecorded spawn",
+    purpose: "Restart restores exactly the recorded effective state — fold first, mount second",
+    settlement: "Persistent recorded state remounts; every session-scoped activation expires at boot (derived; unarchive never resurrects); the spawn-ledger sweep reconciles every intent to a recorded outcome; plugin-era events replay to their defined mappings; a bundle re-registering a built-in id is refused by the namespace partition",
+    steps: "boot folds everything -> session-bound rows expire -> spawn-ledger sweep kills and records orphans -> the active set mounts -> plugin-era history replays under the migration mappings",
+    variants: "crash between spawn and confirm reconciles to a recorded outcome (killed, or reconciled-unknown where the provider cannot prove death)"
+}
+
+Instance j_cap_source of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.register",
+    evidence_class: "declared",
+    initiating_condition: "A capability bundle directory sits on a provider-backed execution world (SSH or WSL)",
+    journey_id: "J-CAP-source",
+    precondition: "The world is connected and the directory is readable through its provider port",
+    purpose: "Directory sources respect the execution-world boundary — no host filesystem assumptions",
+    settlement: "Ingestion, hashing, version-directory materialization, registration and loading behave identically to a local-world install, through provider ports with the bounded-directory guards; no host watch or host read occurs",
+    steps: "directory read through the world provider -> bounded ingest and hashing -> materialize into the version store -> register with provenance -> activate and invoke identically to local"
+}
+
+Instance j_cap_persist of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.bundle.activate, authority.grant.issue",
+    evidence_class: "declared",
+    initiating_condition: "A capability is activated persistently (across sessions) at a stated context level",
+    journey_id: "J-CAP-persist",
+    precondition: "The activator holds the covering authority for the level; level allowances are the structural v1 constants",
+    purpose: "Persistent and session-scoped authorities stay distinct, observable, and restart-true",
+    settlement: "The persistent activation survives restart per its scope; decisions taken inside and outside the level are distinguishable in authority.decision.recorded; session-scoped and persistent rows are independent — suspending one never suspends the other, and exactly one row governs any invocation",
+    steps: "persistent activation committed with its ceiling and level -> decisions in scoped and unscoped sessions recorded with the level observable -> restart restores the persistent row and expires session-bound rows"
+}
+
+Instance j_cap_harness of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "capability.harness.patched, capability.harness.assembled",
+    evidence_class: "declared",
+    initiating_condition: "The operator asks the orchestrator to change a permitted harness behavior for the running session",
+    journey_id: "J-CAP-harness",
+    precondition: "The orchestrator holds a harness-modification grant at the surface's level (v1 surfaces: instruction patches and toolset overrides)",
+    purpose: "Permitted harness changes are authored as capabilities, applied deterministically, and demonstrably used by the next run",
+    settlement: "The authored modification validates, registers and activates in-session; the next run's assembled configuration (recorded by hash and delta) reflects the patch and override uniformly regardless of run source; overlapping modifications follow the per-surface rule (patches compose in precedence, toolset overrides are exclusive per preset); deactivation restores the prior configuration by replay",
+    steps: "modification authored and validated -> conflict-checked at activation -> committed -> the next run assembles with the patch applied and records the result -> the run demonstrably follows it -> deactivation replays back to the prior state",
+    variants: "two capabilities claiming the same exclusive surface refuse co-activation; a replace patch supersedes earlier patches for its section (last-applied wins)"
+}
+
+// Capability-bundles tranche M (§9.1): superseded as the extension-install journey by the
+// J-CAP-* family (j_cap_create / j_cap_persist carry its role in the unified model). Retained
+// deliberately: legacy plugins stay a compatibility surface and this settlement still holds
 Instance j_plg_install of "CanonicalJourney" {
     actor: "User",
     capabilities: "plugin.install, plugin.uninstall",
@@ -997,7 +1259,7 @@ Instance j_cog_search of "CanonicalJourney" {
 
 Instance j_cog_realitytrace of "CanonicalJourney" {
     actor: "OperatorAgent",
-    capabilities: "world.freeze, verification.run",
+    capabilities: "world.freeze, verification.run, observation.status, observation.record",
     evidence_class: "observed",
     initiating_condition: "RealityTrace observation delivery is enabled and a Case emits verification or world-lineage facts",
     precondition: "The runtime observation outbox is configured and the event has a durable identity",
@@ -1377,6 +1639,32 @@ Instance j_session_draft of "CanonicalJourney" {
     variants: "double-click or repeated create with the same request identity yields one Session; a draft survives full app restart; a new draft carries no previous Session's active Task, approval, focus or conversation; legacy sessions without session.created remain readable"
 }
 
+Instance j_ws_files_browse of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.files.list, workspace.file.read",
+    evidence_class: "declared",
+    initiating_condition: "The operator opens the Files tab of the inspector for the current workspace",
+    journey_id: "J-WS-files-browse",
+    precondition: "A workspace is selected and its execution world is connected; browsing is read-only",
+    purpose: "Let the operator browse the workspace file tree and read a file without leaving the app",
+    settlement: "Listings and reads come from the workspace's own execution world, are relative to and contained in the workspace root, bounded (500 entries, 512 KiB of text), hide .git, flag binary and truncated content, and refuse parent traversal, absolute paths, symbolic links that leave the root, the protected application home and unknown workspaces with a readable reason; nothing is ever written and agent runs cannot use these capabilities",
+    steps: "operator opens the Files tab -> the root is listed directories first -> operator expands a folder -> the folder is listed -> operator selects a file -> the file is read and shown read-only with its language",
+    variants: "binary file shows no text; large file shows the first 512 KiB flagged truncated; symlink entries are listed but not followed outside the root; an unreadable path explains itself"
+}
+
+Instance j_ws_delete of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.delete, session.setArchived",
+    evidence_class: "observed",
+    initiating_condition: "The operator no longer wants a project in the sidebar and chooses Delete workspace from its actions",
+    journey_id: "J-WS-delete",
+    precondition: "The workspace exists in the workspaces projection",
+    purpose: "Remove a workspace from the app without touching the project's files, and keep its conversations out of the working list",
+    settlement: "The workspace record is gone from the workspaces projection (and the current pointer is cleared if it was current); the project folder and its files on disk are untouched; the workspace's sessions are archived so they leave the working list while their turns, runs and events stay in history; the UI asked for confirmation first, said files are not touched, and confirmed the removal",
+    steps: "operator opens the workspace actions -> chooses Delete workspace -> a confirmation names the workspace and says its files are not touched -> Cancel keeps everything; Delete workspace records the deletion -> the workspace and its sessions leave the list -> a confirmation toast names the removed workspace",
+    variants: "cancel keeps the workspace; deleting the current workspace returns the app to the no-workspace state; a workspace with no sessions; a workspace with archived and active sessions archives only the active ones; an unknown workspace is refused; re-adding the same folder later creates a fresh record"
+}
+
 Instance j_ws_directory_discovery of "CanonicalJourney" {
     actor: "User",
     capabilities: "workspace.directory.suggest, workspace.select",
@@ -1385,9 +1673,9 @@ Instance j_ws_directory_discovery of "CanonicalJourney" {
     journey_id: "J-WS-directory-discovery",
     precondition: "An execution world is selected and connected; browsing is read-only and pre-workspace",
     purpose: "Suggest matching directories in the chosen execution world as the operator types, so a full absolute path never has to be known or typed",
-    settlement: "Suggestions list only directories from the selected world's filesystem, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
+    settlement: "Suggestions list only directories (symlinks that resolve to directories included) from the selected world's filesystem, matched by prefix, word-boundary, substring then fuzzy tiers against absolute, ~/ or bare-fragment input, deterministically ordered and bounded, never files, never another world's paths, and no workspace is created by browsing; an unknown or disconnected world fails closed; responses carry no file contents, secret material or protected application-home inventory; selecting a suggestion is a separate governed workspace.select",
     steps: "operator types a partial path -> the picker debounces and queries workspace.directory.suggest for the selected world -> the world provider lists its own parent directory and the capability filters, orders and bounds directory matches -> keyboard and pointer complete the field -> an explicit Open confirms the exact destination through workspace.select",
-    variants: "slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
+    variants: "partial, home-relative (~) and fuzzy input match folders, with an exact-prefix match ranked before a fuzzy one; slow or unavailable remote listing keeps typing responsive and shows a loading or error state; stale or out-of-order responses are ignored; empty and denied locations explain themselves; Enter-to-submit is never hijacked while the suggestion list is open"
 }
 
 Instance j_task_scope of "CanonicalJourney" {
@@ -1574,4 +1862,192 @@ Instance j_pkg_doctor of "CanonicalJourney" {
     settlement: "Diagnostics print every required field; exit status is non-zero when the executable identity, the semantic model or the database is not usable",
     steps: "cognate-workbench doctor -> identity and integrity -> database mode and probe -> semantic model -> posture -> integrations",
     variants: "a stopped bundled instance is reported as stopped, not started; credentials are never printed"
+}
+
+// Host-surface, palette and inspector journeys (feat/ui-production-readiness). The desktop launch
+// journey has no Cognate capability: it is the host process lifecycle around the Workbench
+// server, so its settlement is evidenced by test/J-DESKTOP-launch.test.ts, not by an event.
+Instance j_desktop_launch of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "none (host-surface journey: CLI commands launch and stop; no Cognate capability)",
+    evidence_class: "observed",
+    initiating_condition: "The operator opens the installed Workbench from its shortcut, or runs cognate-workbench launch",
+    journey_id: "J-DESKTOP-launch",
+    precondition: "The Workbench is installed; at most one Workbench owns a data home at a time",
+    purpose: "Open the Workbench like a desktop application, with one server per data home, one dedicated app window and a server whose lifetime is the window's lifetime",
+    settlement: "A launch with no running instance starts the server and opens a Chromium-family browser in app mode with a dedicated profile under the data home; a second launch reuses the running instance and only opens another window; closing the launching window shuts the server down cleanly and releases the data-home lock; stop asks the running instance to stop; with no suitable browser the default browser is opened and the server keeps running until stop",
+    steps: "operator launches -> the data home is checked for a running instance -> none: the server starts and the app window opens on its URL; running: the app window opens on the existing URL and the launcher exits -> the operator closes the launching window -> the launcher shuts the server down and removes the lock -> or the operator runs stop at any time",
+    variants: "second launch while the first window is open reuses the instance; no Chromium-family browser found opens the default browser and the server stays up until stop; a window process that exits within seconds is treated as a hand-off to an already-running browser and the server stays up; COGNATE_NO_WINDOW starts the server without a window; COGNATE_APP_BROWSER overrides browser discovery; stop on a data home with no instance reports that; another instance holding the data home refuses a plain start by naming it"
+}
+
+Instance j_ui_command_palette of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "settings.changeShortcuts, session.create, workspace.select",
+    evidence_class: "observed",
+    initiating_condition: "The operator wants to reach an action, a Settings section, a workspace or a session without hunting through the interface",
+    journey_id: "J-UI-command-palette",
+    precondition: "The application shell is rendered; no capability is needed to open the palette itself",
+    purpose: "Offer one fuzzy-searchable go-to-anything surface over the affordances that already exist, owning no mutation of its own",
+    settlement: "Choosing an item runs exactly the handler the rest of the interface runs for that affordance, so every effect and refusal is the one the underlying journey defines; items unavailable in the current condition are not offered; the palette closes and returns focus",
+    steps: "operator presses the palette chord or chooses it from the interface -> items are assembled from actions, Settings sections, workspaces and sessions -> operator types and the list is ranked fuzzily -> operator selects with the keyboard or pointer -> the underlying affordance runs",
+    variants: "empty query shows actions first and only the most recent sessions; no match says so; Escape or the close control dismisses without effect; the chord is the user-editable open-command-palette shortcut; Workbench appears only with a workspace selected"
+}
+
+Instance j_ui_inspector of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "workspace.files.list, workspace.file.read, config.file.read, config.file.apply",
+    evidence_class: "observed",
+    initiating_condition: "The operator wants context, changes, details, files or configuration for the current work beside the conversation",
+    journey_id: "J-UI-inspector",
+    precondition: "The shell is rendered; each tab declares its own precondition (Files needs a connected workspace)",
+    purpose: "Give the current work a right-hand inspector whose tabs are projections of other journeys, so inspecting never becomes a second source of truth",
+    settlement: "Tabs Context, Changes, Details, Files and Config each show only data their own journey authorizes; the open state, width and selected tab survive reload; a tab with nothing to show explains why; mobile presents the inspector as an overlay",
+    steps: "operator toggles the inspector or opens a named tab -> tabs register by identity and the selected tab renders -> the tab reads through its journey (Files through J-WS-files-browse, Config through J-CFG-config-edit) -> operator switches tabs or closes the inspector",
+    variants: "opening a tab before it has registered still selects it once it appears; Changes shows a count of reviewable items; Files and Config are read through read-only or all-or-nothing capabilities and do not widen authority; narrow screens use an overlay instead of a docked panel"
+}
+
+// J-HARNESS-*: running a Session through an external agent-harness CLI installed on the machine
+// the Workbench server runs on. `HarnessCli` is a detected executable (host-side detection);
+// `HarnessBinding` is the durable operator choice that a Session runs through one. Neither widens
+// authority: the native guarantees (per-tool authority checks, containment of the tool effects,
+// protected-evidence blocking, settlement as agent.coding) do NOT apply to an external CLI.
+Entity "HarnessCli"
+
+Entity "HarnessBinding"
+
+Instance j_harness_detect of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "agent.harness.list",
+    evidence_class: "proposed",
+    initiating_condition: "The operator opens the place where an agent harness is chosen, or asks to refresh the list",
+    journey_id: "J-HARNESS-detect",
+    precondition: "The server runs on the host whose command-line tools are being detected; detection reads directories and runs only each tool's version probe",
+    purpose: "Show which external agent-harness CLIs are installed on the machine the server runs on, truthfully, without starting a model or a sign-in",
+    settlement: "Each catalog entry reports installed or not with its path and version when installed, its protocol, whether it can route permission requests through the Workbench, its permission modes, an install hint and a sign-in hint; detection happens on the server host and says so; results are cached briefly and refreshable on request; entries whose launch flags are not verified stay hidden unless the tool is present and its own help prints the flag; no model is called and no login is performed",
+    steps: "operator opens the picker -> agent.harness.list reads PATH and known install folders on the host -> each found tool answers a bounded version probe -> the list returns entries with install and sign-in hints -> refresh bypasses the cache",
+    variants: "a tool missing from the machine is listed as not installed with its install hint; a tool whose version probe times out is still listed as installed; a Windows command shim is resolved without a shell; detection never reflects an SSH, WSL or contained workspace's own machine"
+}
+
+Instance j_harness_session of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.harness.bind, agent.harness.list",
+    evidence_class: "proposed",
+    initiating_condition: "The operator chooses to run a Session through an external harness CLI instead of the native coding agent, then sends a turn",
+    journey_id: "J-HARNESS-session",
+    precondition: "The chosen CLI is installed on the server host; the Session's workspace lives in the local world; no run of the Session is active; SEA-Forge governance is off",
+    purpose: "Run a turn through the CLI and fold what it reports into the same transcript, tool timeline and usage events the native agent produces, labelled with a truthful posture",
+    settlement: "The binding is a durable explicit operator choice per Session, labelled harness-own-sandbox, harness-bridged-approvals or harness-uncontained; each turn runs the CLI process in the workspace folder with a minimal environment that carries no Workbench provider credentials; streamed text, tool calls (file edits with diffs when the CLI reports them), usage and the final message are recorded as the same domain events the native agent emits; the CLI's own session id is recorded so the next turn resumes it; a CLI failure ends the turn as a failed turn with a readable message; a binding to a remote, contained, SSH or WSL workspace is refused with the reason; binding is refused while a run is active; binding back to native is explicit and durable",
+    steps: "operator binds the Session to a harness with a permission mode and optional model -> session.harness.bind validates the CLI, the world and idleness and records the binding -> the operator sends a turn to the harness agent -> the agent drives the CLI through recorded advance steps -> events fold into the transcript -> the CLI's session id is recorded",
+    variants: "binding back to native; changing the permission mode or model between turns; a turn sent from the paired phone to a bound Session starts the harness agent, never the native one, a turn already in progress is refused on the phone with a readable reason rather than steered, and the phone may answer the CLI's permission request; a second turn resumes the CLI's own session; replay of a recorded turn reuses recorded outputs and never respawns the CLI; a server restart in the middle of a turn ends the turn as session-lost rather than repeating the CLI's effects. Guarantee gaps stated: per-tool authority checks, containment of the CLI's tool effects, protected-evidence blocking and settlement as agent.coding do not apply; evidence is what the CLI self-reports; cost is unknown unless the CLI reports tokens"
+}
+
+Instance j_harness_approval of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.harness.bind",
+    evidence_class: "proposed",
+    initiating_condition: "A harness CLI asks permission for a tool call during a turn",
+    journey_id: "J-HARNESS-approval",
+    precondition: "The Session is bound to a harness that can route permission requests, in a mode other than full access",
+    purpose: "Bridge the CLI's own permission requests into Workbench approvals so the operator allows or denies each one and the CLI resumes accordingly",
+    settlement: "Each CLI permission request becomes a tool approval request on the run with the tool, arguments and permission class; the turn waits as a durable continuation; approving answers the CLI with allow and the tool proceeds, denying answers with a refusal and the tool fails with that reason; the decision is recorded as a tool approval decision; in plan mode state-changing requests are declined without asking; this is the CLI's gate bridged to the operator, not the Workbench's own approval gate",
+    steps: "the CLI sends a permission request -> the adapter pauses the turn and returns the request -> the agent records the approval request and waits on a human-approval continuation -> the operator decides -> the agent answers the CLI through the adapter -> the CLI continues or reports the denial",
+    variants: "a request the CLI withdraws is dropped; multiple pending requests are answered one by one; a structured question from the CLI is declined with a note to answer in chat; the full-access mode never asks and is labelled harness-uncontained"
+}
+
+Instance j_harness_cancel of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.harness.bind",
+    evidence_class: "proposed",
+    initiating_condition: "The operator stops a running harness turn",
+    journey_id: "J-HARNESS-cancel",
+    precondition: "A harness turn is running or waiting on a permission request",
+    purpose: "Stop the external CLI promptly and leave no process behind",
+    settlement: "Cancelling the run asks the CLI to stop through its protocol, then closes its input, then signals its whole process group and finally force-kills it after short grace periods; the partial transcript is kept and the run is cancelled; a process left waiting on a permission request of a cancelled run is reaped",
+    steps: "operator stops the run -> the run signal aborts -> the adapter sends the protocol interrupt -> the process is closed and its process tree terminated if it does not exit -> the run ends cancelled",
+    variants: "the CLI honours the interrupt and exits on its own; the CLI ignores it and the tree is killed; the run was waiting for approval when cancelled"
+}
+
+Instance j_harness_unavailable of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "agent.harness.list, session.harness.bind",
+    evidence_class: "proposed",
+    initiating_condition: "The operator binds or runs a harness that is missing, not signed in, rate-limited or crashing",
+    journey_id: "J-HARNESS-unavailable",
+    precondition: "A harness is chosen",
+    purpose: "Fail closed with a readable reason and the next step, never falling back silently to another agent",
+    settlement: "A missing CLI refuses the binding with its install hint; a CLI that is not signed in ends the turn as a failed turn naming the CLI and its sign-in command; a rate or usage limit, a crash or a nonzero exit ends the turn as a failed turn with a readable message; the Workbench never substitutes the native agent for a failed harness turn",
+    steps: "bind or turn is attempted -> the CLI is missing, the CLI reports an authentication error, a limit or exits abnormally -> the failure is classified -> the binding is refused or the turn fails with the hint",
+    variants: "remote, contained, SSH and WSL workspaces are refused until a streaming process port exists upstream; SEA-Forge governance on refuses harness binding"
+}
+
+// J-TERMINAL-* / J-BROWSER-* / J-PREVIEW-*: the desktop collaboration surfaces. `TerminalSession`
+// is an ephemeral PTY-backed interactive session in a selected execution world; `BrowserSession`
+// is one managed browser context that a person and an agent operate in turn; `DevPreview` is a
+// registered development-server preview bound to a workspace. Only their metadata and transitions
+// are durable — stream bytes, video frames and page contents are never persisted.
+Entity "TerminalSession"
+
+Entity "BrowserSession"
+
+Entity "DevPreview"
+
+// J-REMOTE-diagnostics: the phone-remote control surface. Its durable facts are the bounded
+// transition family (`workbench.remote.*`): state changes, pairing, bounded errors — never the
+// status polls, never a pairing secret, link, challenge or credential.
+Entity "RemoteControl"
+
+Resource "PageFeedback" units
+
+Flow "PageFeedback" from "User" to "OperatorAgent" quantity 1
+
+Instance j_terminal_session of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "terminal.open, terminal.close",
+    evidence_class: "proposed",
+    initiating_condition: "The operator wants to run interactive commands or full-screen terminal programs in one of the Workbench's execution worlds beside the conversation",
+    journey_id: "J-TERMINAL-session",
+    precondition: "A workspace is selected whose world is connected; the terminal is a human surface: agents keep tool.bash and cannot open, attach to or steer a terminal",
+    purpose: "Give the operator a real interactive terminal (PTY) per execution world whose lifetime the operator controls and whose stream never enters the durable log or agent context",
+    settlement: "Each open terminal is one PTY in the chosen world, labelled with its world and workspace; the operator resizes it, runs interactive programs, detaches without terminating, reattaches with bounded scrollback restored, and terminates it explicitly including its process group; a dead session is rendered dead after a restart; opening or attaching with another identity is refused; only metadata and transitions are recorded as events",
+    steps: "operator opens the terminal surface -> terminal.open validates the operator, the world and containment and creates the PTY -> the terminal connects over an authenticated stream -> the operator types and the world answers -> terminal.close terminates the process group and records the transition -> or the surface detaches and the process keeps running until reattached or closed",
+    variants: "local worlds under the contained posture stay open to the operator because the posture constrains agent effects, not the operator's own machine; SSH terminals verify the host key and reuse stored credentials; WSL terminals run through the established WSL provider; idle sessions are reaped after a configurable idle timeout; a world that disconnects ends its terminals as failed with the reason; scrollback is bounded and is not written to the event log"
+}
+
+Instance j_browser_session of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "browser.open, browser.navigate, browser.snapshot, browser.screenshot, browser.input, browser.control, browser.close",
+    evidence_class: "proposed",
+    initiating_condition: "The operator or the agent needs to see and operate a real web page or a running development application inside the Workbench",
+    journey_id: "J-BROWSER-session",
+    precondition: "A browser backend is available on the server host; browser content is untrusted: it reaches the panel only as recorded observations and streamed frames and can never invoke Workbench authority",
+    purpose: "Give person and agent one managed browser session: the same live page, one control owner at a time, screenshots and accessibility snapshots as recorded evidence",
+    settlement: "The session streams its live viewport to the panel; human input and agent operations address the same session and are attributed separately; control has one owner at a time with explicit handoff and refusal of conflicting writes; navigation, snapshots and screenshots are recorded; only http(s) navigation is offered; closing the session disposes the browser process; a crashed or disconnected session renders dead, never live",
+    steps: "operator opens the browser panel -> browser.open creates a managed session -> navigation by the operator (browser.navigate) or the agent shows the same page -> input goes through the single control owner -> browser.snapshot records an accessibility snapshot with element references -> browser.screenshot records visual evidence -> browser.close disposes the session",
+    variants: "browser.control names the one controller — a person or the agent — and changing it is a recorded handoff; while the agent holds control, human input on the streamed viewport is refused with the reason, and while the person holds it, the agent's actuation is refused though its reads stay available; agent-driven navigation during agent control; navigating invalidates element references; localhost applications open directly; a refused navigation is explained, never silently blank; several isolated sessions may exist at once"
+}
+
+Instance j_browser_inspect of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "browser.inspect, browser.annotate",
+    evidence_class: "proposed",
+    initiating_condition: "The operator wants to point at a specific element of the page the agent is working on and say what should change",
+    journey_id: "J-BROWSER-inspect",
+    precondition: "A browser session is open with the page loaded; inspect mode is a human act",
+    purpose: "Turn an element selection into compact structured feedback the agent can act on, with evidence, without dumping the page into the model context",
+    settlement: "In inspect mode hovering identifies elements and clicking selects rather than activates; the selection records URL, page identity, role, tag, accessible name, visible text, rectangle, viewport, selector candidates, ancestry, computed styles, a screenshot crop and a timestamp; the operator attaches a note, edits or dismisses it, and submits it to the active agent conversation; the annotation is durable, shows which element it refers to, and is marked stale by later navigation; page text is treated as data, never as instructions",
+    steps: "operator switches to inspect mode -> hover outlines elements in the live page -> clicking captures the element context -> the operator attaches a note -> browser.annotate records the annotation with evidence -> submitting sends the structured feedback into the conversation and the task's evidence",
+    variants: "source-location hints when the dev framework exposes them are labelled best-effort and otherwise the DOM context stands in; a stale annotation after navigation says so; annotations survive reload and restart as durable records; before/after comparison uses recorded screenshots when available"
+}
+
+Instance j_preview_register of "CanonicalJourney" {
+    actor: "OperatorAgent",
+    capabilities: "preview.register, preview.stop, browser.open",
+    evidence_class: "proposed",
+    initiating_condition: "An agent (or the operator) starts a development server for the workspace and the running application should be previewed in the Workbench browser",
+    journey_id: "J-PREVIEW-register",
+    precondition: "The server runs in a connected execution world; the port is loopback-reachable or forwarded; a preview is registered explicitly, never scraped out of process output alone",
+    purpose: "Connect governed development-server execution to the shared browser so previewing needs no manual steps and no stdout scraping as the mechanism",
+    settlement: "The registration records the URL, the workspace, the owning session or task and the process; readiness is probed before the preview opens; the browser opens the registered URL; refreshing after changes is explicit; server and browser errors are shown; stopping the owning task or session or calling preview.stop ends the preview and cleans up the process where the Workbench owns it; a server in an SSH or WSL world is reached by forwarding, never by binding a public interface",
+    steps: "the agent starts the dev server through governed execution -> preview.register records the URL and ownership -> readiness is probed -> the browser opens the preview -> after changes the preview is refreshed -> preview.stop or the owning session's end cleans up",
+    variants: "stdout detection may decorate an explicit registration but never invents one; an unreachable port is refused with the reason; restarting the server re-registers; several previews may be registered, one is open at a time"
 }

@@ -1,0 +1,5 @@
+dist-package/cognate-workbench-0.1.0-windows-x64/bin/cognate-workbench-desktop.exe: Subsystem=2 (WINDOWS_GUI)
+dist-package/cognate-workbench-0.1.0-windows-x64/bin/cognate-workbench.exe: Subsystem=3 (WINDOWS_CUI)
+50083de9a82e16880116e1804c626f7826edc3d7ad4f99a7ded26b3317a2cc9b  dist-package/cognate-workbench-0.1.0-windows-x64/bin/cognate-workbench-desktop.exe
+52ab3640c6532757ecea2721f705e51ac705b77f45d558fc47e1ae2de77e672c  dist-package/cognate-workbench-0.1.0-windows-x64/bin/cognate-workbench.exe
+commit 77633d2

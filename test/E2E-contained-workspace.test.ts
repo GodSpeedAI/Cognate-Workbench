@@ -132,7 +132,8 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
     await dialog.waitFor({ state: "detached", timeout: 30_000 });
     const workspaceRow = page.locator(".workspace-row", { hasText: "workspace" });
     await workspaceRow.waitFor();
-    expect(await workspaceRow.locator(".workspace-world-badge").innerText()).toMatch(/LINUX CHILD CONTAINMENT/);
+    expect(await workspaceRow.locator(".workspace-world-badge").innerText()).toMatch(/^CONTAINED$/i);
+    expect(await workspaceRow.locator(".workspace-world-badge").getAttribute("title")).toMatch(/Linux child containment/i);
 
     // Exercise the normal coding-session UI. The mock plan reads, runs and edits greet.ts via the
     // selected ExecutionWorld; the final host file is the durable side effect of the contained run.

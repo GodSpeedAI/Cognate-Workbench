@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type {
   WorkflowDefinition,
-  WorkflowNode,
   NodeStatus,
   EvidenceKind,
   ImplementationBinding,

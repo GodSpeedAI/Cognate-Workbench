@@ -12,7 +12,7 @@
 import type { Json } from "@godspeedai/cognate-events";
 import type { Projection } from "@godspeedai/cognate-projections";
 
-const TITLE_MAX = 80;
+const TITLE_MAX = 60;
 
 function titleFrom(message: string): string {
   const trimmed = message.trim().replace(/\s+/g, " ");
@@ -41,6 +41,24 @@ export const sessionsProjection: Projection = {
       // workspaceId/title. The capability validates existence first; this keeps the fold total.
       if (!existing) return [];
       return [{ key, value: { ...existing, archived: payload.archived } }];
+    }
+    // J-SESSION-rename: an operator-chosen title. Like archiving, it is an `agent.config` event (not
+    // "session:"-correlated); `renamed: true` stops a later first prompt from replacing it.
+    if (event.eventType === "session.renamed") {
+      const payload = event.payload as { readonly sessionId: string; readonly title: string };
+      const key = `${event.tenant}/${payload.sessionId}`;
+      const existing = state.get(key) as Record<string, Json> | undefined;
+      if (!existing) return [];
+      return [{ key, value: { ...existing, title: payload.title, renamed: true } }];
+    }
+    // F1 (J-SESSION-pin): an operator-chosen pin. Like archive/rename, it is an `agent.config`
+    // event (not "session:"-correlated). Pure view-ordering: the fold only rewrites the flag.
+    if (event.eventType === "session.pinned") {
+      const payload = event.payload as { readonly sessionId: string; readonly pinned: boolean };
+      const key = `${event.tenant}/${payload.sessionId}`;
+      const existing = state.get(key) as Record<string, Json> | undefined;
+      if (!existing) return [];
+      return [{ key, value: { ...existing, pinned: payload.pinned } }];
     }
     if (!event.correlationId.startsWith("session:")) return [];
     // T10 (J-F-delegation): a subagent's child run is `agent.coding` too, so it emits the same
@@ -76,7 +94,7 @@ export const sessionsProjection: Projection = {
       // Title from the literal first human message, set immediately (reference-behavior-matrix.md
       // §4) — only the *first* turn's message sets it; a later turn in the same session must not
       // overwrite an already-titled session.
-      const title = existing?.title && existing.title !== "New Session" ? existing.title : titleFrom(payload.message);
+      const title = existing?.renamed === true || (existing?.title && existing.title !== "New Session") ? (existing.title as string) : titleFrom(payload.message);
       // Usage pass U2: fold the session's CURRENT access mode from the run input the turn started
       // with (the composer's per-session dropdown passes `AgentCodingInput.mode` through here; a
       // direct API run without a mode leaves whatever was already folded). This is distinct from
@@ -100,6 +118,7 @@ export const sessionsProjection: Projection = {
             // T11: this fold rebuilds the row rather than spreading it, so the durable archive flag
             // must be carried forward explicitly or a new turn would silently un-archive the session.
             ...(existing?.archived === true ? { archived: true } : {}),
+            ...(existing?.pinned === true ? { pinned: true } : {}),
             ...(accessMode !== undefined ? { accessMode } : {}),
             ...(preset !== undefined ? { mode: preset } : {}),
           },
@@ -126,6 +145,7 @@ export const sessionsProjection: Projection = {
             updatedAt: event.recordedAt,
             // T11: same carry-forward as `session.turn.started` above — this fold also rebuilds.
             ...(existing?.archived === true ? { archived: true } : {}),
+            ...(existing?.pinned === true ? { pinned: true } : {}),
             ...(existing?.accessMode !== undefined ? { accessMode: existing.accessMode } : {}),
             // Usage pass U4: the folded preset (the row's `mode` badge field) persists across the
             // turn's completion the same way `accessMode` does.

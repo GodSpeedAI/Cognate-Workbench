@@ -108,7 +108,13 @@ describe("E2E cognitive console", () => {
         // focus switch A -> B updates what the agent sees
         await frame.getByRole("button", { name: /integration: FAILED/ }).click();
         await page.waitForFunction(() => (window as any).__webmcp.tools.length > 0);
-        expect(((await callTool(page, "ui_context")) as any).neighborhood.meaning).toBe("integration failed");
+        // The context follows the click on the next render; poll instead of reading once.
+        let meaning: unknown;
+        for (const end = Date.now() + 5000; Date.now() < end; await Bun.sleep(50)) {
+          meaning = ((await callTool(page, "ui_context")) as any).neighborhood.meaning;
+          if (meaning === "integration failed") break;
+        }
+        expect(meaning).toBe("integration failed");
         await composer.fill("why did this fail?");
         await composer.press("Enter");
         await page.getByText("It failed because the integration check recorded: timeout in guest path.").waitFor({ timeout: 20_000 });

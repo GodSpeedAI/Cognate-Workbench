@@ -373,6 +373,23 @@ describe("AutomationPanel", () => {
     expect(html).toContain("Create automation");
   });
 
+  it("schedule controls are MenuSelects announcing their current value (S3 conversion)", () => {
+    const html = renderAndText(
+      React.createElement(AutomationPanel, {
+        runs: [],
+        acceptedTasks: [{ id: "task-1", title: "Task 1" }],
+        onCreate: () => {},
+        onAdvance: () => {},
+      })
+    );
+
+    // The trigger announces the current value, select-like; no native <select> remains.
+    expect(html).toContain('aria-label="Source task: Task 1"');
+    expect(html).toContain('aria-label="Repeat: Sunday"');
+    expect(html).toContain('aria-label="Runner: local-desktop"');
+    expect(html).not.toContain("<select");
+  });
+
   it("form shows substrate note for selected runner", () => {
     const html = renderAndText(
       React.createElement(AutomationPanel, {

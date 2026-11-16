@@ -399,3 +399,156 @@ DomainForge 0.19.0: `validate` zero violations, `fmt --check` clean. UX evidence
 
 Known limits are recorded in `docs/known-gaps.md`; the client's per-event projection re-read
 amplification is the one item that needs an upstream framework change rather than app mitigation.
+
+## Capability binding register and 2026-10-31 journey additions
+
+Conformance pass over `feat/ui-production-readiness` (record: `validation/conformance-2026-10-31.md`).
+
+### New and changed journeys
+
+| Journey | Change | Capabilities | Evidence |
+|---|---|---|---|
+| `J-A-first-use` | revised to the first-run flow Welcome -> Connect a model provider (full provider form) -> Choose a folder -> ready; Configure later lands on a friendly empty state | `model.configure`, `secret.put`, `model.catalog`, `workspace.select`, `onboarding.dismiss` | `test/E2E-onboarding.test.ts` (not yet journey-named) |
+| `J-DESKTOP-launch` | new host-surface journey: single instance per data home, app window, closing it stops the server, default-browser fallback, `stop` | none; CLI `launch` / `stop` in `src/cli.ts`, `src/desktopWindow.ts` | `test/J-DESKTOP-launch.test.ts` |
+| `J-UI-command-palette` | new UI-surface journey; the palette owns no mutation | none of its own; runs existing handlers | `test/ui-shell.test.tsx`, `test/E2E-ui-shell.test.ts` |
+| `J-UI-inspector` | new UI-surface journey; tabs Context, Changes, Details, Files, Config | reads through `workspace.files.list`, `workspace.file.read`, `config.file.read`, `config.file.apply` | `test/ui-inspector-tabs.test.tsx`, `test/E2E-ui-shell.test.ts` |
+| `J-PREFS-shortcuts` | variant added: global application shortcuts | `settings.changeShortcuts` | `test/J-PREFS-shortcuts.test.ts` |
+| `J-WS-directory-discovery` | variant added: partial, home-relative and fuzzy folder matching | `workspace.directory.suggest` | `test/J-WS-directory-suggest-matching.test.ts` |
+| `J-CFG-config-edit`, `J-WS-files-browse`, `J-SECRETS-storage` and ten other model-only journeys | catalog entries added (the `.sea` records already existed) | see register below | named tests under `test/` |
+
+`J-DESKTOP-launch` is a host-surface journey: it needs no capability, binding or event, and a
+downstream agent must not mint one. Its settlement is observable process behavior (health on the
+app URL, the second launch reusing the instance, the port closed and `server.lock` removed after
+the window closes).
+
+### Capability binding register
+
+Every capability id listed in `GRANTED_CAPABILITIES` in `src/server.ts` as a literal (ids supplied
+by `*_ANCHORS` spreads are bound by those tables, already documented above). "Bound to" is the
+semantic entity and the exported table in `domain/index.ts`.
+
+| Capability | Bound to | Journeys |
+|---|---|---|
+| `agent.harness.list` | HarnessCli (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-detect, J-HARNESS-unavailable |
+| `case.derive` | Case (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup, J-COG-liveverify |
+| `case.observe` | Case (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-liveverify |
+| `case.open` | Case (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
+| `config.file.apply` | UserPreferences (TRANCHE11_ANCHORS) | J-CFG-config-edit, J-UI-inspector |
+| `config.file.read` | UserPreferences (TRANCHE11_ANCHORS) | J-CFG-config-edit, J-UI-inspector |
+| `config.path` | UserPreferences (TRANCHE11_ANCHORS) | J-CFG-config-path |
+| `criterion.freeze` | SuccessCriterion (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
+| `execution.containment.inspect` | named in (domain/index.ts:236) | J-RW-contained-workspace |
+| `execution.world.check` | named in (domain/index.ts:235) | none (support capability) |
+| `execution.world.connect` | named in (domain/index.ts:231) | none (support capability) |
+| `execution.world.disconnect` | named in (domain/index.ts:233) | none (support capability) |
+| `execution.world.probe` | named in (domain/index.ts:234) | none (support capability) |
+| `execution.wsl.list` | ExecutionWorld (CONFORMANCE_GAP_ANCHORS) | J-RW-select-world |
+| `experiment.round` | Experiment (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
+| `experiment.status` | Experiment (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
+| `git.branch.list` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-BIND |
+| `git.checkout.attach` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-BIND |
+| `git.checkout.merge` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-LIFECYCLE |
+| `git.checkout.recreate` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-LIFECYCLE |
+| `git.checkout.remove` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-LIFECYCLE |
+| `git.checkout.status` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-BIND, J-CHECKOUT-LIFECYCLE |
+| `harness.turn.advance` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session, J-HARNESS-approval, J-HARNESS-cancel, J-HARNESS-unavailable |
+| `identity.inspect` | named in (domain/index.ts:539) | J-AUTH-SESSION |
+| `identity.session.issue` | named in (domain/index.ts:537) | J-AUTH-SESSION, J-AUTH-TENANT-ISOLATION |
+| `identity.session.revoke` | named in (domain/index.ts:538) | J-AUTH-SESSION |
+| `method.accept` | MethodRecommendation (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
+| `method.active` | MethodRecommendation (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
+| `method.review` | MethodRecommendation (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-search |
+| `model.catalog` | ModelProvider (TRANCHE11_ANCHORS) | J-A-first-use, J-CFG-model-provider, J-CFG-model-catalog |
+| `model.configure` | named in (domain/index.ts:84) | J-A-first-use, J-CFG-model-provider |
+| `model.generate` | named in (domain/index.ts:82) | none (support capability) |
+| `observation.record` | VerificationObservation (CONFORMANCE_GAP_ANCHORS) | J-COG-realitytrace |
+| `observation.status` | VerificationObservation (CONFORMANCE_GAP_ANCHORS) | J-COG-realitytrace |
+| `onboarding.dismiss` | UserPreferences (CONFORMANCE_GAP_ANCHORS) | J-A-first-use |
+| `plan.state` | named in (domain/index.ts:141) | J-RUN-task-attribution |
+| `plugin.catalog` | shares the `Plugin` anchor of `plugin.install` (`catalogSemanticRef ?? installSemanticRef` in `src/capabilities/pluginInstall.ts`) | none (support capability) |
+| `plugin.install` | Plugin (TRANCHE11_ANCHORS) | J-PLG-install |
+| `plugin.uninstall` | Plugin (TRANCHE11_ANCHORS) | J-PLG-install |
+| `provider.activate` | ModelProvider (PROVIDER_CAPABILITY_ANCHORS) | J-CFG-provider-switch |
+| `provider.delete` | ModelProvider (TRANCHE11_ANCHORS) | J-CFG-provider-delete |
+| `provider.list` | ModelProvider (PROVIDER_CAPABILITY_ANCHORS) | J-CFG-provider-switch |
+| `provider.test` | ModelProvider (PROVIDER_CAPABILITY_ANCHORS) | J-CFG-provider-test |
+| `risk.assess` | RiskAssessment (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
+| `secret.put` | named in (domain/index.ts:83) | J-A-first-use, J-SECRETS-storage |
+| `secrets.backend.describe` | ModelProvider (TRANCHE11_ANCHORS) | J-SECRETS-storage |
+| `session.create` | Session (RED_JOURNEY_ANCHORS) | J-B-basic-session, J-SESSION-draft, J-UI-command-palette |
+| `session.harness.bind` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session, J-HARNESS-unavailable |
+| `session.harness.resolve` | HarnessBinding (HARNESS_CAPABILITY_ANCHORS) | J-HARNESS-session |
+| `session.history` | named in (domain/index.ts:86) | J-SESSION-draft, J-RUN-task-attribution |
+| `session.rename` | Session (TRANCHE11_ANCHORS) | J-SESSION-rename |
+| `session.setArchived` | Session (TRANCHE11_ANCHORS) | J-SESSION-archive |
+| `session.task.bind` | Session (RED_JOURNEY_ANCHORS) | J-TASK-scope, J-RUN-task-attribution |
+| `settings.changeAppearance` | named in (domain/index.ts:182) | none (support capability) |
+| `settings.changeCodingTools` | named in (domain/index.ts:185) | none (support capability) |
+| `settings.changeContainment` | named in (domain/index.ts:540) | J-RW-AGGREGATE-CONTAINMENT |
+| `settings.changeFontSize` | named in (domain/index.ts:183) | none (support capability) |
+| `settings.changeLanguage` | named in (domain/index.ts:181) | none (support capability) |
+| `settings.changePerformanceDetail` | named in (domain/index.ts:184) | none (support capability) |
+| `settings.changePermission` | named in (domain/index.ts:180) | none (support capability) |
+| `settings.changePlugin` | named in (domain/index.ts:188) | none (support capability) |
+| `settings.changePreset` | named in (domain/index.ts:187) | none (support capability) |
+| `settings.changeSendBehavior` | named in (domain/index.ts:186) | none (support capability) |
+| `settings.changeShortcuts` | UserPreferences (TRANCHE11_ANCHORS) | J-PREFS-shortcuts, J-UI-command-palette |
+| `settings.changeSpending` | named in (domain/index.ts:189) | J-CONTEXT-BUDGET |
+| `settings.changeWorkDetails` | named in (domain/index.ts:179) | none (support capability) |
+| `subagent.start` | named in (domain/index.ts:157) | J-F-delegation, J-EXPERT-PARALLEL |
+| `task.checkout.resolve` | Task (CHECKOUT_CAPABILITY_ANCHORS) | J-CHECKOUT-EXECUTION |
+| `tool.bash` | named in (domain/index.ts:113) | J-C-tool-execution, J-RW-exec-remote, J-RW-coexist, J-RW-switch, J-WB-protected-evidence |
+| `tool.edit` | named in (domain/index.ts:112) | J-C-tool-execution, J-RW-edit-remote, J-RW-switch, J-WB-protected-evidence |
+| `tool.read` | named in (domain/index.ts:111) | J-C-tool-execution, J-RW-read-remote, J-RW-coexist, J-RW-switch |
+| `tool.run_code` | named in (domain/index.ts:114) | J-RW-exec-remote |
+| `ui.context` | AttentionFocus (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-attention |
+| `ui.focus.publish` | AttentionFocus (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-attention |
+| `ui.pending` | AttentionFocus (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-attention |
+| `ui.request` | AttentionFocus (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-attention |
+| `verification.run` | Verification (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup, J-COG-liveverify |
+| `workspace.contained.select` | named in (domain/index.ts:232) | J-RW-contained-workspace, J-RW-AGGREGATE-CONTAINMENT |
+| `workspace.delete` | named in (domain/index.ts:210) | J-WS-delete |
+| `workspace.directory.suggest` | ExecutionWorld (RED_JOURNEY_ANCHORS) | J-WS-directory-discovery |
+| `workspace.file.read` | WorkspaceRecord (RED_JOURNEY_ANCHORS) | J-WS-files-browse, J-UI-inspector |
+| `workspace.files.list` | WorkspaceRecord (RED_JOURNEY_ANCHORS) | J-WS-files-browse, J-UI-inspector |
+| `workspace.path` | named in (domain/index.ts:115) | J-RW-contained-workspace, J-RW-add-workspace, J-RW-coexist |
+| `workspace.rename` | named in (domain/index.ts:209) | none (support capability) |
+| `workspace.select` | named in (domain/index.ts:85) | J-A-first-use, J-WS-select, J-RW-add-workspace, J-RW-reconnect, J-RW-coexist, J-RW-switch, J-SESSION-draft, J-WS-directory-discovery, J-UI-command-palette |
+| `world.attach` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | none (support capability) |
+| `world.discard` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | none (support capability) |
+| `world.fork` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
+| `world.freeze` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup, J-COG-liveverify |
+| `world.settle` | WorldSnapshot (COGNITIVE_CAPABILITY_ANCHORS) | J-COG-cleanup |
+
+### External agent-harness bindings (J-HARNESS-*)
+
+`HARNESS_CAPABILITY_ANCHORS` in `domain/index.ts` binds `agent.harness.list` to `HarnessCli` and
+`session.harness.bind`, `session.harness.resolve`, `harness.turn.advance` to `HarnessBinding`.
+Event `session.harness.bound` is recorded by `agent.config` (`session.recorded`) and folded, with the
+agent-emitted `harness.session.recorded`, by the public `session-harness-bindings` projection.
+Agent `agent.harness` takes the same input as `agent.coding`; a UI that sees a binding must start it
+instead of `agent.coding`. Gaps stated, not hidden: per-tool authority checks, containment of the
+CLI's effects, protected-evidence blocking and settlement as `agent.coding` do not apply; the
+host-process runner (`src/agents/harness/hostProcess.ts`) exists because the Cognate execution port
+cannot stream or take stdin (`.agents/DEBT.md`, `framework-gap-streaming-process.md`).
+
+
+### Binding gaps closed (2026-11-01)
+
+`CONFORMANCE_GAP_ANCHORS` in `domain/index.ts` (bound by `bindConformanceGaps`, wired in `src/server.ts`)
+now anchors `onboarding.dismiss` on `UserPreferences`, `execution.wsl.list` on `ExecutionWorld`, and
+`observation.status` / `observation.record` on the `VerificationObservation` resource. Journeys:
+`J-A-first-use` (dismiss), `J-RW-select-world` (wsl list variant), `J-COG-realitytrace` (read side).
+
+### Workspace delete, provider errors, remote harness (2026-11-01)
+
+- `workspace.delete` archives the workspace's non-archived sessions (J-WS-delete); files on disk are never touched.
+- `model.request.retried` payload is `{attempt, maxAttempts, maxRetries, delayMs, errorCode, message, baseURLHost, error}` and is emitted on every failed attempt (J-H-provider-error). The `delayMs` is the recorded wait before the next attempt.
+- Mobile remote: a turn for a harness-bound session starts `agent.harness`; a running harness turn is refused with `harness-busy` (HTTP 409, `message` readable). Evidence `test/J-HARNESS-remote.test.ts`.
+
+## Provider parity, server side (J-CFG-provider-switch, J-CFG-provider-test)
+
+- `model.configure` keeps the stored secret when `apiKey` is omitted or empty; only a non-empty key replaces it. `provider.activate` re-mounts a stored route and records it as `model.configured` (so `model-config` `current` and `provider-routes` follow, and the choice survives restart). `provider.delete` accepts any stored provider id; only the active one clears the live route. `provider.list` is the UI read (projection `provider-routes` plus `hasKey`/`isCurrent`). `provider.test` lists models only (never a completion).
+- Journey evidence: `test/J-CFG-provider-switch.test.ts`, `test/J-CFG-provider-test.test.ts`, extended `test/J-CFG-model-catalog.test.ts`, `test/J-CFG-provider-delete.test.ts`, `test/J-CFG-model-provider.test.ts`.
+- Framework gap: none for Azure on the chat protocol (api-key header and api-version query are applied through the adapter's `fetch` option). Azure on Responses/Anthropic wire is not offered.
+- UI read contract: `provider.list` returns `{ providers: StoredProviderRow[] }` with `StoredProviderRow = { providerId, displayName, protocol, baseURL, model, hasKey, isCurrent, keyless, auth?, apiVersion? }` (current first, then by name). The public `provider-routes` projection holds `{ providerId, baseURL, protocol, model, displayName?, auth?, apiVersion?, prices? }` per `provider:<providerId>` and has no key state.

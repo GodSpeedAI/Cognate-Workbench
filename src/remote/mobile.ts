@@ -46,6 +46,10 @@ export interface RemoteHost {
   readonly operatorIdentityId: string;
   /** The phone bundle and its stylesheet, built once per process. */
   readonly assets: () => Promise<{ readonly js: string; readonly css: string }>;
+  /** J-REMOTE-diagnostics: durably records the bounded `workbench.remote.*` transition family.
+   *  Fire-and-forget from the remote's perspective — a failed recording never breaks the control
+   *  path, and the polls never call this. */
+  readonly record?: (events: readonly { readonly type: string; readonly payload: Json }[]) => Promise<void>;
 }
 
 export interface RemoteStatus {
@@ -113,6 +117,13 @@ export class MobileRemote {
 
   constructor(private readonly host: RemoteHost, private readonly settings: RemoteSettings) {}
 
+  /** One bounded diagnostics event, best-effort (J-REMOTE-diagnostics). */
+  private diag(type: "workbench.remote.state" | "workbench.remote.error", payload: Json): void {
+    const record = this.host.record;
+    if (!record) return;
+    void record([{ type, payload }]).catch(() => undefined);
+  }
+
   get publicBase(): string {
     return this.settings.publicUrl ?? `http://localhost:${this.port}`;
   }
@@ -144,6 +155,7 @@ export class MobileRemote {
     await this.revokeDevices("remote: restarted");
     if (!this.server) this.listen();
     this.pairing.start(Date.now(), floor);
+    this.diag("workbench.remote.state", { state: "waiting" });
     return this.status();
   }
 
@@ -152,6 +164,7 @@ export class MobileRemote {
     if (!this.server) return this.start();
     this.pairing.refresh(Date.now());
     await this.revokeAll("remote: refresh");
+    this.diag("workbench.remote.state", { state: "waiting" });
     return this.status();
   }
 
@@ -163,6 +176,7 @@ export class MobileRemote {
     this.streams.clear();
     this.server?.stop(true);
     this.server = undefined;
+    this.diag("workbench.remote.state", { state: "off" });
     return this.status();
   }
 
@@ -275,7 +289,10 @@ export class MobileRemote {
     if (!this.limiter.allow("redeem", 10)) return json({ error: "rate" }, 429);
     const body = await this.body(request);
     const result = this.pairing.redeem(body?.secret, Date.now());
-    if (!result.ok) return json({ error: result.reason }, 400);
+    if (!result.ok) {
+      this.diag("workbench.remote.error", { message: `pairing link refused (${result.reason})` });
+      return json({ error: result.reason }, 400);
+    }
     const userId = randomBytes(16);
     return json({ ticket: result.ticket, options: registrationOptions({ challenge: result.challenge, rpId: this.rpId, userId, userName: "operator" }) });
   }
@@ -297,6 +314,7 @@ export class MobileRemote {
       draft.devices[id] = device;
       draft.audit.push({ at: now, deviceId: id, command: "pair", commandId: "pairing", outcome: "paired" });
     });
+    this.diag("workbench.remote.state", { state: "connected", deviceLabel: label });
     return json({ ok: true, device: { label } }, 200, { "set-cookie": sessionCookie(issued.token) });
   }
 
@@ -319,7 +337,10 @@ export class MobileRemote {
     const { state } = await readRemoteState(this.host.service, this.host.system);
     const device = Object.values(state.devices).find((d) => d.credentialId === credential?.id && d.revokedAt === null && d.generation === this.pairing.generation);
     if (!device) return json({ error: "passkey" }, 401);
-    const result = await verifyAssertion(credential as never, { challenge, origin: this.origin, rpId: this.rpId, publicKey: device.publicKey, signCount: device.signCount });
+    const result = await verifyAssertion(credential as never, { challenge, origin: this.origin, rpId: this.rpId, publicKey: device.publicKey, signCount: device.signCount }).catch((error: unknown) => {
+      this.diag("workbench.remote.error", { message: error instanceof WebAuthnError ? "passkey verification failed" : "passkey verification failed (unexpected)" });
+      throw error;
+    });
     if (device.sid) await revokeSession(this.host.service, this.host.system, device.sid, "remote: re-authenticated").catch(() => undefined);
     const issued = await issueSession(this.host.service, this.host.system, { identityId: this.host.operatorIdentityId, ttlMs: REMOTE_SESSION_TTL_MS, cause: `mobile remote: ${device.id}` });
     const now = new Date().toISOString();
@@ -360,7 +381,8 @@ export class MobileRemote {
   /** Session list plus the decisions waiting on the human. Only what the phone shows is copied. */
   private async snapshot(device: RemoteDevice, caller: Caller) {
     const service = this.host.service;
-    const runs = await service.listRuns(caller, { agent: "agent.coding" });
+    // J-HARNESS-session (remote variant): harness-bound sessions run as `agent.harness`.
+    const runs = [...(await service.listRuns(caller, { agent: "agent.coding" })), ...(await service.listRuns(caller, { agent: "agent.harness" }))];
     // Runs come oldest first: the last one per session is its latest; a live one wins for status.
     const latest = new Map<string, { runId: string; status: string }>();
     for (const run of runs) {
@@ -470,7 +492,17 @@ export class MobileRemote {
       if (!text || text.length > MAX_TEXT) return json({ error: "invalid" }, 400);
       name = "turn";
       const sessionId = parts[1] as string;
-      const live = (await service.listRuns(caller, { agent: "agent.coding" })).find((r) => r.correlationId === `session:${sessionId}` && (r.status === "running" || r.status === "waiting"));
+      // J-HARNESS-session (remote variant): a session bound to an external harness CLI starts
+      // `agent.harness` (the same agent the desktop uses), never the native coding agent. The CLI
+      // runs on the server host, so a phone can drive it; its permission requests are ordinary
+      // `tool-approval` decisions the phone may answer. A running harness turn cannot be steered.
+      const bindingRow = (await this.rows("session-harness-bindings", caller)).find((r) => sessionIdOf(r) === sessionId);
+      const harnessBound = typeof (bindingRow?.value as { harnessId?: unknown } | undefined)?.harnessId === "string";
+      const agent = harnessBound ? "agent.harness" : "agent.coding";
+      const live = (await service.listRuns(caller, { agent })).find((r) => r.correlationId === `session:${sessionId}` && (r.status === "running" || r.status === "waiting"));
+      if (live && harnessBound) {
+        return json({ error: "harness-busy", message: "This session runs through an external harness and a turn is in progress. Wait for it to finish or stop it; follow-up messages cannot be added mid-turn." }, 409);
+      }
       if (live) {
         await service.updateState(caller, { runId: live.runId, update: { patch: [{ op: "add", path: "/steer/-", value: { id: commandId, text } }] } as never, idempotencyKey: commandId });
         outcome = { kind: "steer", runId: live.runId };
@@ -480,7 +512,12 @@ export class MobileRemote {
         if (!row) return json({ error: "not-found" }, 404);
         const workspaceId = (row.value as { workspaceId?: string }).workspaceId;
         const settings = ((await this.rows("settings", caller))[0]?.value ?? {}) as Record<string, Json>;
-        const run = await service.startRun(caller, {
+        const run = await service.startRun(caller, harnessBound ? {
+          agent: "agent.harness",
+          input: { sessionId, workspaceId, message: text } as Json,
+          idempotencyKey: commandId,
+          correlationId: `session:${sessionId}`,
+        } : {
           agent: "agent.coding",
           input: { sessionId, workspaceId, message: text, mode: settings.permission ?? DEFAULT_PERMISSION_MODE, preset: settings.preset ?? DEFAULT_AGENT_PRESET } as Json,
           idempotencyKey: commandId,
