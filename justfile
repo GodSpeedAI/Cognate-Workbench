@@ -11,6 +11,13 @@ typecheck:
 test:
     bun run test
 
+# One CI shard of the suite, balanced by ci/test-timings.json; measured durations land in
+# .tmp/test-timings.json (merge the shard files into ci/test-timings.json to rebalance).
+test-shard shard total:
+    mkdir -p .tmp
+    cp ci/test-timings.json .tmp/test-timings.json
+    bun test --timeout 15000 --shard={{shard}}/{{total}} --timings .tmp/test-timings.json --update-timings test
+
 verify:
     ./.tmp/pg0/pg0 start --name cognate-dev || true
     bun run verify
