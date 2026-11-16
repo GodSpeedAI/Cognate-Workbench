@@ -9,11 +9,11 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react/pure";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom, releaseDom } from "./dom-env.ts";
 import { useState } from "react";
 import { MenuSelect } from "../src/ui/shell/MenuSelect.tsx";
 
-beforeAll(() => GlobalRegistrator.register());
+beforeAll(() => registerDom());
 afterEach(async () => {
   await act(async () => {
     cleanup();
@@ -25,7 +25,7 @@ afterAll(async () => {
     cleanup();
     await Promise.resolve();
   });
-  await GlobalRegistrator.unregister();
+  await releaseDom();
 });
 
 const OPTIONS = [

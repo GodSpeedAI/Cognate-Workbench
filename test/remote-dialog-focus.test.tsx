@@ -5,7 +5,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react/pure";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom, releaseDom } from "./dom-env.ts";
 import React, { useState } from "react";
 import { RemoteDialog } from "../src/ui/RemotePanel.tsx";
 import { CognateProvider } from "@godspeedai/cognate-react";
@@ -16,7 +16,7 @@ const stubClient = {
   projection: () => ({ subscribe: () => () => {}, get: () => undefined }),
 } as never;
 
-beforeAll(() => GlobalRegistrator.register());
+beforeAll(() => registerDom());
 afterEach(async () => {
   await act(async () => {
     cleanup();
@@ -28,7 +28,7 @@ afterAll(async () => {
     cleanup();
     await Promise.resolve();
   });
-  await GlobalRegistrator.unregister();
+  await releaseDom();
 });
 
 /** A parent that re-renders on demand and passes a new inline onClose each time, as App does. */
