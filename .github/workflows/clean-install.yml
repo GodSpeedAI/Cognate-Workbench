@@ -5,28 +5,35 @@ name: clean-install
 # documented, then `just dev` must reach a healthy server on 127.0.0.1:3180.
 on:
   push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**', '.agents/**']
   pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', '.agents/**']
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: workbench-clean-install-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   clean-install:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.0
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
       - name: README quick start in a fresh HOME
         run: |
           export HOME="$RUNNER_TEMP/fresh-home"; mkdir -p "$HOME"
           ! command -v psql || echo "note: runner image has psql; the app must not depend on it"
-          bun install
+          bun install --frozen-lockfile
           just db-setup
           (just dev > "$RUNNER_TEMP/dev.log" 2>&1 &)
           for i in $(seq 1 180); do
@@ -51,13 +58,13 @@ jobs:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.0
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
         with:
           toolchain: 1.99.0
 
@@ -66,7 +73,7 @@ jobs:
       - name: Build DomainForge napi binding for linux-arm64
         run: |
           set -euo pipefail
-          bun install
+          bun install --frozen-lockfile
           DF_VERSION="$(node -p "require('./node_modules/@godspeedai/domainforge/package.json').version")"
           git clone --depth 1 --branch "v$DF_VERSION" https://github.com/GodSpeedAI/DomainForge.git "$RUNNER_TEMP/domainforge"
           cd "$RUNNER_TEMP/domainforge"
