@@ -13,6 +13,7 @@ import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import { decideShell, decideWrite, type Decision } from "../workbench/authority.ts";
 import { advance as advanceAutomation, deliveryReceipt, newAutomation, nextFire, type AutomationRun, type Schedule } from "../workbench/automation.ts";
 import { contractMissing, defaultAuthority } from "../workbench/contract.ts";
+import { requireOperator } from "../workbench/operatorGuard.ts";
 import { validateGroundedFeedback, type GroundedFeedback } from "../workbench/grounded.ts";
 import { acceptanceReady, reviewReadiness } from "../workbench/ledger.ts";
 import { planParallelism, type WorkUnit } from "../workbench/parallelism.ts";
@@ -62,18 +63,43 @@ export const WORKBENCH_CAPABILITY_IDS = [
   "steer.pending",
   "feedback.record",
   "workbench.seed",
+  "workbench.remote.record",
 ] as const;
 export type WorkbenchCapabilityId = (typeof WORKBENCH_CAPABILITY_IDS)[number];
 
 const TERMINAL_TASK: ReadonlySet<TaskStatus> = new Set(["ACCEPTED", "OPERATIONALIZED"]);
-const ALL_ALLOWED: AuthorityScopes = {
-  filesystem: { read: "yes", write: "yes", outsideWorkspace: "yes" },
+// Capability-bundles tranche P (§1.6.i): the ALL_ALLOWED fallback is retired — unbound calls
+// clamp to the operator's NAMED runtime ceiling instead of an anonymous everything. The ceiling
+// preserves the product's operational baseline (in-workspace builds run; destructive shell
+// commands remain mediated by the existing risk.assess/Sentinel gate, not double-gated here) —
+// authorized flows stay frictionless per D2. The genuine tightenings: outside-workspace writes
+// land on approval (were "yes"), extension install/enable is gated (was "yes"/"yes"), and
+// run_code is consulted at all. Per-principal tightening arrives with grant records (T1); this
+// constant is the operator-permission leg until then.
+const OPERATOR_RUNTIME_CEILING: AuthorityScopes = {
+  filesystem: { read: "yes", write: "yes", outsideWorkspace: "approval" },
   shell: { run: "yes", destructive: "yes" },
   network: { outbound: "yes" },
   packages: { install: "yes" },
-  extensions: { install: "yes", enable: "yes" },
+  extensions: { install: "approval", enable: "no" },
   protectedPaths: [],
 };
+type Grant = "yes" | "approval" | "no";
+const STRICTER: Record<Grant, number> = { yes: 0, approval: 1, no: 2 };
+const stricter = (a: Grant, b: Grant): Grant => (STRICTER[b] > STRICTER[a] ? b : a);
+/** Declared ∩ ceiling (§1.4): per surface the stricter grant wins; protected paths union. */
+const clampScopes = (declared: AuthorityScopes, ceiling: AuthorityScopes): AuthorityScopes => ({
+  filesystem: {
+    read: stricter(declared.filesystem.read, ceiling.filesystem.read),
+    write: stricter(declared.filesystem.write, ceiling.filesystem.write),
+    outsideWorkspace: stricter(declared.filesystem.outsideWorkspace, ceiling.filesystem.outsideWorkspace),
+  },
+  shell: { run: stricter(declared.shell.run, ceiling.shell.run), destructive: stricter(declared.shell.destructive, ceiling.shell.destructive) },
+  network: { outbound: stricter(declared.network.outbound, ceiling.network.outbound) },
+  packages: { install: stricter(declared.packages.install, ceiling.packages.install) },
+  extensions: { install: stricter(declared.extensions.install, ceiling.extensions.install), enable: stricter(declared.extensions.enable, ceiling.extensions.enable) },
+  protectedPaths: declared.protectedPaths,
+});
 
 interface RecordedEvent {
   readonly type: string;
@@ -139,9 +165,11 @@ export function workbenchComponent(options: {
       correlationId: `session:${sessionId}`,
     });
   };
-  const requireUser = (ctx: HandlerContext, what: string): void => {
-    if (ctx.actor.kind !== "user") throw new Error(`${what} is a human decision: only a user may do this, not ${ctx.actor.kind} "${ctx.actor.id}"`);
-  };
+  // §1.6.iii: the shared operator guard (kind !== "user" || runId) replaces the kind-only check —
+  // the runId leg closes the user-kind masquerade (a run inheriting its starter's user actor).
+  // In-run refusals record `authority.decision.recorded` (the P evidence matrix).
+  const requireUser = (ctx: HandlerContext, what: string): Promise<void> =>
+    requireOperator(ctx, what, (event) => record([event as unknown as RecordedEvent]));
   const getTask = async (taskId: string): Promise<ScopedTaskRecord> => {
     const task = await readOne<ScopedTaskRecord>(`task/${taskId}`);
     if (!task) throw new Error(`unknown task ${taskId}`);
@@ -354,7 +382,7 @@ export function workbenchComponent(options: {
       });
 
       provide("task.review.decide", async (input: { taskId: string; decision: "accept" | "rework"; note?: string }, ctx) => {
-        requireUser(ctx, "task.review.decide");
+        await requireUser(ctx, "task.review.decide");
         const task = await getTask(input.taskId);
         if (task.status !== "READY_FOR_REVIEW") throw new Error(`task.review.decide: task is ${task.status}, not READY_FOR_REVIEW`);
         if (input.decision !== "accept" && input.decision !== "rework") throw new Error("task.review.decide: decision must be accept or rework");
@@ -381,8 +409,10 @@ export function workbenchComponent(options: {
         const tasks = (await readRows("task/")).map((r) => r.value as TaskRecord).filter((t) => t.workspaceId === input.workspaceId && !TERMINAL_TASK.has(t.status));
         const own = input.taskId ? tasks.find((t) => t.id === input.taskId) : undefined;
         const protectedPaths = [...new Set(tasks.flatMap((t) => t.contract.authority?.protectedPaths ?? []))];
-        const base = own?.contract.authority ?? ALL_ALLOWED;
-        const scopes: AuthorityScopes = { ...base, protectedPaths };
+        // §1.6.i: declared authority is a declarative hint, clamped to the operator runtime
+        // ceiling; the ALL_ALLOWED fallback is retired — unbound calls get the ceiling.
+        const base = own?.contract.authority ?? OPERATOR_RUNTIME_CEILING;
+        const scopes: AuthorityScopes = { ...clampScopes(base, OPERATOR_RUNTIME_CEILING), protectedPaths };
         const elevated = (await readOne<ElevationRecord>(`elevation/${input.workspaceId}`))?.paths ?? [];
         const owner = own?.id ?? tasks.find((t) => (t.contract.authority?.protectedPaths ?? []).length > 0)?.id;
         const withTask = <T extends object>(d: T): T & { taskId?: string } => (owner ? { ...d, taskId: owner } : d);
@@ -397,11 +427,26 @@ export function workbenchComponent(options: {
         if (input.tool === "bash") {
           return withTask({ ...decideShell(scopes, String(input.args.command ?? ""), { elevatedPaths: elevated }) });
         }
+        // §1.6.i: run_code joins the authority plane (it was previously unconsulted). Its shell
+        // grants decide: `sandbox_permissions` escalations ride the destructive grant.
+        if (input.tool === "run_code") {
+          const escalated = input.args?.sandbox_permissions !== undefined && input.args.sandbox_permissions !== "none";
+          const outcome: Decision["outcome"] = scopes.shell.run === "no" ? "deny" : scopes.shell.run === "approval" || (escalated && scopes.shell.destructive !== "yes") ? "approval" : "allow";
+          return withTask({
+            outcome,
+            rule: "shell.run",
+            reason: outcome === "allow"
+              ? "code execution permitted under the shell grant"
+              : outcome === "approval"
+                ? "code execution requires approval (shell grant or escalation beyond the destructive grant)"
+                : "code execution denied: the shell grant is not given",
+          });
+        }
         return { outcome: "allow", rule: "not-applicable", reason: `${input.tool} is not path-mutating` };
       });
 
       provide("authority.elevate", async (input: { workspaceId: string; path: string }, ctx) => {
-        requireUser(ctx, "authority.elevate");
+        await requireUser(ctx, "authority.elevate");
         if (!input.path?.trim()) throw new Error("authority.elevate: an exact path is required (elevation is per path, never blanket)");
         if (/[*?[{]/.test(input.path)) throw new Error("authority.elevate: globs cannot be elevated; name the exact path");
         await record([{ type: "workbench.authority.elevated", payload: { workspaceId: input.workspaceId, path: input.path.trim() } as unknown as Json }]);
@@ -452,6 +497,12 @@ export function workbenchComponent(options: {
       // ---- Skill OS (J-WB-capability-lifecycle) ---------------------------------------------------
       provide("skill.register", async (input: { def: CapabilityContractDef }) => {
         if (!input.def?.id?.startsWith("capability.")) throw new Error('skill.register: capability ids start with "capability."');
+        // Capability-bundles tranche M (§4.4 namespace partition): seeded built-in ids are
+        // reserved — a bundle-owner registration may never shadow them; bundle ids carry owner
+        // "bundle" and a version (the deterministic reload identity).
+        const seeded = await readOne<{ def?: { owner?: string } }>(`capability/${input.def.id}`);
+        if (input.def.owner === "bundle" && seeded?.def?.owner === "builtin") throw new Error(`skill.register: ${input.def.id} is a reserved built-in id and cannot be shadowed by a bundle`);
+        if (input.def.owner === "bundle" && !input.def.version) throw new Error(`skill.register: ${input.def.id} is bundle-owned and must carry a version (manifest version + payload hash)`);
         await record([{ type: "workbench.capability.registered", payload: { def: input.def } as unknown as Json }]);
         return { capabilityId: input.def.id };
       });
@@ -474,7 +525,7 @@ export function workbenchComponent(options: {
       provide("skill.lifecycle.advance", async (input: { capabilityId: string; implementationId: string; to: CapabilityState }, ctx) => {
         const row = await readOne<BindingRecord>(`binding/${input.capabilityId}/${input.implementationId}`);
         if (!row) throw new Error(`skill.lifecycle.advance: ${input.implementationId} is not bound to ${input.capabilityId}`);
-        if (input.to === "AUTHORITY_GRANTED" || input.to === "REVIEWED" || input.to === "INSTALLED") requireUser(ctx, `granting ${input.to}`);
+        if (input.to === "AUTHORITY_GRANTED" || input.to === "REVIEWED" || input.to === "INSTALLED") await requireUser(ctx, `granting ${input.to}`);
         const result = advanceLifecycle(row.state, input.to);
         if (!result.ok) throw new Error(`skill.lifecycle.advance: ${result.error}`);
         if (input.to === "ENABLED") {
@@ -545,6 +596,20 @@ export function workbenchComponent(options: {
         const id = `fb-${randomUUID().slice(0, 8)}`;
         await record([{ type: "workbench.feedback.recorded", payload: { id, feedback: input.feedback, ...(input.taskId ? { taskId: input.taskId } : {}) } as unknown as Json }]);
         return { feedbackId: id };
+      });
+
+      // ---- Remote diagnostics (F2, J-REMOTE-diagnostics) ---------------------------------------------
+      // The bounded transition family only: state changes (with the device's operator label)
+      // and bounded pairing errors. Polls, secrets, links, challenges and credentials are
+      // refused — the recorder in src/remote/mobile.ts already emits exactly this family, and
+      // this handler is the validated surface for anything else that needs it.
+      provide("workbench.remote.record", async (input: { readonly events: readonly { readonly type: string; readonly payload: Json }[] }) => {
+        const allowed: ReadonlySet<string> = new Set(["workbench.remote.state", "workbench.remote.error"]);
+        for (const event of input.events) {
+          if (!allowed.has(event.type)) throw new Error(`workbench.remote.record: ${event.type} is outside the remote diagnostics family`);
+        }
+        await record(input.events.map((e) => ({ type: e.type, payload: e.payload })));
+        return { recorded: input.events.length };
       });
 
       // ---- Seed (idempotent): the catalog, example bindings and the two reference workflows -------------

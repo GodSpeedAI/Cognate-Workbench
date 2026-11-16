@@ -60,3 +60,7 @@ history and driving a model -> tool_calls -> capability invocation loop.
 
 - Run (from repo root): `bun test test`
 - Covered by, among others: `test/J-C-tool-execution.test.ts` (tool loop, read-before-edit), `test/J-D-approval.test.ts` (approval gates), `test/J-E-plan.test.ts` (plan mode), `test/J-F-delegation.test.ts` (`subagent`), `test/J-H-provider-error.test.ts` and `test/J-H-cancellation.test.ts` (retry/cancellation), `test/expert-model-routing.test.ts` and `test/J-TASK-expert-provenance.red.test.ts` (Expert path), `test/J-CFG-config-path.test.ts` and `test/J-SET-settings.test.ts` (`agent.config`). All files verified present under `test/`.
+
+## External harness agent
+
+- [agentHarness.ts:agentHarnessAgent] — agent id `"agent.harness"`; same input as `agent.coding` (`{ sessionId, workspaceId, message }`). Requires a Session bound with `session.harness.bind`. Drives an external CLI (Claude Code, Codex, ACP agents) through the recorded step `harness.turn.advance` and maps its output onto the native domain events. Adapters, catalog, detection and the host-process runner live in `harness/`; the child environment is an allowlist (no Workbench provider keys; opt-in names via `COGNATE_HARNESS_ENV_PASSTHROUGH`). Guarantee gaps (authority checks, containment, protected evidence, settlement) are stated in `.sea/interaction/` J-HARNESS-*.

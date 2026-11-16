@@ -4,6 +4,7 @@
 import { useState } from "react";
 import type { EvidenceKind } from "../../workbench/types.ts";
 import type { LedgerRow, LedgerGroup } from "../../workbench/ledger.ts";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 interface LedgerPanelProps {
   readonly rows: readonly LedgerRow[];
@@ -154,17 +155,15 @@ export function LedgerPanel({
 
             <div className="wb-field">
               <label htmlFor="evidence-kind">Kind</label>
-              <select
+              <MenuSelect
                 id="evidence-kind"
+                ariaLabel="Kind"
                 value={formKind}
-                onChange={(e) => setFormKind(e.currentTarget.value as EvidenceKind)}
-              >
-                {EVIDENCE_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {kind}
-                  </option>
-                ))}
-              </select>
+                variant="field"
+                placement="down"
+                options={EVIDENCE_KINDS.map((kind) => ({ value: kind, label: kind }))}
+                onPick={(v) => setFormKind(v)}
+              />
               <span className="wb-muted">
                 Human acceptance is recorded by the reviewer, not here.
               </span>
@@ -172,33 +171,32 @@ export function LedgerPanel({
 
             <div className="wb-field">
               <label htmlFor="evidence-status">Status</label>
-              <select
+              <MenuSelect
                 id="evidence-status"
+                ariaLabel="Status"
                 value={formStatus}
-                onChange={(e) =>
-                  setFormStatus(e.currentTarget.value as "pass" | "fail" | "pending")
-                }
-              >
-                <option value="pass">Pass</option>
-                <option value="fail">Fail</option>
-                <option value="pending">Pending</option>
-              </select>
+                variant="field"
+                placement="down"
+                options={[
+                  { value: "pass", label: "Pass" },
+                  { value: "fail", label: "Fail" },
+                  { value: "pending", label: "Pending" },
+                ]}
+                onPick={(v) => setFormStatus(v)}
+              />
             </div>
 
             <div className="wb-field">
               <label htmlFor="evidence-criterion">Criterion (optional)</label>
-              <select
+              <MenuSelect
                 id="evidence-criterion"
+                ariaLabel="Criterion (optional)"
                 value={formCriterion}
-                onChange={(e) => setFormCriterion(e.currentTarget.value)}
-              >
-                <option value="">None</option>
-                {rows.map((row) => (
-                  <option key={row.criterionId} value={row.criterionId}>
-                    {row.description}
-                  </option>
-                ))}
-              </select>
+                variant="field"
+                placement="down"
+                options={[{ value: "", label: "None" }, ...rows.map((row) => ({ value: row.criterionId, label: row.description }))]}
+                onPick={(v) => setFormCriterion(v)}
+              />
             </div>
 
             <div className="wb-field">

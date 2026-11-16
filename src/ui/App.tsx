@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, RefObject } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ClipboardEvent, ReactNode } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
@@ -15,6 +15,13 @@ import { interruptedCapability, isModelGeneration } from "../capabilities/ambigu
 import { CognitiveFrame, SurfaceView } from "./CognitiveFrame.tsx";
 import { SshWorkspaceForm, WorldBanner, WslWorkspaceForm, useExecutionWorlds } from "./RemoteWorkspaceForm.tsx";
 import { DirectoryField } from "./DirectoryField.tsx";
+import { FirstRunFlow } from "./onboarding/FirstRun.tsx";
+import { capabilityErrorMessage } from "./models/providerCatalog.ts";
+import { ProvidersPane } from "./models/ProvidersPane.tsx";
+import { AgentsPane } from "./agents/AgentsPane.tsx";
+import { AgentChip, AgentNotice, agentLabel } from "./agents/AgentChip.tsx";
+import { useHarnessBindings, useHarnessList, type HarnessChoice, type HarnessInfo } from "./agents/useHarness.ts";
+import { ModelPicker } from "./models/ModelPicker.tsx";
 import { errorText } from "./workbench/data.ts";
 import type { TraceRow, TraceRequest, TraceTool, TraceTurn } from "../projections/sessionTrace.ts";
 import { TOOL_DEFS } from "../agents/agentCoding.ts";
@@ -51,7 +58,6 @@ import {
   DEFAULT_WORK_DETAILS_MODE,
   WORK_DETAILS_LABELS,
   WORK_DETAILS_MODES,
-  isWorkDetailsMode,
   showsLiveProcessDetail,
   type WorkDetailsMode,
 } from "../workDetails.ts";
@@ -68,7 +74,6 @@ import {
   PERMISSION_MODES,
   SEND_BEHAVIOR_LABELS,
   SEND_BEHAVIORS,
-  isAppearanceMode,
   isPermissionMode,
   pluginEnabled,
   resolveGeneralSettings,
@@ -79,6 +84,19 @@ import {
   type SendBehavior,
 } from "../settings.ts";
 import {
+  ArchiveIcon,
+  BotIcon,
+  BranchIcon,
+  ChipIcon,
+  CommandIcon,
+  InfoIcon,
+  KeyboardIcon,
+  MoonIcon,
+  PaletteIcon,
+  SessionIcon,
+  ShieldIcon,
+  SunIcon,
+  UndoIcon,
   CheckIcon,
   ChevronDownIcon,
   PluginIcon,
@@ -92,7 +110,6 @@ import {
   EditIcon,
   FileIcon,
   FolderIcon,
-  FullscreenIcon,
   GearIcon,
   ListViewIcon,
   LogoIcon,
@@ -101,25 +118,24 @@ import {
   SendIcon,
   SplitViewIcon,
   StopIcon,
+  TerminalIcon,
+  GlobeIcon,
   TrashIcon,
-} from "./icons.tsx";
+  PinIcon, } from "./icons.tsx";
 import {
   ARCHIVE_FILTER_LABELS,
   GROUP_BY_LABELS,
-  applyArchiveFilter,
   groupSessions,
   hiddenArchiveCount,
-  orderSessions,
-  sessionMatchesSearch,
   type ArchiveFilter,
   type GroupBy,
   type OrderBy,
   type SessionRow,
-  type SessionGroup,
 } from "../sidebarView.ts";
 import {
   SHORTCUT_ACTIONS,
   chordFromKeyboardEvent,
+  resolveKeypress,
   describeChord,
   effectiveChord,
   isChord,
@@ -127,15 +143,30 @@ import {
   restoreDefaults,
   validateAssignment,
 } from "../shortcuts.ts";
-import type { ConfigPathResult } from "../capabilities/configPath.ts";
 import { copyToClipboard, downloadTextFile } from "./download.ts";
-import type { ModelCatalogResult } from "../modelCatalog.ts";
 import type { PluginCatalogResult } from "../capabilities/pluginInstall.ts";
 import { catalogEntry, optionalPluginEnabled, type PluginStatus, type PluginView } from "../plugins.ts";
 import { diffHunk, renderFileAfterChange, renderUnifiedPatch, reviewTabKey, type EditSummary, type ReviewTab } from "../reviewPatch.ts";
 import type { ShortcutOverrides } from "../shortcuts.ts";
 import { RemoteButton, RemoteDialog, RemoteIndicator } from "./RemotePanel.tsx";
 import { resolveSessionLink } from "./sessionLink.ts";
+import { registerShellBridge } from "./shell/desktopBridge.ts";
+import { composeTitle, highestTitleState, type TitleState } from "./titleStatus.ts";
+import { CloseButton, DialogHeader } from "./shell/DialogHeader.tsx";
+import { OPEN_MODAL_STACK, useModalFocus } from "./shell/useModalFocus.ts";
+import { ToastProvider, useToast } from "./shell/Toast.tsx";
+import { Inspector, InspectorEmpty, InspectorProvider, InspectorTab, useInspector } from "./shell/Inspector.tsx";
+import { InspectorExtraTabs } from "./inspector/InspectorExtraTabs.tsx";
+// J-TERMINAL/J-BROWSER: the dock surfaces load on first open (React.lazy). Their module graph
+// includes the xterm renderer and the browser panel; keeping them out of the initial chunk keeps
+// every non-dock page load light — measurable in the UI E2Es under parallel load.
+const TerminalPanel = lazy(() => import("./terminal/TerminalPanel.tsx").then((m) => ({ default: m.TerminalPanel })));
+const BrowserPanel = lazy(() => import("./browser/BrowserPanel.tsx").then((m) => ({ default: m.BrowserPanel })));
+import { ResizeHandle, clampWidth } from "./shell/ResizeHandle.tsx";
+import { MenuSelect } from "./shell/MenuSelect.tsx";
+import { MainHeader, type CenterView } from "./shell/MainHeader.tsx";
+import { CommandPalette, type PaletteItem } from "./shell/CommandPalette.tsx";
+import { Kbd, chordLabel, isApplePlatform } from "./shell/Kbd.tsx";
 
 interface WorkspaceRow {
   readonly id: string;
@@ -166,6 +197,8 @@ interface ChatMessage {
   readonly retryCount?: number;
   /** The last successful `edit` tool call this turn made, if any (`10-file-change-*`). */
   readonly editSummary?: EditSummary;
+  /** Every file this turn changed (last successful edit per path): feeds the "Files changed" card. */
+  readonly editSummaries?: readonly EditSummary[];
   /** Step count for this turn — `useToolTimeline(activeRunId).length + 1` at finalize time (the
    *  `+1` is the model's own generation step, present even with zero tool calls or on a cancelled
    *  turn) — feeds the composer footer's "N turns M steps" counter. Critic round-2 batch A P1:
@@ -394,18 +427,6 @@ function useTheme(appearance: AppearanceMode): string {
   return theme;
 }
 
-/** Whether the given first-run step (`"notice"` | `"apikey"`) has already been dismissed for this
- *  `COGNATE_HARNESS_HOME` — folded from durable `onboarding.dismissed` events (`onboarding`
- *  projection). Absence of a row is what makes the first-run dialog pair reappear on a fresh home,
- *  same mechanism the reference uses per-`DSH_HOME` (critic round-1 P0-1). */
-function useOnboardingDismissed(step: "notice" | "apikey"): boolean {
-  const rows = useProjection("onboarding");
-  // `ReadProjection` strips the tenant prefix the projection stores keys with (same convention as
-  // `model-config`'s "current" / `workspaces`'s "record/<id>" rows) — the row key here is the bare
-  // step name, not `${tenant}/${step}`.
-  return useMemo(() => rows?.some((r) => r.key === step) ?? false, [rows, step]);
-}
-
 /** "just now" / "2m" / "3h" / "5d" — same rough granularity as the reference's session-tree
  * relative-time suffix (see reference/observations/aria/15-completed-session.desktop.txt: a
  * session row name ends in a relative-time word like "now"). */
@@ -435,16 +456,29 @@ export function SessionRowButton({
   session,
   active,
   planPending,
+  harnessLabel,
   onOpen,
   onToggleArchive,
+  onRename,
+  onCopyPath,
+  onTogglePin,
 }: {
   readonly session: SessionRow;
   readonly active: boolean;
   readonly planPending: boolean;
+  /** The external agent CLI this session is bound to, when it is not the native agent. */
+  readonly harnessLabel?: string | undefined;
   readonly onOpen: () => void;
   readonly onToggleArchive: () => void;
+  /** Opens the rename dialog (J-SESSION-rename). Omitted: the menu simply has no Rename. */
+  readonly onRename?: () => void;
+  /** Copies the workspace folder path (client-only). Omitted: no Copy workspace path item. */
+  readonly onCopyPath?: () => void;
+  /** Toggles the durable pin (F1, J-SESSION-pin). Omitted: no Pin item. */
+  readonly onTogglePin?: () => void;
 }) {
   const archived = session.archived === true;
+  const pinned = session.pinned === true;
   const label = session.title || "New Session";
   // A waiting run is labelled by what it is blocked on: an interrupted step needs operator
   // reconciliation (never an approval); other known non-approval waits name their type.
@@ -452,14 +486,44 @@ export function SessionRowButton({
   const needsReconciliation = waiting && session.waitingType === "ambiguous-invocation";
   // A SEA-Forge escalation is an approval, decided by the external authority (P02).
   const otherWait = waiting && !needsReconciliation && session.waitingType && session.waitingType !== "tool-approval" && session.waitingType !== "governance-approval" ? session.waitingType : undefined;
+  const status = needsReconciliation || waiting ? "waiting" : session.lastStatus === "running" ? "running" : session.lastStatus === "failed" ? "failed" : undefined;
+  const statusLabel = status === "running" ? "Running" : status === "failed" ? "Last run failed" : status === "waiting" ? "Needs you" : undefined;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [menuOpen]);
   return (
-    <div role="treeitem" aria-selected={active} className={active ? "session-row-wrap active" : "session-row-wrap"}>
+    <div role="treeitem" aria-selected={active} className={`${active ? "session-row-wrap active" : "session-row-wrap"}${menuOpen ? " menu-open" : ""}`}>
       <button type="button" className="session-row" onClick={onOpen} title={session.title}>
+        <span className={`session-status-dot${status ? ` is-${status}` : ""}`} aria-hidden="true" title={statusLabel} />
         <span className="session-row-title">
-          {planPending ? "Plan awaiting review " : needsReconciliation ? "Needs reconciliation " : otherWait ? `Waiting: ${otherWait} ` : waiting ? "Waiting for approval " : ""}
+          {/* D-24: the wait/reconcile prefixes duplicated the row's own badge and made the
+           *  title truncate mid-name; the badge + status dot + tooltip carry the signal. */}
+          {planPending ? "Plan awaiting review " : ""}
           {label}
           {archived ? " (archived)" : ""}
         </span>
+        {harnessLabel && (
+          <span className="session-agent-tag" title={`Runs ${harnessLabel}`} aria-label={`Agent: ${harnessLabel}`}>
+            <TerminalIcon aria-hidden="true" />
+          </span>
+        )}
         {needsReconciliation && (
           <span className="approval-badge" title="Needs reconciliation">
             <span className="approval-badge-dot" aria-hidden="true" />
@@ -472,169 +536,129 @@ export function SessionRowButton({
             {otherWait ? "Waiting" : "Approval"}
           </span>
         )}
+        {status === "running" && <span className="sr-only">Running</span>}
+        {status === "failed" && <span className="sr-only">Last run failed</span>}
+        {pinned && <span className="session-pin-tag" title="Pinned to the top" aria-label="Pinned"><PinIcon aria-hidden="true" /></span>}
         <span className="session-row-time">{relativeTime(session.updatedAt)}</span>
       </button>
-      <button
-        type="button"
-        className="icon-btn session-row-archive"
-        aria-label={archived ? `Restore ${label} from the archive` : `Archive ${label}`}
-        title={archived ? "Restore from archive" : "Archive"}
-        aria-pressed={archived}
-        onClick={onToggleArchive}
-      >
-        {archived ? "↺" : "⌫"}
+      <div className="session-row-menu-wrap" ref={menuRef}>
+        <button
+          type="button"
+          className="icon-btn session-row-more"
+          aria-label={`Session actions for ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title="Session actions"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <MoreIcon />
+        </button>
+        {menuOpen && (
+          <div role="menu" className="workspace-actions-menu session-row-menu">
+            {onTogglePin && (
+              <button
+                type="button"
+                role="menuitem"
+                aria-label={pinned ? `Unpin ${label}` : `Pin ${label} to the top`}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onTogglePin();
+                }}
+              >
+                {pinned ? <UndoIcon /> : <PinIcon />}
+                {pinned ? "Unpin" : "Pin to top"}
+              </button>
+            )}
+            {onRename && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onRename();
+                }}
+              >
+                <EditIcon />
+                Rename
+              </button>
+            )}
+            {onCopyPath && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onCopyPath();
+                }}
+              >
+                <CopyIcon />
+                Copy workspace path
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              aria-label={archived ? `Restore ${label} from the archive` : `Archive ${label}`}
+              onClick={() => {
+                setMenuOpen(false);
+                onToggleArchive();
+              }}
+            >
+              {archived ? <UndoIcon /> : <ArchiveIcon />}
+              {archived ? "Restore from archive" : "Archive"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The modal focus trap / Escape stack lives in ./shell/useModalFocus.ts (shared with the palette).
+
+/** Gates the first-run flow on the durable `onboarding` projection (steps "notice" and "apikey"),
+ *  the model config and the workspaces; the flow itself lives in ./onboarding/FirstRun.tsx. */
+function FirstRunDialogs({ onFinished }: { readonly onFinished: () => void }) {
+  const rows = useProjection("onboarding");
+  const modelConfig = useModelConfig();
+  const workspaces = useWorkspaces();
+  const has = (step: string) => rows?.some((r) => r.key === step) ?? false;
+  return (
+    <FirstRunFlow
+      noticeDismissed={rows === undefined ? undefined : has("notice")}
+      apikeyDismissed={has("apikey")}
+      hasModel={modelConfig !== undefined}
+      hasWorkspace={workspaces.length > 0}
+      onFinished={onFinished}
+    />
+  );
+}
+
+/** Shown on the empty states while no model is configured: one clear way forward. */
+function ConnectModelNotice({ onConnect }: { readonly onConnect: () => void }) {
+  return (
+    <div className="connect-model-notice" role="status">
+      <div>
+        <strong>No model provider connected</strong>
+        <span>Connect one to start a conversation.</span>
+      </div>
+      <button type="button" className="pw-primary" onClick={onConnect}>
+        Connect a model provider
       </button>
     </div>
   );
 }
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/** Open-modal stack (usage pass U2): the Keyboard shortcuts dialog stacks over Settings, and the
- *  Full-access confirmation stacks over the General pane — "Close menu or top dialog Esc" (listed
- *  as a real binding in that dialog) must close only the TOP dialog, so each mounted modal
- *  registers itself here and ignores Escape/Tab while something sits above it. */
-const OPEN_MODAL_STACK: HTMLElement[] = [];
-
-/** Shared modal contract (technical audit: only one of three modal surfaces had this before this
- *  redesign) — traps focus inside the dialog, returns focus to whatever opened it on unmount, and
- *  optionally calls `onEscape` when the dialog is open and Escape is pressed. Every modal in this
- *  app (Settings, both first-run dialogs, Keyboard shortcuts, the Full-access confirmation) uses
- *  this instead of inventing its own subset. */
-function useModalFocus(dialogRef: RefObject<HTMLElement | null>, onEscape?: () => void): void {
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    if (dialog) OPEN_MODAL_STACK.push(dialog);
-    const focusables = dialog?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-    (focusables && focusables[0] ? focusables[0] : dialog)?.focus();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only the top-most open modal reacts — a stacked dialog (shortcuts over Settings, the
-      // Full-access confirmation over General) absorbs Escape/Tab first.
-      if (dialog && OPEN_MODAL_STACK[OPEN_MODAL_STACK.length - 1] !== dialog) return;
-      if (e.key === "Escape" && onEscape) {
-        e.preventDefault();
-        onEscape();
-        return;
-      }
-      if (e.key !== "Tab" || !dialog) return;
-      const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (nodes.length === 0) return;
-      const first = nodes[0]!;
-      const last = nodes[nodes.length - 1]!;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      const index = dialog ? OPEN_MODAL_STACK.indexOf(dialog) : -1;
-      if (index >= 0) OPEN_MODAL_STACK.splice(index, 1);
-      previouslyFocused?.focus();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+/** A refused `workspace.select` in plain words: no capability name, no JSON envelope. */
+function workspaceErrorText(err: unknown): string {
+  const text = capabilityErrorMessage(err).replace(/^workspace\.select:\s*/, "");
+  const missing = /^not a directory in world \w+:\s*(.+)$/.exec(text);
+  if (missing) return `There is no folder at ${missing[1]}. Check the path, or pick one from the suggestions.`;
+  return text;
 }
 
-/** First-run dialog #1 (critic round-1 P0-1): same structure/roles as the reference's "Internal
- *  Testing Notice" (`dialog`, `heading[level=2]`, single "Continue" button; reference-behavior-
- *  matrix.md §1) — Cognate-branded wording, not DeepSeek's copy (spec: brand/copy may be swapped,
- *  the control itself may not be dropped). */
-function FirstRunNotice({ onContinue }: { readonly onContinue: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef);
-  return (
-    <div className="modal-backdrop">
-      <div
-        className="modal first-run-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="first-run-notice-heading"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <h2 id="first-run-notice-heading">Welcome to Cognate Console</h2>
-        <p>
-          Cognate Console runs a coding agent against your own workspace: it can read and edit
-          files, run shell commands, and execute code on your behalf. Every one of those actions is
-          visible in the transcript as it happens, and anything irreversible — like running
-          arbitrary code — pauses for your explicit approval first.
-        </p>
-        <p>This build is under active development; expect rough edges and changing behavior.</p>
-        <div className="modal-actions">
-          <button type="button" onClick={onContinue}>
-            Continue
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** First-run dialog #2 (critic round-1 P0-1): same structure as the reference's "Add an API key to
- *  get started" (API-key textbox, "Configure later"/"Save and continue", the latter disabled until a
- *  key is entered; reference-behavior-matrix.md §1). This tranche has no default/preset provider to
- *  key-only configure (no DeepSeek-branded "official" provider) — "Save and continue" dismisses this
- *  step the same as "Configure later"; the entered key is not persisted here (an assumption, not an
- *  observed reference behavior — see docs/known-gaps.md). Full provider setup happens in Settings →
- *  Models afterward. */
-function FirstRunApiKey({ onDismiss }: { readonly onDismiss: () => void }) {
-  const [key, setKey] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef);
-  return (
-    <div className="modal-backdrop">
-      <div
-        className="modal first-run-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="first-run-apikey-heading"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <h2 id="first-run-apikey-heading">Add an API key to get started</h2>
-        <p>Configure a model provider to start building.</p>
-        <label>
-          API key
-          <input type="password" aria-label="API key" value={key} onChange={(e) => setKey(e.currentTarget.value)} />
-        </label>
-        <div className="modal-actions">
-          <button type="button" onClick={onDismiss}>
-            Configure later
-          </button>
-          <button type="button" disabled={key.trim().length === 0} onClick={onDismiss}>
-            Save and continue
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Sequences the two first-run dialogs, gated by the `onboarding` projection — renders nothing once
- *  both steps are dismissed (or the apikey step is moot because a model is already configured, e.g.
- *  a home reused from an older build of this app). */
-function FirstRunDialogs() {
+function WorkspaceChooser({ onConnectModel }: { readonly onConnectModel?: () => void }) {
   const client = useCognate();
-  const noticeDismissed = useOnboardingDismissed("notice");
-  const apikeyDismissed = useOnboardingDismissed("apikey");
-  const modelConfig = useModelConfig();
-  const dismiss = useCallback((step: "notice" | "apikey") => void client.invoke("onboarding.dismiss", { step }), [client]);
-  if (!noticeDismissed) return <FirstRunNotice onContinue={() => dismiss("notice")} />;
-  if (!apikeyDismissed && !modelConfig) return <FirstRunApiKey onDismiss={() => dismiss("apikey")} />;
-  return null;
-}
-
-function WorkspaceChooser() {
-  const client = useCognate();
-  const settings = useGeneralSettings();
   const [path, setPath] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -648,7 +672,7 @@ function WorkspaceChooser() {
       await client.invoke("workspace.select", { path });
       setPath("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     } finally {
       setBusy(false);
     }
@@ -657,18 +681,11 @@ function WorkspaceChooser() {
   return (
     <div className="workspace-chooser">
       <div className="workspace-chooser-card">
-        <p role="alert" className="empty-state">
-          Unable to create default workspace. Use Choose workspace to select a folder.
-        </p>
-        {/* No session exists yet, so the badge reflects the durable DEFAULT preset for new sessions
-            (settings.changePreset) rather than a dead "Standard mode" label. */}
-        <PresetMenu
-          current={undefined}
-          fallback={settings.preset}
-          onPick={(preset) => {
-            void client.invoke("settings.changePreset", { preset } as never).catch((e) => console.error("settings.changePreset failed", e));
-          }}
-        />
+        {onConnectModel && <ConnectModelNotice onConnect={onConnectModel} />}
+        <div className="workspace-chooser-intro">
+          <h1 className="workspace-chooser-title">Choose a folder to work in</h1>
+          <p className="workspace-chooser-hint">Cognate runs sessions inside a folder on this computer. Pick the project you want to work on; you can add more later.</p>
+        </div>
         {/* J-WS-directory-discovery: the same accessible folder type-ahead the Add-workspace
             dialog uses — the first-run chooser and the dialog share one picker, not two flows. */}
         <DirectoryField
@@ -692,162 +709,6 @@ function WorkspaceChooser() {
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-/** A small, original list of generic OpenAI-compatible provider presets for the "Third-party model
- *  provider" combobox (critic round-1 P0-4) — deliberately not a copy of the reference's ~35-entry
- *  DeepSeek-branded provider list (that list mixes in DeepSeek's own brand assets); this is a short
- *  placeholder set of well-known OpenAI-compatible endpoints, sufficient to exercise the tab/combobox
- *  control itself. Picking one pre-fills the Custom model API form's Base URL/Provider ID/Display
- *  name fields (this app has no live per-provider defaults database beyond this).
- */
-const THIRD_PARTY_PRESETS: readonly {
-  readonly id: string;
-  readonly label: string;
-  readonly baseURL: string;
-  /** Sensible wire default for the preset; the operator can still change it in the form. */
-  readonly protocol: (typeof API_PROTOCOL_OPTIONS)[number];
-}[] = [
-  { id: "openai", label: "OpenAI", baseURL: "https://api.openai.com/v1", protocol: "OpenAI Responses" },
-  { id: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1", protocol: "OpenAI Chat Completions" },
-  { id: "azure-openai", label: "Azure OpenAI", baseURL: "https://your-resource.openai.azure.com/openai/deployments/your-deployment", protocol: "OpenAI Chat Completions" },
-  { id: "groq", label: "Groq", baseURL: "https://api.groq.com/openai/v1", protocol: "OpenAI Chat Completions" },
-  { id: "mistral", label: "Mistral", baseURL: "https://api.mistral.ai/v1", protocol: "OpenAI Chat Completions" },
-  { id: "together", label: "Together AI", baseURL: "https://api.together.xyz/v1", protocol: "OpenAI Chat Completions" },
-  { id: "fireworks", label: "Fireworks AI", baseURL: "https://api.fireworks.ai/inference/v1", protocol: "OpenAI Chat Completions" },
-  { id: "anthropic", label: "Anthropic", baseURL: "https://api.anthropic.com/v1", protocol: "Anthropic Messages" },
-];
-
-const API_PROTOCOL_OPTIONS = ["OpenAI Chat Completions", "OpenAI Responses", "Anthropic Messages"] as const;
-
-/** UI display name ↔ wire protocol value persisted by `model.configure`. "openai-compatible" is a
- *  legacy wire value that only arrives from old persisted configs; it edits as OpenAI Chat
- *  Completions (its actual semantics) and stays valid until the operator changes protocol. */
-const PROTOCOL_WIRE_VALUES = {
-  "OpenAI Chat Completions": "openai-completions",
-  "OpenAI Responses": "openai-responses",
-  "Anthropic Messages": "anthropic-messages",
-} as const satisfies Readonly<Record<(typeof API_PROTOCOL_OPTIONS)[number], WireProtocolValue>>;
-type WireProtocolValue = "openai-compatible" | "openai-completions" | "openai-responses" | "anthropic-messages";
-function protocolToWire(display: (typeof API_PROTOCOL_OPTIONS)[number]): Exclude<WireProtocolValue, "openai-compatible"> {
-  return PROTOCOL_WIRE_VALUES[display];
-}
-function wireToProtocol(wire: string): (typeof API_PROTOCOL_OPTIONS)[number] {
-  if (wire === "openai-responses") return "OpenAI Responses";
-  if (wire === "anthropic-messages") return "Anthropic Messages";
-  return "OpenAI Chat Completions";
-}
-
-interface ModelRow {
-  readonly id: string;
-  readonly modelId: string;
-  readonly displayName: string;
-}
-
-/** A shared dropdown-menu control (usage pass U2): a trigger button labelled with the current
- *  value, a `role="menu"` popover of `menuitem` buttons, outside-click/Escape to close, and
- *  ↑/↓ focus movement between items — the Work-details dropdown's behavior generalized so every
- *  General-pane menu (Permission, Language, Performance & usage, Send behavior) and the composer's
- *  access-mode menu share one implementation ("Move menu selection ↑ ↓" / "Select menu item Enter"
- *  in the Keyboard shortcuts dialog are real because of this). */
-interface DropdownMenuItem {
-  readonly label: string;
-  readonly value: string;
-  readonly disabled?: boolean;
-  readonly title?: string;
-}
-
-function DropdownMenu({
-  label,
-  items,
-  onSelect,
-  triggerAriaLabel,
-  triggerClassName,
-  dropup = false,
-  disabled = false,
-}: {
-  readonly label: string;
-  readonly items: readonly DropdownMenuItem[];
-  readonly onSelect: (value: string) => void;
-  readonly triggerAriaLabel?: string;
-  readonly triggerClassName?: string;
-  readonly dropup?: boolean;
-  readonly disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [open]);
-
-  const menuButtons = (): HTMLButtonElement[] =>
-    Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? []);
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const buttons = menuButtons();
-    if (buttons.length === 0) return;
-    const index = buttons.findIndex((b) => b === document.activeElement);
-    if (index === -1) {
-      buttons[e.key === "ArrowDown" ? 0 : buttons.length - 1]!.focus();
-    } else {
-      const delta = e.key === "ArrowDown" ? 1 : -1;
-      buttons[(index + delta + buttons.length) % buttons.length]!.focus();
-    }
-  };
-
-  return (
-    <div className="work-details-dropdown" ref={rootRef} onKeyDown={handleKeyDown}>
-      <button
-        type="button"
-        className={triggerClassName}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={triggerAriaLabel}
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-      >
-        {label}
-        <svg className="dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
-      </button>
-      {open && (
-        <div role="menu" className={dropup ? "work-details-menu dropup" : "work-details-menu"} ref={menuRef}>
-          {items.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                setOpen(false);
-                onSelect(item.value);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -878,12 +739,7 @@ function FullAccessConfirmDialog({
         tabIndex={-1}
         ref={dialogRef}
       >
-        <div className="dialog-banner">
-          <h2 id="full-access-heading">Enable Full access?</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onCancel}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Enable Full access?" titleId="full-access-heading" closeLabel="full access confirmation" onClose={onCancel} />
         <p>
           Full access lets new sessions act without the usual confirmation steps, including
           sensitive operations, file changes, and external commands. Only turn it on for tasks
@@ -935,7 +791,8 @@ const SHORTCUT_FIXED_REGIONS: readonly { readonly region: string; readonly rows:
   },
 ];
 
-/** `dialog "Keyboard shortcuts"` (usage pass U2, checkpoint 22d; made real in T11): a searchable
+/** Settings -> Keyboard shortcuts (formerly the stacked `dialog "Keyboard shortcuts"`; now a section
+ *  of the Settings page, reached by Ctrl+/ too) (usage pass U2, checkpoint 22d; made real in T11): a searchable
  *  list of this app's real actions/bindings grouped "Application" (editable) / "Message input" /
  *  "Menus and dialogs" / "Approval area", plus a contentinfo "Restore all defaults".
  *
@@ -943,23 +800,20 @@ const SHORTCUT_FIXED_REGIONS: readonly { readonly region: string; readonly rows:
  *  and writes them through `settings.changeShortcuts`, so the dialog and the global key listener
  *  always agree. Capture happens in the capture phase on `window` so neither the dialog's own
  *  Escape handling nor the global shortcut listener can fire while a chord is being typed. */
-export function ShortcutsDialog({
+export function ShortcutsPanel({
   overrides,
   onChangeShortcuts,
-  onClose,
 }: {
   /** Durable per-action overrides from the `settings` projection. */
   readonly overrides: ShortcutOverrides;
   /** Writes one whole-value shortcut patch through `settings.changeShortcuts`. */
   readonly onChangeShortcuts: (shortcuts: ShortcutOverrides) => Promise<void>;
-  readonly onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
   const [capture, setCapture] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const cancelEditing = useCallback(() => {
     setEditingId(undefined);
     setCapture(undefined);
@@ -979,7 +833,7 @@ export function ShortcutsDialog({
         await onChangeShortcuts({ [editingId]: chord });
         cancelEditing();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(workspaceErrorText(err));
       } finally {
         setSaving(false);
       }
@@ -994,13 +848,11 @@ export function ShortcutsDialog({
       await onChangeShortcuts(restoreDefaults());
       cancelEditing();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     } finally {
       setSaving(false);
     }
   }, [onChangeShortcuts, cancelEditing]);
-
-  useModalFocus(dialogRef, onClose);
 
   // Chord capture: window + capture phase so this handler runs before every other keydown listener
   // in the app, and `stopImmediatePropagation` keeps them all from acting on the same keystroke.
@@ -1046,21 +898,8 @@ export function ShortcutsDialog({
   })).filter((g) => g.rows.length > 0);
   const atDefaults = isDefault(overrides);
   return (
-    <div className="modal-backdrop modal-backdrop-stacked">
-      <div
-        className="modal shortcuts-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shortcuts-heading"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <div className="dialog-banner">
-          <h2 id="shortcuts-heading">Keyboard shortcuts</h2>
-          <button type="button" className="icon-btn" aria-label="Close keyboard shortcuts" onClick={onClose}>
-            ×
-          </button>
-        </div>
+    <div className="shortcuts-panel">
+      <div className="shortcuts-panel-inner">
         <div role="search" aria-label="Search shortcuts" className="shortcuts-search">
           <input type="search" aria-label="Search shortcuts" placeholder="Search shortcuts" value={query} onChange={(e) => setQuery(e.currentTarget.value)} />
         </div>
@@ -1074,6 +913,7 @@ export function ShortcutsDialog({
                   const current = effectiveChord(a.id, overrides);
                   return (
                     <li key={a.id}>
+                      <span className="shortcuts-row-text">{a.label}</span>
                       {editing ? (
                         <span className="shortcuts-capture">
                           <span className="shortcuts-capture-hint">
@@ -1084,23 +924,30 @@ export function ShortcutsDialog({
                           </button>
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          className="shortcuts-edit-btn"
-                          aria-label={`Edit shortcut for ${a.label}`}
-                          disabled={saving}
-                          onClick={() => {
-                            setEditingId(a.id);
-                            setCapture(undefined);
-                            setError(undefined);
-                          }}
-                        >
-                          Edit
-                        </button>
+                        <>
+                          {current ? (
+                            <>
+                              <Kbd chord={current} />
+                              <span className="sr-only">{describeChord(current)}</span>
+                            </>
+                          ) : (
+                            <span className="shortcuts-unbound">No shortcut</span>
+                          )}
+                          <button
+                            type="button"
+                            className="shortcuts-edit-btn"
+                            aria-label={`Edit shortcut for ${a.label}`}
+                            disabled={saving}
+                            onClick={() => {
+                              setEditingId(a.id);
+                              setCapture(undefined);
+                              setError(undefined);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </>
                       )}
-                      <span className="shortcuts-row-text">
-                        {a.label} {describeChord(current)}
-                      </span>
                     </li>
                   );
                 })}
@@ -1118,9 +965,9 @@ export function ShortcutsDialog({
               <ul>
                 {g.rows.map((r) => (
                   <li key={r.label}>
-                    <span className="shortcuts-row-text">
-                      {r.label} {r.keys}
-                    </span>
+                    <span className="shortcuts-row-text">{r.label}</span>
+                    <Kbd chord={r.keys.split(" ").join("+")} />
+                    <span className="sr-only">{r.keys}</span>
                   </li>
                 ))}
               </ul>
@@ -1145,9 +992,8 @@ export function ShortcutsDialog({
   );
 }
 
-/** One menu-button control of the General pane (usage pass U2, §11): the button's label IS the
- *  current value (reference convention — every General menu renders its selection as the label),
- *  opening a small `role="menu"` list. Closes on outside click and Escape. */
+/** One select control of the General pane, drawn with the shell's own menu (MenuSelect) so it matches
+ *  the rest of the app in both themes and is fully keyboard operable. */
 function SettingMenu<T extends string>({
   value,
   options,
@@ -1161,49 +1007,18 @@ function SettingMenu<T extends string>({
   readonly disabled?: boolean;
   readonly ariaLabel: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const current = options.find((o) => o.value === value)?.label ?? value;
+  return <MenuSelect variant="field" placement="down" ariaLabel={ariaLabel} value={value} options={options} onPick={onPick} {...(disabled === undefined ? {} : { disabled })} />;
+}
+
+/** One row of a settings card: label + description on the left, the control on the right. */
+function SettingRow({ label, description, children }: { readonly label: string; readonly description?: string; readonly children: React.ReactNode }) {
   return (
-    <div className="work-details-dropdown" ref={ref}>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel} disabled={disabled} onClick={() => setOpen(!open)}>
-        {current}
-        <svg className="dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
-      </button>
-      {open && (
-        <div role="menu" className="work-details-menu">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                onPick(o.value);
-                setOpen(false);
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="settings-row" role="group" aria-label={label}>
+      <div className="settings-row-text">
+        <div className="settings-row-label">{label}</div>
+        {description && <div className="settings-row-desc">{description}</div>}
+      </div>
+      <div className="settings-row-control">{children}</div>
     </div>
   );
 }
@@ -1266,8 +1081,6 @@ function BuiltInPluginsPane({ settings }: { readonly settings: GeneralSettings }
   const globalRows = GLOBAL_PLUGIN_CATALOG.filter((p) => matches(p.name, p.id, p.description));
   return (
     <>
-      <h3>Built-in plugins</h3>
-      <p className="settings-description">Inspect the plugins this deployment ships.</p>
       <input
         type="search"
         aria-label="Search plugins"
@@ -1359,8 +1172,6 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
   const [configFor, setConfigFor] = useState<AgentPreset | undefined>(undefined);
   return (
     <>
-      <h3>Agent presets</h3>
-      <p className="settings-description">Choose the agent's tools and how it works. Use Standard mode for everyday tasks.</p>
       <ul className="plugins-list" aria-label="Agent presets">
         {AGENT_PRESETS.map((preset) => {
           const isDefault = settings.preset === preset;
@@ -1402,12 +1213,7 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
       {detailsFor && (
         <div className="modal-backdrop modal-backdrop-stacked">
           <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="preset-details-heading" tabIndex={-1}>
-            <div className="dialog-banner">
-              <h2 id="preset-details-heading">{AGENT_PRESET_LABELS[detailsFor]}</h2>
-              <button type="button" className="icon-btn" aria-label="Close" onClick={() => setDetailsFor(undefined)}>
-                ×
-              </button>
-            </div>
+            <DialogHeader title={AGENT_PRESET_LABELS[detailsFor]} titleId="preset-details-heading" closeLabel="preset details" onClose={() => setDetailsFor(undefined)} />
             <p>{PRESET_DETAILS[detailsFor]}</p>
             <div className="modal-actions">
               <button type="button" onClick={() => setDetailsFor(undefined)}>
@@ -1420,12 +1226,7 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
       {configFor && (
         <div className="modal-backdrop modal-backdrop-stacked">
           <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="preset-config-heading" tabIndex={-1}>
-            <div className="dialog-banner">
-              <h2 id="preset-config-heading">View configuration · {AGENT_PRESET_LABELS[configFor]}</h2>
-              <button type="button" className="icon-btn" aria-label="Close" onClick={() => setConfigFor(undefined)}>
-                ×
-              </button>
-            </div>
+            <DialogHeader title={`View configuration · ${AGENT_PRESET_LABELS[configFor]}`} titleId="preset-config-heading" closeLabel="preset configuration" onClose={() => setConfigFor(undefined)} />
             <p className="settings-description">The tools this preset registers for the agent's model calls:</p>
             <ul className="plugins-list">
               {SESSION_PLUGIN_CATALOG.filter((p) => p.presets.includes(configFor)).map((p) => (
@@ -1452,786 +1253,305 @@ function AgentPresetsPane({ settings }: { readonly settings: GeneralSettings }) 
  *  usage, Coding Tools, Keyboard shortcuts, Send behavior while busy, and a current-version
  *  footer. Every control writes through its own durable `settings.change*` capability; the
  *  `settings` projection round trip re-renders the pane with the new value. */
+function useSettingsChange() {
+  const client = useCognate();
+  const toast = useToast();
+  return useCallback(
+    async (capability: string, field: string, value: unknown) => {
+      try {
+        await client.invoke(capability, { [field]: value } as never);
+        toast.show("Settings saved");
+      } catch (error) {
+        console.error(`settings: ${capability} failed`, error);
+        toast.show("Could not save that setting");
+      }
+    },
+    [client, toast],
+  );
+}
+
 function GeneralPane({
   settings,
-  onOpenShortcuts,
   fullAccessConfirm,
   setFullAccessConfirm,
 }: {
   readonly settings: GeneralSettings;
-  readonly onOpenShortcuts: () => void;
   readonly fullAccessConfirm: boolean;
   readonly setFullAccessConfirm: (open: boolean) => void;
 }) {
-  const client = useCognate();
-  const change = useCallback(
-    async (capability: string, field: string, value: unknown) => {
-      try {
-        await client.invoke(capability, { [field]: value } as never);
-      } catch (error) {
-        console.error(`settings: ${capability} failed`, error);
-      }
-    },
-    [client],
-  );
-
+  const change = useSettingsChange();
   return (
-    <>
-      <h3>General</h3>
-
-      <p className="settings-subtitle">Permission</p>
-      <p className="settings-description">Choose the default permission mode for new sessions</p>
-      <SettingMenu
-        ariaLabel="Permission mode for new sessions"
-        value={settings.permission}
-        disabled={fullAccessConfirm}
-        options={PERMISSION_MODES.map((m) => ({ value: m, label: PERMISSION_LABELS[m] }))}
-        onPick={(m) => {
-          // Checkpoint 22f: "Full access" never commits directly — it opens the confirmation
-          // dialog, whose checked-state "Enable Full access" button commits.
-          if (m === "full-access") setFullAccessConfirm(true);
-          else void change("settings.changePermission", "permission", m);
-        }}
-      />
-
-      <p className="settings-subtitle">Language</p>
-      <SettingMenu
-        ariaLabel="Language"
-        value={settings.language}
-        options={LANGUAGE_CODES.map((l) => ({ value: l, label: LANGUAGE_LABELS[l] }))}
-        onPick={(l) => void change("settings.changeLanguage", "language", l)}
-      />
-
-      <p className="settings-subtitle">Appearance</p>
-      <div role="group" aria-label="Appearance" className="appearance-group">
-        {APPEARANCE_MODES.map((mode) => (
-          <button key={mode} type="button" aria-pressed={settings.appearance === mode} onClick={() => void change("settings.changeAppearance", "appearance", mode)}>
-            {mode === "light" ? "Light" : mode === "dark" ? "Dark" : "System"}
-          </button>
-        ))}
-      </div>
-
-      <p className="settings-subtitle">Font size</p>
-      <p className="settings-description">Only affects conversation content</p>
-      <div className="font-size-stepper" role="group" aria-label="Font size">
-        <span className="font-size-value">{settings.fontSize}</span>
+    <div className="settings-card">
+      <SettingRow label="Permission" description="Default permission mode for new sessions">
+        <SettingMenu
+          ariaLabel="Permission mode for new sessions"
+          value={settings.permission}
+          disabled={fullAccessConfirm}
+          options={PERMISSION_MODES.map((m) => ({ value: m, label: PERMISSION_LABELS[m] }))}
+          onPick={(m) => {
+            // Checkpoint 22f: "Full access" never commits directly — it opens the confirmation
+            // dialog, whose checked-state "Enable Full access" button commits.
+            if (m === "full-access") setFullAccessConfirm(true);
+            else void change("settings.changePermission", "permission", m);
+          }}
+        />
+      </SettingRow>
+      <SettingRow label="Language">
+        <SettingMenu
+          ariaLabel="Language"
+          value={settings.language}
+          options={LANGUAGE_CODES.map((l) => ({ value: l, label: LANGUAGE_LABELS[l] }))}
+          onPick={(l) => void change("settings.changeLanguage", "language", l)}
+        />
+      </SettingRow>
+      <SettingRow label="Work details" description="How much detail to show for tool calls">
+        <SettingMenu
+          ariaLabel="Work details"
+          value={settings.workDetails}
+          options={WORK_DETAILS_MODES.map((m) => ({ value: m, label: WORK_DETAILS_LABELS[m] }))}
+          onPick={(m) => void change("settings.changeWorkDetails", "workDetails", m)}
+        />
+      </SettingRow>
+      <SettingRow label="Performance & usage" description="How much performance and usage information to show">
+        <SettingMenu
+          ariaLabel="Performance and usage detail"
+          value={settings.performanceDetail}
+          options={(["compact", "detailed"] as const).map((m) => ({ value: m, label: PERFORMANCE_DETAIL_LABELS[m] }))}
+          onPick={(m) => void change("settings.changePerformanceDetail", "performanceDetail", m)}
+        />
+      </SettingRow>
+      <SettingRow label="Coding Tools" description="Shows trajectory, code diffs, and Agent preset switching in new chats">
         <button
           type="button"
-          aria-label="Increase font size"
-          disabled={settings.fontSize >= MAX_FONT_SIZE_PX}
-          onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize + 1)}
-        >
-          +
-        </button>
-        <button
-          type="button"
-          aria-label="Decrease font size"
-          disabled={settings.fontSize <= MIN_FONT_SIZE_PX}
-          onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize - 1)}
-        >
-          −
-        </button>
-        <span className="font-size-unit">px</span>
-      </div>
-
-      <p className="settings-subtitle">Work details</p>
-      <p className="settings-description">Choose how much detail to show for tool calls</p>
-      <SettingMenu
-        ariaLabel="Work details"
-        value={settings.workDetails}
-        options={WORK_DETAILS_MODES.map((m) => ({ value: m, label: WORK_DETAILS_LABELS[m] }))}
-        onPick={(m) => void change("settings.changeWorkDetails", "workDetails", m)}
-      />
-
-      <p className="settings-subtitle">Performance &amp; usage</p>
-      <p className="settings-description">Choose how much performance and usage information to show</p>
-      <SettingMenu
-        ariaLabel="Performance and usage detail"
-        value={settings.performanceDetail}
-        options={(["compact", "detailed"] as const).map((m) => ({ value: m, label: PERFORMANCE_DETAIL_LABELS[m] }))}
-        onPick={(m) => void change("settings.changePerformanceDetail", "performanceDetail", m)}
-      />
-
-      <p className="settings-subtitle">Coding Tools</p>
-      <p className="settings-description">Shows trajectory, code diffs, and Agent preset switching in new chats</p>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={settings.codingTools}
-        aria-label="Coding Tools"
-        className="settings-switch"
-        onClick={() => void change("settings.changeCodingTools", "codingTools", !settings.codingTools)}
-      />
-
-      <p className="settings-subtitle">Keyboard shortcuts</p>
-      <p className="settings-description">View and edit available shortcuts and input actions</p>
-      <button type="button" onClick={onOpenShortcuts}>
-        Edit shortcuts
-      </button>
-
-      <p className="settings-subtitle">Send behavior while busy</p>
-      <p className="settings-description">
-        What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior
-      </p>
-      <SettingMenu
-        ariaLabel="Send behavior while busy"
-        value={settings.sendBehavior}
-        options={SEND_BEHAVIORS.map((b) => ({ value: b, label: SEND_BEHAVIOR_LABELS[b] }))}
-        onPick={(b) => void change("settings.changeSendBehavior", "sendBehavior", b)}
-      />
-
-      <p className="settings-version">Current version: {APP_VERSION}</p>
-    </>
-  );
-}
-
-/** Settings → Models: a provider list (row + Cancel/Apply for the configured provider's API key,
- *  Edit/Delete) plus a two-tab "Add model provider" wizard (Third-party combobox / Custom model API
- *  form with a Models sub-list and Cancel/Create provider) — critic round-1 P0-4/P1-4. This tranche's
- *  backend (`model.configure`) holds one live provider config (`model-config` projection's single
- *  `"current"` row), so "Edit" reopens the wizard prefilled with the current config. Delete is a
- *  real two-step action that removes the configured provider and its stored secret. */
-/** "Open configuration file" (T11, J-CFG-config-path): the browser cannot open a local file, so the
- *  button resolves where configuration lives and hands over the real, non-secret bytes — the path to
- *  copy, the recognised environment variables with sensitive values already redacted, and a
- *  download of the exact file. Nothing secret is ever fetched or rendered. */
-export function ConfigFileDialog({
-  onResolve,
-  onClose,
-}: {
-  /** Resolves the configuration facts (`config.path`). Injected so this dialog is testable. */
-  readonly onResolve: () => Promise<ConfigPathResult>;
-  readonly onClose: () => void;
-}) {
-  const [info, setInfo] = useState<ConfigPathResult | undefined>(undefined);
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [copied, setCopied] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef, onClose);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await onResolve();
-        if (!cancelled) setInfo(result);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setBusy(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [onResolve]);
-
-  return (
-    <div className="modal-backdrop modal-backdrop-stacked">
-      <div className="modal config-file-dialog" role="dialog" aria-modal="true" aria-labelledby="config-file-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="config-file-heading">Configuration file</h2>
-          <button type="button" className="icon-btn" aria-label="Close configuration file" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {busy && <p className="empty-state small">Resolving configuration location…</p>}
-        {!busy && error && (
-          <p role="alert" className="form-error">
-            {error}
-          </p>
-        )}
-        {!busy && info && (
-          <div className="config-file-body">
-            <dl className="config-file-facts">
-              <dt>Home directory</dt>
-              <dd>
-                <code>{info.home}</code>
-              </dd>
-              <dt>Configuration file</dt>
-              <dd>
-                <code>{info.configFile}</code>
-                <span className={info.configFileExists ? "config-file-exists" : "config-file-missing"}>
-                  {info.configFileExists ? "Exists" : "Not present yet — the download below creates it"}
-                </span>
-              </dd>
-            </dl>
-            <div className="config-file-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  void copyToClipboard(info.configFile).then((ok) => setCopied(ok));
-                }}
-              >
-                {copied ? "Path copied" : "Copy path"}
-              </button>
-              <button type="button" onClick={() => downloadTextFile("cognate.config.json", info.export)}>
-                Download configuration
-              </button>
-            </div>
-            <h3>Settings in effect</h3>
-            <pre className="config-file-pre">{JSON.stringify(info.settings, null, 2)}</pre>
-            <h3>Environment</h3>
-            <table className="config-file-env">
-              <thead>
-                <tr>
-                  <th scope="col">Variable</th>
-                  <th scope="col">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {info.environment.map((entry) => (
-                  <tr key={entry.name}>
-                    <td>
-                      <code>{entry.name}</code>
-                    </td>
-                    <td>
-                      <code>{entry.value}</code>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="settings-description">Secrets are never included in this view or in the download.</p>
-          </div>
-        )}
-      </div>
+          role="switch"
+          aria-checked={settings.codingTools}
+          aria-label="Coding Tools"
+          className="settings-switch"
+          onClick={() => void change("settings.changeCodingTools", "codingTools", !settings.codingTools)}
+        />
+      </SettingRow>
+      <SettingRow label="Send behavior while busy" description="What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior">
+        <SettingMenu
+          ariaLabel="Send behavior while busy"
+          value={settings.sendBehavior}
+          options={SEND_BEHAVIORS.map((b) => ({ value: b, label: SEND_BEHAVIOR_LABELS[b] }))}
+          onPick={(b) => void change("settings.changeSendBehavior", "sendBehavior", b)}
+        />
+      </SettingRow>
     </div>
   );
 }
 
-function SettingsModels({
+/** Settings → Appearance: theme (segmented) and conversation font size (stepper). */
+function AppearancePane({ settings }: { readonly settings: GeneralSettings }) {
+  const change = useSettingsChange();
+  return (
+    <div className="settings-card">
+      <SettingRow label="Theme" description="Light, dark, or follow the operating system">
+        <div role="group" aria-label="Appearance" className="segmented">
+          {APPEARANCE_MODES.map((mode) => (
+            <button key={mode} type="button" aria-pressed={settings.appearance === mode} onClick={() => void change("settings.changeAppearance", "appearance", mode)}>
+              {mode === "light" ? <SunIcon /> : mode === "dark" ? <MoonIcon /> : <ChipIcon />}
+              {mode === "light" ? "Light" : mode === "dark" ? "Dark" : "System"}
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      <SettingRow label="Font size" description="Only affects conversation content">
+        <div className="stepper font-size-stepper" role="group" aria-label="Font size">
+          <button
+            type="button"
+            aria-label="Decrease font size"
+            disabled={settings.fontSize <= MIN_FONT_SIZE_PX}
+            onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize - 1)}
+          >
+            −
+          </button>
+          <span className="font-size-value" aria-live="polite">
+            {settings.fontSize} px
+          </span>
+          <button
+            type="button"
+            aria-label="Increase font size"
+            disabled={settings.fontSize >= MAX_FONT_SIZE_PX}
+            onClick={() => void change("settings.changeFontSize", "fontSize", settings.fontSize + 1)}
+          >
+            +
+          </button>
+        </div>
+      </SettingRow>
+    </div>
+  );
+}
+
+/** Settings → About: what this build is and where its keys live. */
+function AboutPane() {
+  return (
+    <div className="settings-card">
+      <SettingRow label="Version" description="This build of Cognate Workbench">
+        <code>{APP_VERSION}</code>
+      </SettingRow>
+      <SettingRow label="Keyboard" description="Open the command palette to reach anything">
+        <Kbd chord="Ctrl+K" />
+      </SettingRow>
+      <SettingRow label="Configuration" description="Where settings, provider config and the config export live">
+        <span className="settings-row-note">Use “Open configuration file” at the top of this page</span>
+      </SettingRow>
+    </div>
+  );
+}
+
+
+/** Settings sections, in nav order. `description` is the muted line under each section's h2. */
+export const SETTINGS_SECTIONS = [
+  { id: "general", label: "General", description: "Defaults for new sessions and how the agent reports its work.", icon: <GearIcon /> },
+  { id: "appearance", label: "Appearance", description: "Theme and the size of conversation text.", icon: <PaletteIcon /> },
+  { id: "models", label: "Providers", description: "Model providers, where their keys are stored, and which one is active.", icon: <ChipIcon /> },
+  { id: "agents", label: "Agents", description: "Cognate's own agent and external agent CLIs on this computer.", icon: <TerminalIcon /> },
+  { id: "plugins", label: "Plugins", description: "Built-in tools this deployment ships and which sessions get them.", icon: <PluginIcon /> },
+  { id: "presets", label: "Agent presets", description: "Choose the agent's tools and how it works. Standard suits everyday tasks.", icon: <BotIcon /> },
+  { id: "governance", label: "Governance & evidence", description: "Who decides approvals, whether agent runs are settled, and the proof they are judged by.", icon: <ShieldIcon /> },
+  { id: "shortcuts", label: "Keyboard shortcuts", description: "View and edit the shortcuts and input actions available in the app.", icon: <KeyboardIcon /> },
+  { id: "about", label: "About", description: "Version and where to find configuration.", icon: <InfoIcon /> },
+] as const;
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
+
+/** Settings as a full-page takeover of the sidebar + center columns (the right-hand inspector stays
+ *  beside it). Left: a vertical tablist. Right: one section at a time in a fixed-width column that
+ *  scrolls inside the page, so switching sections never moves the page. The close control is the
+ *  top-right X (and Esc, handled by the App's global key listener). */
+export interface SettingsWizardRequest {
+  /** Edit the configured provider instead of adding a new one. */
+  readonly edit?: boolean;
+  /** Prefill this model when editing. */
+  readonly model?: string;
+}
+
+function SettingsPage({
   onClose,
+  section,
+  onSectionChange,
   settings,
-  onOpenShortcuts,
   workspaceId,
+  onChangeShortcuts,
+  startWizard,
 }: {
   readonly onClose: () => void;
+  /** Open Models straight into the provider wizard (empty state, composer model picker). */
+  readonly startWizard?: SettingsWizardRequest | undefined;
+  /** Writes one whole-value shortcut patch through `settings.changeShortcuts`. */
+  readonly onChangeShortcuts: (shortcuts: ShortcutOverrides) => Promise<void>;
+  readonly section: SettingsSection;
+  readonly onSectionChange: (section: SettingsSection) => void;
   /** The app's selected workspace, for the Governance & evidence proof. */
   readonly workspaceId: string | undefined;
-  /** Every General setting, resolved with defaults from the durable `settings` row (usage pass
-   *  U2, reference-behavior-matrix.md §11) — the General pane is the full inventory: Permission,
-   *  Language, Appearance, Font size, Work details, Performance & usage, Coding Tools, Keyboard
-   *  shortcuts, Send behavior while busy. Each control writes through its own
-   *  `settings.change*` capability; the projection round trip re-renders this pane. */
+  /** Every General setting, resolved with defaults from the durable `settings` row. */
   readonly settings: GeneralSettings;
-  /** Opens the Keyboard shortcuts dialog (stacked above this modal). */
-  readonly onOpenShortcuts: () => void;
 }) {
+  const setSection = onSectionChange;
+  const toast = useToast();
   const client = useCognate();
-  const config = useModelConfig();
-  const [section, setSection] = useState<"general" | "models" | "plugins" | "presets" | "governance">("models");
   // Full-access confirmation (checkpoint 22f): opened by selecting "Full access" in the Permission
   // menu; the Permission control stays disabled while it is open, and only the checked-state
   // "Enable Full access" button commits the durable change.
   const [fullAccessConfirm, setFullAccessConfirm] = useState(false);
-  const [view, setView] = useState<"list" | "wizard">("list");
-  const [addTab, setAddTab] = useState<"third-party" | "custom">("custom");
-  const [thirdParty, setThirdParty] = useState("");
-  const [providerId, setProviderId] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [baseURL, setBaseURL] = useState("");
-  const [protocol, setProtocol] = useState<(typeof API_PROTOCOL_OPTIONS)[number]>(API_PROTOCOL_OPTIONS[0]);
-  const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState<readonly ModelRow[]>([]);
-  const [modelError, setModelError] = useState<string | undefined>(undefined);
-  const [customizedOpen, setCustomizedOpen] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
-  // Quick "Apply" from the list-view row: just the API key, reusing the already-configured
-  // provider/base URL/model.
-  const [rowApiKey, setRowApiKey] = useState("");
-  // T11: "Open configuration file" (config.path), provider Delete (confirmed, secret-first) and
-  // "Fetch models" (model.catalog) — the three Settings -> Models actions that were inert.
-  const [configFileOpen, setConfigFileOpen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [catalog, setCatalog] = useState<ModelCatalogResult | undefined>(undefined);
-  const [catalogBusy, setCatalogBusy] = useState(false);
+  const inspector = useInspector();
 
-  const resetWizard = useCallback((prefillFromConfig: boolean) => {
-    setAddTab("custom");
-    setThirdParty("");
-    setModelError(undefined);
-    setError(undefined);
-    if (prefillFromConfig && config) {
-      setProviderId(config.providerId);
-      setDisplayName(config.providerId);
-      setBaseURL(config.baseURL);
-      // Editing preserves the provider's actual protocol; only an explicit operator change alters it.
-      setProtocol(wireToProtocol(config.protocol));
-      setApiKey("");
-      setModels([{ id: crypto.randomUUID(), modelId: config.model, displayName: config.model }]);
-    } else {
-      setProviderId("");
-      setDisplayName("");
-      setBaseURL("");
-      setProtocol(API_PROTOCOL_OPTIONS[0]);
-      setApiKey("");
-      setModels([]);
-    }
-  }, [config]);
-
-  const openAddWizard = useCallback(() => {
-    resetWizard(false);
-    setView("wizard");
-  }, [resetWizard]);
-
-  const openEditWizard = useCallback(() => {
-    resetWizard(true);
-    setView("wizard");
-  }, [resetWizard]);
-
-  const applyPreset = useCallback((id: string) => {
-    setThirdParty(id);
-    const preset = THIRD_PARTY_PRESETS.find((p) => p.id === id);
-    if (preset) {
-      setProviderId(preset.id);
-      setDisplayName(preset.label);
-      setBaseURL(preset.baseURL);
-      setProtocol(preset.protocol);
-      setAddTab("custom");
-    }
+  const pageRef = useRef<HTMLElement>(null);
+  // Page focus contract (it is not a modal, so no trap): land on the active tab when opened and
+  // hand focus back to whatever opened it when closed.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    pageRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    return () => opener?.focus?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const addModelRow = useCallback(() => {
-    setModels((prev) => [...prev, { id: crypto.randomUUID(), modelId: "", displayName: "" }]);
-  }, []);
-
-  const updateModelRow = useCallback((id: string, patch: Partial<ModelRow>) => {
-    setModels((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-  }, []);
-
-  const createProviderValid =
-    providerId.trim().length > 0 &&
-    displayName.trim().length > 0 &&
-    baseURL.trim().length > 0 &&
-    apiKey.trim().length > 0 &&
-    models.length > 0 &&
-    models.every((m) => m.modelId.trim().length > 0);
-
-  const createProvider = useCallback(async () => {
-    setBusy(true);
-    setError(undefined);
-    setModelError(undefined);
-    try {
-      if (models.length === 0 || models.some((m) => m.modelId.trim().length === 0)) {
-        const badIndex = models.findIndex((m) => m.modelId.trim().length === 0);
-        setModelError(`Model ${badIndex === -1 ? models.length + 1 : badIndex + 1}: Model ID is required.`);
-        return;
-      }
-      if (!providerId || !displayName || !baseURL) throw new Error("Provider ID, display name, and base URL are required.");
-      // This tranche's `model.configure` capability holds exactly one live provider config; a
-      // Models sub-list with several rows is structurally supported (Fetch/Add), but only the first
-      // configured model is actually wired through to the backend — see docs/known-gaps.md.
-      await client.invoke("model.configure", {
-        providerId,
-        baseURL,
-        protocol: protocolToWire(protocol),
-        model: models[0]!.modelId,
-        apiKey,
-      });
-      setView("list");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [client, providerId, displayName, baseURL, apiKey, models, protocol]);
-
-  const applyRowKey = useCallback(async () => {
-    if (!config) return;
-    setBusy(true);
-    setError(undefined);
-    setSaved(false);
-    try {
-      // Re-keying must not silently rewrite the wire protocol: reuse the configured one.
-      await client.invoke("model.configure", {
-        providerId: config.providerId,
-        baseURL: config.baseURL,
-        protocol: config.protocol,
-        model: config.model,
-        apiKey: rowApiKey,
-      });
-      setSaved(true);
-      setRowApiKey("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [client, config, rowApiKey]);
-
-  /** Deletes the single live provider configuration. Destructive, so it is a two-step control:
-   *  the first press states exactly what will happen, the second commits. `provider.delete` removes
-   *  the stored secret first, so a failure leaves the configuration intact. */
-  const deleteProvider = useCallback(async () => {
-    if (!config) return;
-    setBusy(true);
-    setError(undefined);
-    setSaved(false);
-    try {
-      await client.invoke("provider.delete", { providerId: config.providerId } as never);
-      setDeleteConfirm(false);
-      setRowApiKey("");
-      setCustomizedOpen(false);
-      setCatalog(undefined);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setDeleteConfirm(false);
-    } finally {
-      setBusy(false);
-    }
-  }, [client, config]);
-
-  /** Discovers real model ids for the provider being added. Read-only: nothing is configured or
-   *  recorded until the operator chooses a row and saves. */
-  const fetchModels = useCallback(async () => {
-    setCatalogBusy(true);
-    setCatalog(undefined);
-    setModelError(undefined);
-    try {
-      const result = (await client.invoke("model.catalog", {
-        protocol: protocolToWire(protocol),
-        baseURL,
-        ...(apiKey.trim().length > 0 ? { apiKey } : {}),
-      } as never)) as unknown as ModelCatalogResult;
-      setCatalog(result);
-      if (result.ok) {
-        // Append only: fetching must never discard ids the operator typed by hand.
-        setModels((prev) => {
-          const have = new Set(prev.map((m) => m.modelId.trim()).filter((v) => v.length > 0));
-          const added = result.models
-            .filter((id) => !have.has(id))
-            .map((modelId) => ({ id: crypto.randomUUID(), modelId, displayName: "" }));
-          return [...prev, ...added];
-        });
-      }
-    } catch (err) {
-      setCatalog({ ok: false, reason: err instanceof Error ? err.message : String(err), models: [] });
-    } finally {
-      setCatalogBusy(false);
-    }
-  }, [client, protocol, baseURL, apiKey]);
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(dialogRef, onClose);
+  const onTabKeyDown = (e: React.KeyboardEvent) => {
+    const keys = ["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const i = SETTINGS_SECTIONS.findIndex((x) => x.id === section);
+    const last = SETTINGS_SECTIONS.length - 1;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? last : e.key === "ArrowDown" || e.key === "ArrowRight" ? (i + 1) % (last + 1) : (i - 1 + last + 1) % (last + 1);
+    const target = SETTINGS_SECTIONS[next]!.id;
+    setSection(target);
+    requestAnimationFrame(() => document.getElementById(`settings-tab-${target}`)?.focus());
+  };
+  const meta = SETTINGS_SECTIONS.find((x) => x.id === section)!;
   return (
-    <div className="modal-backdrop">
-      <div className="modal settings-panel" role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} ref={dialogRef}>
-        <div className="settings-titlebar">
-          <h2>Settings</h2>
-          <button type="button" className="open-config-file-btn" onClick={() => setConfigFileOpen(true)}>
+    <section className="settings-page" aria-label="Settings" ref={pageRef}>
+      <header className="settings-head">
+        <h1>Settings</h1>
+        <div className="settings-head-actions">
+          {/* The configuration file opens in the inspector's Config tab, beside this page, where it can be edited. */}
+          <button type="button" className="open-config-file-btn" aria-controls="inspector" onClick={() => inspector.openInspector("config")}>
             Open configuration file
           </button>
-          <button type="button" className="icon-btn" aria-label="Close settings" onClick={onClose}>
-            ×
-          </button>
+          <CloseButton label="settings" onClick={onClose} />
         </div>
-        {configFileOpen && (
-          <ConfigFileDialog
-            onResolve={() => client.invoke("config.path", {}) as unknown as Promise<ConfigPathResult>}
-            onClose={() => setConfigFileOpen(false)}
-          />
-        )}
-        <div className="settings-body">
-          <nav className="settings-nav" aria-label="Settings sections">
+      </header>
+      <nav className="settings-nav" aria-label="Settings sections">
+        <div role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={onTabKeyDown}>
+          {SETTINGS_SECTIONS.map((x) => (
             <button
+              key={x.id}
               type="button"
-              className={section === "general" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "general" ? "page" : undefined}
-              onClick={() => setSection("general")}
+              role="tab"
+              id={`settings-tab-${x.id}`}
+              aria-selected={section === x.id}
+              aria-controls="settings-panel"
+              tabIndex={section === x.id ? 0 : -1}
+              className={section === x.id ? "settings-nav-item active" : "settings-nav-item"}
+              onClick={() => setSection(x.id)}
             >
-              General
+              {x.icon}
+              <span>{x.label}</span>
             </button>
-            <button
-              type="button"
-              className={section === "models" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "models" ? "page" : undefined}
-              onClick={() => setSection("models")}
-            >
-              Models
-            </button>
-            <button
-              type="button"
-              className={section === "plugins" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "plugins" ? "page" : undefined}
-              onClick={() => setSection("plugins")}
-            >
-              Built-in plugins
-            </button>
-            <button
-              type="button"
-              className={section === "presets" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "presets" ? "page" : undefined}
-              onClick={() => setSection("presets")}
-            >
-              Agent presets
-            </button>
-            <button
-              type="button"
-              className={section === "governance" ? "settings-nav-item active" : "settings-nav-item"}
-              aria-current={section === "governance" ? "page" : undefined}
-              onClick={() => setSection("governance")}
-            >
-              Governance &amp; evidence
-            </button>
-          </nav>
+          ))}
+        </div>
+      </nav>
+      <div className="settings-scroll">
+        <div className="settings-column" role="tabpanel" id="settings-panel" aria-labelledby={`settings-tab-${section}`}>
+          <div className="settings-section-head">
+            <h2>{meta.label}</h2>
+            <p>{meta.description}</p>
+          </div>
           <div className="settings-content">
             {section === "general" ? (
-              <GeneralPane settings={settings} onOpenShortcuts={onOpenShortcuts} fullAccessConfirm={fullAccessConfirm} setFullAccessConfirm={setFullAccessConfirm} />
+              <GeneralPane settings={settings} fullAccessConfirm={fullAccessConfirm} setFullAccessConfirm={setFullAccessConfirm} />
+            ) : section === "appearance" ? (
+              <AppearancePane settings={settings} />
+            ) : section === "shortcuts" ? (
+              <ShortcutsPanel overrides={settings.shortcuts} onChangeShortcuts={onChangeShortcuts} />
+            ) : section === "about" ? (
+              <AboutPane />
             ) : section === "plugins" ? (
               <BuiltInPluginsPane settings={settings} />
             ) : section === "presets" ? (
               <AgentPresetsPane settings={settings} />
             ) : section === "governance" ? (
               <GovernancePane workspaceId={workspaceId} />
-            ) : view === "list" ? (
-              <>
-                <h3>Models</h3>
-                <p className="settings-subtitle">Enter your API key to use models from the following provider.</p>
-                {config ? (
-                  <div className="provider-card provider-card-configured">
-                    <div className="provider-card-header">
-                      <span className="provider-card-name">
-                        <CheckIcon aria-hidden="true" />
-                        {config.providerId} — {config.model}
-                      </span>
-                      <span className="provider-card-protocol" title="Wire protocol">
-                        {wireToProtocol(config.protocol)}
-                      </span>
-                      <span className="provider-card-key-status" title="API key configured">
-                        <CheckIcon aria-hidden="true" /> API key configured
-                      </span>
-                      <div className="provider-card-actions">
-                        <button type="button" aria-label={`Edit ${config.providerId} (${config.providerId})`} onClick={openEditWizard}>
-                          <EditIcon /> Edit
-                        </button>
-                        {deleteConfirm ? (
-                          <span className="provider-delete-confirm">
-                            <span role="status" className="provider-delete-confirm-text">
-                              Delete {config.providerId} and its stored key? This cannot be undone.
-                            </span>
-                            <button type="button" className="danger-btn" disabled={busy} onClick={() => void deleteProvider()}>
-                              Yes, delete
-                            </button>
-                            <button type="button" disabled={busy} onClick={() => setDeleteConfirm(false)}>
-                              Cancel
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            aria-label={`Delete ${config.providerId} (${config.providerId})`}
-                            disabled={busy}
-                            onClick={() => {
-                              setError(undefined);
-                              setDeleteConfirm(true);
-                            }}
-                          >
-                            <TrashIcon /> Delete
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <label>
-                      API key
-                      <input
-                        type="password"
-                        value={rowApiKey}
-                        onChange={(e) => setRowApiKey(e.currentTarget.value)}
-                        placeholder="Configured — enter a new value to replace"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="disclosure-btn"
-                      aria-expanded={customizedOpen}
-                      onClick={() => setCustomizedOpen((v) => !v)}
-                    >
-                      Customized settings
-                    </button>
-                    {customizedOpen && (
-                      <div className="provider-customized">
-                        <div>
-                          Base URL: <code>{config.baseURL}</code>
-                        </div>
-                        <div>Model: {config.model}</div>
-                        <div>API protocol: {wireToProtocol(config.protocol)}</div>
-                      </div>
-                    )}
-                    {error && (
-                      <p role="alert" className="form-error">
-                        {error}
-                      </p>
-                    )}
-                    {saved && <p className="form-success">Saved. Model changes take effect on the next request.</p>}
-                    <div className="provider-card-row-actions">
-                      <button type="button" onClick={() => setRowApiKey("")}>
-                        Cancel
-                      </button>
-                      <button type="button" disabled={busy || rowApiKey.trim().length === 0} onClick={applyRowKey}>
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="empty-state small">No model provider configured yet.</p>
-                )}
-                <button type="button" className="add-provider-btn" onClick={openAddWizard}>
-                  <PlusIcon /> Add model provider
-                </button>
-              </>
+            ) : section === "agents" ? (
+              <AgentsPane />
             ) : (
-              <>
-                <h3>Add model provider</h3>
-                <div role="tablist" aria-label="How to add" className="add-provider-tabs">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={addTab === "third-party"}
-                    className={addTab === "third-party" ? "tab active" : "tab"}
-                    onClick={() => setAddTab("third-party")}
-                  >
-                    Third-party model provider
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={addTab === "custom"}
-                    className={addTab === "custom" ? "tab active" : "tab"}
-                    onClick={() => setAddTab("custom")}
-                  >
-                    Custom model API
-                  </button>
-                </div>
-                {addTab === "third-party" ? (
-                  <div className="third-party-panel">
-                    <label>
-                      Provider
-                      <select aria-label="Third-party model provider" value={thirdParty} onChange={(e) => applyPreset(e.currentTarget.value)}>
-                        <option value="" disabled>
-                          Choose a provider…
-                        </option>
-                        {THIRD_PARTY_PRESETS.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <p className="settings-subtitle">Selecting a provider fills in its details on the Custom model API tab.</p>
-                  </div>
-                ) : (
-                  <div className="provider-card">
-                    <label>
-                      Provider ID
-                      <input value={providerId} onChange={(e) => setProviderId(e.currentTarget.value)} placeholder="acme-gateway" />
-                    </label>
-                    <p className="field-hint">Lowercase identifier, starting with a letter, that uniquely names this provider in requests and as its credential name.</p>
-                    <label>
-                      Display name
-                      <input value={displayName} onChange={(e) => setDisplayName(e.currentTarget.value)} />
-                    </label>
-                    <label>
-                      Base URL
-                      <input value={baseURL} onChange={(e) => setBaseURL(e.currentTarget.value)} placeholder="https://gateway.example/v1" />
-                    </label>
-                    <label>
-                      API protocol
-                      <select value={protocol} onChange={(e) => setProtocol(e.currentTarget.value as (typeof API_PROTOCOL_OPTIONS)[number])}>
-                        {API_PROTOCOL_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      API key
-                      <input type="password" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
-                    </label>
-                    <div role="region" aria-label="Models" className="models-region">
-                      <div className="models-region-header">
-                        <span>Models</span>
-                        <div>
-                          <button
-                            type="button"
-                            disabled={baseURL.trim().length === 0 || catalogBusy}
-                            onClick={() => void fetchModels()}
-                          >
-                            {catalogBusy ? "Fetching…" : "Fetch available models"}
-                          </button>
-                          <button type="button" onClick={addModelRow}>
-                            Add model
-                          </button>
-                        </div>
-                      </div>
-                      {catalog !== undefined && !catalog.ok && (
-                        <p role="alert" className="form-error">
-                          {catalog.reason}
-                        </p>
-                      )}
-                      {catalog !== undefined && catalog.ok && (
-                        <p role="status" className="settings-subtitle catalog-status">
-                          Found {catalog.models.length} model{catalog.models.length === 1 ? "" : "s"} — added below, unrecognised duplicates were skipped.
-                        </p>
-                      )}
-                      {models.map((m, i) => (
-                        <div key={m.id} className="model-row">
-                          <input
-                            aria-label={`Model ${i + 1} ID`}
-                            value={m.modelId}
-                            onChange={(e) => updateModelRow(m.id, { modelId: e.currentTarget.value })}
-                            placeholder="Model ID"
-                          />
-                          <input
-                            aria-label={`Model ${i + 1} display name`}
-                            value={m.displayName}
-                            onChange={(e) => updateModelRow(m.id, { displayName: e.currentTarget.value })}
-                            placeholder="Display name"
-                          />
-                        </div>
-                      ))}
-                      {modelError && (
-                        <p role="alert" className="form-error">
-                          {modelError}
-                        </p>
-                      )}
-                    </div>
-                    {error && (
-                      <p role="alert" className="form-error">
-                        {error}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </>
+              <ProvidersPane startWizard={startWizard} />
             )}
           </div>
         </div>
-        {section === "models" && view === "wizard" && (
-          <div className="modal-actions">
-            <button type="button" onClick={() => setView("list")}>
-              Cancel
-            </button>
-            <button type="button" disabled={busy || !createProviderValid} onClick={createProvider}>
-              Create provider
-            </button>
-          </div>
-        )}
-        {fullAccessConfirm && (
-          <FullAccessConfirmDialog
-            onCancel={() => setFullAccessConfirm(false)}
-            onConfirm={() => {
-              setFullAccessConfirm(false);
-              void client.invoke("settings.changePermission", { permission: "full-access" } as never).catch((e) => console.error("settings: full access failed", e));
-            }}
-          />
-        )}
       </div>
-    </div>
+      {fullAccessConfirm && (
+        <FullAccessConfirmDialog
+          onCancel={() => setFullAccessConfirm(false)}
+          onConfirm={() => {
+            setFullAccessConfirm(false);
+            void client
+              .invoke("settings.changePermission", { permission: "full-access" } as never)
+              .then(() => toast.show("Settings saved"))
+              .catch((e) => console.error("settings: full access failed", e));
+          }}
+        />
+      )}
+    </section>
   );
 }
 
@@ -2240,6 +1560,11 @@ interface RetryInfo {
   readonly maxRetries: number;
   readonly code: string;
   readonly message: string;
+  /** HTTP_<status> | TIMEOUT | CONNECTION_REFUSED | DNS_FAILED | NETWORK_ERROR (older events: absent). */
+  readonly errorCode?: string;
+  readonly delayMs?: number;
+  readonly baseURLHost?: string;
+  readonly receivedAt: number;
 }
 
 interface TurnFailure {
@@ -2284,14 +1609,18 @@ function useStreamingTurn(runId: string | undefined) {
         }
         // deltas from a superseded (lower) attempt are discarded
       } else if (event.eventType === "model.request.retried") {
-        const payload = event.payload as { readonly attempt?: number; readonly maxRetries?: number; readonly error?: { readonly code?: string; readonly message?: string } };
+        const payload = event.payload as { readonly attempt?: number; readonly maxRetries?: number; readonly errorCode?: string; readonly message?: string; readonly delayMs?: number; readonly baseURLHost?: string; readonly error?: { readonly code?: string; readonly message?: string } };
         setRetries((prev) => [
           ...prev,
           {
             attempt: payload.attempt ?? prev.length + 1,
             maxRetries: payload.maxRetries ?? 5,
-            code: payload.error?.code ?? "",
-            message: payload.error?.message ?? "",
+            code: payload.errorCode ?? payload.error?.code ?? "",
+            message: payload.message ?? payload.error?.message ?? "",
+            ...(payload.errorCode ? { errorCode: payload.errorCode } : {}),
+            ...(typeof payload.delayMs === "number" ? { delayMs: payload.delayMs } : {}),
+            ...(payload.baseURLHost ? { baseURLHost: payload.baseURLHost } : {}),
+            receivedAt: Date.now(),
           },
         ]);
       } else if (event.eventType === "turn.failed") {
@@ -2431,8 +1760,8 @@ function RetryDisclosure({ retries, elapsedSeconds }: { readonly retries: readon
   return (
     <div className="retry-disclosure" data-retry-card>
       <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="retry-disclosure-btn">
-        Retried model request ({latest.attempt}/{latest.maxRetries}) · {elapsedSeconds}s
-        <ChevronDownIcon />
+        <ChevronDownIcon className={expanded ? "retry-chev open" : "retry-chev"} />
+        <span>Retried model request ({latest.attempt}/{latest.maxRetries}) · {elapsedSeconds}s</span>
       </button>
       {expanded && (
         <ul className="retry-list">
@@ -2447,17 +1776,90 @@ function RetryDisclosure({ retries, elapsedSeconds }: { readonly retries: readon
   );
 }
 
+/** J-H-provider-error: while the model request is being retried, say so plainly in the transcript, with
+ *  the underlying error, how long since the last failed attempt, and the two useful ways out. */
+function RetryCard({ retries, provider, onStop, onOpenSettings }: { readonly retries: readonly RetryInfo[]; readonly provider: string; readonly onStop: () => void; readonly onOpenSettings: () => void }) {
+  const latest = retries[retries.length - 1]!;
+  const since = useRef(Date.now());
+  useEffect(() => { since.current = Date.now(); }, [retries.length]);
+  const sinceSeconds = useElapsedSeconds(true, since.current);
+  const httpStatus = /^HTTP_(\d+)$/.exec(latest.errorCode ?? "")?.[1];
+  const nextIn = latest.delayMs !== undefined ? Math.max(0, Math.ceil((latest.delayMs - (Date.now() - latest.receivedAt)) / 1000)) : undefined;
+  return (
+    <div className="retry-card" role="status" data-retry-card>
+      <p className="retry-card-title">
+        {httpStatus
+          ? `${latest.baseURLHost ?? provider} returned an error (HTTP ${httpStatus}) — retrying (${latest.attempt}/${latest.maxRetries})`
+          : `Can't reach ${latest.baseURLHost ? `${provider.split(" (")[0]} (${latest.baseURLHost})` : provider} — retrying (${latest.attempt}/${latest.maxRetries})`}
+      </p>
+      {latest.message && <p className="retry-card-error">{latest.message}{latest.code ? <span className="retry-card-code"> {latest.code}</span> : null}</p>}
+      <p className="retry-card-meta">
+        Attempt {latest.attempt} failed {sinceSeconds}s ago.{" "}
+        {nextIn !== undefined ? (nextIn > 0 ? `Next attempt in ${nextIn}s.` : "Trying again now.") : "The next attempt starts automatically."}
+      </p>
+      <div className="retry-card-actions">
+        <button type="button" className="retry-card-btn" onClick={onStop}>Stop</button>
+        <button type="button" className="retry-card-btn" onClick={onOpenSettings}>Open model settings</button>
+      </div>
+    </div>
+  );
+}
+
+/** AUTH_REQUIRED shows the CLI's sign-in hint; HARNESS_UNAVAILABLE shows how to install it. The
+ *  failing CLI is the one whose label the server named in the message. */
+function HarnessFailureHint({ code, message }: { readonly code: string; readonly message: string }) {
+  const { harnesses } = useHarnessList();
+  const h: HarnessInfo | undefined = harnesses?.find((x) => message.includes(x.label));
+  if (!h) return null;
+  if (code === "AUTH_REQUIRED") {
+    return (
+      <p className="failure-hint" data-harness-hint="sign-in">
+        Sign in to {h.label}: {h.signInHint}
+      </p>
+    );
+  }
+  return (
+    <p className="failure-hint" data-harness-hint="install">
+      <a href={h.installHint.url} target="_blank" rel="noreferrer">
+        Install {h.label}
+      </a>
+      {h.installHint.command && (
+        <>
+          {" "}
+          or run <code>{h.installHint.command}</code>
+        </>
+      )}
+      , then refresh agents in Settings.
+    </p>
+  );
+}
+
 /** T11 (J-H-provider-error): the terminal failure block — exactly "This turn failed" / message /
  *  a `code` badge (reference-behavior-matrix.md §8). No manual "Retry"/"Dismiss" button; the composer
  *  stays available underneath to start a new message. */
-function FailureBlock({ code, message }: { readonly code: string; readonly message: string }) {
+function FailureBlock({ code, message: rawMessage, onRetry }: { readonly code: string; readonly message: string; readonly onRetry?: () => void }) {
+  const { harnesses } = useHarnessList();
+  // The sign-in hint is shown once, in its own line; do not also repeat it inside the failure message.
+  const hintOwner = code === "AUTH_REQUIRED" ? harnesses?.find((x) => rawMessage.includes(x.label)) : undefined;
+  const message = hintOwner && hintOwner.signInHint && rawMessage.includes(hintOwner.signInHint) ? rawMessage.replace(hintOwner.signInHint, "").trim() : rawMessage;
   return (
     <div className="failure-block" role="alert">
       <p className="failure-title">This turn failed</p>
-      <p className="failure-message">{message}</p>
-      <span className="failure-code">{code}</span>
+      <p className="failure-message">{message.split(/(`[^`]+`)/g).map((part, i) => part.startsWith("`") && part.endsWith("`") && part.length > 2 ? <code key={i}>{part.slice(1, -1)}</code> : part)}</p>
+      {(code === "AUTH_REQUIRED" || code === "HARNESS_UNAVAILABLE") && <HarnessFailureHint code={code} message={message} />}
+      <div className="retry-card-actions">
+        {code && <span className="failure-code">{code}</span>}
+        {onRetry && <button type="button" className="failure-retry" onClick={onRetry}>Retry</button>}
+      </div>
     </div>
   );
+}
+
+/** The approval sentence. A harness CLI's request carries no justification, so name the tool instead. */
+function approvalSentence(entry: ToolEntry): string {
+  const why = entry.approval?.justification;
+  if (typeof why === "string" && why.trim()) return `Allow this operation with ${entry.approval?.permission} permissions: ${why}.`;
+  return `Allow ${entry.tool} with ${entry.approval?.permission} permissions.`;
 }
 
 /** Approval bar: docked where the composer normally sits (reference `11-approval-pending`: the
@@ -2490,7 +1892,7 @@ export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; re
   // Long plain-text justifications get a one-line summary plus a disclosure; a structured `surface`
   // is exempt because `SurfaceView` renders diff content that must never be clipped or collapsed.
   const structured = entry.approval?.surface !== undefined;
-  const summary = summarizeApproval(`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`);
+  const summary = summarizeApproval(approvalSentence(entry));
   const showDisclosure = approvalNeedsDisclosure(summary, structured);
   return (
     <div
@@ -2521,9 +1923,9 @@ export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; re
         ) : showDisclosure ? (
           <>
             {expanded ? (
-              <pre className="approval-full-text">{`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`}</pre>
+              <pre className="approval-full-text">{approvalSentence(entry)}</pre>
             ) : (
-              <span className="approval-summary-line" title={`Allow this operation with ${entry.approval?.permission} permissions: ${entry.approval?.justification}.`}>
+              <span className="approval-summary-line" title={approvalSentence(entry)}>
                 {summary.line}
               </span>
             )}
@@ -2537,7 +1939,7 @@ export function ApprovalBar({ entry, onDecide }: { readonly entry: ToolEntry; re
             </button>
           </>
         ) : (
-          <>Allow this operation with {entry.approval?.permission} permissions: {entry.approval?.justification}.</>
+          <>{approvalSentence(entry)}</>
         )}
       </div>
       <div className="approval-actions">
@@ -2615,13 +2017,11 @@ export function SubagentTree({ rows, onOpen }: { readonly rows: readonly Subagen
  *  delegated prompt, its final answer) sourced entirely from its `subagents` projection row. */
 function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly onClose: () => void }) {
   return (
-    <aside className="right-panel" role="tabpanel" aria-label={row.title}>
+    <div className="inspector-pane" role="group" aria-label={row.title}>
       <div className="right-panel-tabs" role="tablist">
         <span role="tab" aria-selected="true" className="right-panel-tab">
           {row.title}
-          <button type="button" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
+          <CloseButton label={row.title} onClick={onClose} />
         </span>
       </div>
       <div className="right-panel-body">
@@ -2638,7 +2038,7 @@ function RightPanel({ row, onClose }: { readonly row: SubagentRowView; readonly 
           <p className="empty-state small">{row.status === "failed" ? "Subagent failed." : "Running…"}</p>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -2756,6 +2156,65 @@ function EditDiff({
   );
 }
 
+/** "Files changed during this turn": one card per agent turn that edited files, with the total
+ *  +/- counts, a folder tree of the changed files and "Open diff" (opens the inspector Changes tab on
+ *  that file). Built from the same edit summaries the transcript already folds. */
+function TurnChangesCard({
+  summaries,
+  turnNumber,
+  onOpenReview,
+}: {
+  readonly summaries: readonly EditSummary[];
+  readonly turnNumber: number;
+  readonly onOpenReview: (summary: EditSummary, turnNumber: number) => void;
+}) {
+  const additions = summaries.reduce((n, item) => n + item.additions, 0);
+  const deletions = summaries.reduce((n, item) => n + item.deletions, 0);
+  const sorted = [...summaries].sort((a, b) => a.file_path.localeCompare(b.file_path));
+  const rows: { readonly kind: "dir" | "file"; readonly depth: number; readonly name: string; readonly summary?: EditSummary }[] = [];
+  const seenDirs = new Set<string>();
+  for (const item of sorted) {
+    const parts = item.file_path.split("/").filter(Boolean);
+    for (let depth = 0; depth < parts.length - 1; depth += 1) {
+      const dir = parts.slice(0, depth + 1).join("/");
+      if (!seenDirs.has(dir)) { seenDirs.add(dir); rows.push({ kind: "dir", depth, name: parts[depth]! }); }
+    }
+    rows.push({ kind: "file", depth: parts.length - 1, name: parts[parts.length - 1] ?? item.file_path, summary: item });
+  }
+  return (
+    <section className="turn-changes" aria-label="Files changed during this turn">
+      <header className="turn-changes-head">
+        <span className="turn-changes-title">
+          {summaries.length === 1 ? "1 file changed" : `${summaries.length} files changed`}<span className="turn-changes-when"> this turn</span>
+        </span>
+        <span className="turn-changes-stat"><span className="diff-add">+{additions}</span> <span className="diff-del">-{deletions}</span></span>
+        <button type="button" className="turn-changes-open" onClick={() => onOpenReview(sorted[0]!, turnNumber)}>Open diff</button>
+      </header>
+      <ul className="turn-changes-tree">
+        {rows.map((row, index) => row.kind === "dir" ? (
+          <li key={`d${index}`} className="turn-changes-dir" style={{ paddingLeft: 12 + row.depth * 16 }}>
+            <FolderIcon aria-hidden="true" /><span>{row.name}</span>
+          </li>
+        ) : (
+          <li key={`f${index}`}>
+            <button
+              type="button"
+              className="turn-changes-file"
+              style={{ paddingLeft: 12 + row.depth * 16 }}
+              aria-label={`View changes to ${row.summary!.file_path}: +${row.summary!.additions} -${row.summary!.deletions}`}
+              onClick={() => onOpenReview(row.summary!, turnNumber)}
+            >
+              <FileIcon aria-hidden="true" />
+              <span className="turn-changes-name">{row.name}</span>
+              <span className="turn-changes-stat"><span className="diff-add">+{row.summary!.additions}</span> <span className="diff-del">-{row.summary!.deletions}</span></span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** The Review split-diff panel (critic round-2 batch B P0, `10-file-change-expanded`; layout and
  *  view controls completed in T11): a right-hand pane beside the chat with a real tab strip (open,
  *  switch and close file changes), layout controls (split / fullscreen / collapse), three view
@@ -2776,10 +2235,8 @@ export function ReviewPanel({
 }) {
   const [tabs, setTabs] = useState<readonly ReviewTab[]>([initialTab]);
   const [activeKey, setActiveKey] = useState(initialTab.key);
-  const [view, setView] = useState<"list" | "split" | "code">("split");
-  const [lineWrap, setLineWrap] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [view, setView] = useState<"list" | "split" | "code">("list"); // unified reads in the narrow inspector; split is one click away
+  const [lineWrap, setLineWrap] = useState(true);
   const [showLocation, setShowLocation] = useState(false);
   const [addTabOpen, setAddTabOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<undefined | "more">(undefined);
@@ -2861,22 +2318,8 @@ export function ReviewPanel({
 
   const available = availableTabs.filter((t) => !tabs.some((open) => open.key === t.key));
 
-  const cls = ["right-panel", "review-right-panel"];
-  if (fullscreen) cls.push("review-fullscreen");
-  if (collapsed) cls.push("review-collapsed");
-
-  if (collapsed) {
-    return (
-      <aside className={cls.join(" ")} role="tabpanel" aria-label={`Review · turn ${active.turnNumber}`} aria-expanded="false">
-        <button type="button" className="review-expand-btn" aria-label="Expand right sidebar" title="Expand right sidebar" onClick={() => setCollapsed(false)}>
-          <PanelRightIcon />
-        </button>
-      </aside>
-    );
-  }
-
   return (
-    <aside className={cls.join(" ")} role="tabpanel" aria-label={`Review · turn ${active.turnNumber}`}>
+    <div className="inspector-pane review-right-panel" role="group" aria-label={`Review · turn ${active.turnNumber}`}>
       <div className="right-panel-tabs" role="tablist" ref={toolbarRef}>
         {tabs.map((tab) => (
           <span
@@ -2929,25 +2372,6 @@ export function ReviewPanel({
         >
           <SplitViewIcon />
         </button>
-        <button
-          type="button"
-          className="review-toolbar-btn icon-btn"
-          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-          aria-pressed={fullscreen}
-          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-          onClick={() => setFullscreen((v) => !v)}
-        >
-          <FullscreenIcon />
-        </button>
-        <button
-          type="button"
-          className="review-toolbar-btn icon-btn"
-          aria-label="Collapse right sidebar"
-          title="Collapse right sidebar"
-          onClick={() => setCollapsed(true)}
-        >
-          <PanelRightIcon />
-        </button>
       </div>
       <div className="review-panel-toolbar" role="toolbar" aria-label="Review view">
         <button type="button" className="review-toolbar-btn icon-btn" aria-pressed={view === "list"} onClick={() => setView("list")} aria-label="List view" title="List view">
@@ -2970,17 +2394,8 @@ export function ReviewPanel({
         <span className="review-panel-stat">
           +{summary.additions} -{summary.deletions}
         </span>
-        <button type="button" className="review-toolbar-btn" aria-pressed={lineWrap} onClick={() => setLineWrap((v) => !v)}>
-          Line wrap
-        </button>
-        <button
-          type="button"
-          className="review-toolbar-btn"
-          aria-pressed={showLocation}
-          onClick={() => setShowLocation((v) => !v)}
-        >
-          Show file location
-        </button>
+        {/* D-26: the text toggles and the open-actions collapsed into one options menu — the
+         *  toolbar kept wrapping to two rows at 340 px. Toggles render as checkable items. */}
         <button
           type="button"
           className="review-toolbar-btn"
@@ -2988,10 +2403,17 @@ export function ReviewPanel({
           aria-expanded={openMenu === "more"}
           onClick={() => setOpenMenu((v) => (v === "more" ? undefined : "more"))}
         >
-          More ways to open
+          Options
         </button>
         {openMenu === "more" && (
           <div role="menu" className="review-more-menu">
+            <button type="button" role="menuitemcheckbox" aria-checked={lineWrap} onClick={() => setLineWrap((v) => !v)}>
+              {lineWrap ? "✓ " : ""}Line wrap
+            </button>
+            <button type="button" role="menuitemcheckbox" aria-checked={showLocation} onClick={() => setShowLocation((v) => !v)}>
+              {showLocation ? "✓ " : ""}Show file location
+            </button>
+            <hr />
             <button type="button" role="menuitem" onClick={() => void copyPath(summary.file_path, "Path")}>
               Copy path
             </button>
@@ -3075,7 +2497,7 @@ export function ReviewPanel({
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -3127,6 +2549,7 @@ export function Composer({
   disabled,
   sending,
   modelLabel,
+  modelControl,
   planMode,
   onSend,
   onStop,
@@ -3141,10 +2564,15 @@ export function Composer({
   onCancelQueued,
   onSteerQueued,
   focusToken,
+  contextBar,
 }: {
+  /** The context bar (workspace, posture, task, focus, run status), drawn at the card's top edge. */
+  readonly contextBar?: ReactNode;
   readonly disabled: boolean;
   readonly sending: boolean;
   readonly modelLabel: string | undefined;
+  /** Replaces the plain model label (the shell passes the model picker). */
+  readonly modelControl?: ReactNode;
   /** J-E-plan: whether the active session is currently in plan mode — swaps the composer
    *  placeholder and shows the "Plan mode on, press to turn off" toggle (reference-behavior-matrix.md
    *  §6.3, `13-plan-active`). */
@@ -3245,6 +2673,7 @@ export function Composer({
   );
   return (
     <div className="composer-card">
+      {contextBar}
       <textarea
         ref={textareaRef}
         aria-label={planMode ? "describe your task to generate plan" : "Message or run a task, / commands, @ files or sessions"}
@@ -3335,7 +2764,7 @@ export function Composer({
         </div>
       )}
       <div className="composer-toolbar">
-        <SettingMenu
+        <MenuSelect
           ariaLabel={`Access mode, current: ${PERMISSION_LABELS[accessMode]}`}
           value={accessMode}
           disabled={disabled}
@@ -3347,9 +2776,11 @@ export function Composer({
             Plan
           </button>
         )}
-        <span className="composer-info-label" title="Model configured in Settings → Models">
-          {modelLabel ?? "No model"}
-        </span>
+        {modelControl ?? (
+          <span className="composer-info-label" title="Model configured in Settings → Providers">
+            {modelLabel ?? "No model"}
+          </span>
+        )}
         <div className="composer-spacer" />
         {sending ? (
           <button type="button" className="send-btn stop" aria-label="Stop generating" onClick={onStop}>
@@ -3427,14 +2858,6 @@ export function ToolGroup({
   );
 }
 
-/** A settled turn's individual-step line for "Verbose" Work details (reference-behavior-matrix.md
- *  §10a) — short noun label + "· <detail>", matching the reference's own ungrouped verbose list
- *  (`21-work-details-verbose`: "Read · <path>", "Bash · <description>", "Edit · <path>").
- *  Table-driven via `toolStepLabelFor` (`src/toolGroups.ts`). */
-function verboseStepLabel(entry: ToolEntry): string {
-  return toolStepLabelFor(entry.tool, entry.args);
-}
-
 /** Reality over narrative: a call the task's authority refused is always shown, whatever the
  *  Work details verbosity, because the agent's own summary may say otherwise. */
 function AuthorityNotice({ steps }: { readonly steps?: readonly ToolEntry[] }) {
@@ -3461,12 +2884,19 @@ function MessageBubble({
   turnNumber,
   onOpenReview,
   workDetails,
+  currentAction,
+  onRetry,
 }: {
   readonly message: ChatMessage;
   readonly elapsedSeconds?: number;
   readonly turnNumber?: number;
+  /** Offered on the latest failed turn: resend the preceding user message. */
+  readonly onRetry?: () => void;
   readonly onOpenReview?: (summary: EditSummary, turnNumber: number) => void;
   readonly workDetails?: WorkDetailsMode;
+  /** D-22: the running tool's action label (trace projection), so the streaming status names
+   *  what is happening instead of the vague "Deep diving". */
+  readonly currentAction?: string;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -3499,9 +2929,9 @@ function MessageBubble({
       {message.streaming ? (
         <div className="message-status-row">
           <span className="status-pill status-streaming" role="status">
-            <span className="sr-only">Deep diving for {elapsedSeconds ?? 0}s</span>
+            <span className="sr-only">{currentAction ? `${currentAction} · ${elapsedSeconds ?? 0}s` : `Deep diving for ${elapsedSeconds ?? 0}s`}</span>
           </span>
-          <span className="took-btn" aria-hidden="true">Deep diving for {elapsedSeconds ?? 0}s</span>
+          <span className="took-btn" aria-hidden="true">{currentAction ?? `Deep diving for ${elapsedSeconds ?? 0}s`}</span>
         </div>
       ) : (
         <div className="message-status-row">
@@ -3524,7 +2954,7 @@ function MessageBubble({
       )}
       {message.failed && message.retryCount !== undefined && (
         <RetryDisclosure
-          retries={[{ attempt: message.retryCount, maxRetries: 5, code: message.failureCode ?? "", message: message.failureMessage ?? "" }]}
+          retries={[{ attempt: message.retryCount, maxRetries: 5, code: message.failureCode ?? "", message: message.failureMessage ?? "", receivedAt: 0 }]}
           elapsedSeconds={Math.max(0, Math.round((message.tookMs ?? 0) / 1000))}
         />
       )}
@@ -3555,10 +2985,12 @@ function MessageBubble({
       <div className="message-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
       <CodeBlocks containerRef={bodyRef} />
       <AuthorityNotice steps={message.steps} />
-      {message.editSummary && onOpenReview && (
+      {onOpenReview && (message.editSummaries?.length ?? 0) > 0 ? (
+        <TurnChangesCard summaries={message.editSummaries!} turnNumber={turnNumber ?? 1} onOpenReview={onOpenReview} />
+      ) : message.editSummary && onOpenReview ? (
         <EditDiff summary={message.editSummary} turnNumber={turnNumber ?? 1} onOpenReview={onOpenReview} />
-      )}
-      {message.failed && message.failureMessage && <FailureBlock code={message.failureCode ?? ""} message={message.failureMessage} />}
+      ) : null}
+      {message.failed && message.failureMessage && <FailureBlock code={message.failureCode ?? ""} message={message.failureMessage} {...(onRetry ? { onRetry } : {})} />}
       {!message.failed && !message.streaming && (
         <div className="message-actions">
           {message.cancelled && <span className="cancelled-tag">Stopped</span>}
@@ -3640,10 +3072,11 @@ export function LocalWorkspaceForm({
       setModeState("contained");
     }
   }, [containmentAvailable, inspection?.executionPosture, modeChosen]);
-  const containmentReason = inspectionError ?? inspection?.reason ??
-    (inspection?.platformSupported === false ? "Linux child containment is unavailable on this platform." :
-      inspection?.configured === false ? "Linux child containment is not configured by the host." :
-        "Checking host support…");
+  // Plain words first: the host's own reason is for logs, not for this form.
+  const containmentReason = inspectionError ??
+    (inspection?.platformSupported === false ? "Contained mode needs Linux, so it isn't available on this computer." :
+      inspection?.configured === false ? "Contained mode isn't set up on this computer. Choose Local to open the folder." :
+        inspection?.reason ?? "Checking host support…");
   const containmentLimits = inspection?.limits
     ? ` Wall-time limit: ${Math.ceil(inspection.limits.timeoutMs / 1000)} seconds; output limit: ${(inspection.limits.maxOutputBytes / (1024 * 1024)).toFixed(1)} MiB.`
     : "";
@@ -3655,7 +3088,7 @@ export function LocalWorkspaceForm({
       await selectWorkspaceForExecution(invoke, path, mode, inspection);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
       setBusy(false);
     }
   }, [inspection, invoke, mode, onClose, path]);
@@ -3686,7 +3119,7 @@ export function LocalWorkspaceForm({
             ? "Local · uncontained — agents run commands and write files on this computer as you"
             : "Local · read-only to agents — commands and writes need a contained workspace"}
         </label>
-        <label title={containmentAvailable ? undefined : containmentReason}>
+        <label title={containmentAvailable ? undefined : (inspection?.reason ?? containmentReason)}>
           <input
             type="radio"
             name="workspace-execution-mode"
@@ -3734,12 +3167,7 @@ function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="add-workspace-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="add-workspace-heading">Add workspace</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Add workspace" titleId="add-workspace-heading" closeLabel="add workspace" onClose={onClose} />
         <div role="tablist" aria-label="Where the workspace lives" className="rw-tabs">
           {places.map(([id, text], i) => (
             <button
@@ -3784,6 +3212,48 @@ function AddWorkspaceDialog({ onClose }: { readonly onClose: () => void }) {
   );
 }
 
+/** Delete-workspace confirmation: names the workspace, states what is and is not touched. */
+function DeleteWorkspaceDialog({
+  workspace,
+  onClose,
+}: {
+  readonly workspace: { readonly id: string; readonly title: string; readonly root: string; readonly sessionCount: number };
+  readonly onClose: () => void;
+}) {
+  const client = useCognate();
+  const toast = useToast();
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const confirm = useCallback(async () => {
+    setBusy(true);
+    try {
+      await client.invoke("workspace.delete", { workspaceId: workspace.id } as never);
+      toast.show(`Removed workspace "${workspace.title}"`);
+      onClose();
+    } catch (err) {
+      setBusy(false);
+      setError(workspaceErrorText(err));
+    }
+  }, [client, toast, workspace, onClose]);
+  return (
+    <div className="modal-backdrop modal-backdrop-stacked">
+      <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-heading" tabIndex={-1} ref={dialogRef}>
+        <DialogHeader title={`Delete workspace “${workspace.title}”?`} titleId="delete-workspace-heading" closeLabel="delete workspace" onClose={onClose} />
+        <p className="dialog-copy">
+          This removes <strong>{workspace.title}</strong>{workspace.sessionCount > 0 ? <> and its {workspace.sessionCount === 1 ? "1 conversation" : `${workspace.sessionCount} conversations`}</> : null} from the sidebar. Files in <code>{workspace.root}</code> are not touched, and you can add the folder again later.
+        </p>
+        {error && <p role="alert" className="form-error">{error}</p>}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-danger" disabled={busy} onClick={() => void confirm()}>Delete workspace</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Usage pass U3 (§12): the per-workspace "Rename" dialog — writes the durable `workspace.rename`
  *  capability; the `workspaces` projection round trip updates the sidebar row. */
 function RenameWorkspaceDialog({
@@ -3794,6 +3264,7 @@ function RenameWorkspaceDialog({
   readonly onClose: () => void;
 }) {
   const client = useCognate();
+  const toast = useToast();
   const [title, setTitle] = useState(workspace.title);
   const [error, setError] = useState<string | undefined>(undefined);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -3801,21 +3272,59 @@ function RenameWorkspaceDialog({
   const submit = useCallback(async () => {
     try {
       await client.invoke("workspace.rename", { workspaceId: workspace.id, title } as never);
+      toast.show("Workspace renamed");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     }
-  }, [client, workspace.id, title, onClose]);
+  }, [client, toast, workspace.id, title, onClose]);
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-workspace-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="rename-workspace-heading">Rename workspace</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
-            ×
+        <DialogHeader title="Rename workspace" titleId="rename-workspace-heading" closeLabel="rename workspace" onClose={onClose} />
+        <input aria-label="Workspace name" value={title} onChange={(e) => setTitle(e.currentTarget.value)} onKeyDown={(e) => {
+          if (e.key === "Enter" && title.trim()) void submit();
+        }} autoFocus />
+        {error && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn-primary" disabled={!title.trim()} onClick={() => void submit()}>
+            Rename
           </button>
         </div>
-        <input aria-label="Workspace name" value={title} onChange={(e) => setTitle(e.currentTarget.value)} onKeyDown={(e) => {
+      </div>
+    </div>
+  );
+}
+
+/** J-SESSION-rename: the per-session "Rename" dialog — writes the durable `session.rename` capability. */
+function RenameSessionDialog({ session, onClose }: { readonly session: { readonly id: string; readonly title: string }; readonly onClose: () => void }) {
+  const client = useCognate();
+  const toast = useToast();
+  const [title, setTitle] = useState(session.title === "New Session" ? "" : session.title);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, onClose);
+  const submit = useCallback(async () => {
+    try {
+      await client.invoke("session.rename", { sessionId: session.id, title } as never);
+      toast.show("Session renamed");
+      onClose();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, [client, toast, session.id, title, onClose]);
+  return (
+    <div className="modal-backdrop modal-backdrop-stacked">
+      <div className="modal workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-session-heading" tabIndex={-1} ref={dialogRef}>
+        <DialogHeader title="Rename session" titleId="rename-session-heading" closeLabel="rename session" onClose={onClose} />
+        <input aria-label="Session name" value={title} maxLength={120} placeholder="Name this session" onChange={(e) => setTitle(e.currentTarget.value)} onKeyDown={(e) => {
           if (e.key === "Enter" && title.trim()) void submit();
         }} autoFocus />
         {error && (
@@ -3872,7 +3381,17 @@ function PresetMenu({
   return (
     <div className="preset-menu-wrap" ref={ref}>
       <button type="button" className="mode-badge mode-badge-btn" aria-label={`Agent preset, current: ${AGENT_PRESET_LABELS[value]}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        {AGENT_PRESET_LABELS[value]}
+        {(() => {
+          const words = AGENT_PRESET_LABELS[value].split(" ");
+          return words.length > 1 ? (
+            <>
+              {words.slice(0, -1).join(" ")}
+              <span className="preset-label-suffix"> {words[words.length - 1]}</span>
+            </>
+          ) : (
+            AGENT_PRESET_LABELS[value]
+          );
+        })()}
       </button>
       {open && (
         <div role="menu" className="workspace-actions-menu preset-menu">
@@ -3918,7 +3437,10 @@ export function PluginsPanelBody({
   onCloseAdd,
   onInstall,
   onToggle,
+  onOpenModelSettings,
 }: {
+  /** Opens Settings > Models; offered on the model-provider plugin's detail. */
+  readonly onOpenModelSettings?: () => void;
   readonly detail: PluginView | undefined;
   readonly catalog: PluginCatalogResult | undefined;
   readonly loading: boolean;
@@ -3968,9 +3490,7 @@ export function PluginsPanelBody({
               </button>
             </>
           )}
-          <button type="button" className="icon-btn" aria-label="Close plugins panel" onClick={onClose}>
-            ×
-          </button>
+          <CloseButton label="plugins panel" onClick={onClose} />
         </div>
       </div>
 
@@ -4020,6 +3540,11 @@ export function PluginsPanelBody({
           </dl>
           {detail.reason && <p className="plugin-detail-reason">{detail.reason}</p>}
           <div className="plugin-detail-actions">
+            {detail.id === "model-provider" && onOpenModelSettings && (
+              <button type="button" className="btn-primary" onClick={onOpenModelSettings}>
+                Configure in Settings → Providers
+              </button>
+            )}
             {detail.lifecycle === "optional" &&
               (detail.status === "installed" ? (
                 <button type="button" disabled={pending !== undefined} onClick={() => onInstall(detail.id, false)}>
@@ -4096,7 +3621,9 @@ function PluginsPanel({
   onClose,
   onOpenDetail,
   onCloseDetail,
+  onOpenModelSettings,
 }: {
+  readonly onOpenModelSettings?: () => void;
   /** From the `#plugins/<id>` hash route. `undefined` is the list view. */
   readonly detailId: string | undefined;
   readonly onClose: () => void;
@@ -4126,7 +3653,7 @@ function PluginsPanel({
       setCatalog(result);
       setRefreshedAt(new Date().toLocaleTimeString());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(workspaceErrorText(err));
     } finally {
       setLoading(false);
     }
@@ -4172,6 +3699,7 @@ function PluginsPanel({
       onClose={onClose}
       onOpenDetail={onOpenDetail}
       onCloseDetail={onCloseDetail}
+      {...(onOpenModelSettings ? { onOpenModelSettings } : {})}
       onRefresh={() => void load()}
       onOpenAdd={() => setAddOpen(true)}
       onCloseAdd={() => setAddOpen(false)}
@@ -4215,12 +3743,7 @@ function AddPluginDialog({
   return (
     <div className="modal-backdrop modal-backdrop-stacked">
       <div className="modal add-plugin-dialog" role="dialog" aria-modal="true" aria-labelledby="add-plugin-heading" tabIndex={-1} ref={dialogRef}>
-        <div className="dialog-banner">
-          <h2 id="add-plugin-heading">Add plugin</h2>
-          <button type="button" className="icon-btn" aria-label="Close add plugin" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="Add plugin" titleId="add-plugin-heading" closeLabel="add plugin" onClose={onClose} />
         <div className="add-plugin-body">
           {candidates.length === 0 ? (
             <p className="empty-state small">Everything this deployment offers is already installed.</p>
@@ -4277,13 +3800,6 @@ function requestDurationMs(request: TraceRequest, turn: TraceTurn): number | und
   const end = after.find((t) => t > start);
   return end === undefined ? undefined : end - start;
 }
-
-const TRACE_ROLE_LABELS: Readonly<Record<string, string>> = {
-  system: "SYSTEM",
-  user: "USER",
-  assistant: "ASSISTANT",
-  tool: "TOOL",
-};
 
 /** Format a duration the way the reference's trajectory rows show it ("1,408 ms"). */
 function formatDurationMs(ms: number): string {
@@ -4504,7 +4020,7 @@ function TraceDetailsPanel({
     ? (["summary", "options", "timing", "ledger"] as const)
     : (["summary", "payload", "result", "schema", "timing", "ledger"] as const);
   return (
-    <aside className="right-panel trace-details" role="complementary" aria-label="Event details">
+    <div className="inspector-pane trace-details" role="group" aria-label="Event details">
       <div className="right-panel-tabs" role="tablist">
         <span className="trace-details-heading">{heading}</span>
         <div className="trace-details-tabs">
@@ -4514,9 +4030,7 @@ function TraceDetailsPanel({
             </button>
           ))}
         </div>
-        <button type="button" className="icon-btn" aria-label="Close details" onClick={onClose}>
-          ×
-        </button>
+        <CloseButton label="details" onClick={onClose} />
       </div>
       <div className="right-panel-body">
         {request && tab === "summary" && (
@@ -4654,7 +4168,7 @@ function TraceDetailsPanel({
           </div>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -4666,9 +4180,10 @@ function TraceDetailsPanel({
  *  tabs) only appears once the session has an actual message (06-user-message onward). */
 function HeroLanding({
   workspaceLabel,
-  modeLabel,
   composerDisabled,
   modelLabel,
+  modelControl,
+  noModelNotice,
   onSend,
   accessMode,
   onAccessModeChange,
@@ -4677,11 +4192,16 @@ function HeroLanding({
   onSwitchWorkspace,
   onAddWorkspace,
   composerFocusToken,
+  contextBar,
 }: {
+  readonly contextBar?: ReactNode;
   readonly workspaceLabel: string;
-  readonly modeLabel: string;
+  readonly modeLabel?: string;
   readonly composerDisabled: boolean;
   readonly modelLabel: string | undefined;
+  readonly modelControl?: ReactNode;
+  /** Shown above the composer while no model is connected. */
+  readonly noModelNotice?: ReactNode;
   readonly onSend: (message: string) => void;
   /** Usage pass U2: the hero composer's access-mode dropdown edits the pending choice the
    *  session-creating send() consumes (no session id exists yet to key an override onto). */
@@ -4763,13 +4283,14 @@ function HeroLanding({
               </div>
             )}
           </div>
-          <span className="mode-badge">{modeLabel}</span>
         </div>
+        {noModelNotice}
         <div className="hero-composer">
           <Composer
             disabled={composerDisabled}
             sending={false}
             modelLabel={modelLabel}
+            {...(modelControl ? { modelControl } : {})}
             planMode={false}
             onSend={onSend}
             onStop={() => undefined}
@@ -4779,6 +4300,7 @@ function HeroLanding({
             sendBehavior={sendBehavior}
             onBusySubmit={() => undefined}
             focusToken={composerFocusToken}
+            {...(contextBar ? { contextBar } : {})}
           />
         </div>
       </div>
@@ -4797,12 +4319,54 @@ function WorkbenchIcon() {
   );
 }
 
-export function App() {
+/** Short, never-truncated posture word for chips, plus the full statement for the tooltip. */
+function workspacePosture(worldId: string | undefined, world: { readonly kind?: string; readonly label?: string } | undefined, root: string | undefined): { readonly short: string; readonly detail: string } {
+  if (!worldId || worldId === "local") {
+    return { short: "Local", detail: `Local · uncontained. Commands run directly on this computer with your user permissions${root ? ` in ${root}` : ""}.` };
+  }
+  const label = world?.label ?? worldId;
+  if (world?.kind === "linux-bubblewrap") return { short: "Contained", detail: `Linux child containment · ${label}. Commands run inside a restricted sandbox${root ? ` over ${root}` : ""}.` };
+  const kind = (world?.kind ?? "remote").toUpperCase();
+  return { short: kind, detail: `${kind} · ${label}. Commands run on a remote machine${root ? ` in ${root}` : ""}.` };
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const apply = () => setMatches(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [query]);
+  return matches;
+}
+
+const SIDEBAR_STORAGE_KEY = "cognate.sidebar.width";
+const SIDEBAR_DEFAULT = 280;
+const SIDEBAR_MIN = 220;
+const SIDEBAR_MAX = 420;
+function readSidebarWidth(): number {
+  try {
+    const n = Number(window.localStorage.getItem(SIDEBAR_STORAGE_KEY));
+    return Number.isFinite(n) && n > 0 ? clampWidth(n, SIDEBAR_MIN, SIDEBAR_MAX) : SIDEBAR_DEFAULT;
+  } catch {
+    return SIDEBAR_DEFAULT;
+  }
+}
+
+function AppShell() {
   const client = useCognate();
+  const toast = useToast();
   const workspaces = useWorkspaces();
   const worlds = useExecutionWorlds();
   const sessions = useSessions();
   const modelConfig = useModelConfig();
+  const harnessList = useHarnessList();
+  const harnessBindings = useHarnessBindings();
+  // The agent chosen before a session exists (hero composer); bound when the first send creates it.
+  const [pendingHarness, setPendingHarness] = useState<HarnessChoice>({ harnessId: null });
+  const [agentBindError, setAgentBindError] = useState<string | undefined>(undefined);
   const currentWorkspaceId = useCurrentWorkspaceId();
   // The open Case (if any) rides on each run so the agent gets the Case-scoped tools and mediation context.
   const activeCaseId = useProjection("cognitive")?.find((r) => r.key === "activeCase")?.value as string | undefined;
@@ -4812,26 +4376,62 @@ export function App() {
   const settings = useGeneralSettings();
   const theme = useTheme(settings.appearance);
   const workDetails = settings.workDetails;
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-
-  // "Open keyboard shortcuts Ctrl /" (ShortcutsDialog's one real binding) — a global listener, so
-  // the dialog opens from anywhere. Ignored while typing in a textarea/input (the reference's
-  // binding list is application-level, not composer-level).
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "/" && (e.ctrlKey || e.metaKey)) {
-        const target = e.target as HTMLElement | null;
-        if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
-        e.preventDefault();
-        setShortcutsOpen((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches);
+  const inspector = useInspector();
+  const isMobile = useMediaQuery("(max-width: 760px)");
+  const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
+  // J-TERMINAL-session: the docked working surface (terminal today; browser with its phase).
+  // The dock is a view of a server-side session — height is the only local preference.
+  const [surface, setSurface] = useState<"none" | "terminal" | "browser">("none");
+  const [surfaceMaximized, setSurfaceMaximized] = useState(false);
+  const [surfaceHeight, setSurfaceHeight] = useState<number>(() => {
+    const raw = Number(localStorage.getItem("cognate.surface.height"));
+    return Number.isFinite(raw) && raw >= 180 && raw <= 800 ? raw : 320;
+  });
+  const setSurfaceHeightPersisted = useCallback((px: number) => {
+    const clamped = Math.round(Math.max(180, Math.min(800, px)));
+    setSurfaceHeight(clamped);
+    try { localStorage.setItem("cognate.surface.height", String(clamped)); } catch { /* storage may be unavailable */ }
   }, []);
-
-  const [collapsed, setCollapsed] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const toggleSurface = useCallback((next: "terminal" | "browser") => {
+    setSurface((current) => (current === next ? "none" : next));
+    setSurfaceMaximized(false);
+  }, []);
+  const startSurfaceResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = surfaceHeight;
+    const move = (moveEvent: PointerEvent) => setSurfaceHeightPersisted(startHeight + (startY - moveEvent.clientY));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }, [surfaceHeight, setSurfaceHeightPersisted]);
+  const setSidebarWidth = useCallback((w: number) => {
+    setSidebarWidthState(w);
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(w));
+    } catch {
+      /* storage unavailable — width is simply not remembered */
+    }
+  }, []);
+  // Settings is a page (not a modal): `settingsSection` is both "is it open" and "which section".
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
+  const showSettings = settingsSection !== undefined;
+  const [settingsWizard, setSettingsWizard] = useState<SettingsWizardRequest | undefined>(undefined);
+  const openSettings = useCallback((section: SettingsSection = "general", wizard?: SettingsWizardRequest) => {
+    setSettingsWizard(wizard);
+    setSettingsSection(section);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsSection(undefined);
+    setSettingsWizard(undefined);
+  }, []);
+  const [pickerRequest, setPickerRequest] = useState(false);
+  const clearPickerRequest = useCallback(() => setPickerRequest(false), []);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Usage pass U2: per-session access mode (the composer dropdown) — an override map keyed by
   // session id, seeded from the settings default for new sessions (`pendingAccessMode` carries a
   // hero-composer choice into the session send() creates). The `sessions` projection folds each
@@ -4861,7 +4461,9 @@ export function App() {
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<ReadonlySet<string>>(new Set());
   const [wsMenuFor, setWsMenuFor] = useState<string | undefined>(undefined);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
+  const [deleteFor, setDeleteFor] = useState<{ readonly id: string; readonly title: string; readonly root: string; readonly sessionCount: number } | undefined>(undefined);
   const [renameFor, setRenameFor] = useState<{ readonly id: string; readonly title: string } | undefined>(undefined);
+  const [renameSessionFor, setRenameSessionFor] = useState<{ readonly id: string; readonly title: string } | undefined>(undefined);
   const [chooseWsOpen, setChooseWsOpen] = useState(false);
   const chooseWsRef = useRef<HTMLDivElement>(null);
   // Usage pass U4 (§14): the sidebar "Plugins" global panel — a toggle that swaps the center
@@ -5019,14 +4621,16 @@ export function App() {
   const availableReviewTabs = useMemo(
     () =>
       transcript
-        .map((message, index) => (message.editSummary ? reviewTabKey(message.editSummary, index + 1) : undefined))
-        .filter((tab): tab is ReviewTab => tab !== undefined),
+        .flatMap((message, index) => (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => reviewTabKey(summary, index + 1))),
     [transcript],
   );
-  const openReviewPanel = useCallback((summary: EditSummary, turnNumber: number) => {
-    setOpenChildToolCallId(undefined);
-    setOpenReview({ summary, turnNumber });
-  }, []);
+  const openReviewPanel = useCallback(
+    (summary: EditSummary, turnNumber: number) => {
+      setOpenReview({ summary, turnNumber });
+      inspector.openInspector("changes");
+    },
+    [inspector.openInspector],
+  );
   const planReviewContinuation = openContinuations.find((c) => c.type === "plan-review");
   const decidePlanReview = useCallback(
     async (approved: boolean) => {
@@ -5243,6 +4847,17 @@ export function App() {
   const startNewSession = useCallback(
     async (workspaceId: string) => {
       if (newSessionPending) return;
+      // An empty draft (no prompt yet) elsewhere in the list already is "a new session": take the person to it
+      // instead of stacking identical untitled rows. (Pressing + while already on one still starts a fresh one.)
+      const emptyDraft = sessions.find((row) => row.workspaceId === workspaceId && row.lastStatus === "draft" && row.archived !== true && row.id !== activeSessionId);
+      if (emptyDraft) {
+        setExpertsPanelOpen(false);
+        setPluginsPanelOpen(false);
+        setWorkbenchOpen(false);
+        setNewSessionError(undefined);
+        await openSession(emptyDraft.id);
+        return;
+      }
       setNewSessionPending(true);
       setNewSessionError(undefined);
       // J-SESSION-draft: the + action means "take me to the conversation" — the center surface
@@ -5271,7 +4886,7 @@ export function App() {
         setNewSessionPending(false);
       }
     },
-    [client, newSessionPending, rememberSession],
+    [client, newSessionPending, rememberSession, sessions, openSession, activeSessionId],
   );
 
   const newSession = useCallback(() => {
@@ -5294,6 +4909,174 @@ export function App() {
     },
     [client, startNewSession],
   );
+
+  // ---- Global keyboard shortcuts + command palette (T1a) -----------------------------------
+  // `chordFor` is the effective chord (durable override, else shipped default) for an action id.
+  const chordFor = useCallback((id: string) => effectiveChord(id, settings.shortcuts), [settings.shortcuts]);
+  const closeCenterPanels = useCallback(() => {
+    setExpertsPanelOpen(false);
+    setWorkbenchOpen(false);
+    if (pluginsPanelOpen) closePluginsPanel();
+  }, [pluginsPanelOpen, closePluginsPanel]);
+
+  const actionHandlers = useRef<Record<string, () => void>>({});
+  actionHandlers.current = {
+    "open-command-palette": () => setPaletteOpen((open) => !open),
+    "open-settings": () => (showSettings ? closeSettings() : openSettings()),
+    "open-shortcuts": () => openSettings("shortcuts"),
+    "toggle-sidebar": () => setCollapsed((c) => !c),
+    "toggle-inspector": () => inspector.toggleInspector(),
+    "new-session": () => {
+      closeSettings();
+      newSession();
+    },
+  };
+  const shortcutOverridesRef = useRef(settings.shortcuts);
+  shortcutOverridesRef.current = settings.shortcuts;
+  // The Tauri shell dispatches menu actions into this bridge (desktop-native-completion B3);
+  // in a browser or CLI context nothing registers it and the shell is not there to call it.
+  // Handlers are read live on every dispatch so the bridge always routes to the current map.
+  useEffect(() => {
+    registerShellBridge(() => actionHandlers.current);
+  }, []);
+  const escapeStateRef = useRef({ showSettings, drawerOpen: false, closeDrawer: () => {} });
+  escapeStateRef.current = { showSettings, drawerOpen: isMobile && !collapsed, closeDrawer: () => setCollapsed(true) };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "Escape") {
+        // Escape closes the topmost surface. Dialogs (OPEN_MODAL_STACK) and open menus own their
+        // own Escape; the palette is a dialog; only then does it fall through to the Settings page.
+        if (OPEN_MODAL_STACK.length > 0) return;
+        if (document.querySelector('[aria-haspopup][aria-expanded="true"]')) return;
+        if (escapeStateRef.current.drawerOpen) {
+          e.preventDefault();
+          escapeStateRef.current.closeDrawer();
+          return;
+        }
+        if (escapeStateRef.current.showSettings) {
+          e.preventDefault();
+          closeSettings();
+        }
+        return;
+      }
+      // Cmd acts as Ctrl on Apple platforms, so the stored "Ctrl+K" is Cmd+K there.
+      const event = { key: e.key, ctrlKey: e.ctrlKey || (isApplePlatform && e.metaKey), shiftKey: e.shiftKey, altKey: e.altKey, metaKey: !isApplePlatform && e.metaKey };
+      // Every chord carries a modifier (shortcuts.ts refuses bare keys), so it can never be
+      // someone typing. The composer is the default focus, so firing from <input>/<textarea> is
+      // required (Ctrl+K from the composer); only a rich-text editing surface is protected, via
+      // `isTypingTarget`'s contenteditable rule.
+      const target = e.target as HTMLElement | null;
+      const guard = target?.isContentEditable === true ? { tagName: "DIV", isContentEditable: true } : null;
+      const action = resolveKeypress(event, shortcutOverridesRef.current, guard);
+      const handler = action ? actionHandlers.current[action] : undefined;
+      if (!handler) return;
+      e.preventDefault();
+      handler();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeSettings]);
+
+  const paletteItems = useMemo<readonly PaletteItem[]>(() => {
+    const items: PaletteItem[] = [];
+    const go = (fn: () => void) => () => {
+      closeSettings();
+      fn();
+    };
+    items.push({ id: "new-session", group: "Actions", label: "New session", icon: <PlusIcon />, chord: chordFor("new-session"), keywords: "chat conversation create", run: () => actionHandlers.current["new-session"]?.() });
+    items.push({ id: "add-workspace", group: "Actions", label: "Add workspace", icon: <FolderIcon />, keywords: "open folder project directory", run: go(() => setAddWorkspaceOpen(true)) });
+    items.push({ id: "toggle-sidebar", group: "Actions", label: "Toggle sidebar", icon: <CollapseIcon />, chord: chordFor("toggle-sidebar"), keywords: "collapse expand navigation", run: () => setCollapsed((c) => !c) });
+    items.push({ id: "toggle-inspector", group: "Actions", label: "Toggle inspector", icon: <PanelRightIcon />, chord: chordFor("toggle-inspector"), keywords: "right panel context changes details files config", run: () => inspector.toggleInspector() });
+    items.push({
+      id: "toggle-theme",
+      group: "Actions",
+      label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+      icon: theme === "dark" ? <SunIcon /> : <MoonIcon />,
+      keywords: "appearance dark light mode",
+      run: () => void client.invoke("settings.changeAppearance", { appearance: theme === "dark" ? "light" : "dark" } as never).then(() => toast.show("Settings saved")).catch(() => toast.show("Could not save that setting")),
+    });
+    items.push({
+      id: "switch-model",
+      group: "Actions",
+      label: "Switch model",
+      icon: <BotIcon />,
+      keywords: "model provider change llm manage providers",
+      run: go(() => {
+        closeCenterPanels();
+        if (currentWorkspaceId) setPickerRequest(true);
+        else openSettings("models", modelConfig ? { edit: true } : { edit: false });
+      }),
+    });
+    items.push({
+      id: "choose-agent",
+      group: "Actions",
+      label: "Choose agent…",
+      icon: <TerminalIcon />,
+      keywords: "agent harness cli claude code codex opencode native cognate permission mode",
+      run: go(() => {
+        closeCenterPanels();
+        if (currentWorkspaceId) requestAnimationFrame(() => document.getElementById("agent-chip")?.click());
+        else openSettings("agents");
+      }),
+    });
+    items.push({
+      id: "refresh-agents",
+      group: "Actions",
+      label: "Refresh agent CLIs",
+      icon: <TerminalIcon />,
+      keywords: "agents harness detect installed rescan",
+      run: go(() => {
+        void harnessList.refresh().then(() => toast.show("Agent CLIs refreshed"));
+      }),
+    });
+    items.push({ id: "experts", group: "Actions", label: "Experts & Teams", icon: <BotIcon />, keywords: "agents teams", run: go(() => { closeCenterPanels(); setExpertsPanelOpen(true); }) });
+    if (currentWorkspaceId) items.push({ id: "workbench", group: "Actions", label: "Workbench", icon: <WorkbenchIcon />, keywords: "tasks workflows automations", run: go(() => { closeCenterPanels(); setWorkbenchOpen(true); }) });
+    items.push({ id: "plugins", group: "Actions", label: "Plugins", icon: <PluginIcon />, keywords: "extensions", run: go(() => { setExpertsPanelOpen(false); setWorkbenchOpen(false); setPluginsPanelOpen(true); }) });
+    items.push({ id: "settings", group: "Settings", label: "Settings", icon: <GearIcon />, chord: chordFor("open-settings"), keywords: "preferences configuration", run: () => openSettings() });
+    for (const section of SETTINGS_SECTIONS) {
+      items.push({
+        id: `settings-${section.id}`,
+        group: "Settings",
+        label: section.id === "shortcuts" ? "Keyboard shortcuts" : `Settings: ${section.label}`,
+        icon: section.icon,
+        ...(section.id === "shortcuts" ? { chord: chordFor("open-shortcuts") } : {}),
+        keywords: `settings ${section.description}`,
+        run: () => openSettings(section.id),
+      });
+    }
+    for (const ws of workspaces) {
+      items.push({
+        id: `ws-${ws.id}`,
+        group: "Workspaces",
+        label: ws.title || ws.id,
+        detail: ws.root,
+        icon: <FolderIcon />,
+        keywords: "workspace switch",
+        run: go(() => void client.invoke("workspace.select", { path: ws.root, worldId: ws.executionWorldId ?? "local" } as never).catch((e) => toast.show(errorText(e)))),
+      });
+    }
+    const titleOf = new Map(workspaces.map((w) => [w.id, w.title || w.id]));
+    [...sessions]
+      .filter((x) => x.archived !== true)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .forEach((session) => {
+        items.push({
+          id: `session-${session.id}`,
+          group: "Sessions",
+          label: session.title || "New Session",
+          detail: titleOf.get(session.workspaceId) ?? "",
+          icon: <SessionIcon />,
+          keywords: "session conversation",
+          run: go(() => {
+            closeCenterPanels();
+            void openSession(session.id);
+          }),
+        });
+      });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chordFor, theme, workspaces, sessions, currentWorkspaceId, modelConfig, client, toast, closeCenterPanels, openSession, openSettings, closeSettings, inspector]);
 
   // Close the sidebar's floating menus on outside click / Escape (same pattern as SettingMenu).
   useEffect(() => {
@@ -5330,6 +5113,7 @@ export function App() {
       // The task this turn serves: the active session's durable binding, or — on the session-
       // creating first send — the parked choice, bound durably below before the run freezes it.
       let runTaskId = activeTaskId;
+      let runHarnessId: string | null = activeSessionId ? (harnessBindings.get(activeSessionId)?.harnessId ?? null) : null;
       if (!sessionId) {
         // The hero composer's first send creates the conversation's durable identity first
         // (idempotent `session.create`), binds the parked task choice if any, and only then
@@ -5347,6 +5131,16 @@ export function App() {
         }
         setActiveSessionId(sessionId);
         rememberSession(sendWorkspaceId, sessionId);
+        if (pendingHarness.harnessId) {
+          const choice = pendingHarness;
+          try {
+            await client.invoke("session.harness.bind", { sessionId, harnessId: choice.harnessId, ...(choice.permissionMode ? { permissionMode: choice.permissionMode } : {}), ...(choice.model ? { model: choice.model } : {}) } as never);
+            runHarnessId = choice.harnessId;
+            setPendingHarness({ harnessId: null });
+          } catch (e) {
+            setAgentBindError(capabilityErrorMessage(e));
+          }
+        }
         if (pendingTaskId) {
           const taskId = pendingTaskId;
           setPendingTaskId(undefined);
@@ -5383,15 +5177,19 @@ export function App() {
         { role: "user", content: message, at },
       ]);
       runStartedAtRef.current = Date.now();
+      // A session bound to an external agent CLI runs `agent.harness` (same input shape); every other
+      // session runs the native `agent.coding`.
       const view = await client.startRun(
-        "agent.coding",
-        { sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message), mode, preset, ...(activeCaseId ? { caseId: activeCaseId } : {}), ...(runTaskId ? { taskId: runTaskId } : {}) } as unknown as Json,
+        runHarnessId ? "agent.harness" : "agent.coding",
+        runHarnessId
+          ? ({ sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message) } as unknown as Json)
+          : { sessionId, workspaceId: sendWorkspaceId, message: messageWithFocus(message), mode, preset, ...(activeCaseId ? { caseId: activeCaseId } : {}), ...(runTaskId ? { taskId: runTaskId } : {}) } as unknown as Json,
         // The run's shared state is seeded with an empty steering list: "Steer now" appends to it.
         { idempotencyKey: crypto.randomUUID(), correlationId: `session:${sessionId}`, state: { steer: [] } as unknown as Json },
       );
       setActiveRunId(view.runId);
     },
-    [client, currentWorkspaceId, currentSession, activeSessionId, activeTaskId, rememberSession, pendingTaskId, planState?.on, accessModeOverrides, pendingAccessMode, settings.permission, presetOverrides, settings.preset, activeCaseId, messageWithFocus],
+    [client, harnessBindings, pendingHarness, currentWorkspaceId, currentSession, activeSessionId, activeTaskId, rememberSession, pendingTaskId, planState?.on, accessModeOverrides, pendingAccessMode, settings.permission, presetOverrides, settings.preset, activeCaseId, messageWithFocus],
   );
 
   const stop = useCallback(async () => {
@@ -5549,7 +5347,13 @@ export function App() {
       // The last successful `edit` this turn made, if any (`10-file-change-collapsed`/`-expanded`).
       const lastEdit = [...toolEntries].reverse().find((e) => e.tool === "edit" && e.status === "success");
       const editSummary = lastEdit ? (lastEdit.result as EditSummary | undefined) : undefined;
-      setTranscript((prev) => [...prev, { role: "assistant", content: streaming.text, at, tookMs, editSummary, stepCount: toolEntries.length + 1, steps: toolEntries }]);
+      const byPath = new Map<string, EditSummary>();
+      for (const entry of toolEntries) {
+        const result = entry.tool === "edit" && entry.status === "success" ? (entry.result as EditSummary | undefined) : undefined;
+        if (result?.file_path) byPath.set(result.file_path, result);
+      }
+      const editSummaries = [...byPath.values()];
+      setTranscript((prev) => [...prev, { role: "assistant", content: streaming.text, at, tookMs, editSummary, ...(editSummaries.length > 0 ? { editSummaries } : {}), stepCount: toolEntries.length + 1, steps: toolEntries }]);
       setActiveRunId(undefined);
     } else if (streaming.status === "cancelled") {
       // T11 (J-H-cancellation): the partial streamed text is kept, not discarded, with a "Stopped"
@@ -5581,6 +5385,14 @@ export function App() {
   }, [streaming.status, streaming.text, streaming.retries, streaming.failure, toolEntries]);
 
   const modelLabel = modelConfig ? `${modelConfig.model}` : undefined;
+  const modelPicker = (
+    <ModelPicker
+      config={modelConfig}
+      openRequest={pickerRequest}
+      onOpened={clearPickerRequest}
+      onManage={() => openSettings("models")}
+    />
+  );
   const sessionTitle = currentSession?.title || "New Session";
   const breadcrumbTitle = sessionTitle.length > 64 ? `${sessionTitle.slice(0, 63)}…` : sessionTitle;
   // 04/05 hero landing (see HeroLanding's doc comment above): a workspace is chosen but no turn has
@@ -5588,11 +5400,152 @@ export function App() {
   const showHero =
     Boolean(currentWorkspaceId) && transcript.length === 0 && streaming.status === "idle" && !activeRunId;
   const sessionTurns = transcript.filter((m) => m.role === "assistant").length;
+  // D-25: one turn counter. The diff header's "Review · turn N" used the raw transcript index
+  // (user messages counted), so it read "turn 2" while the composer said "1 turn". Both now
+  // count assistant turns.
+  const turnOrdinals = new Map<number, number>();
+  let assistantTurnCounter = 0;
+  transcript.forEach((m, i) => {
+    if (m.role === "assistant") turnOrdinals.set(i, ++assistantTurnCounter);
+  });
   const sessionSteps = transcript.reduce((sum, m) => sum + (m.stepCount ?? 0), 0);
+
+  // ---- One source of truth for the center view -------------------------------------------------
+  // The header's view switch and the sidebar entries both read `currentView` and write through
+  // `setView`; the underlying booleans stay private to this block.
+  const inSession = Boolean(currentWorkspaceId) && !showHero;
+  const currentView: CenterView = expertsPanelOpen
+    ? "experts"
+    : pluginsPanelOpen
+      ? "plugins"
+      : workbenchOpen && currentWorkspaceId
+        ? "workbench"
+        : sessionTab === "trajectory" && inSession && !expertsPanelOpen
+          ? "trajectory"
+          : "conversation";
+  const setView = useCallback(
+    (view: "conversation" | "trajectory" | "workbench" | "experts") => {
+      if (pluginsPanelOpen) closePluginsPanel();
+      setExpertsPanelOpen(view === "experts");
+      setWorkbenchOpen(view === "workbench");
+      if (view === "conversation") setSessionTab("chat");
+      if (view === "trajectory") setSessionTab("trajectory");
+    },
+    [pluginsPanelOpen, closePluginsPanel],
+  );
+  const viewLabel: Record<CenterView, string> = { conversation: "", trajectory: "Trajectory", workbench: "Workbench", experts: "Experts & Teams", plugins: "Plugins" };
+  const crumbs: string[] = [];
+  const boundHarnessId = activeSessionId ? harnessBindings.get(activeSessionId)?.harnessId : null;
+  const boundHarnessLabel = boundHarnessId ? agentLabel(harnessList.harnesses, boundHarnessId) : undefined;
+  const workspaceCrumb = currentWorkspace?.title || currentWorkspace?.id;
+  if (workspaceCrumb) crumbs.push(workspaceCrumb);
+  if (currentView === "conversation" || currentView === "trajectory") {
+    crumbs.push(inSession ? breadcrumbTitle : currentWorkspaceId ? "Start a session" : "Get started");
+    if (inSession && boundHarnessLabel) crumbs.push(boundHarnessLabel);
+  } else {
+    crumbs.push(viewLabel[currentView]);
+  }
+  const postureOfCurrent = workspacePosture(currentWorkspace?.executionWorldId, currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId) : undefined, currentWorkspace?.root);
+
+  // Selecting something to inspect opens the inspector on the matching tab instead of replacing it.
+  const { openInspector } = inspector;
+  const selectTrace = useCallback(
+    (detail: typeof traceDetail) => {
+      setOpenChildToolCallId(undefined);
+      setTraceDetail(detail);
+      if (detail) openInspector("details");
+    },
+    [openInspector],
+  );
+  const openSubagent = useCallback(
+    (toolCallId: string) => {
+      setTraceDetail(undefined);
+      setOpenChildToolCallId(toolCallId);
+      openInspector("details");
+    },
+    [openInspector],
+  );
+
+  // The mobile drawer: Esc/scrim close it (see the key handler), focus moves in on open and back to
+  // the header's menu button on close, and picking where to go closes it.
+  const drawerWasOpen = useRef(false);
+  useEffect(() => {
+    const open = isMobile && !collapsed;
+    if (open && !drawerWasOpen.current) document.getElementById("sidebar-collapse-btn")?.focus();
+    if (!open && drawerWasOpen.current) requestAnimationFrame(() => document.querySelector<HTMLElement>(".main-header-toggle")?.focus());
+    drawerWasOpen.current = open;
+  }, [isMobile, collapsed]);
+  useEffect(() => {
+    if (isMobile) setCollapsed(true);
+  }, [isMobile, activeSessionId, currentView, settingsSection]);
+
+  const boundRow = activeSessionId ? harnessBindings.get(activeSessionId) : undefined;
+  const agentChoice: HarnessChoice = activeSessionId
+    ? { harnessId: boundRow?.harnessId ?? null, ...(boundRow?.permissionMode ? { permissionMode: boundRow.permissionMode } : {}), ...(boundRow?.model ? { model: boundRow.model } : {}) }
+    : pendingHarness;
+  const changeAgent = useCallback(
+    (next: HarnessChoice) => {
+      setAgentBindError(undefined);
+      if (!activeSessionId) {
+        setPendingHarness(next);
+        return;
+      }
+      void client
+        .invoke("session.harness.bind", { sessionId: activeSessionId, harnessId: next.harnessId, ...(next.permissionMode ? { permissionMode: next.permissionMode } : {}), ...(next.model ? { model: next.model } : {}) } as never)
+        .catch((e) => setAgentBindError(capabilityErrorMessage(e)));
+    },
+    [client, activeSessionId],
+  );
+  const agentLocked = Boolean(activeRunId) || streaming.status === "streaming" || Boolean(pendingApproval);
+  // The window title is the shell's one sanctioned web→shell cue (desktop-native-completion
+  // B3): states and counts only, never session content. Precedence (approval →
+  // reconciliation → waiting → running) is titleStatus's documented contract, and the format
+  // is a two-sided, test-pinned grammar the shell parses strictly.
+  useEffect(() => {
+    const states: TitleState[] = showHero
+      ? [{ kind: "idle" }]
+      : [
+          streaming.status === "streaming" ? { kind: "running" } : { kind: "idle" },
+          ...(pendingApproval ? [{ kind: "approval", count: 1 } satisfies TitleState] : []),
+          ...(planReviewContinuation || governanceContinuation ? [{ kind: "waiting" } satisfies TitleState] : []),
+          ...(ambiguousContinuation ? [{ kind: "reconciliation" } satisfies TitleState] : []),
+        ];
+    document.title = composeTitle(highestTitleState(states));
+    // The Chromium --app fallback's beforeunload guard (B4) consults this flag; the entry
+    // template installs that listener only when the boot's shell kind is "chromium-app".
+    (window as unknown as { __wbInFlight?: boolean }).__wbInFlight = !showHero && states.some((s) => s.kind !== "idle");
+  }, [showHero, pendingApproval, planReviewContinuation, governanceContinuation, ambiguousContinuation, streaming.status]);
+  const contextBar = currentWorkspaceId ? (
+    <ComposerBar
+      agentChip={<AgentChip harnesses={harnessList.harnesses} choice={agentChoice} locked={agentLocked} error={agentBindError} onChange={changeAgent} onOpenSettings={() => openSettings("agents")} />}
+      agentNotice={<AgentNotice harnesses={harnessList.harnesses} choice={agentChoice} />}
+      workspaceId={currentWorkspaceId}
+      {...(activeSessionId ? { sessionId: activeSessionId } : {})}
+      {...(activeTaskId ? { taskId: activeTaskId } : {})}
+      onTaskChange={(taskId) => void bindTask(taskId ?? null)}
+      bindError={taskBindError}
+      onOpenWorkbench={() => setView("workbench")}
+      state={showHero ? "idle" : pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
+      steps={showHero ? 0 : toolEntries.length + 1}
+      elapsedSeconds={showHero ? 0 : elapsedSeconds}
+      approvalsPending={!showHero && pendingApproval ? 1 : 0}
+      {...(showHero ? {} : { workspaceTitle: currentWorkspace?.title || currentWorkspace?.id || "" })}
+      {...(!showHero && currentWorkspace?.root ? { workspaceRoot: currentWorkspace.root } : {})}
+      posture={postureOfCurrent}
+      {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
+      onClearFocus={() => setFocusSelection(undefined)}
+    />
+  ) : undefined;
 
   return (
     <div className="app-shell" data-theme={theme}>
-      <aside className={collapsed ? "sidebar collapsed" : "sidebar"}>
+      {isMobile && !collapsed && <div className="drawer-scrim" onClick={() => setCollapsed(true)} aria-hidden="true" />}
+      <aside
+        id="app-sidebar"
+        aria-label="Sidebar"
+        className={`${collapsed ? "sidebar collapsed" : "sidebar"}${isMobile ? " sidebar-drawer" : ""}${showSettings && !isMobile ? " shell-hidden" : ""}`}
+        style={isMobile ? undefined : { width: collapsed ? 0 : sidebarWidth }}
+      >
         <div className="sidebar-top">
           <div className="brand">
             <LogoIcon />
@@ -5603,7 +5556,7 @@ export function App() {
               </span>
             )}
           </div>
-          <button type="button" className="icon-btn" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((c) => !c)}>
+          <button type="button" id="sidebar-collapse-btn" className="icon-btn" aria-controls="app-sidebar" aria-expanded={!collapsed} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={`${collapsed ? "Expand" : "Collapse"} sidebar (${chordLabel(chordFor("toggle-sidebar"))})`} aria-keyshortcuts={chordLabel(chordFor("toggle-sidebar"))} onClick={() => setCollapsed((c) => !c)}>
             <CollapseIcon />
           </button>
         </div>
@@ -5612,12 +5565,15 @@ export function App() {
           type="button"
           className="new-session-btn"
           aria-label="New session"
+          title={`New session (${chordLabel(chordFor("new-session"))})`}
+          aria-keyshortcuts={chordLabel(chordFor("new-session"))}
           onClick={newSession}
           disabled={!currentWorkspaceId || newSessionPending}
           aria-busy={newSessionPending}
         >
           <PlusIcon />
           {!collapsed && (newSessionPending ? "Creating…" : "New Session")}
+          {!collapsed && !newSessionPending && <Kbd chord={chordFor("new-session")} className="kbd-right" />}
         </button>
         {newSessionError && (
           <p role="alert" className="new-session-error">
@@ -5633,16 +5589,15 @@ export function App() {
           <nav className="global-panels" aria-label="Global panels">
             <button
               type="button"
-              className={expertsPanelOpen ? "global-panel-btn active" : "global-panel-btn"}
-              aria-label="Experts and Teams"
-              aria-pressed={expertsPanelOpen}
+              className={currentView === "experts" ? "global-panel-btn active" : "global-panel-btn"}
+              aria-label="Go to Experts & Teams"
+              aria-current={currentView === "experts" ? "page" : undefined}
               onClick={() => {
-                setExpertsPanelOpen((open) => !open);
-                setPluginsPanelOpen(false);
-                setWorkbenchOpen(false);
+                setView("experts");
                 if (window.matchMedia("(max-width: 1023px)").matches) setCollapsed(true);
               }}
             >
+              <BotIcon />
               Experts &amp; Teams
             </button>
             <button
@@ -5662,11 +5617,11 @@ export function App() {
             <RemoteButton onOpen={() => setRemoteOpen(true)} />
             <button
               type="button"
-              className={workbenchOpen ? "global-panel-btn active" : "global-panel-btn"}
-              aria-label="Workbench"
-              aria-pressed={workbenchOpen}
+              className={currentView === "workbench" ? "global-panel-btn active" : "global-panel-btn"}
+              aria-label="Go to Workbench"
+              aria-current={currentView === "workbench" ? "page" : undefined}
               disabled={!currentWorkspaceId}
-              onClick={() => { setWorkbenchOpen((v) => !v); setExpertsPanelOpen(false); setPluginsPanelOpen(false); }}
+              onClick={() => setView("workbench")}
             >
               <WorkbenchIcon />
               Workbench
@@ -5810,19 +5765,47 @@ export function App() {
               {workspaces.length === 0 ? (
                 <p className="empty-state small">No workspace selected</p>
               ) : (() => {
-                const grouped = groupSessions({ workspaces, sessions, groupBy, orderBy, archiveFilter, search: sessionSearch });
-                const hiddenCount = hiddenArchiveCount(sessions, archiveFilter);
+                // Sessions of a deleted workspace stay in the event history but leave the list (no raw-id rows).
+                const knownWorkspaceIds = new Set(workspaces.map((w) => w.id));
+                const visibleSessions = sessions.filter((s) => knownWorkspaceIds.has(s.workspaceId));
+                const grouped = groupSessions({ workspaces, sessions: visibleSessions, groupBy, orderBy, archiveFilter, search: sessionSearch });
+                const hiddenCount = hiddenArchiveCount(visibleSessions, archiveFilter);
                 const renderRow = (session: SessionRow) => (
                   <SessionRowButton
                     key={session.id}
                     session={session}
                     active={session.id === activeSessionId}
                     planPending={planReviewPendingSessions.has(session.id)}
+                    {...(harnessBindings.get(session.id)?.harnessId ? { harnessLabel: agentLabel(harnessList.harnesses, harnessBindings.get(session.id)!.harnessId) } : {})}
                     onOpen={() => openSession(session.id)}
+                    onRename={() => setRenameSessionFor({ id: session.id, title: session.title })}
+                    onTogglePin={() => {
+                      const pinned = session.pinned === true;
+                      void client
+                        .invoke("session.setPinned", { sessionId: session.id, pinned: !pinned } as never)
+                        .then(() => toast.show(pinned ? "Session unpinned" : "Session pinned to the top"))
+                        .catch((e) => console.error("session.setPinned failed", e));
+                    }}
+                    {...(workspaces.find((w) => w.id === session.workspaceId)?.root
+                      ? {
+                          onCopyPath: () => {
+                            const root = workspaces.find((w) => w.id === session.workspaceId)?.root ?? "";
+                            void navigator.clipboard?.writeText(root).then(() => toast.show("Workspace path copied"), () => toast.show("Could not copy the path"));
+                          },
+                        }
+                      : {})}
                     onToggleArchive={() => {
                       const archived = session.archived !== true;
                       void client
                         .invoke("session.setArchived", { sessionId: session.id, archived } as never)
+                        .then(() =>
+                          toast.show(archived ? "Session archived" : "Session restored", {
+                            action: {
+                              label: "Undo",
+                              onAction: () => void client.invoke("session.setArchived", { sessionId: session.id, archived: !archived } as never).catch((e) => console.error("session.setArchived failed", e)),
+                            },
+                          }),
+                        )
                         .catch((e) => console.error("session.setArchived failed", e));
                     }}
                   />
@@ -5873,15 +5856,14 @@ export function App() {
                       >
                         <FolderIcon aria-hidden="true" />
                         {group.title}
-                        {group.executionWorldId ? (
-                          <span className="workspace-world-badge">
-                            {group.executionWorldId === "local"
-                              ? "LOCAL · UNCONTAINED"
-                              : worlds.get(group.executionWorldId)?.kind === "linux-bubblewrap"
-                                ? `LINUX CHILD CONTAINMENT · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`
-                                : `${(worlds.get(group.executionWorldId)?.kind ?? "remote").toUpperCase()} · ${worlds.get(group.executionWorldId)?.label ?? group.executionWorldId}`}
-                          </span>
-                        ) : null}
+                        {(() => {
+                          const posture = workspacePosture(group.executionWorldId, group.executionWorldId ? worlds.get(group.executionWorldId) : undefined, group.root);
+                          return (
+                            <span className="workspace-world-badge" title={posture.detail}>
+                              {posture.short}
+                            </span>
+                          );
+                        })()}
                         <button
                           type="button"
                           className="icon-btn workspace-new-session-btn"
@@ -5921,7 +5903,7 @@ export function App() {
                               role="menuitem"
                               onClick={() => {
                                 setWsMenuFor(undefined);
-                                void client.invoke("workspace.delete", { workspaceId: group.workspaceId } as never).catch((e) => console.error("workspace.delete failed", e));
+                                setDeleteFor({ id: group.workspaceId, title: group.title, root: group.root, sessionCount: visibleSessions.filter((x) => x.workspaceId === group.workspaceId).length });
                               }}
                             >
                               Delete workspace
@@ -5947,22 +5929,115 @@ export function App() {
         )}
 
         <div className="sidebar-bottom">
-          <button type="button" className="icon-btn" aria-label="Settings" onClick={() => setShowSettings(true)}>
+          <button type="button" className="icon-btn" aria-label="Command palette" title={`Command palette (${chordLabel(chordFor("open-command-palette"))})`} aria-keyshortcuts={chordLabel(chordFor("open-command-palette"))} onClick={() => setPaletteOpen(true)}>
+            <CommandIcon />
+            {!collapsed && <span>Search &amp; commands</span>}
+            {!collapsed && <Kbd chord={chordFor("open-command-palette")} className="kbd-right" />}
+          </button>
+          <button type="button" className="icon-btn" aria-label="Settings" onClick={() => openSettings()} title={`Settings (${chordLabel(chordFor("open-settings"))})`} aria-keyshortcuts={chordLabel(chordFor("open-settings"))}>
             <GearIcon />
             {!collapsed && <span>Settings</span>}
+            {!collapsed && <Kbd chord={chordFor("open-settings")} className="kbd-right" />}
           </button>
         </div>
+        {!collapsed && !isMobile && (
+          <ResizeHandle
+            edge="right"
+            label="Resize sidebar"
+            controls="app-sidebar"
+            value={sidebarWidth}
+            min={SIDEBAR_MIN}
+            max={SIDEBAR_MAX}
+            defaultValue={SIDEBAR_DEFAULT}
+            onChange={setSidebarWidth}
+          />
+        )}
       </aside>
 
-      <main className="center-column">
+      {showSettings && (
+        <SettingsPage
+          onClose={closeSettings}
+          section={settingsSection}
+          startWizard={settingsWizard}
+          onSectionChange={setSettingsSection}
+          settings={settings}
+          workspaceId={currentWorkspaceId}
+          onChangeShortcuts={(shortcuts) => client.invoke("settings.changeShortcuts", { shortcuts } as never) as unknown as Promise<void>}
+        />
+      )}
+      <main id="main-content" className={showSettings ? "center-column shell-hidden" : "center-column"}>
+        <MainHeader
+          sidebarHidden={collapsed}
+          onShowSidebar={() => setCollapsed(false)}
+          sidebarChord={chordFor("toggle-sidebar")}
+          crumbs={crumbs}
+          view={currentView}
+          views={[
+            { id: "conversation", label: "Conversation" },
+            { id: "trajectory", label: "Trajectory", hidden: !settings.codingTools, disabled: !inSession },
+            { id: "workbench", label: "Workbench", disabled: !currentWorkspaceId },
+            { id: "experts", label: "Experts & Teams", short: "Experts", ariaLabel: "Experts and Teams" },
+          ]}
+          onViewChange={setView}
+          mode={
+            <PresetMenu
+              current={currentSession?.mode === "ptc" ? "ptc" : currentSession?.mode === "minimal" ? "minimal" : currentSession?.mode === "standard" ? "standard" : undefined}
+              fallback={settings.preset}
+              onPick={(preset) => {
+                if (activeSessionId) setPresetOverrides((prev) => ({ ...prev, [activeSessionId]: preset }));
+                else void client.invoke("settings.changePreset", { preset } as never).catch((e) => console.error("settings.changePreset failed", e));
+              }}
+            />
+          }
+          trailing={
+            <>
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "terminal" ? " active" : ""}`}
+                  aria-pressed={surface === "terminal"}
+                  aria-label={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  title={surface === "terminal" ? "Hide terminal" : "Show terminal"}
+                  onClick={() => toggleSurface("terminal")}
+                >
+                  <TerminalIcon />
+                </button>
+              )}
+              {currentWorkspaceId && (
+                <button
+                  type="button"
+                  className={`icon-btn surface-toggle${surface === "browser" ? " active" : ""}`}
+                  aria-pressed={surface === "browser"}
+                  aria-label={surface === "browser" ? "Hide browser" : "Show browser"}
+                  title={surface === "browser" ? "Hide browser" : "Show browser"}
+                  onClick={() => toggleSurface("browser")}
+                >
+                  <GlobeIcon />
+                </button>
+              )}
+              {inSession && subagentRows.length > 0 ? (
+              <div className="subagent-count-wrap">
+                <button type="button" className="subagent-count-btn" aria-expanded={subagentsExpanded} onClick={() => setSubagentsExpanded((v) => !v)}>
+                  {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
+                </button>
+                {subagentsExpanded && <SubagentTree rows={subagentRows} onOpen={(row) => openSubagent(row.toolCallId)} />}
+              </div>
+            ) : undefined}
+            </>
+          }
+          inspectorOpen={inspector.open}
+          onToggleInspector={inspector.toggleInspector}
+          inspectorChord={chordFor("toggle-inspector")}
+        />
         {expertsPanelOpen ? (
-          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onClose={() => setExpertsPanelOpen(false)} onOpenNavigation={() => setCollapsed(false)} onOpenSettings={() => setShowSettings(true)} />
+          <ExpertsTeamsPanel workspaceId={currentWorkspaceId} onOpenSettings={() => openSettings("models")} />
         ) : pluginsPanelOpen ? (
           <PluginsPanel
             detailId={detailPluginId}
             onClose={closePluginsPanel}
             onOpenDetail={openPluginDetail}
             onCloseDetail={closePluginDetail}
+            onOpenModelSettings={() => openSettings("models", modelConfig ? { edit: true } : { edit: false })}
           />
         ) : workbenchOpen && currentWorkspaceId ? (
           <WorkbenchView
@@ -5984,28 +6059,16 @@ export function App() {
             onClose={() => setWorkbenchOpen(false)}
           />
         ) : !currentWorkspaceId ? (
-          <WorkspaceChooser />
+          <WorkspaceChooser {...(modelConfig ? {} : { onConnectModel: () => openSettings("models", { edit: false }) })} />
         ) : showHero ? (
           <>
-          <ComposerBar
-            workspaceId={currentWorkspaceId}
-            {...(activeSessionId ? { sessionId: activeSessionId } : {})}
-            {...(activeTaskId ? { taskId: activeTaskId } : {})}
-            onTaskChange={(taskId) => void bindTask(taskId ?? null)}
-            bindError={taskBindError}
-            onOpenWorkbench={() => setWorkbenchOpen(true)}
-            state="idle"
-            steps={0}
-            elapsedSeconds={0}
-            approvalsPending={0}
-            {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
-            onClearFocus={() => setFocusSelection(undefined)}
-          />
           <HeroLanding
             workspaceLabel={currentWorkspace?.title || currentWorkspace?.id || ""}
             modeLabel={AGENT_PRESET_LABELS[settings.preset]}
             composerDisabled={composerDisabled}
             modelLabel={modelLabel}
+            {...(modelPicker ? { modelControl: modelPicker } : {})}
+            noModelNotice={modelConfig ? undefined : <ConnectModelNotice onConnect={() => openSettings("models", { edit: false })} />}
             onSend={send}
             accessMode={effectiveAccessMode}
             onAccessModeChange={changeAccessMode}
@@ -6014,66 +6077,13 @@ export function App() {
             onSwitchWorkspace={(ws) => void newSessionIn(ws)}
             onAddWorkspace={() => setAddWorkspaceOpen(true)}
             composerFocusToken={composerFocusToken}
+            {...(contextBar ? { contextBar } : {})}
           />
           </>
         ) : (
           <>
-            <header className="session-header">
-              <nav aria-label="Session hierarchy" className="breadcrumb">
-                {breadcrumbTitle}
-              </nav>
-              {subagentRows.length > 0 && (
-                <div className="subagent-count-wrap">
-                  <button
-                    type="button"
-                    className="subagent-count-btn"
-                    aria-expanded={subagentsExpanded}
-                    onClick={() => setSubagentsExpanded((v) => !v)}
-                  >
-                    {subagentRows.length} subagent{subagentRows.length === 1 ? "" : "s"}
-                  </button>
-                  {/* Anchored dropdown popover directly under the header badge (critic round-2
-                   *  batch B P1) — the reference renders this as a small floating card at the
-                   *  button's position, not a bottom banner above the composer. */}
-                  {subagentsExpanded && (
-                    <SubagentTree
-                      rows={subagentRows}
-                      onOpen={(row) => {
-                        setOpenReview(undefined);
-                        setOpenChildToolCallId(row.toolCallId);
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-              {settings.codingTools && (
-                <div role="tablist" aria-label="Session views" className="session-tabs">
-                  <button type="button" role="tab" aria-selected={sessionTab === "chat"} onClick={() => setSessionTab("chat")}>
-                    Chat
-                  </button>
-                  <button type="button" role="tab" aria-selected={sessionTab === "trajectory"} onClick={() => setSessionTab("trajectory")}>
-                    Trajectory
-                  </button>
-                </div>
-              )}
-              <PresetMenu
-                current={
-                  currentSession?.mode === "ptc"
-                    ? "ptc"
-                    : currentSession?.mode === "minimal"
-                      ? "minimal"
-                      : currentSession?.mode === "standard"
-                        ? "standard"
-                        : undefined
-                }
-                fallback={settings.preset}
-                onPick={(preset) => {
-                  if (activeSessionId) setPresetOverrides((prev) => ({ ...prev, [activeSessionId]: preset }));
-                }}
-              />
-            </header>
             {sessionTab === "trajectory" ? (
-              <TrajectoryView trace={trace} onSelect={setTraceDetail} />
+              <TrajectoryView trace={trace} onSelect={selectTrace} />
             ) : (
             <div
               className="messages"
@@ -6084,12 +6094,35 @@ export function App() {
             >
               {transcript.length === 0 && streaming.status === "idle" && <p className="empty-state">Start the conversation below.</p>}
               {transcript.map((message, index) => (
-                <MessageBubble key={index} message={message} turnNumber={index + 1} onOpenReview={openReviewPanel} workDetails={workDetails} />
+                <MessageBubble
+                  key={index}
+                  message={message}
+                  turnNumber={turnOrdinals.get(index) ?? 1}
+                  onOpenReview={openReviewPanel}
+                  workDetails={workDetails}
+                  {...(message.failed && index === transcript.length - 1 && streaming.status !== "streaming"
+                    ? { onRetry: () => { const prior = transcript.slice(0, index).reverse().find((m) => m.role === "user"); if (prior) void send(prior.content); } }
+                    : {})}
+                />
               ))}
               {streaming.status === "streaming" && (
                 <>
-                  <MessageBubble message={{ role: "assistant", content: streaming.text, streaming: true }} elapsedSeconds={elapsedSeconds} />
-                  {streaming.retries.length > 0 && <RetryDisclosure retries={streaming.retries} elapsedSeconds={elapsedSeconds} />}
+                  <MessageBubble
+                    message={{ role: "assistant", content: streaming.text, streaming: true }}
+                    elapsedSeconds={elapsedSeconds}
+                    currentAction={(() => {
+                      const last = toolEntries[toolEntries.length - 1];
+                      return last && last.status === "running" ? toolActionLabel(last, workDetails) : undefined;
+                    })()}
+                  />
+                  {streaming.retries.length > 0 && (
+                    <RetryCard
+                      retries={streaming.retries}
+                      provider={modelConfig ? (modelConfig.baseURL ? `${modelConfig.providerId} (${modelConfig.baseURL})` : modelConfig.providerId) : "the model provider"}
+                      onStop={() => void stop()}
+                      onOpenSettings={() => openSettings("models", modelConfig ? { edit: true } : { edit: false })}
+                    />
+                  )}
                   <ToolActivity entries={toolEntries} elapsedSeconds={elapsedSeconds} workDetails={workDetails} />
                 </>
               )}
@@ -6102,26 +6135,11 @@ export function App() {
               ) : null;
             })()}
             {planState && planState.todos.length > 0 && <TodoWidget todos={planState.todos} />}
-            {currentWorkspaceId && (
-              <ComposerBar
-                workspaceId={currentWorkspaceId}
-                {...(activeSessionId ? { sessionId: activeSessionId } : {})}
-                {...(activeTaskId ? { taskId: activeTaskId } : {})}
-                onTaskChange={(taskId) => void bindTask(taskId ?? null)}
-                bindError={taskBindError}
-                onOpenWorkbench={() => setWorkbenchOpen(true)}
-                state={pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
-                steps={toolEntries.length + 1}
-                elapsedSeconds={elapsedSeconds}
-                approvalsPending={pendingApproval ? 1 : 0}
-                {...(resolvedAttention.referent ? { referent: { ref: resolvedAttention.referent, level: resolvedAttention.level } } : {})}
-                onClearFocus={() => setFocusSelection(undefined)}
-              />
-            )}
             {otherContinuation && (
               <p role="status" className="continuation-waiting">Waiting on {otherContinuation.type} ({otherContinuation.status.toLowerCase()})</p>
             )}
             <SettlementCard operations={settlementOperations} />
+            {(pendingApproval || governanceApproval || ambiguousContinuation || planReviewContinuation) && contextBar && <div className="context-bar-standalone">{contextBar}</div>}
             {pendingApproval ? (
               <ApprovalBar entry={pendingApproval} onDecide={(approved) => decideApproval(pendingApproval.toolCallId, approved)} />
             ) : governanceApproval ? (
@@ -6151,6 +6169,7 @@ export function App() {
                 disabled={composerDisabled}
                 sending={streaming.status === "streaming"}
                 modelLabel={modelLabel}
+                {...(modelPicker ? { modelControl: modelPicker } : {})}
                 planMode={Boolean(planState?.on)}
                 onSend={send}
                 onStop={stop}
@@ -6165,34 +6184,118 @@ export function App() {
                 onCancelQueued={cancelQueued}
                 onSteerQueued={steerQueued}
                 focusToken={composerFocusToken}
+                {...(contextBar ? { contextBar } : {})}
               />
             )}
           </>
         )}
+        {surface === "browser" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Browser dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize browser dock" onPointerDown={startSurfaceResize} />
+            )}
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the browser panel…</p></div>}
+            >
+              <BrowserPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+                onSendToConversation={(message) => void send(message)}
+              />
+            </Suspense>
+          </section>
+        )}
+        {surface === "terminal" && currentWorkspaceId && (
+          <section
+            className={`surface-dock${surfaceMaximized ? " maximized" : ""}`}
+            style={surfaceMaximized ? undefined : { height: `${surfaceHeight}px` }}
+            aria-label="Terminal dock"
+          >
+            {!surfaceMaximized && (
+              <div className="surface-dock-resize" role="separator" aria-orientation="horizontal" aria-label="Resize terminal dock" onPointerDown={startSurfaceResize} />
+            )}
+            <Suspense
+              fallback={<div className="term-empty" role="status"><p>Loading the terminal…</p></div>}
+            >
+              <TerminalPanel
+                workspaceId={currentWorkspaceId}
+                workspaceLabel={currentWorkspace?.title || currentWorkspaceId}
+                worldId={currentWorkspace?.executionWorldId ?? "local"}
+                worldLabel={currentWorkspace?.executionWorldId ? worlds.get(currentWorkspace.executionWorldId)?.label ?? currentWorkspace.executionWorldId : "Local"}
+                maximized={surfaceMaximized}
+                onToggleMaximize={() => setSurfaceMaximized((value) => !value)}
+                onClose={() => setSurface("none")}
+              />
+            </Suspense>
+          </section>
+        )}
       </main>
-      {openReview ? (
-        <ReviewPanel
-          initialTab={reviewTabKey(openReview.summary, openReview.turnNumber)}
-          availableTabs={availableReviewTabs}
-          workspaceRoot={currentWorkspace?.root}
-          onClose={() => setOpenReview(undefined)}
-        />
-      ) : traceDetail ? (
-        <TraceDetailsPanel trace={trace} detail={traceDetail} onClose={() => setTraceDetail(undefined)} />
-      ) : (
-        openChildRow ? <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} /> : <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
-      )}
-      {showSettings && <SettingsModels onClose={() => setShowSettings(false)} settings={settings} onOpenShortcuts={() => setShortcutsOpen(true)} workspaceId={currentWorkspaceId} />}
-      {shortcutsOpen && (
-        <ShortcutsDialog
-          overrides={settings.shortcuts}
-          onChangeShortcuts={(shortcuts) => client.invoke("settings.changeShortcuts", { shortcuts } as never) as unknown as Promise<void>}
-          onClose={() => setShortcutsOpen(false)}
-        />
-      )}
+      <Inspector sidebarWidth={isMobile || collapsed ? 0 : sidebarWidth} />
+      <InspectorTab id="context" label="Context" icon={<InfoIcon />} order={10}>
+        <CognitiveFrame awaitingDecision={Boolean(pendingApproval)} />
+      </InspectorTab>
+      <InspectorTab id="changes" label="Changes" icon={<BranchIcon />} order={20} {...(availableReviewTabs.length > 0 ? { badge: String(availableReviewTabs.length) } : {})}>
+        {openReview ? (
+          <ReviewPanel
+            initialTab={reviewTabKey(openReview.summary, openReview.turnNumber)}
+            availableTabs={availableReviewTabs}
+            workspaceRoot={currentWorkspace?.root}
+            onClose={() => setOpenReview(undefined)}
+          />
+        ) : availableReviewTabs.length > 0 ? (
+          <div className="inspector-pane">
+            <p className="cf-h">File changes in this session</p>
+            <ul className="inspector-list">
+              {transcript.flatMap((message, index) =>
+                (message.editSummaries ?? (message.editSummary ? [message.editSummary] : [])).map((summary) => ({ summary, turn: turnOrdinals.get(index) ?? 1 })),
+              ).map(({ summary, turn }) => (
+                <li key={`${turn}-${summary.file_path}`}>
+                  <button type="button" className="inspector-list-row" onClick={() => setOpenReview({ summary, turnNumber: turn })}>
+                    <FileIcon aria-hidden="true" />
+                    <span className="inspector-list-main">{summary.file_path}</span>
+                    <span className="review-panel-stat">+{summary.additions} -{summary.deletions}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <InspectorEmpty title="No changes yet" hint="When the agent edits files in this session, each change opens here as a diff you can review." />
+        )}
+      </InspectorTab>
+      <InspectorTab id="details" label="Details" icon={<ListViewIcon />} order={30}>
+        {traceDetail ? (
+          <TraceDetailsPanel trace={trace} detail={traceDetail} onClose={() => setTraceDetail(undefined)} />
+        ) : openChildRow ? (
+          <RightPanel row={openChildRow} onClose={() => setOpenChildToolCallId(undefined)} />
+        ) : (
+          <InspectorEmpty title="Nothing selected" hint="Select a step in the Trajectory view or open a subagent to see its details here." />
+        )}
+      </InspectorTab>
+      <InspectorExtraTabs workspaceId={currentWorkspace ? currentWorkspaceId : undefined} workspaceName={currentWorkspace?.title} />
+      {paletteOpen && <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />}
       {addWorkspaceOpen && <AddWorkspaceDialog onClose={() => setAddWorkspaceOpen(false)} />}
+      {deleteFor && <DeleteWorkspaceDialog workspace={deleteFor} onClose={() => setDeleteFor(undefined)} />}
       {renameFor && <RenameWorkspaceDialog workspace={renameFor} onClose={() => setRenameFor(undefined)} />}
-      <FirstRunDialogs />
+      {renameSessionFor && <RenameSessionDialog session={renameSessionFor} onClose={() => setRenameSessionFor(undefined)} />}
+      <FirstRunDialogs onFinished={() => setComposerFocusToken((t) => t + 1)} />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <ToastProvider>
+      <InspectorProvider>
+        <AppShell />
+      </InspectorProvider>
+    </ToastProvider>
   );
 }

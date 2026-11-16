@@ -38,7 +38,7 @@ describe("E2E workbench cockpit", () => {
         await page.getByRole("button", { name: "Workbench", exact: true }).click();
         await page.getByRole("heading", { name: "Workbench", exact: true }).waitFor();
         expect(await page.getByRole("button", { name: "Workbench", exact: true }).getAttribute("aria-pressed")).toBe("true");
-        expect(await page.getByRole("tab").allInnerTexts()).toEqual(["Tasks", "Workflows", "Capabilities", "Automations"]);
+        expect(await page.getByRole("tablist", { name: "Workbench sections" }).getByRole("tab").allInnerTexts()).toEqual(["Tasks", "Workflows", "Capabilities", "Automations"]);
 
         // Empty state teaches, and there is exactly one way to begin.
         await page.getByText(/A task is the unit of governed work/).waitFor();
@@ -78,9 +78,12 @@ describe("E2E workbench cockpit", () => {
         await waitUntil("skills chip", async () => /1 skills/.test(await chip(page, "Skills").innerText()));
 
         // Authority: the plane is explicit. Allow writes and shell, and protect the file under test.
+        // The S1 conversion: the grant selects are MenuSelects — open by the announced name, pick the row.
         await chip(page, "Authority").click();
-        await page.locator("#auth-fs-write").selectOption("yes");
-        await page.locator("#auth-shell-run").selectOption("yes");
+        await page.getByRole("button", { name: "Workspace write: no" }).click();
+        await page.getByRole("menuitemradio", { name: "yes" }).click();
+        await page.getByRole("button", { name: "Run shell commands: no" }).click();
+        await page.getByRole("menuitemradio", { name: "yes" }).click();
         await page.locator("#auth-protected-paths").fill("src/greet.ts");
         await page.locator(".wb-contract-editor").getByRole("button", { name: "Save" }).click();
         await waitUntil("authority chip", async () => /write/.test(await chip(page, "Authority").innerText()));
@@ -100,7 +103,7 @@ describe("E2E workbench cockpit", () => {
         await waitForRow<TaskRecord>(app, `task/${taskId}`, (t) => t.status === "RUNNING");
         const bar = page.locator(".wb-composerbar");
         await bar.waitFor();
-        expect(await bar.locator("select").inputValue()).toBe(taskId);
+        expect(await bar.locator("button#wb-bind-task").innerText()).toContain("Update the greeting");
         expect(await bar.getByRole("status", { name: "Runtime" }).innerText()).toMatch(/idle/i);
         const composer = page.getByRole("textbox", { name: /Message or run a task/ });
         await composer.fill("[[scenario:edit]] change the greeting");
@@ -154,9 +157,13 @@ describe("E2E workbench cockpit", () => {
         await shot(page, "e2e-06-review-blocked-independent-check");
         // Record the independent check through the cockpit's own form.
         const form = page.locator(".wb-ledger-form");
-        await form.locator("select").nth(0).selectOption("independent-check");
-        await form.locator("select").nth(1).selectOption("pass");
-        await form.locator("select").nth(2).selectOption({ label: "totals match an independent calculation" }).catch(() => form.locator("select").nth(2).selectOption({ index: 2 }));
+        // S6 conversion: the ledger form's selects are MenuSelects — open by announced name, pick the row.
+        await form.getByRole("button", { name: /^Kind:/ }).click();
+        await page.getByRole("menuitemradio", { name: "independent-check" }).click();
+        await form.getByRole("button", { name: /^Status:/ }).click();
+        await page.getByRole("menuitemradio", { name: "Pass" }).click();
+        await form.getByRole("button", { name: /^Criterion/ }).click();
+        await page.getByRole("menuitemradio", { name: "totals match an independent calculation" }).click();
         await form.locator("textarea, input[type=text]").first().fill("totals match the independent calculation");
         await form.getByRole("button", { name: "Record" }).click();
         await notice(page).getByText("Evidence recorded.").waitFor();
@@ -175,7 +182,7 @@ describe("E2E workbench cockpit", () => {
         await page.getByRole("tab", { name: "Capabilities" }).click();
         // The starter catalog was loaded when the cockpit first opened; nothing to click.
         await page.getByRole("heading", { name: "Verify" }).first().waitFor();
-        expect(await page.getByText("Built is not installed. Installed is not enabled. Enabled is not verified.").count()).toBeGreaterThan(0);
+        expect(await page.getByText("A capability goes through four steps: built, installed, enabled, then verified. Finishing one step does not complete the next.").count()).toBeGreaterThan(0);
         const advance = page.getByRole("button", { name: /Advance to reviewed/i }).first();
         await advance.click();
         await waitUntil("a binding reached REVIEWED", async () => [...(await wbRows(app))].some(([k, v]) => k.startsWith("binding/") && (v as BindingRecord).state === "REVIEWED"));

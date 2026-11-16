@@ -10,6 +10,7 @@ import type { Json } from "@godspeedai/cognate-events";
 import { canMerge, checkoutStatusText, mergeOutcomeText, suggestBranchName, type BranchListLike } from "../../workbench/checkoutUi.ts";
 import type { WorktreeStatus } from "../../workbench/gitOps.ts";
 import { errorText } from "./data.ts";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 type Notice = { readonly kind: "error" | "warn" | "ok"; readonly text: string } | undefined;
 
@@ -32,10 +33,14 @@ export interface CheckoutChipProps {
 export function CheckoutChip({ workspaceId, taskId, taskTitle, locked }: CheckoutChipProps) {
   const client = useCognate();
   const rows = useProjection("task-checkout-bindings");
-  const binding = useMemo(
+  const projected = useMemo(
     () => (rows ?? []).map((row) => row.value as unknown as BindingRow).find((row) => row.taskId === taskId),
     [rows, taskId],
   );
+  // After a removal a shared, already-running projection read can still return the old row, even after
+  // a fresh read dropped it. Ignore that row until the operator creates a checkout again.
+  const [removedRoot, setRemovedRoot] = useState<string | undefined>();
+  const binding = projected && projected.root !== removedRoot ? projected : undefined;
 
   const [status, setStatus] = useState<WorktreeStatus | undefined>();
   const [branches, setBranches] = useState<BranchListLike | undefined>();
@@ -88,6 +93,7 @@ export function CheckoutChip({ workspaceId, taskId, taskTitle, locked }: Checkou
   const attach = async () => {
     setBusy(true);
     setNotice(undefined);
+    setRemovedRoot(undefined);
     try {
       const target = finalName;
       if (binding && binding.branch === target) {
@@ -136,12 +142,15 @@ export function CheckoutChip({ workspaceId, taskId, taskTitle, locked }: Checkou
   const remove = async () => {
     setBusy(true);
     setNotice(undefined);
+    // Mark it removed before the call: the stale row can come back while the call is still running.
+    setRemovedRoot(binding?.root);
     try {
       const result = await invoke<{ branchDeleted?: boolean }>("git.checkout.remove", { taskId, deleteBranch: true });
       setConfirmRemove(false);
       if (result.branchDeleted) setNotice({ kind: "ok", text: "Checkout removed and its merged branch deleted." });
       else setNotice({ kind: "ok", text: "Checkout removed; the branch was kept because it has unmerged commits." });
     } catch (error) {
+      setRemovedRoot(undefined);
       setNotice({ kind: "error", text: errorText(error) });
     } finally {
       setBusy(false);
@@ -221,14 +230,14 @@ export function CheckoutChip({ workspaceId, taskId, taskTitle, locked }: Checkou
           ) : (
             <label>
               Start from
-              <select value={base} onChange={(event) => setBase(event.currentTarget.value)} aria-label="Start from branch">
-                {(branches?.branches ?? []).map((branch) => (
-                  <option key={branch} value={branch}>
-                    {branch}
-                    {branch === branches?.default ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
+              <MenuSelect
+                ariaLabel="Start from branch"
+                value={base}
+                variant="field"
+                placement="down"
+                options={(branches?.branches ?? []).map((branch) => ({ value: branch, label: branch === branches?.default ? `${branch} (default)` : branch }))}
+                onPick={(v) => setBase(v)}
+              />
             </label>
           )}
           <span className="wb-muted">Created as {finalName} beside the repository; this conversation&apos;s turns then run there.</span>

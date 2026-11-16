@@ -135,6 +135,10 @@ export type NodeStatus = "pending" | "ready" | "running" | "blocked" | "review" 
 // ---- Skill OS (§3, §4, §17) ---------------------------------------------------------------------
 export interface CapabilityContractDef {
   readonly id: string;
+  /** Manifest version + payload content hash identity (§4.4); unset for pre-M seeded catalog rows. */
+  readonly version?: string;
+  /** Namespace owner: "builtin" (reserved, seed-only) or "bundle" (capability-runtime registered). */
+  readonly owner?: "builtin" | "bundle";
   readonly category: string;
   readonly purpose: string;
   readonly consumes: readonly string[];
@@ -204,5 +208,86 @@ export const WORKBENCH_EVENTS = [
   // The truth is this event log; the `task-checkout-bindings` projection rows are derived.
   "workbench.checkout.bound",
   "workbench.checkout.removed",
+  // J-TERMINAL-session: metadata and transitions of interactive terminal sessions. Stream
+  // bytes are deliberately absent — the durable log never records what a terminal printed.
+  "workbench.terminal.opened",
+  "workbench.terminal.closed",
+  // J-BROWSER-session: metadata and transitions of the shared browser sessions. Page content,
+  // frames and cookies are never persisted — only which session exists, where it points and
+  // who holds control.
+  "workbench.browser.opened",
+  "workbench.browser.navigated",
+  "workbench.browser.control.changed",
+  "workbench.browser.screenshot",
+  "workbench.browser.annotated",
+  "workbench.browser.closed",
+  // J-PREVIEW-register: governed dev-server previews. The registration is explicit and
+  // ownership-carrying; readiness is probed, never assumed.
+  "workbench.preview.registered",
+  "workbench.preview.stopped",
+  // J-REMOTE-diagnostics: remote-control transitions only — state changes (start/refresh/stop/
+  // pairing, with the device's operator label) and bounded pairing errors. Never the 2 s/5 s
+  // status polls, never a pairing secret, link, challenge or credential.
+  "workbench.remote.state",
+  "workbench.remote.error",
+  // Capability-bundles tranche P (§1.5/§1.6/§1.7): durable enforcement decisions and runtime
+  // enablement evidence. Decision rows are the P evidence matrix; the runtime markers gate
+  // extensible-runtime enablement on versioned remediation evidence (§1.7).
+  "authority.decision.recorded",
+  "workbench.capability_runtime.enabled",
+  "workbench.capability_runtime.remediation_verified",
+  // Capability-bundles tranche M (§8 matrix): bundle/activation lifecycle, grants, harness,
+  // presentation, executables (spawn ledger), safe mode, retention.
+  "capability.bundle.registered",
+  "capability.bundle.validated",
+  "capability.activated",
+  "capability.repointed",
+  "capability.suspended",
+  "capability.resumed",
+  "capability.deactivated",
+  "capability.uninstalled",
+  "capability.activation_failed",
+  "capability.repoint_failed",
+  "capability.validation_failed",
+  "capability.integrity_failed",
+  "capability.binding.retired",
+  "capability.harness.patched",
+  "capability.harness.assembled",
+  "capability.presentation.faulted",
+  "capability.mcp.spawn.intended",
+  "capability.mcp.spawned",
+  "capability.mcp.exited",
+  "capability.mcp.tool_invoked",
+  "workbench.safemode.boot_attempted",
+  "workbench.safemode.cleared",
+  "workbench.bundles.pruned",
+  "session.activation",
+  "capability.binding.retired",
+  "workbench.kernel.observed.provided",
+  "workbench.kernel.observed.withdrawn",
+  "workbench.kernel.observed.fiber_state",
+  "authority.grant.issued",
+  "authority.grant.revoked",
+  "authority.grant.expired",
+  "authority.level.allowances.set",
 ] as const;
 export type WorkbenchEventType = (typeof WORKBENCH_EVENTS)[number];
+
+// Capability-bundles tranche P: the durable enforcement-decision record (§2.3's evidence
+// matrix). Emitters: the harness tool loop, the dispatcher (T2), the governed spawn boundary
+// (T3), the shared operator guard, and the subagent narrowing check.
+export interface AuthorityDecisionRecord {
+  readonly decisionId: string;
+  readonly point: "tool-loop" | "dispatcher" | "spawn-boundary" | "operator-guard" | "policy" | "narrowing";
+  readonly actorId: string;
+  readonly actorKind: string;
+  readonly capability: string;
+  readonly operation?: string;
+  readonly outcome: "refused" | "allowed";
+  readonly reasonCode: string;
+  readonly reason: string;
+  readonly runId?: string;
+  readonly taskId?: string;
+}
+/** Why an activation is suspended; `resumed` clears exactly one named reason (§1.5). */
+export type SuspensionReason = "operator-yank" | "grant-revoked" | "grant-expired" | "integrity" | "safe-mode";

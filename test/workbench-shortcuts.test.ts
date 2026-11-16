@@ -51,6 +51,16 @@ describe("chord capture", () => {
     expect(a).toBe("Ctrl+Shift+Alt+Meta+K");
   });
 
+  test("Alt on macOS: the composed key is ignored, the physical letter/digit wins", () => {
+    // Option+N yields e.key "˜" on macOS; the chord must still be Ctrl+Alt+N.
+    const mac = { key: "˜", code: "KeyN", ctrlKey: true, altKey: true, shiftKey: false, metaKey: false };
+    expect(chordFromKeyboardEvent(mac)).toBe("Ctrl+Alt+N");
+    expect(chordFromKeyboardEvent({ ...mac, key: "¡", code: "Digit1" })).toBe("Ctrl+Alt+1");
+    // Without Alt, `key` (layout-aware) stays authoritative; punctuation keeps its key name.
+    expect(chordFromKeyboardEvent({ ...mac, altKey: false, key: "z", code: "KeyY" })).toBe("Ctrl+Z");
+    expect(chordFromKeyboardEvent({ ...mac, key: "/", code: "Slash" })).toBe("Ctrl+Alt+/");
+  });
+
   test("a non-character key with a modifier keeps its name", () => {
     expect(chordFromKeyboardEvent(key({ key: "ArrowUp", ctrlKey: true }))).toBe("Ctrl+ArrowUp");
     expect(chordFromKeyboardEvent(key({ key: "/", ctrlKey: true }))).toBe("Ctrl+/");
@@ -131,7 +141,8 @@ describe("validateAssignment", () => {
 describe("effective chord and defaults", () => {
   test("an absent override falls back to the shipped default", () => {
     expect(effectiveChord("open-shortcuts", {})).toBe("Ctrl+/");
-    expect(effectiveChord("new-session", {})).toBeUndefined();
+    expect(effectiveChord("new-session", {})).toBe("Ctrl+Alt+N");
+    expect(effectiveChord("new-session", { "new-session": null })).toBeUndefined();
   });
 
   test("an explicit null unbinds a defaulted action", () => {
@@ -149,10 +160,12 @@ describe("effective chord and defaults", () => {
     expect(isDefault({ "open-shortcuts": null })).toBe(false);
   });
 
-  test("restoreDefaults writes every action explicitly, null when it had no default", () => {
+  test("restoreDefaults writes every action explicitly, the shipped chord for every action", () => {
     const restored = restoreDefaults();
     expect(restored["open-shortcuts"]).toBe("Ctrl+/");
-    expect(restored["new-session"]).toBeNull();
+    // Every shipped action has a default chord now; restoring writes that chord back explicitly.
+    expect(restored["new-session"]).toBe("Ctrl+Alt+N");
+    expect(restored["open-command-palette"]).toBe("Ctrl+K");
     expect(Object.keys(restored).sort()).toEqual(SHORTCUT_ACTIONS.map((a) => a.id).sort());
   });
 

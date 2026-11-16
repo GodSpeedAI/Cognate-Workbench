@@ -99,12 +99,16 @@ export class ExpertsService {
   async invocation(ctx: HandlerContext, assignmentId?: unknown, allowEffectDispatch=false): Promise<Assignment> {
     if (!ctx.runId) throw new Error("This capability requires a registered Expert run");
     const run = await this.service.getRun(this.caller(ctx.tenant),{runId:ctx.runId});
-    if (run.agent !== EXPERT_AGENT || run.startedBy !== this.systemCaller.actor.id || !["running","waiting"].includes(run.status)) throw new Error("Untrusted or inactive Expert run");
+    if (run.agent !== EXPERT_AGENT || !["running","waiting"].includes(run.status)) throw new Error("Untrusted or inactive Expert run");
     const input = run.input as {assignmentId?: string};
     if (assignmentId !== undefined && input.assignmentId !== assignmentId) throw new Error("Assignment impersonation denied");
     const state = (await readExpertsScope(this.service,this.caller(ctx.tenant),["experts","teams","assignments"])).state as ExpertState;
     const a = state.assignments[input.assignmentId ?? ""];
     if (!a || !isUnfinished(a) || a.attempt !== (run.input as {attempt?:number}).attempt) throw new Error("Assignment is not authorized to execute");
+    // Capability-bundles tranche P (§1.1): an expert run executes under its responsible agent
+    // principal (`wb-agent:<expertId>`, started by the completion bridge) or the system-recorder
+    // lineage (runs started before per-agent principals). Any other starter is a forged binding.
+    if (run.startedBy !== this.systemCaller.actor.id && run.startedBy !== `wb-agent:${a.expertId}`) throw new Error("Untrusted or inactive Expert run");
     if(Object.values(a.effects ?? {}).some(effect=>effect.state==="UNKNOWN_RECONCILIATION_REQUIRED" || !allowEffectDispatch && effect.state==="DISPATCHING"))throw new Error("Effect outcome requires human reconciliation before further work");
     if(a.teamId){
       const t=team(state,a.teamId,true);

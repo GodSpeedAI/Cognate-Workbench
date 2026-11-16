@@ -23,8 +23,20 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 ## Interface
 
 - `./App.tsx:App` — root shell; composes sidebar, center column (hero landing / Experts &
-  Teams / Plugins / Workbench / conversation), right panel (ReviewPanel / TraceDetailsPanel /
-  RightPanel / CognitiveFrame) and the modal dialogs.
+  Teams / Plugins / Workbench / conversation), the tabbed right inspector (Context =
+  CognitiveFrame, Changes = ReviewPanel, Details = TraceDetailsPanel / RightPanel) and the modal
+  dialogs. The shell is a three-column grid; the header's view switch is the one source of truth
+  for the current center view.
+- `./shell/Inspector.tsx:InspectorProvider` / `Inspector` / `InspectorTab` / `useInspector` — the
+  generic right inspector. Register a tab anywhere under the provider with
+  `<InspectorTab id label icon order>…</InspectorTab>` (children are portalled into the body while
+  the tab is selected); open it from anywhere with `useInspector().openInspector("config")`.
+  Width, open state and tab persist in `localStorage` (`cognate.inspector.v1`).
+- `./shell/MainHeader.tsx:MainHeader` — breadcrumb, view switch, mode chip, inspector toggle.
+- `./shell/ResizeHandle.tsx:ResizeHandle` — the shared separator used by sidebar and inspector.
+- `./shell/MenuSelect.tsx:MenuSelect` — styled menu button standing in for a native select.
+- `./workbench/ComposerBar.tsx:ComposerBar` — the context bar at the composer card's top edge
+  (workspace, posture, task chip + menu, focus chip, run status).
 - `./App.tsx:ToolEntry` — one tool call in a run's timeline (`toolCallId`, `tool`, `args`,
   `status: "running" | "success" | "failed"`, optional `approval` with
   `status: "pending" | "approved" | "denied"`).
@@ -41,12 +53,11 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 - `./App.tsx:Composer` — the message composer: paste-image previews, queued messages with
   Steer/cancel, access-mode dropdown, plan-mode toggle, turns/steps counters.
 - `./App.tsx:ToolGroup` — one collapsed group of consecutive tool calls.
-- `./App.tsx:ShortcutsDialog` — keyboard-shortcuts editor; props
+- `./App.tsx:ShortcutsPanel` — keyboard-shortcuts editor (Settings → Keyboard shortcuts; formerly a dialog; shell primitives live in `./shell/`: DialogHeader, CommandPalette, Toast, Kbd, useModalFocus); props
   `{ overrides, onChangeShortcuts, onClose }` (the callback writes through
   `settings.changeShortcuts`).
-- `./App.tsx:ConfigFileDialog` — "Configuration file" dialog; props
-  `{ onResolve, onClose }` where `onResolve` returns a `ConfigPathResult` (injected for
-  testability).
+- `./inspector/ConfigTab.tsx:ConfigTab` — Config inspector tab (edit the configuration file;
+  "Open configuration file" in Settings opens it). Replaces the old stacked ConfigFileDialog.
 - `./App.tsx:selectWorkspaceForExecution` — shared workspace-open path:
   `mode === "contained"` requires `inspection.configured && inspection.platformSupported`
   (throws `inspection.reason` otherwise) and invokes `workspace.contained.select`; local mode
@@ -126,7 +137,7 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
   from durable events/projections, and `openSession` reattaches to a still-in-flight run from
   the `sessions` projection's durable `runId`/`lastStatus`.
 - Only the top-most modal reacts to Escape/Tab: every dialog registers in `OPEN_MODAL_STACK`
-  via `./App.tsx:useModalFocus`, which traps focus, restores the previously focused element on
+  via `./shell/useModalFocus.ts:useModalFocus`, which traps focus, restores the previously focused element on
   unmount, and ignores keys while another modal sits above it.
 - The send path is string-only: `./App.tsx:Composer` refuses to send while image attachments
   are present (`attachmentsBlockSend`) and says why; the paste handler only claims the paste
@@ -184,7 +195,7 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
   `session.history`, `session.setArchived`, `session.task.bind`, `workspace.select`,
   `workspace.contained.select`, `workspace.rename`, `workspace.delete`,
   `execution.containment.inspect`, `model.configure`, `model.catalog`, `provider.delete`,
-  `config.path` (Settings' ConfigFileDialog), `settings.changePermission`,
+  `config.path`, `settings.changePermission`,
   `settings.changePreset`, `settings.changePlugin`, `settings.changeShortcuts`,
   `onboarding.dismiss`, `plugin.catalog`, `plugin.install`, `plugin.uninstall`,
   `observation.status`, `observation.record` (TraceDetailsPanel ledger), `run.invocation.reconcile`,
@@ -217,7 +228,7 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 - WebMCP registration: `./webmcp.ts:publishToWebMcp` calls
   `navigator.modelContext.provideContext` when the browser exposes one.
 - DOM/browser effects: `document.documentElement.setAttribute("data-theme", …)`
-  (`./App.tsx:useTheme`); modal focus trap and focus restore (`./App.tsx:useModalFocus`);
+  (`./App.tsx:useTheme`); modal focus trap and focus restore (`./shell/useModalFocus.ts:useModalFocus`);
   `./download.ts:downloadTextFile` (Blob URL + anchor click + revoke);
   `./download.ts:copyToClipboard` and `./App.tsx:CodeBlocks`' Copy button
   (`navigator.clipboard`); `./App.tsx:ReviewPanel` opens the unified patch as a Blob URL in a
@@ -249,7 +260,7 @@ Child panels with their own contracts: [Experts & Teams panels](./experts/README
 - `test/E2E-cognitive-console.test.ts` — verified to exercise `CognitiveFrame` (its
   `data-testid="cognitive-frame"`) and the WebMCP tool registration end to end.
 - The `App()` shell itself, `GovernancePane`, `DirectoryField`, `ReviewPanel`,
-  `PluginsPanelBody`, `ShortcutsDialog`, `ConfigFileDialog`, `download.ts`, `markdown.ts` and
+  `PluginsPanelBody`, `ShortcutsPanel`, `download.ts`, `markdown.ts` and
   `icons.tsx` have no direct component test (covered indirectly through the journey/E2E suites);
   for those, run the full suite.
 - Full suite: Run (from repo root): `bun run test` (type checking separately: `just typecheck`).

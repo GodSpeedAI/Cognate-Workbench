@@ -3,7 +3,7 @@
 .wb-cockpit { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: 24px clamp(16px, 4vw, 40px) 0; overflow: hidden; }
 .wb-cockpit-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .wb-cockpit-head p { margin: 4px 0 0; max-width: 62ch; }
-.wb-cockpit-tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--cg-border); overflow-x: auto; }
+.wb-cockpit-tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--cg-border); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .wb-cockpit-tab { font: inherit; font-size: 13px; padding: 10px 14px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--cg-text-muted); cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
 .wb-cockpit-tab:hover { color: var(--cg-text); background: var(--cg-hover); }
 .wb-cockpit-tab.active { color: var(--cg-text); border-bottom-color: var(--cg-accent); }

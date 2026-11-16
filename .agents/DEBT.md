@@ -104,3 +104,44 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: In the live walkthrough, after creating the checkout the chip read "clean · Merge into main (disabled)"; committing `tidy: warmer greeting` in the worktree from the shell left the chip text unchanged; a page reload (fresh mount → refresh) changed the chip to "workbench/tidy-the-greeting · 1 commit to merge" and enabled the button, and the merge then succeeded. DOM text captured before/after reload is quoted in `.agents/plans/pandacode-affordance-delta/verification.md` § live walkthrough.
 - Confidence: high
 - Closure: Re-observe on window focus (or before opening the Change/Remove controls, or a modest poll while a binding exists) — the donor re-queried `worktree_status` each time its worktree dialog opened, which is the same trigger this needs. Files likely touched: src/ui/workbench/CheckoutChip.tsx; size S.
+
+### Cognate execution port cannot host a bidirectional CLI session (harness sessions use a host-process runner)
+
+- Date: 2026-11-01
+- Location: `@godspeedai/cognate-execution` `ProcessPort.exec` (buffered, argv-only, no stdin, no streaming, no pid / process group); app workaround `src/agents/harness/hostProcess.ts`, `src/capabilities/harness.ts`.
+- Debt: external agent-harness CLIs (Claude Code stream-json, Codex app-server, ACP agents) are long-lived, line-oriented, bidirectional processes (stdin control messages, streamed stdout, permission round-trips, interrupt then group kill). The execution port can only run a command to completion. The app therefore launches harness CLIs with an explicit, named host-process runner (Bun.spawn pipes, process-group kill on POSIX, `taskkill /T /F` on Windows, windowsHide), used ONLY for harness sessions in a `local` world. It bypasses the execution-world registry and the contained-posture guard by design, so remote, contained, SSH and WSL workspaces are refused for harness sessions (with a message) and SEA-Forge governance on refuses binding. Guarantees that do not hold for an external CLI: per-tool authority checks, containment of the CLI's tool effects, protected-evidence blocking, settlement as `agent.coding`. Also: after a server restart mid-turn there is no live process to resume (turn ends session-lost; an interrupted `start` waits for reconciliation).
+- Evidence: `test/J-HARNESS-*.test.ts`; proposal in `.agents/reports/ui-production-readiness/framework-gap-streaming-process.md`.
+- Confidence: high
+- Closure: an upstream streaming `process.spawn` port (stdin, line stream, pid, group kill) implemented for local/ssh/wsl/bubblewrap worlds, consumed here to replace `hostProcess.ts`; size M (upstream) + S (app).
+
+### Per-Expert model routes cannot carry auth or Azure options
+- Date: 2026-11-01
+- Location: src/experts/service.ts `route()` (allows only providerId, model, baseURL, protocol); src/capabilities/expertModel.ts (builds the provider from the route).
+- Debt: `model.configure` now supports `auth: "none"` and Azure OpenAI (`auth: "api-key"` + `apiVersion`) for the app's active route and stored providers, but an Expert route stores configuration only (four fields) and is rebuilt with default auth. A per-Expert route to a remote keyless gateway or to Azure therefore still fails to authenticate; local hosts work because keyless is inferred from the loopback address.
+- Evidence: `route()` rejects any other key ("Model routes contain configuration only"); `expertModelGenerateComponent` calls `buildProvider(route, secrets)` with that route.
+- Confidence: high
+- Closure: let Expert routes reference a stored `providerId` row (resolving auth/apiVersion from `provider-routes` at build time) instead of copying fields; keep the credentials-free rule. Files likely touched: src/experts/service.ts, src/capabilities/expertModel.ts, test/expert-model-routing.test.ts; size M.
+
+### UI polish left open after the production-readiness audit (A2)
+- Date: 2026-11-01
+- Location: `.agents/reports/ui-production-readiness/recon/A2-final-audit.md` §3 (defect ids); src/ui/App.tsx header (mobile), Workbench/Experts/Automation/ContractEditor panels (native selects).
+- Debt: the A2 D-rows are closed. D-9, D-12, D-13, D-15, D-17, D-18, D-19, D-21 (REDESIGN: causes render once per group), D-22, D-24, D-25, D-26, D-27, D-29, D-30 landed in the desktop-native-completion D track (commits e3907ff, d187434, 6f2dee0, a6c9e6b, 102cdbb); D-16 and D-34 had landed earlier (b0bbd87, fb14932) and are recorded. All 42 native `<select>` controls converted to MenuSelect across nine ledger batches (S1-S9, commits 133876b..5b894b9) with the accessibility gate (`test/ui-menu-select.test.tsx`) and the standing guard (`test/native-select-guard.test.ts`). Remaining from this row: the session row menu has no Pin (ledger F1, model-first, next) and remote diagnostics are collected by the open dialog only (ledger F2, model-first, next).
+- Evidence: A2 report rows; `.agents/reports/ui-production-readiness/evidence/final/` shots named there.
+- Confidence: high
+- Closure: one polish pass per A2 row; convert remaining selects to `src/ui/shell/MenuSelect.tsx` and update E2E to click the menu; size M.
+
+### Desktop launch and secret store not exercised on real Windows/macOS
+- Date: 2026-11-01
+- Location: src/desktopWindow.ts, scripts/package.ts, scripts/installers.ts, src/secrets.ts.
+- Debt: Edge/Chrome `--app` launch, the GUI-subsystem `cognate-workbench-desktop.exe`, Start Menu/Desktop shortcuts, the NSIS installer, the macOS `.app` (no icon) and the Credential Manager/Keychain backends are proven only by Linux runs, cross-built PE headers (desktop exe Subsystem=2) and unit tests. The Windows installer was not built (no `makensis` on the Linux host).
+- Evidence: `.agents/reports/ui-production-readiness/evidence/package/` (Linux launch log, window argv, pe-subsystem.txt).
+- Confidence: medium
+- Closure: run the packaged build on a Windows and a macOS host (launch, close, relaunch, store a provider key, reboot, key still there); add a macOS icon (`.icns`); size S.
+
+### Stray body-less POST seen once by the provider-switch fake
+- Date: 2026-11-01
+- Location: test/J-CFG-provider-switch.test.ts ("switching model with the key left blank…"), test/providerFake.ts.
+- Debt: In one full `just verify` run the recording fake on an ephemeral port saw a POST without a `model` field before the test's first model call; 9 isolated runs did not reproduce it. The likely source is a late request from an earlier app or fake in the same test process reaching a reused port, but it was not traced. The test now counts only POSTs that carry a model.
+- Evidence: the failing run's diff (`+ undefined` before `"model-one"`).
+- Confidence: low
+- Closure: record the request path and a per-test nonce header in `providerFake.ts` and reject requests without it; size S.

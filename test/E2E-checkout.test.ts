@@ -34,12 +34,20 @@ describe("E2E task checkout", () => {
 
         // A draft conversation is enough: no model turn is needed to isolate a checkout.
         await page.getByRole("button", { name: "New session", exact: true }).click();
-        const taskSelect = page.locator("#wb-bind-task");
-        await taskSelect.waitFor();
+        const taskChip = page.locator("button#wb-bind-task");
+        await taskChip.waitFor();
 
         const taskId = await createTask(app, client, workspaceId, "Tidy the greeting");
-        await page.locator(`#wb-bind-task option[value="${taskId}"]`).waitFor({ state: "attached", timeout: 10_000 });
-        await taskSelect.selectOption(taskId);
+        // The task appears in the chip's menu once its workbench row reaches the client.
+        const pick = page.getByRole("menuitemradio", { name: /Tidy the greeting/ });
+        for (let attempt = 0; ; attempt++) {
+          await taskChip.click();
+          if (await pick.isVisible()) break;
+          await page.keyboard.press("Escape");
+          if (attempt > 40) throw new Error("the created task never appeared in the task menu");
+          await page.waitForTimeout(250);
+        }
+        await pick.click();
 
         const isolate = page.getByRole("button", { name: "Isolate in a worktree…" });
         await isolate.waitFor();
@@ -53,13 +61,14 @@ describe("E2E task checkout", () => {
         const branchInput = page.getByLabel("Branch name");
         await branchInput.waitFor();
         expect(await branchInput.inputValue()).toBe("tidy-the-greeting");
-        const startSelect = form.getByLabel("Start from branch");
+        // S9 conversion: the branch picker is a MenuSelect whose trigger announces the current value.
+        const startSelect = form.getByRole("button", { name: /^Start from branch/ });
         await startSelect.waitFor();
         await page.waitForFunction(() => {
-          const el = document.querySelector('select[aria-label="Start from branch"]') as HTMLSelectElement | null;
-          return el !== null && el.value !== "";
+          const el = document.querySelector('.menu-select-btn[aria-label^="Start from branch"]');
+          return el !== null && !(el.getAttribute("aria-label") ?? "").endsWith(": ");
         });
-        expect(await startSelect.inputValue()).toBe("main");
+        expect(await startSelect.getAttribute("aria-label")).toBe("Start from branch: main (default)");
         await shot(page, "e2e-checkout-02-form");
 
         await form.getByRole("button", { name: "Create checkout" }).click();

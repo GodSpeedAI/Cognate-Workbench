@@ -1,0 +1,23 @@
+{
+  "at": "2026-11-01T07:19:54.628Z",
+  "results": [
+    {
+      "id": "claude",
+      "version": "2.1.316 (Claude Code)",
+      "mode": "ask",
+      "status": "completed",
+      "ms": 5067,
+      "reply": "READY",
+      "eventTypes": [
+        "run.started",
+        "run.invocation",
+        "session.turn.started",
+        "harness.session.recorded",
+        "run.invocation.progress",
+        "workbench.usage.recorded",
+        "message.completed",
+        "run.completed"
+      ]
+    }
+  ]
+}

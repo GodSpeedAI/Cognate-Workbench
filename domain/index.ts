@@ -278,6 +278,10 @@ export const WORKBENCH_ANCHORS: Readonly<Record<string, string>> = {
   // governed move mutation, anchored on the same `Task` entity as `task.create`.
   "task.list": "Task",
   "task.move": "Task",
+  // F2 (J-REMOTE-diagnostics): the bounded remote-control transition family, anchored on the
+  // `RemoteControl` entity (the events are `workbench.remote.*`, folded by the workbench
+  // projection into the `remote/control` row).
+  "workbench.remote.record": "RemoteControl",
 };
 
 export function workbenchBindings(domain: Domain): readonly CapabilityBinding[] {
@@ -292,13 +296,15 @@ export function bindWorkbench(domain: Domain): Readonly<Record<string, Capabilit
 }
 
 /**
- * T11: the completion of the workbench's disabled controls. Six capabilities, each anchored on an
+ * T11: the completion of the workbench's disabled controls. Capabilities, each anchored on an
  * IDM entity that already described the concept (the `Plugin` entity was added to the model this
  * tranche; the rest predate it):
  *
- * - `session.setArchived` on `Session` — J-SESSION-archive
+ * - `session.setArchived` on `Session` — J-SESSION-archive; `session.rename` on `Session` — J-SESSION-rename
  * - `settings.changeShortcuts` and `config.path` on `UserPreferences` — J-PREFS-shortcuts,
- *   J-CFG-config-path (both are operator preference/config surfaces)
+ *   J-CFG-config-path (both are operator preference/config surfaces); `config.file.read` and
+ *   `config.file.apply` on `UserPreferences` — J-CFG-config-edit
+ * - `secrets.backend.describe` on `ModelProvider` — J-SECRETS-storage (where its API keys are kept)
  * - `provider.delete` and `model.catalog` on `ModelProvider` — J-CFG-provider-delete,
  *   J-CFG-model-catalog
  * - `plugin.install` and `plugin.uninstall` on `Plugin` — J-PLG-install
@@ -307,13 +313,32 @@ export function bindWorkbench(domain: Domain): Readonly<Record<string, Capabilit
  */
 export const TRANCHE11_ANCHORS: readonly (readonly [string, string])[] = [
   ["session.setArchived", "Session"],
+  ["session.rename", "Session"],
   ["settings.changeShortcuts", "UserPreferences"],
   ["provider.delete", "ModelProvider"],
   ["model.catalog", "ModelProvider"],
   ["config.path", "UserPreferences"],
+  ["config.file.read", "UserPreferences"],
+  ["config.file.apply", "UserPreferences"],
+  ["secrets.backend.describe", "ModelProvider"],
   ["plugin.install", "Plugin"],
   ["plugin.uninstall", "Plugin"],
 ];
+
+/**
+ * F1 (J-SESSION-pin): the session row menu's Pin affordance (the design's donor-parity half of
+ * D-23), anchored on the `Session` entity the archive/rename capabilities already use.
+ */
+export const SESSION_PIN_ANCHORS: readonly (readonly [string, string])[] = [
+  ["session.setPinned", "Session"],
+];
+
+export function bindSessionPin(domain: Domain) {
+  const bindings = SESSION_PIN_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} session-pin contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}
 
 export function tranche11Bindings(domain: Domain): readonly CapabilityBinding[] {
   return TRANCHE11_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
@@ -323,6 +348,30 @@ export function bindTranche11(domain: Domain) {
   const bindings = tranche11Bindings(domain);
   const contracts = bindCapabilities(domain.projection, bindings);
   if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} tranche-11 contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}
+
+/**
+ * Conformance gaps closed (2026-10-31 conformance record, items 9-11). Each capability that was
+ * registered and granted without a `semanticRef` is anchored explicitly:
+ * - `onboarding.dismiss` on `UserPreferences` (the durable first-run progress is an operator
+ *   preference) -- J-A-first-use
+ * - `execution.wsl.list` on `ExecutionWorld`, beside `process.exec` and `execution.world.connect`
+ *   (it enumerates the places a WSL world can be connected) -- J-RW-select-world
+ * - `observation.status` / `observation.record` on the `VerificationObservation` resource -- the
+ *   read side of J-COG-realitytrace (delivery status and the correlated record)
+ */
+export const CONFORMANCE_GAP_ANCHORS: Readonly<Record<string, string>> = {
+  "onboarding.dismiss": "UserPreferences",
+  "execution.wsl.list": "ExecutionWorld",
+  "observation.status": "VerificationObservation",
+  "observation.record": "VerificationObservation",
+};
+
+export function bindConformanceGaps(domain: Domain) {
+  const bindings = Object.entries(CONFORMANCE_GAP_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} conformance-gap contracts, got ${contracts.length}`);
   return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
 }
 
@@ -440,11 +489,15 @@ export function bindAmbiguousCapabilities(domain: Domain): Readonly<Record<strin
  * - `session.task.bind` on `Session` — the governed Task↔Session binding mutation (J-TASK-scope).
  * - `workspace.directory.suggest` on `ExecutionWorld` — read-only directory completion in the
  *   selected execution world (J-WS-directory-discovery).
+ * - `workspace.files.list` and `workspace.file.read` on `WorkspaceRecord` - read-only file
+ *   browsing of a workspace for the inspector's Files tab (J-WS-files-browse).
  */
 export const RED_JOURNEY_ANCHORS: Readonly<Record<string, string>> = {
   "session.create": "Session",
   "session.task.bind": "Session",
   "workspace.directory.suggest": "ExecutionWorld",
+  "workspace.files.list": "WorkspaceRecord",
+  "workspace.file.read": "WorkspaceRecord",
 };
 
 export function redJourneyBindings(domain: Domain): readonly CapabilityBinding[] {
@@ -505,6 +558,94 @@ export function bindCheckoutCapabilities(domain: Domain): Readonly<Record<string
   >;
 }
 
+/**
+ * J-HARNESS-*: external agent-harness CLIs. Detection anchors on `HarnessCli`; the durable per-
+ * session binding, its resolution and the recorded turn-advance step anchor on `HarnessBinding`.
+ */
+export const HARNESS_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "agent.harness.list": "HarnessCli",
+  "session.harness.bind": "HarnessBinding",
+  "session.harness.resolve": "HarnessBinding",
+  "harness.turn.advance": "HarnessBinding",
+};
+
+export function bindHarnessCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(HARNESS_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} harness contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: harness capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
+/**
+ * J-TERMINAL-session / J-BROWSER-session / J-BROWSER-inspect / J-PREVIEW-register: the desktop
+ * collaboration surfaces. Terminal lifecycle anchors on `TerminalSession` (a human surface: agents
+ * keep tool.bash and never hold a PTY). Browser observation, control and element feedback anchor on
+ * `BrowserSession` (an annotation is a fact about a browser session's page; the durable feedback
+ * handed to the agent is the PageFeedback flow). Development-server registration anchors on
+ * `DevPreview`.
+ */
+export const SURFACES_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "terminal.open": "TerminalSession",
+  "terminal.close": "TerminalSession",
+  "browser.open": "BrowserSession",
+  "browser.close": "BrowserSession",
+  "browser.navigate": "BrowserSession",
+  "browser.snapshot": "BrowserSession",
+  "browser.screenshot": "BrowserSession",
+  "browser.input": "BrowserSession",
+  "browser.control": "BrowserSession",
+  "browser.inspect": "BrowserSession",
+  "browser.annotate": "BrowserSession",
+  "preview.register": "DevPreview",
+  "preview.stop": "DevPreview",
+};
+
+export function bindSurfaceCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(SURFACES_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} surface contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: surface capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
+/**
+ * J-CFG-provider-switch / J-CFG-provider-test: stored-provider listing, activation and connection
+ * test. All three anchor on `ModelProvider`, like `model.configure`, `provider.delete` and
+ * `model.catalog`.
+ */
+export const PROVIDER_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "provider.list": "ModelProvider",
+  "provider.activate": "ModelProvider",
+  "provider.test": "ModelProvider",
+};
+
+export function bindProviderCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(PROVIDER_CAPABILITY_ANCHORS).map(([id, entity]) => ({
+    semanticId: domain.semanticId(entity),
+    capability: { id, version: "1.0.0" },
+  }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} provider contracts, got ${contracts.length}`);
+  const unbound = contracts.find((contract) => !contract.semanticRef);
+  if (unbound) throw new Error(`domain: provider capability ${unbound.id} has no SemanticRef`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<
+    Record<string, CapabilityContract["semanticRef"]>
+  >;
+}
+
 /** Effective native capacity is inspection data, distinct from advisory parallelism plans. */
 export function bindRuntimeExecution(domain: Domain): CapabilityContract["semanticRef"] {
   const contracts = bindCapabilities(domain.projection, [{
@@ -538,4 +679,32 @@ export function bindT8Identity(domain: Domain) {
     identity: { issue: byId["identity.session.issue"]!, revoke: byId["identity.session.revoke"]!, inspect: byId["identity.inspect"]!, connectHorizon: byId["identity.connectHorizon"]! },
     containment: byId["settings.changeContainment"]!,
   };
+}
+
+/**
+ * Capability-bundles tranche M (§9.1): anchors for the dynamically extensible capability system.
+ * Grant administration anchors on `AuthorityGrant` (the operator's durable grant of specified
+ * powers to a responsible agent principal); bundle lifecycle and the runtime enablement gate
+ * anchor on `CapabilityActivation` (the activation row is the invocation-gating record); the
+ * dispatcher's model-facing tools anchor on `CapabilityBundle` (the packaging form of everything
+ * they serve). The ten J-CAP-* canonical journeys entered the catalog in this same change set.
+ */
+export const CAPABILITY_RUNTIME_ANCHORS: Readonly<Record<string, string>> = {
+  "authority.grant.issue": "AuthorityGrant",
+  "authority.grant.revoke": "AuthorityGrant",
+  "authority.grant.list": "AuthorityGrant",
+  "capability.runtime.enable": "CapabilityActivation",
+  "capability.bundle.register": "CapabilityBundle",
+  "capability.bundle.activate": "CapabilityBundle",
+  "capability.bundle.deactivate": "CapabilityBundle",
+  "capability.bundle.uninstall": "CapabilityBundle",
+  "tool.capability_invoke": "CapabilityBundle",
+  "tool.skill_load": "CapabilityBundle",
+};
+
+export function bindCapabilityRuntime(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(CAPABILITY_RUNTIME_ANCHORS).map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} capability-runtime contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
 }

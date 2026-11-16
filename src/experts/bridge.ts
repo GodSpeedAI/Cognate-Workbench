@@ -40,7 +40,12 @@ export class ExpertCompletionBridge {
           if(activeRoots+dispatchedThisPass>=boundedBatch)continue;
         }
         const groupKey=a.teamId ? `team:${a.teamId}` : `conversation:${a.conversationId}`;
-        const run=await service.startRun(caller,{agent:EXPERT_AGENT,input:{assignmentId:a.id,attempt:a.attempt},idempotencyKey:`expert-run:${a.id}:${a.attempt}`,correlationId:`expert:${a.id}:${a.attempt}`});
+        // Capability-bundles tranche P (§1.1): expert runs execute under the responsible agent
+        // principal — `wb-agent:<expertId>` — so enforcement attributes work to the agent, never
+        // to the operator or the shared system caller. Narrowing is lineage-derived (the child's
+        // own assignment bounds); the principal creates no new identity authority (§1.7).
+        const runCaller={actor:{id:`wb-agent:${a.expertId}`,kind:"agent" as const},tenant:this.tenant};
+        const run=await service.startRun(runCaller,{agent:EXPERT_AGENT,input:{assignmentId:a.id,attempt:a.attempt},idempotencyKey:`expert-run:${a.id}:${a.attempt}`,correlationId:`expert:${a.id}:${a.attempt}`});
         startedThisPass.set(groupKey,(startedThisPass.get(groupKey) ?? 0)+1);
         await this.experts.mutate(this.tenant,`bind:${a.id}:${a.attempt}`,{runId:run.runId},s=>{
           const current=s.assignments[a.id]!;

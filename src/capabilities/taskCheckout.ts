@@ -124,7 +124,7 @@ export function taskCheckoutComponent(options: TaskCheckoutOptions): Component {
       });
 
       fiber.provide({ id: "git.checkout.attach", version: "1.0.0", semanticRef: ref("git.checkout.attach") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "git.checkout.attach");
+        await operatorOnly(ctx, "git.checkout.attach");
         const input = rawInput as CheckoutAttachInput;
         if (typeof input.taskId !== "string" || !input.taskId.trim()) throw new Error("git.checkout.attach: a taskId is required");
         if (typeof input.branch !== "string" || !input.branch.trim()) throw new Error("git.checkout.attach: a branch name is required");
@@ -174,7 +174,7 @@ export function taskCheckoutComponent(options: TaskCheckoutOptions): Component {
       });
 
       fiber.provide({ id: "git.checkout.merge", version: "1.0.0", semanticRef: ref("git.checkout.merge") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "git.checkout.merge");
+        await operatorOnly(ctx, "git.checkout.merge");
         const input = rawInput as { readonly taskId?: unknown; readonly target?: unknown };
         if (typeof input.taskId !== "string" || !input.taskId.trim()) throw new Error("git.checkout.merge: a taskId is required");
         const task = await taskRow(input.taskId);
@@ -197,7 +197,7 @@ export function taskCheckoutComponent(options: TaskCheckoutOptions): Component {
       });
 
       fiber.provide({ id: "git.checkout.remove", version: "1.0.0", semanticRef: ref("git.checkout.remove") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "git.checkout.remove");
+        await operatorOnly(ctx, "git.checkout.remove");
         const input = rawInput as { readonly taskId?: unknown; readonly deleteBranch?: unknown };
         if (typeof input.taskId !== "string" || !input.taskId.trim()) throw new Error("git.checkout.remove: a taskId is required");
         const task = await taskRow(input.taskId);
@@ -221,7 +221,7 @@ export function taskCheckoutComponent(options: TaskCheckoutOptions): Component {
       });
 
       fiber.provide({ id: "git.checkout.recreate", version: "1.0.0", semanticRef: ref("git.checkout.recreate") }, async (rawInput, ctx) => {
-        operatorOnly(ctx, "git.checkout.recreate");
+        await operatorOnly(ctx, "git.checkout.recreate");
         const input = rawInput as { readonly taskId?: unknown };
         if (typeof input.taskId !== "string" || !input.taskId.trim()) throw new Error("git.checkout.recreate: a taskId is required");
         const binding = await bindingRow(input.taskId);

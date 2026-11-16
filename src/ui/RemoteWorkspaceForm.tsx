@@ -3,6 +3,7 @@
 // and must be confirmed before anything authenticates); secrets are typed into password fields and go
 // straight to the server's secret store — they are never kept in component state after submit, never
 // shown again, and never part of the durable record the sidebar reads.
+import { MenuSelect } from "./shell/MenuSelect.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCognate, useProjection } from "@godspeedai/cognate-react";
 import { DirectoryField } from "./DirectoryField.tsx";
@@ -259,9 +260,7 @@ export function WslWorkspaceForm({ onAdded }: { readonly onAdded: () => void }) 
       ) : (
         <>
           <Field label="Distribution">
-            <select aria-label="WSL distribution" value={distro} onChange={(e) => setDistro(e.currentTarget.value)}>
-              {distros.map((d) => <option key={d.name} value={d.name}>{d.name}{d.isDefault ? " (default)" : ""}</option>)}
-            </select>
+            <MenuSelect variant="field" placement="down" ariaLabel="WSL distribution" value={distro} onPick={setDistro} options={distros.map((d) => ({ value: d.name, label: `${d.name}${d.isDefault ? " (default)" : ""}` }))} />
           </Field>
           <Field label="Linux user (optional)" hint="Leave empty to use the distribution's default user."><input aria-label="WSL user" value={user} onChange={(e) => setUser(e.currentTarget.value)} autoComplete="off" /></Field>
         </>

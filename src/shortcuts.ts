@@ -16,12 +16,19 @@ export interface ShortcutAction {
   readonly defaultChord: string | undefined;
 }
 
-/** The "Application" region of the shortcuts dialog — the editable set. */
+/** The "Application" region of the shortcuts dialog — the editable set.
+ *
+ *  Defaults are chosen so none is browser-reserved (see RESERVED_EXACT): Ctrl+N would open a new
+ *  window in Chromium (and in an installed app window) and can never be intercepted, so "New
+ *  Session" ships as Ctrl+Alt+N instead. Ctrl+K / Ctrl+, / Ctrl+B / Ctrl+/ are not reserved. On
+ *  Apple platforms the app treats Cmd as Ctrl when matching, so the same chords read Cmd+K etc. */
 export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
+  { id: "open-command-palette", label: "Open command palette", defaultChord: "Ctrl+K" },
   { id: "open-shortcuts", label: "Open keyboard shortcuts", defaultChord: "Ctrl+/" },
-  { id: "new-session", label: "New Session", defaultChord: undefined },
-  { id: "toggle-sidebar", label: "Toggle left sidebar", defaultChord: undefined },
-  { id: "open-settings", label: "Open settings", defaultChord: undefined },
+  { id: "new-session", label: "New Session", defaultChord: "Ctrl+Alt+N" },
+  { id: "toggle-sidebar", label: "Toggle left sidebar", defaultChord: "Ctrl+B" },
+  { id: "open-settings", label: "Open settings", defaultChord: "Ctrl+," },
+  { id: "toggle-inspector", label: "Toggle right inspector", defaultChord: "Ctrl+Shift+B" },
 ];
 
 export function actionById(id: string): ShortcutAction | undefined {
@@ -67,8 +74,15 @@ export function chordFromKeyboardEvent(event: {
   readonly shiftKey: boolean;
   readonly altKey: boolean;
   readonly metaKey: boolean;
+  /** Physical key ("KeyN", "Digit1"). With Alt held, macOS reports a composed `key` ("˜" for Alt+N). */
+  readonly code?: string;
 }): string | undefined {
-  const key = event.key;
+  let key = event.key;
+  if (event.altKey && event.code) {
+    const letter = /^Key([A-Z])$/.exec(event.code);
+    const digit = /^Digit([0-9])$/.exec(event.code);
+    if (letter?.[1] ?? digit?.[1]) key = (letter?.[1] ?? digit?.[1])!;
+  }
   if (key === "Control" || key === "Shift" || key === "Alt" || key === "Meta") return undefined;
   const mods: string[] = [];
   if (event.ctrlKey) mods.push("Ctrl");
@@ -193,7 +207,7 @@ export function isTypingTarget(target: { readonly tagName?: string; readonly isC
  * A chord fires only when the event was not produced inside a text-entry target.
  */
 export function resolveKeypress(
-  event: { readonly key: string; readonly ctrlKey: boolean; readonly shiftKey: boolean; readonly altKey: boolean; readonly metaKey: boolean },
+  event: { readonly key: string; readonly ctrlKey: boolean; readonly shiftKey: boolean; readonly altKey: boolean; readonly metaKey: boolean; readonly code?: string },
   overrides: ShortcutOverrides,
   target: { readonly tagName?: string; readonly isContentEditable?: boolean } | null,
 ): string | undefined {

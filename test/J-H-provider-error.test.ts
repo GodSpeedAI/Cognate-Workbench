@@ -187,3 +187,59 @@ describe("J-H-provider-error", () => {
     });
   });
 });
+
+async function unreachablePort(): Promise<number> {
+  const server = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const port = server.port;
+  server.stop(true);
+  return port;
+}
+
+describe("J-H-provider-error (unreachable provider)", () => {
+  for (const protocol of ["openai-compatible", "openai-responses", "anthropic-messages"] as const) {
+    test(`${protocol}: connection refused reports the first failed attempt promptly with errorCode and delayMs, then turn.failed`, async () => {
+      process.env.MODEL_RETRY_BACKOFF_MS = "50";
+      await withTempHome(async (home) => {
+        const port = await unreachablePort();
+        const { app, client } = await bootApp(home);
+        try {
+          await client.invoke("model.configure", {
+            providerId: "dead", baseURL: `http://127.0.0.1:${port}/v1`, protocol, model: "m", apiKey: "sk-secret-value",
+          });
+          const workspaceDir = await mkdtemp(join(tmpdir(), "provider-unreachable-"));
+          const { workspaceId } = (await client.invoke("workspace.select", { path: workspaceDir })) as { readonly workspaceId: string };
+          const sessionId = randomUUID();
+          const started = Date.now();
+          const view = await client.startRun(
+            "agent.coding",
+            { sessionId, workspaceId, message: "hello" } as never,
+            { idempotencyKey: randomUUID(), correlationId: `session:${sessionId}` },
+          );
+          await retriedCountAtLeast(app, view.runId, 1);
+          expect(Date.now() - started).toBeLessThan(2000);
+          const finalRun = await waitForCompletion(app, view.runId);
+          expect(finalRun.status).toBe("failed");
+          const events = await eventsFor(app, view.runId);
+          const retried = events.filter((e) => e.eventType === "model.request.retried");
+          expect(retried.length).toBe(5);
+          const first = retried[0]!.payload as Record<string, unknown>;
+          expect(first.attempt).toBe(1);
+          expect(first.maxAttempts).toBe(6);
+          expect(first.delayMs).toBe(50);
+          expect(typeof first.errorCode).toBe("string");
+          expect(["CONNECTION_REFUSED", "NETWORK_ERROR"]).toContain(first.errorCode as string);
+          if (protocol === "openai-compatible") expect(first.errorCode).toBe("CONNECTION_REFUSED");
+          expect(first.baseURLHost).toBe(`127.0.0.1:${port}`);
+          expect(typeof first.message).toBe("string");
+          expect(JSON.stringify(events)).not.toContain("sk-secret-value");
+          const failed = events.filter((e) => e.eventType === "turn.failed");
+          expect(failed.length).toBe(1);
+          expect(typeof (failed[0]!.payload as { message?: unknown }).message).toBe("string");
+        } finally {
+          await app.stop();
+          delete process.env.MODEL_RETRY_BACKOFF_MS;
+        }
+      });
+    }, 20000);
+  }
+});

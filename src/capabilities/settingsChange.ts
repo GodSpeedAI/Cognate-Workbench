@@ -30,13 +30,13 @@ import { isShortcutOverrides, validateAssignment } from "../shortcuts.ts";
 /** One descriptor per capability: the durable field it writes and the guard that validates the
  *  client's value before any event is recorded. Kept declarative so the component's `provides`
  *  list and its `fiber.provide` wiring stay in lockstep. */
-interface SettingField {
+export interface SettingField {
   readonly capability: string;
   readonly field: keyof SettingsPatch;
   readonly validate: (value: unknown) => boolean;
 }
 
-const SETTING_FIELDS: readonly SettingField[] = [
+export const SETTING_FIELDS: readonly SettingField[] = [
   { capability: "settings.changeWorkDetails", field: "workDetails", validate: isWorkDetailsMode },
   { capability: "settings.changePermission", field: "permission", validate: isPermissionMode },
   { capability: "settings.changeLanguage", field: "language", validate: isLanguageCode },
@@ -56,6 +56,41 @@ const SETTING_FIELDS: readonly SettingField[] = [
   // containment ledger enforces them fail-closed across processes, never in this writer.
   { capability: "settings.changeContainment", field: "containment", validate: isContainmentQuotas },
 ];
+
+/**
+ * The one shortcut-patch rule, shared by `settings.changeShortcuts` and `config.file.apply`:
+ * structurally valid overrides are not enough, so each binding is simulated in turn against the
+ * standing overrides. Returns a human-readable problem, or `undefined` when the patch is valid.
+ */
+export function shortcutPatchProblem(value: unknown, standing: unknown): string | undefined {
+  if (!isShortcutOverrides(value)) {
+    return "shortcuts must map known action ids to a chord string or null";
+  }
+  const applied: Record<string, string | null> = { ...(isShortcutOverrides(standing) ? standing : {}) };
+  for (const [actionId, chord] of Object.entries(value)) {
+    applied[actionId] = chord;
+    if (chord === null) continue;
+    const decision = validateAssignment(actionId, chord, applied);
+    if (!decision.ok) return decision.reason;
+  }
+  return undefined;
+}
+
+/** Records one validated `settings.changed` event (the shared effect path of every `settings.change*`). */
+export async function recordSettingChange(
+  service: RuntimeService,
+  caller: Caller,
+  field: keyof SettingsPatch,
+  value: unknown,
+): Promise<void> {
+  const eventInput: Record<string, unknown> = { kind: "settings.changed" };
+  eventInput[field] = value;
+  await service.startRun(caller, {
+    agent: AGENT_CONFIG,
+    input: eventInput as unknown as Json,
+    idempotencyKey: randomUUID(),
+  });
+}
 
 export function settingsChangeComponent(options: {
   readonly getService: () => RuntimeService;
@@ -82,14 +117,7 @@ export function settingsChangeComponent(options: {
           if (!field.validate(value)) {
             throw new Error(`settings.change*: ${field.field} failed validation`);
           }
-          const service = options.getService();
-          const eventInput: Record<string, unknown> = { kind: "settings.changed" };
-          eventInput[field.field] = value;
-          await service.startRun(options.systemCaller, {
-            agent: AGENT_CONFIG,
-            input: eventInput as unknown as Json,
-            idempotencyKey: randomUUID(),
-          });
+          await recordSettingChange(options.getService(), options.systemCaller, field.field, value);
           return { ok: true };
         });
       });
@@ -110,15 +138,8 @@ export function settingsChangeComponent(options: {
         const rows = (await service.readProjection(options.systemCaller, { name: "settings" })).rows;
         // `readProjection` returns tenant-relative keys ("current"), so match both forms.
         const current = rows.find((r) => r.key === "current" || r.key.endsWith("/current"))?.value as { readonly shortcuts?: unknown } | undefined;
-        const applied: Record<string, string | null> = { ...(isShortcutOverrides(current?.shortcuts) ? current.shortcuts : {}) };
-        // Simulate the patch in turn against the standing overrides so a patch that binds two
-        // actions to the same chord fails, and so a chord freed by this same patch is reusable.
-        for (const [actionId, chord] of Object.entries(value)) {
-          applied[actionId] = chord;
-          if (chord === null) continue;
-          const decision = validateAssignment(actionId, chord, applied);
-          if (!decision.ok) throw new Error(`settings.changeShortcuts: ${decision.reason}`);
-        }
+        const problem = shortcutPatchProblem(value, current?.shortcuts);
+        if (problem !== undefined) throw new Error(`settings.changeShortcuts: ${problem}`);
         await service.startRun(options.systemCaller, {
           agent: AGENT_CONFIG,
           input: { kind: "settings.changed", shortcuts: value } as unknown as Json,

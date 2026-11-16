@@ -5,11 +5,18 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react/pure";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { registerDom, releaseDom } from "./dom-env.ts";
 import React, { useState } from "react";
 import { RemoteDialog } from "../src/ui/RemotePanel.tsx";
+import { CognateProvider } from "@godspeedai/cognate-react";
 
-beforeAll(() => GlobalRegistrator.register());
+/** The dialog reads the workbench projection (J-REMOTE-diagnostics); this test stubs the
+ *  projection store — focus behaviour is what is under test, not the data. */
+const stubClient = {
+  projection: () => ({ subscribe: () => () => {}, get: () => undefined }),
+} as never;
+
+beforeAll(() => registerDom());
 afterEach(async () => {
   await act(async () => {
     cleanup();
@@ -21,7 +28,7 @@ afterAll(async () => {
     cleanup();
     await Promise.resolve();
   });
-  await GlobalRegistrator.unregister();
+  await releaseDom();
 });
 
 /** A parent that re-renders on demand and passes a new inline onClose each time, as App does. */
@@ -37,8 +44,12 @@ function Parent() {
 
 describe("remote dialog focus", () => {
   test("a parent re-render does not move focus away from a control inside the dialog", async () => {
-    const ui = render(<Parent />);
-    const close = ui.getByRole("button", { name: "Close" });
+    const ui = render(
+      <CognateProvider client={stubClient}>
+        <Parent />
+      </CognateProvider>,
+    );
+    const close = ui.getByRole("button", { name: "Close remote control" });
     await act(async () => {
       close.focus();
     });

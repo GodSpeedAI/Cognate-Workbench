@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import type { ModelConfig } from "../../components/providerRegistry.ts";
 import { EXPERT_TOOLS, type Expert, type ExpertTool } from "../../experts/types.ts";
 import type { ExpertModelBudget } from "../../experts/economics.ts";
+import { MenuSelect } from "../shell/MenuSelect.tsx";
 
 const TOOL_LABELS: Readonly<Record<ExpertTool, string>> = {
   read: "Read files",
@@ -72,16 +73,16 @@ export function ExpertEditor({ initial, copying = false, defaultRoute, routes, b
       <label htmlFor="expert-specialization">Specialization<input id="expert-specialization" required maxLength={500} value={specialization} onChange={(event) => setSpecialization(event.currentTarget.value)} /></label>
       <label htmlFor="expert-instructions">Instructions<textarea id="expert-instructions" required rows={5} value={instructions} onChange={(event) => setInstructions(event.currentTarget.value)} /></label>
       <fieldset><legend>Model route</legend>
-        <label htmlFor="expert-route-select">Configured provider<select id="expert-route-select" value={routeOption} onChange={(event) => selectRoute(event.currentTarget.value)}>
-          <option value="inherit">Use Workbench default{defaultRoute ? ` (${defaultRoute.providerId} · ${defaultRoute.model})` : " (not configured)"}</option>
-          {routes.map((candidate) => <option key={`${candidate.providerId}:${candidate.model}`} value={candidate.providerId}>{candidate.providerId} · {candidate.model}</option>)}
-          {defaultRoute && !routes.some((candidate) => candidate.providerId === defaultRoute.providerId) && <option value={defaultRoute.providerId}>{defaultRoute.providerId} · {defaultRoute.model}</option>}
-          <option value="manual">Enter a route</option>
-        </select></label>
+        <label htmlFor="expert-route-select">Configured provider<MenuSelect id="expert-route-select" ariaLabel="Configured provider" value={routeOption} variant="field" placement="down" options={[
+          { value: "inherit", label: `Use Workbench default${defaultRoute ? ` (${defaultRoute.providerId} · ${defaultRoute.model})` : " (not configured)"}` },
+          ...routes.map((candidate) => ({ value: candidate.providerId, label: `${candidate.providerId} · ${candidate.model}` })),
+          ...(defaultRoute && !routes.some((candidate) => candidate.providerId === defaultRoute.providerId) ? [{ value: defaultRoute.providerId, label: `${defaultRoute.providerId} · ${defaultRoute.model}` }] : []),
+          { value: "manual", label: "Enter a route" },
+        ]} onPick={(v) => selectRoute(v)} /></label>
         {!inheritDefault && route && <div className="experts-route-fields">
           <label htmlFor="expert-route-provider">Provider ID<input id="expert-route-provider" required value={route.providerId} onChange={(event) => setRoute({ ...route, providerId: event.currentTarget.value })} /></label>
           <label htmlFor="expert-route-url">Base URL<input id="expert-route-url" required type="url" value={route.baseURL} onChange={(event) => setRoute({ ...route, baseURL: event.currentTarget.value })} /></label>
-          <label htmlFor="expert-route-protocol">Protocol<select id="expert-route-protocol" value={route.protocol} onChange={(event) => setRoute({ ...route, protocol: event.currentTarget.value as ModelConfig["protocol"] })}><option value="openai-compatible">OpenAI compatible</option><option value="openai-completions">OpenAI completions</option><option value="openai-responses">OpenAI responses</option><option value="anthropic-messages">Anthropic messages</option></select></label>
+          <label htmlFor="expert-route-protocol">Protocol<MenuSelect id="expert-route-protocol" ariaLabel="Protocol" value={route.protocol} variant="field" placement="down" options={[{ value: "openai-compatible", label: "OpenAI compatible" }, { value: "openai-completions", label: "OpenAI completions" }, { value: "openai-responses", label: "OpenAI responses" }, { value: "anthropic-messages", label: "Anthropic messages" }]} onPick={(v) => setRoute({ ...route, protocol: v })} /></label>
           <label htmlFor="expert-route-model">Model<input id="expert-route-model" required value={route.model} onChange={(event) => setRoute({ ...route, model: event.currentTarget.value })} /></label>
         </div>}
         {!inheritDefault && !route && <div className="experts-route-fields"><label htmlFor="expert-route-provider">Provider ID<input id="expert-route-provider" required value="" onChange={(event) => setRoute({ providerId: event.currentTarget.value, baseURL: "", protocol: "openai-compatible", model: "" })} /></label></div>}

@@ -11,6 +11,7 @@ import type { Caller, RunView, RuntimeService } from "@godspeedai/cognate-runtim
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import { containedWorldId } from "./executionWorlds.ts";
 import { workspaceIdFor } from "./workspaceSelect.ts";
+import { operatorOnly } from "../workbench/operatorGuard.ts";
 
 export type ContainmentConfig = Omit<BubblewrapExecutionWorldOptions, "worldId" | "workspaceRoot">;
 const ALLOWED_RUNTIME_ROOTS = new Set(["/usr/bin", "/usr/lib", "/usr/lib64", "/bin", "/lib", "/lib64"]);
@@ -263,12 +264,8 @@ export function containedWorkspaceComponent(options: ContainedWorkspaceOptions):
   const inspect = { id: "execution.containment.inspect", version: "1.0.0", semanticRef: options.semanticRefs.containmentInspect };
   const contained = { id: "workspace.contained.select", version: "1.0.0", semanticRef: options.semanticRefs.contained };
   const inFlight = new Map<string, Promise<{ readonly workspaceId: string; readonly root: string; readonly executionWorldId: string; readonly title: string }>>();
-  const operatorOnly = (ctx: HandlerContext, capability: string) => {
-    if (ctx.actor.kind !== "user" || ctx.runId) throw new Error(`${capability}: only a direct human operator may ${capability === "workspace.contained.select" ? "select a contained workspace" : "inspect host containment"}`);
-  };
-
-  async function select(input: unknown, ctx: HandlerContext) {
-    operatorOnly(ctx, contained.id);
+    async function select(input: unknown, ctx: HandlerContext) {
+    await operatorOnly(ctx, contained.id, `${contained.id}: only a direct human operator may select a contained workspace`);
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error(`${contained.id}: accepts only a path`);
     const record = input as Record<string, unknown>;
     if (Object.keys(record).some(key => key !== "path") || typeof record.path !== "string" || !record.path.trim() || record.path.includes("\0")) {
@@ -352,7 +349,7 @@ export function containedWorkspaceComponent(options: ContainedWorkspaceOptions):
     provides: [inspect, contained],
     activate(fiber) {
       fiber.provide(inspect, async (_raw, ctx) => {
-        operatorOnly(ctx, inspect.id);
+        await operatorOnly(ctx, inspect.id, `${inspect.id}: only a direct human operator may inspect host containment`);
         return safeInspection(options.config, options.executionPosture ?? "contained");
       });
       fiber.provide(contained, select);
