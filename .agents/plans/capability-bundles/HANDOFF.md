@@ -54,15 +54,24 @@
 - `capability.bundle.register` + activate/deactivate in GRANTED_CAPABILITIES
 - `test/J-CAP-create.test.ts` (3 tests): register → activate → invoke in-session, over-ceiling refusal, in-session discovery
 
+### Tranche T2 remainder — committed (`feat/capability-runtime-t2`)
+- `src/capabilities/capabilityRuntime.ts` (reworked): version-keyed handler table; the §1.4 decision implemented once in `decide` (enablement marker ∧ not the system caller ∧ index available ∧ selected row active, reasons ∅ ∧ ceiling ∧ actor grant, unexpired ∧ clamp grant intact); every refusal AND bundle-path allow recorded (`authority.decision.recorded`, on a per-capability `decisions:` stream so audit appends never race lifecycle CAS); in-flight counter taken in the same synchronous section as the decision; deadline timers cleared; hot reload = mount v2 → integrity + conflict re-check + CAS pre-state → `capability.repointed` → old handle drained then disposed; failures: `capability.activation_failed` (first activation) / `capability.repoint_failed` (replacement), v1 untouched; load-time integrity failure → `capability.integrity_failed` + `integrity` suspension
+- `src/workbench/harnessPatches.ts`: closed section vocabulary (conventions/workflow/tooling/style), explicit refusal of non-surfaces, toolset-override validation (dispatcher ids kept, no `run_code` outside ptc), §3.3 composition (persistent then session order, `replace` last-wins), exclusive per-preset toolset ownership via `detectConflicts`, `capability.harness.patched`
+- `src/agents/runStartResolver.ts`: run-start resolution as the read-only capabilities `capability.harness.resolve` / `.refresh` (the loop emits the returned `capability.harness.assembled` records — a resolver that recorded would deadlock behind its own serial run); hashes + delta by reference, full text once per changed section; fail-closed on index unavailability; live descriptor refresh keyed on the index sequence; wired into `agentCoding.ts` (system message for standard runs, `instructions` for Expert runs, `toolsForPreset` override seam, step-boundary refresh)
+- `src/capabilities/skillLoader.ts`: descriptors with pinned budgets (400 / 4,000 tokens, visible truncation recorded at registration), closed-vocabulary `skill.load` (manifest-declared skills only), hash verification on every load
+- `src/workbench/bundleSources.ts`: provider-backed directory source (stat-bounded reads through the world filesystem port into a staging dir, then the identical hash/materialize pipeline), `BundleBackedPluginSource` bridge; `capability.bundle.register` accepts `executionWorldId`
+- Registration now records the validated manifest (`bundle-version/<cap>/<hash>` rows keep every version's manifest), records `capability.validation_failed` on every refusal, and requires `harness.modify` for harness-declaring bundles
+- Dispatcher principal rule: a user-kind actor inside a run is the operator's client identity carried into agent work, not the operator; it resolves to `wb-agent:coding` and needs its own grant (fail-closed by default)
+- Test seams: `ServerOptions.capabilityRuntimeHooks` (never set in production) and `bootApp(home, extra)`
+- Suites: `test/J-CAP-reload.test.ts` (CUJ 2/13, 5 tests), `test/J-CAP-source.test.ts` (CUJ 8, ssh/wsl/local parameterized, 7 tests), `test/J-CAP-refusal.test.ts` (CUJ 4 bundle-path matrix + enablement gate, 2 tests), `test/J-CAP-harness.test.ts` (CUJ 11 + refusals + resolver units, 7 tests); `test/J-CAP-create.test.ts` now enables the runtime first
+
 ## What remains (in dependency order)
 
-### T2 remainder
-1. **Run-start resolver** (`src/agents/runStartResolver.ts`): named instruction sections, toolset-override application, descriptor assembly at run start, `capability.harness.assembled` by hash + delta, live descriptor refresh reading the index sequence, fail-closed on index unavailability
-2. **`src/workbench/harnessPatches.ts`**: instruction-patch/toolset-override record types, validation, per-surface overlap regime, `capability.harness.patched`
-3. **`src/capabilities/skillLoader.ts`**: descriptor registry; `tool.skill.load` serving from version directories with hash verification; entry-document flags
-4. **`src/workbench/bundleSources.ts`**: directory source over provider-backed semantics (SSH/WSL identical)
-5. **J-CAP suites**: j_cap_reload (+rollback), j_cap_source, j_cap_refusal, j_cap_harness
-6. **Chunked verify at the T2 boundary**
+### T2 leftovers (deliberately not in this tranche slice)
+- `test/workbench-call-sites.test.ts` (design item 43, the grep-pinned call-site inventory)
+- Boot remount of the active set (`activeSet` is still `[]` in `server.ts`; folds into the T4 restart journey)
+- Activation/creation beyond an agent's grant refuses and records (D2's "park on the approval machinery" is not built)
+- Session-bound activation routing through the loop (the dispatcher accepts `sessionId`; the loop does not yet pass it); capability-declarable 300 s deadlines
 
 ### T3 — executables
 1. **`src/mcp/client.ts`**: MCP protocol client — official TypeScript SDK with custom Transport adapter over execution-world provider streams; invocation-record emission
@@ -84,12 +93,18 @@
 4. Enablement: write `workbench.capability_runtime.enabled` after the full chunked gate passes
 
 ## Verification state
-- Chunked approach is the authoritative gate (3 sequential `bun test` runs, ~68 files each)
-- Chunk 1 (T1 boundary): 205 pass / 0 fail
-- Chunk 2 (T2 boundary): 288 pass / 11 skip / 3 flakes (pass isolated — documented host-concurrency class)
-- Chunk 3 (T1/T2 boundary): 1,120 pass / 0 fail
-- Consolidated: 1,619+ pass / 0 fail (all 202 files, 10+ new suites included)
-- The full single-process `just verify` has 189-380 documented host-concurrency flakes (pg0 saturation) — chunked is authoritative
+- CI is the authoritative gate since PR #37: four timing-balanced test shards, each with its own
+  PostgreSQL service. The local chunked run (3 sequential `bun test` runs) is a fallback; on the
+  8 GB development host it stalled during the T2 remainder, so CI decides.
+- T2 remainder, local (2026-11-17): J-CAP-refusal 4/0, J-CAP-reload 5/0, J-CAP-harness 7/0,
+  J-CAP-source 6/0, J-CAP-create 3/0, J-CAP-prerequisite 6/0 (pass/fail); typecheck clean.
+- Red evidence against main's src (same tests): J-CAP-refusal 1 pass / 3 fail (the principal-mapping
+  and enablement invariants); J-CAP-reload, J-CAP-harness and J-CAP-source fail to load (the modules
+  they exercise do not exist on main); J-CAP-create passes on main (its change only enables the
+  runtime first, which the new gate requires).
+- Earlier tranches: chunk 1 (T1) 205/0; chunk 2 (T2 dispatcher) 288 pass, 11 skip, 3 flakes passing
+  in isolation; chunk 3 1,120/0. The single-process `just verify` has documented host-concurrency
+  flakes (pg0 saturation).
 
 ## Key infrastructure notes
 - pg0 shared instance: max_connections saturates under peak parallel load; the verify recipe pre-starts it; bootApp retries the transient signature

@@ -25,7 +25,8 @@ import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
-import { capabilityRuntimeComponent } from "./capabilities/capabilityRuntime.ts";
+import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
+import { runStartResolverComponent } from "./agents/runStartResolver.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
@@ -183,6 +184,8 @@ export interface ServerOptions {
   readonly runOwnership?: "single-process" | "multi-process";
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
+  /** Test seam (capability runtime T2): fault/observation points inside the dispatcher. Never set in production. */
+  readonly capabilityRuntimeHooks?: CapabilityRuntimeHooks;
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -319,6 +322,9 @@ const GRANTED_CAPABILITIES = [
   "capability.bundle.uninstall",
   "tool.capability_invoke",
   "tool.skill_load",
+  // T2: the run-start resolver's read-only faces (data and records, never authority).
+  "capability.harness.resolve",
+  "capability.harness.refresh",
 ];
 
 function buildPolicy(): Policy {
@@ -681,6 +687,15 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
     return rows.some((r) => r.key === "runtime/remediation");
   };
+  // §1.7: the durable enablement marker, read fold-first. Absent or unreadable = disabled.
+  const isCapabilityRuntimeEnabled = async (): Promise<boolean> => {
+    try {
+      const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
+      return rows.some((r) => r.key === "runtime/enablement");
+    } catch {
+      return false;
+    }
+  };
   const runtime: Runtime = await createRuntime({
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
@@ -786,6 +801,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         authorityIndex: capabilityRuntimeIndex,
         home,
         tenant: LOCAL_OPERATOR.tenant,
+        getRegistry: () => executionWorlds,
+        // §4.2.3 GC reference rule: any version an activation row names is never pruned.
+        referencedVersions: (capabilityId) => new Set([...capabilityRuntimeIndex.activations.values()].filter((row) => row.capabilityId === capabilityId && row.state !== "retired").map((row) => row.version)),
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityRuntimeComponent({
@@ -795,10 +813,20 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         tenant: LOCAL_OPERATOR.tenant,
         getRecorder: () => capabilityRuntimeRecorder,
         getIndex: () => capabilityRuntimeIndex,
+        isEnabled: isCapabilityRuntimeEnabled,
+        // Decision records ride their own stream per capability so an audit append never races
+        // the capability's lifecycle CAS (activate/repoint) on the same stream.
         recordDecision: async (event) => {
-          await capabilityRuntimeRecorder.commitBatch(String((event.payload as Record<string, unknown>).capabilityId ?? "runtime"), [event as { type: string; payload: Record<string, unknown> }]);
+          await capabilityRuntimeRecorder.commitBatch(`decisions:${String((event.payload as Record<string, unknown>).capability ?? "runtime")}`, [event as { type: string; payload: Record<string, unknown> }]);
         },
         activeSet: [],
+        ...(options.capabilityRuntimeHooks ? { hooks: options.capabilityRuntimeHooks } : {}),
+        semanticRefs: capabilityRuntimeRefs,
+      }),
+      runStartResolverComponent({
+        isEnabled: isCapabilityRuntimeEnabled,
+        getIndex: () => capabilityRuntimeIndex,
+        readRows: async () => (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows,
         semanticRefs: capabilityRuntimeRefs,
       }),
     ],

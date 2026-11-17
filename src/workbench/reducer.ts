@@ -383,7 +383,13 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
     case "capability.bundle.registered": {
       const capabilityId = String(p.capabilityId ?? "");
       if (!capabilityId) return [];
-      return [{ key: `bundle/${capabilityId}`, value: j({ capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, registeredAt: recordedAt }) }];
+      const row = { capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, name: p.name ?? "", purpose: p.purpose ?? "", manifest: p.manifest ?? null, descriptorTruncated: p.descriptorTruncated === true, ...(p.sourceWorldId ? { sourceWorldId: p.sourceWorldId } : {}), registeredAt: recordedAt };
+      // `bundle/` names the LATEST registered version; `bundle-version/` keeps every version's
+      // manifest so readers resolve the ACTIVATED version, not merely the newest (hot reload).
+      return [
+        { key: `bundle/${capabilityId}`, value: j(row) },
+        ...(row.versionHash ? [{ key: `bundle-version/${capabilityId}/${row.versionHash}`, value: j(row) }] : []),
+      ];
     }
     case "capability.bundle.validated": {
       const capabilityId = String(p.capabilityId ?? "");

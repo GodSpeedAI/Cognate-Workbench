@@ -165,3 +165,24 @@ export async function gitIn(cwd: string, args: readonly string[]): Promise<strin
   if (code !== 0) throw new Error(`git ${args.join(" ")} failed (${code}): ${stderr}`);
   return stdout;
 }
+
+/** Enables the capability runtime the way an operator does (§1.7): the remediation evidence marker
+ *  is recorded through the real recording path, then the operator-only enable command runs. */
+export async function enableCapabilityRuntime(app: AppServer, client: Client): Promise<void> {
+  const { AGENT_CONFIG } = await import("../src/agents/agentConfig.ts");
+  await app.runtime.service.startRun(SYSTEM, {
+    agent: AGENT_CONFIG,
+    input: { kind: "workbench.recorded", events: [{ type: "workbench.capability_runtime.remediation_verified", payload: { workbenchBuild: { commitSha: "test", packageVersion: "test" }, suiteDigest: "test", recordedAt: new Date().toISOString() } }] } as never,
+    idempotencyKey: randomUUID(),
+  });
+  await waitUntil("remediation marker", async () => ((await wbRows(app)).get("runtime/remediation") as Record<string, unknown> | undefined));
+  await inv(client, "capability.runtime.enable", {});
+  await waitUntil("enablement marker", async () => ((await wbRows(app)).get("runtime/enablement") as Record<string, unknown> | undefined));
+}
+
+/** Registers a bundle directory and waits for its (async-folded) registry row. */
+export async function registerBundle(app: AppServer, client: Client, args: { capabilityId: string; sourceDir: string; manifest: Record<string, unknown>; executionWorldId?: string }): Promise<{ capabilityId: string; version: string; dir: string; files: number }> {
+  const registered = (await inv(client, "capability.bundle.register", args)) as { capabilityId: string; version: string; dir: string; files: number };
+  await waitUntil(`bundle-version row ${registered.version}`, async () => ((await wbRows(app)).get(`bundle-version/${args.capabilityId}/${registered.version}`) as Record<string, unknown> | undefined));
+  return registered;
+}

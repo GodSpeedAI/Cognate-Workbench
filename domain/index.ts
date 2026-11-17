@@ -700,6 +700,8 @@ export const CAPABILITY_RUNTIME_ANCHORS: Readonly<Record<string, string>> = {
   "capability.bundle.uninstall": "CapabilityBundle",
   "tool.capability_invoke": "CapabilityBundle",
   "tool.skill_load": "CapabilityBundle",
+  "capability.harness.resolve": "CapabilityBundle",
+  "capability.harness.refresh": "CapabilityBundle",
 };
 
 export function bindCapabilityRuntime(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
