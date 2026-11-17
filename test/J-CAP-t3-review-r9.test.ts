@@ -11,7 +11,6 @@ import { describe, expect, test } from "bun:test";
 import { createExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { createMcpSupervisor } from "../src/capabilities/mcpManage.ts";
 import { McpClient, type McpRecord, type StdioChannel } from "../src/mcp/client.ts";
-import { adoptMinted } from "../src/mcp/typedRecord.ts";
 
 function channel(tools: unknown[], onCall: (id: unknown, reply: (r: unknown) => void) => void = () => {}): StdioChannel {
   let listener: (c: Buffer) => void | Promise<void> = () => {};
@@ -37,10 +36,6 @@ describe("J-CAP-t3-review-r9 I1: server text never becomes a recorded id", () =>
     expect(ids.length).toBeGreaterThan(0);
     expect(JSON.stringify(recs)).not.toContain("server-private-0123456789");
     await client.dispose();
-  });
-  test("adoptMinted accepts only a UUID or our digest form", () => {
-    expect(String(adoptMinted("c99b47e4-f8ae-45cb-9954-682e41409c5b"))).toBe("c99b47e4-f8ae-45cb-9954-682e41409c5b");
-    expect(adoptMinted("server-private-0123456789")).toMatch(/^sha256:[0-9a-f]{32}$/);
   });
 });
 

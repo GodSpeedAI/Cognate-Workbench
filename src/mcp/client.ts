@@ -16,7 +16,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ResultSchema, type JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import Ajv, { type ValidateFunction } from "ajv";
 import { INGRESS, isPlain, type Inbound, LineFramer, measureJson, parseToolResult, snapshotJson, jsonBytes, unsupportedRequestReply, type RpcId, type Violation } from "./ingress.ts";
-import { adoptId, adoptMinted, boundText, digestId, mintId, sha256Of, shortSha, text, type CallCode, type MintedId, type RecordCode, type Sha256, type StripClass, type Trusted, type TypedPayload } from "./typedRecord.ts";
+import { adoptId, boundText, digestId, mintId, sha256Of, shortSha, text, type CallCode, type MintedId, type RecordCode, type Sha256, type StripClass, type Trusted, type TypedPayload } from "./typedRecord.ts";
 
 /** The wrapper-owned byte channel to a spawned server: what the SDK transport needs, nothing more. */
 export interface StdioChannel {
@@ -179,6 +179,16 @@ export class ChannelTransport implements Transport {
   async start(): Promise<void> {
     this.channel.onData((chunk) => {
       if (this.#closed) return;
+      const held = this.retained;
+      if (chunk.length + held.queuedChunks + held.partialLine > INGRESS.maxRetainedBytes) {
+        // I3: checked on arrival, before anything is queued: a hard cap, not just backpressure.
+        this.#closed = true;
+        this.#queue = [];
+        this.hooks.onViolation?.({ reason: "oversize", bytes: chunk.length, sha256: sha256Of(chunk) });
+        this.onclose?.();
+        void this.channel.close().catch(() => {});
+        return;
+      }
       this.#queue.push(chunk);
       this.#measure();
       if (!this.#paused && this.retained.queuedChunks >= INGRESS.queueHighBytes) { this.#paused = true; this.peaks.pauses++; this.channel.pause?.(); }
@@ -532,13 +542,13 @@ export class McpClient {
     const pending: PendingCall = { deadlineFired: false, failure: null, serverError: null };
     const correlation = String(mintId());
     const trace: { started: boolean; resultBytes?: number } = { started: false };
-    let base: Record<string, MintedId> = {};
+    let base: Record<string, MintedId | Sha256> = {};
     let outcome: McpCallOutcome = INTERNAL;
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      base = { ...this.#ids, callId: adoptMinted(call.callId), tool: digestId(name), actorId: adoptId(call.actorId) };
+      base = { ...this.#ids, callId: mintId(), ...(call.callId !== undefined ? { callerCallSha256: sha256Of(call.callId) } : {}), tool: digestId(name), actorId: adoptId(call.actorId) };
       outcome = await this.#execute(name, args, call, deadlineAt, pending, correlation, controller, base, trace, (t) => { timer = t; }, onAbort);
     } catch {
       outcome = INTERNAL;
@@ -571,7 +581,7 @@ export class McpClient {
     return outcome;
   }
 
-  async #execute(name: string, args: Record<string, unknown>, call: { timeoutMs: number; signal?: AbortSignal; actorId: string }, deadlineAt: number, pending: PendingCall, correlation: string, controller: AbortController, base: Record<string, MintedId>, trace: { started: boolean }, setTimer: (t: ReturnType<typeof setTimeout>) => void, onAbort: () => void): Promise<McpCallOutcome> {
+  async #execute(name: string, args: Record<string, unknown>, call: { timeoutMs: number; signal?: AbortSignal; actorId: string }, deadlineAt: number, pending: PendingCall, correlation: string, controller: AbortController, base: Record<string, MintedId | Sha256>, trace: { started: boolean }, setTimer: (t: ReturnType<typeof setTimeout>) => void, onAbort: () => void): Promise<McpCallOutcome> {
     const fail = (code: CallCode, message: Trusted): McpCallOutcome => ({ ok: false, code, message: this.#msg(message) });
     const tool = digestId(name);
     if (this.#closed) return fail("server_not_running", text`the MCP server is not running`);

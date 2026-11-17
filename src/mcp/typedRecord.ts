@@ -48,10 +48,9 @@ const ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,127}$/;
 export const mintId = (): MintedId => randomUUID() as MintedId;
 /** Adopt an id that comes from our own runtime (manifest, registry, dispatcher). A value of the wrong shape is replaced by a digest, never recorded. */
 export const adoptId = (value: string): MintedId => (ID_SHAPE.test(value) ? value : `sha256:${sha256Of(value).slice(0, 32)}`) as MintedId;
-const MINTED_SHAPE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|sha256:[0-9a-f]{32})$/;
-/** An id that must be of a format WE mint (a UUID or our own `sha256:` digest form). Anything else (server-derived text
- *  included) is replaced by a digest, never recorded; absent mints a fresh one. */
-export const adoptMinted = (value: string | undefined): MintedId => (value === undefined ? mintId() : MINTED_SHAPE.test(value) ? (value as MintedId) : digestId(value));
+/** A refusal code from our own host boundary, narrowed to the recorded set (anything else is `internal_error`). */
+const CALL_CODES: ReadonlySet<string> = new Set(["server_not_running", "unknown_tool", "arguments_too_large", "schema_invalid", "record_failed", "result_too_large", "output_invalid", "deadline_exceeded", "cancelled", "server_error", "internal_error"]);
+export const callCode = (value: string): CallCode => (CALL_CODES.has(value) ? (value as CallCode) : "internal_error");
 /** A digest of a possibly hostile name, in the shape of an id: the only way a tool or other server-chosen name appears in a record. */
 export const digestId = (value: string): MintedId => `sha256:${sha256Of(value).slice(0, 32)}` as MintedId;
 /** Text authored by OUR runtime or the operator's verified registry (a reason from our own authorizer, an argv from a verified manifest).

@@ -19,7 +19,7 @@ import { spawnGoverned, type LedgerEvent, type ProcView } from "../src/capabilit
 import { LifecycleRecorder } from "../src/workbench/lifecycleRecorder.ts";
 import { INGRESS } from "../src/mcp/ingress.ts";
 import { MCP_LIMITS, McpClient, type McpRecord } from "../src/mcp/client.ts";
-import type { TypedPayload } from "../src/mcp/typedRecord.ts";
+import { sha256Of, type TypedPayload } from "../src/mcp/typedRecord.ts";
 import { LOCAL_POSTURE, sleep } from "./mcp-helpers.ts";
 
 const RUNS = Number(process.env.FC_RUNS ?? 200);
@@ -222,7 +222,7 @@ async function runInner(sc: Scenario, emitted: Buffer[], logs: string[]): Promis
   if (ON.has("I2")) for (let i = 0; i < sc.calls.length; i++) {
     expect(outcomes[i], `call ${i} threw`).not.toBe("threw");
     const o = outcomes[i] as Exclude<(typeof outcomes)[number], "threw">;
-    const finished = stored.filter((p) => p.phase === "finished" && p.callId === callIdOf(i));
+    const finished = stored.filter((p) => p.phase === "finished" && p.callerCallSha256 === sha256Of(callIdOf(i)));
     expect(finished.length, `call ${i}: finished records in the store (${sc.recorder})`).toBeLessThanOrEqual(1);
     if (!(!o.ok && o.code === "record_failed")) expect(finished.length, `call ${i}: result delivered without a confirmed finished record (${sc.recorder})`).toBe(1);
     else expect("result" in o, "record_failed withholds the result").toBe(false);

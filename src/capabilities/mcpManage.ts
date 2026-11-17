@@ -19,7 +19,7 @@ import type { DurableStore, StoredEvent } from "@godspeedai/cognate-events";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { randomUUID } from "node:crypto";
 import { McpClient, McpConnectError, boundBytes, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
-import { adoptId, digestId, mintId, describeDigest, digestText, operatorText, type Trusted, type TypedPayload } from "../mcp/typedRecord.ts";
+import { adoptId, digestId, mintId, describeDigest, digestText, operatorText, callCode, type Trusted, type TypedPayload } from "../mcp/typedRecord.ts";
 import { authorizeCapabilityOp, type Actor, type CapabilityOp } from "../workbench/authoritySelection.ts";
 import type { AuthorityIndex } from "../workbench/authorityIndex.ts";
 import type { LifecycleRecorder } from "../workbench/lifecycleRecorder.ts";
@@ -344,28 +344,39 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     return { ok: true, state: "running", pid: spawned.handle.pid, tools: entry.client.tools().length };
   };
 
-  const host: McpHost = {
-    toolsFor: (capabilityId, version, sessionId) => [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.version === version && e.accepting).flatMap((e) => [...(e.client?.tools() ?? [])]),
-    serversFor: (capabilityId, version, sessionId) => [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.version === version).map((e) => ({ serverId: e.serverId, state: e.state })),
-    async call(capabilityId, version, sessionId, toolRef, args, call) {
+  const innerCall = async (capabilityId: string, version: string, sessionId: string | undefined, toolRef: string, args: Record<string, unknown>, call: { deadlineMs: number; actorId: string }, viaClient: { value: boolean }): Promise<McpCallResult> => {
       const m = /^mcp\.([a-z0-9][a-z0-9-]{0,31})\.(.+)$/.exec(toolRef);
       if (!m) return { ok: false, code: "unknown_tool", message: describeDigest(operatorText("the tool reference is not an mcp.<serverId>.<tool> id"), digestText(toolRef).bytes, digestText(toolRef).sha256), retryable: false };
-      // Snapshot, synchronously: the server this call belongs to, and its in-flight count.
       const entry = running.get(serverKey(capabilityId, sessionId, m[1]!));
       if (!entry || entry.version !== version || !entry.accepting || !entry.client) {
-        // I2: a refusal at the host boundary is still a call: exactly one durable finished record, or `record_failed`.
-        const recordId = mintId();
-        try { await record("capability.mcp.tool_invoked", { capabilityId: adoptId(capabilityId), version: adoptId(version), serverId: adoptId(m[1]!), ...(sessionId ? { sessionId: adoptId(sessionId) } : {}), callId: mintId(), tool: digestId(m[2]!), actorId: adoptId(call.actorId), phase: "finished", recordId, outcome: "server_not_running" }, `calls:${capabilityId}:${m[1]!}`, recordId); } catch { return { ok: false, code: "record_failed", message: "the refusal could not be recorded", retryable: false }; }
         return { ok: false, code: "server_not_running", message: `MCP server ${m[1]} of ${capabilityId} is not accepting calls`, retryable: true };
       }
       const client = entry.client;
       entry.inFlight += 1;
       try {
+        viaClient.value = true; // the client writes its own finished record from here on
         const outcome = await client.callTool(m[2]!, args, { timeoutMs: call.deadlineMs, actorId: call.actorId });
         return outcome.ok ? { ok: true, result: outcome.result } : { ok: false, code: outcome.code, message: outcome.message, retryable: outcome.code === "server_not_running" };
       } finally {
         entry.inFlight -= 1;
       }
+  };
+
+  const host: McpHost = {
+    toolsFor: (capabilityId, version, sessionId) => [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.version === version && e.accepting).flatMap((e) => [...(e.client?.tools() ?? [])]),
+    serversFor: (capabilityId, version, sessionId) => [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.version === version).map((e) => ({ serverId: e.serverId, state: e.state })),
+    async call(capabilityId, version, sessionId, toolRef, args, call) {
+      // I2: ONE wrapper. Every return path of the inner call passes through here; a refusal the client did not record itself
+      // (it never reached `client.callTool`) gets exactly one finished record carrying its code, or becomes `record_failed`.
+      const viaClient = { value: false };
+      const result = await innerCall(capabilityId, version, sessionId, toolRef, args, call, viaClient);
+      if (result.ok || viaClient.value) return result;
+      const m = /^mcp\.([a-z0-9][a-z0-9-]{0,31})\.(.+)$/.exec(toolRef);
+      const recordId = mintId();
+      try {
+        await record("capability.mcp.tool_invoked", { capabilityId: adoptId(capabilityId), version: adoptId(version), serverId: m ? adoptId(m[1]!) : digestId(toolRef), ...(sessionId ? { sessionId: adoptId(sessionId) } : {}), callId: mintId(), tool: digestId(m ? m[2]! : toolRef), actorId: adoptId(call.actorId), phase: "finished", recordId, outcome: callCode(result.code) }, `calls:${capabilityId}:${m ? m[1]! : "unparsed"}`, recordId);
+      } catch { return { ok: false, code: "record_failed", message: "the refusal could not be recorded", retryable: false }; }
+      return result;
     },
   };
 

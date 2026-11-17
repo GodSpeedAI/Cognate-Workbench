@@ -15,6 +15,8 @@ export const INGRESS = {
   maxMessageBytes: 256 * 1024, maxDepth: 64, maxMethodLength: 256,
   /** Backpressure: when this many received bytes are waiting to be framed, the stream is paused; it resumes below `queueLowBytes`. */
   queueHighBytes: 128 * 1024, queueLowBytes: 32 * 1024,
+  /** Hard cap on bytes retained (queued chunks plus the partial line): a chunk that would exceed it is a protocol violation on arrival. */
+  maxRetainedBytes: 512 * 1024,
 } as const;
 
 export type ViolationReason = "oversize" | "malformed" | "too-deep";
