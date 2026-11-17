@@ -18,7 +18,7 @@ import type { Component, CapabilityContract, HandlerContext, SemanticRef } from 
 import type { DurableStore, StoredEvent } from "@godspeedai/cognate-events";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { randomUUID } from "node:crypto";
-import { McpClient, boundBytes, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
+import { McpClient, boundBytes, describeOpaque, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
 import { authorizeCapabilityOp, type Actor, type CapabilityOp } from "../workbench/authoritySelection.ts";
 import type { AuthorityIndex } from "../workbench/authorityIndex.ts";
 import type { LifecycleRecorder } from "../workbench/lifecycleRecorder.ts";
@@ -97,8 +97,17 @@ export interface McpSupervisor {
   status(): readonly { capabilityId: string; sessionId?: string; serverId: string; version: string; state: string; pid?: number }[];
   /** Boot sweep: reconcile every spawn the ledger left non-terminal. */
   reconcileBoot(): Promise<{ spawnId: string; outcome: string }[]>;
+  /** The index (or projection) initialisation failed fatally: no reconciliation runs, admission stays closed, the failure is recorded. */
+  failBoot(error: unknown): Promise<void>;
   /** Stop every server (process shutdown). */
   shutdown(): Promise<void>;
+}
+
+/** Boot wiring: reconciliation waits for the REAL index initialisation. A fatal initialisation failure does not
+ *  reconcile (the sweep depends on the projection it could not read); it records the failure and keeps admission closed. */
+export async function reconcileAfterIndex(index: { readonly ready: Promise<void> }, supervisor: Pick<McpSupervisor, "reconcileBoot" | "failBoot">): Promise<void> {
+  try { await index.ready; } catch (error) { await supervisor.failBoot(error).catch(() => {}); return; }
+  await supervisor.reconcileBoot().catch(() => {});
 }
 
 export function createMcpSupervisor(options: McpSupervisorOptions): McpSupervisor {
@@ -319,7 +328,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     } catch (error) {
       spawned.handle.stop("handshake-failed", "emergency");
       await spawned.handle.exited;
-      return refuse("handshake-failed", `MCP handshake with ${serverId} failed: ${boundBytes(spawned.handle.scrubber.text(error instanceof Error ? error.message : String(error)), 512)}`, { spawnId: spawned.handle.spawnId });
+      return refuse("handshake-failed", describeOpaque(`MCP handshake with ${serverId} failed`, error instanceof Error ? error.message : String(error)), { spawnId: spawned.handle.spawnId });
     }
     entry.starting = false;
     if (entry.cancelled) {
@@ -462,6 +471,11 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
         openGate(false);
         throw error;
       }
+    },
+    async failBoot(error) {
+      openGate(false);
+      // The cause is recorded by digest and size only (a boot error can quote arbitrary text).
+      await decision("runtime", "mcp.boot", { id: "system", kind: "system" }, "refused", "boot-init-failed", describeOpaque("the authority index or projection failed to initialise; no spawn is admitted and the ledger was not reconciled", error instanceof Error ? error.message : String(error))).catch(() => {});
     },
     async shutdown() {
       shuttingDown = true;

@@ -66,7 +66,8 @@ describe("J-CAP-t3-review-r3 finding 2: server schemas may not use references", 
     const validate = ajv.compile(safe.schema);
     expect(validate({})).toBe(true);
     expect(performance.now() - started).toBeLessThan(20);
-    expect(safe.stripped).toEqual(expect.arrayContaining(["$ref", "$defs"]));
+    // r4: the allowlist drops the combinator and the definitions before any reference is reached.
+    expect(safe.stripped).toEqual(expect.arrayContaining(["$defs", "allOf"]));
     expect(JSON.stringify(safe.schema)).not.toContain("$ref");
   });
 
@@ -96,7 +97,7 @@ describe("J-CAP-t3-review-r3 finding 2: server schemas may not use references", 
     expect(JSON.stringify(client.tools())).not.toContain("$ref");
     const stripped = records.filter((r) => r.payload.reasonCode === "schema-sanitized").map((r) => JSON.stringify(r.payload.stripped));
     expect(stripped.length).toBeGreaterThanOrEqual(2); // input and output
-    expect(stripped.every((s) => s.includes("$ref"))).toBe(true);
+    expect(stripped.every((s) => s.includes("allOf"))).toBe(true);
   });
 });
 

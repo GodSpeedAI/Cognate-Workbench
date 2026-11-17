@@ -27,7 +27,7 @@ import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
 import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
-import { createMcpSupervisor, type McpSupervisor } from "./capabilities/mcpManage.ts";
+import { createMcpSupervisor, reconcileAfterIndex, type McpSupervisor } from "./capabilities/mcpManage.ts";
 import { acquireLongLeaseSlot, releaseAllLongLeaseSlots, releaseLongLeaseSlot } from "./capabilities/aggregateContainment.ts";
 import type { PostureRecord } from "./capabilities/execSpawn.ts";
 import { runStartResolverComponent } from "./agents/runStartResolver.ts";
@@ -960,7 +960,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // T3: suspension/deactivation/uninstall/repoint/session expiry stop servers in the commit's own turn;
   // the boot sweep then reconciles every spawn the ledger left non-terminal (before any new spawn).
   const unwatchMcp = mcpSupervisor.watch(runtime.store);
-  void capabilityRuntimeIndex.ready.then(() => mcpSupervisor.reconcileBoot(), () => mcpSupervisor.reconcileBoot()).catch(() => {});
+  void reconcileAfterIndex(capabilityRuntimeIndex, mcpSupervisor);
   const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex, new Date(), capabilityMutex).catch(() => {}); }, 60_000);
   grantExpirySweep.unref?.();
 

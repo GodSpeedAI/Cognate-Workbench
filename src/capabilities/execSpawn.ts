@@ -380,27 +380,34 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
         found.delete(process.pid);
         return found;
       };
-      // A recorded group id is signalled only if a live member of that group carries the spawn's marker or the
-      // bundle signature: after a restart the number may belong to an unrelated group, which is never touched.
+      // Groups to end. Governed children are group leaders (spawned detached), so a marker holder's process group IS the
+      // spawn's group: it is derived from every marker holder (and signature match), whether or not it was recorded, and
+      // treated like a recorded pgid. A child that cleared its marker stays in that group and is ended with it. A
+      // recorded group id is additionally signalled only if a live member proves it ours: after a restart the number
+      // may belong to an unrelated group, which is never touched. The server's own group and groups <= 1 are never signalled.
+      const ownGroup = await proc.readPgid?.(process.pid);
+      const groups = new Set<number>();
+      const addGroup = (g: number | undefined): void => { if (typeof g === "number" && g > 1 && g !== ownGroup) groups.add(g); };
+      const probe = (g: number): boolean => { try { process.kill(-g, 0); return true; } catch { return false; } };
+      const marked = new Set(await proc.pidsWithSpawnId(row.spawnId));
+      if (proc.readPgid) {
+        for (const pid of marked) addGroup(await proc.readPgid(pid));
+        for (const pid of await targets()) { if (marked.has(pid)) continue; const g = await proc.readPgid(pid); if (g === pid) addGroup(g); } // a signature match counts only as the leader of its own group
+      }
       const group = row.pgid ?? undefined;
-      const groupLiveRaw = (): boolean => { if (typeof group !== "number" || group <= 1) return false; try { process.kill(-group, 0); return true; } catch { return false; } };
-      const groupOwned = async (): Promise<boolean> => {
-        if (!groupLiveRaw()) return false;
-        const marked = new Set(await proc.pidsWithSpawnId(row.spawnId));
-        if (!proc.readPgid) return marked.size > 0;
-        for (const pid of await proc.listPids()) {
+      if (typeof group === "number" && group > 1 && probe(group)) {
+        let owned = marked.size > 0 && !proc.readPgid;
+        if (proc.readPgid) for (const pid of await proc.listPids()) {
           if (pid === process.pid || (await proc.readPgid(pid)) !== group) continue;
-          if (marked.has(pid) || (await matches(pid))) return true;
+          if (marked.has(pid) || (await matches(pid))) { owned = true; break; }
         }
-        return false;
-      };
-      const owned = await groupOwned();
-      if (groupLiveRaw() && !owned) groupUnverified = true;
-      const groupLive = (): boolean => owned && groupLiveRaw();
+        if (owned) addGroup(group); else groupUnverified = true;
+      }
+      const groupLive = (): boolean => [...groups].some(probe);
       const anyAlive = async (): Promise<boolean> => (await targets()).size > 0 || groupLive();
       const endAll = async (sig: NodeJS.Signals): Promise<void> => {
         for (const pid of await targets()) signal(pid, sig);
-        if (owned && typeof group === "number" && group > 1) signal(-group, sig);
+        for (const g of groups) signal(-g, sig);
       };
       if (await anyAlive()) {
         await endAll("SIGTERM");

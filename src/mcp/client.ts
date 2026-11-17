@@ -58,27 +58,36 @@ export function boundBytes(value: string, max: number): string {
 }
 const MAX_MESSAGE_BYTES = 512;
 
-/** Untrusted schema sanitization (section 11, input and output schemas alike): the server validates its own input, so keywords that run a
- *  backtracking regex engine on the event loop (`pattern`, `patternProperties`, every `format`) are stripped,
- *  and depth and node count are bounded. Returns what was stripped, or a refusal reason. */
+/** Opaque description of server-originated free text: records and messages carry the byte count and a digest, never the text. */
+export function opaqueText(text: string): { bytes: number; sha256: string } {
+  return { bytes: utf8Bytes(text), sha256: createHash("sha256").update(text).digest("hex") };
+}
+export const describeOpaque = (what: string, text: string): string => { const o = opaqueText(text); return `${what} (${o.bytes} bytes, sha256 ${o.sha256.slice(0, 16)})`; };
+
+/** Untrusted schema handling (section 11, input and output schemas alike): the server validates its own input, so our
+ *  validation is defence in depth and is reduced to an ALLOWLIST of cheap structural keywords. Anything else (patterns,
+ *  formats, uniqueItems, combinators, references, definitions, ...) is stripped, so no server schema can select an
+ *  expensive validation algorithm. Depth and node count are bounded. Returns what was stripped (named only from the
+ *  standard vocabulary: a server-chosen keyword name is never recorded), or a refusal reason. */
 const SCHEMA_MAX_DEPTH = 16;
 const SCHEMA_MAX_NODES = 512;
-/** Keywords whose value is ONE schema, an array of schemas, or a map name -> schema. Everything else (enum, const,
- *  required, default, examples, unknown keywords) is data and is never rewritten. */
-const SCHEMA_ONE = new Set(["items", "additionalItems", "additionalProperties", "contains", "not", "if", "then", "else", "propertyNames", "unevaluatedItems", "unevaluatedProperties", "contentSchema"]);
-const SCHEMA_LIST = new Set(["allOf", "anyOf", "oneOf", "prefixItems", "items"]);
-const SCHEMA_MAP = new Set(["properties", "dependentSchemas", "dependencies"]);
+const KEEP_NUMBER = new Set(["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength", "maxLength", "minItems", "maxItems"]);
+const KEEP_TEXT = new Set(["description", "title"]);
+const KEEP_DATA = new Set(["enum", "const", "default"]);
+const STANDARD_KEYWORDS = new Set(["$ref", "$dynamicRef", "$recursiveRef", "$defs", "definitions", "$id", "$schema", "$anchor", "$comment", "$async", "pattern", "patternProperties", "format", "uniqueItems", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "dependencies", "dependentSchemas", "dependentRequired", "propertyNames", "additionalItems", "unevaluatedItems", "unevaluatedProperties", "contains", "minContains", "maxContains", "prefixItems", "multipleOf", "minProperties", "maxProperties", "contentEncoding", "contentMediaType", "contentSchema", "examples", "readOnly", "writeOnly", "deprecated", "nullable", "discriminator", "items(tuple)", "additionalProperties(invalid)"]);
 export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<string, unknown>; stripped: string[] } | { ok: false; reason: string } {
   const stripped = new Set<string>();
+  let otherStripped = false;
   let nodes = 0;
   let problem: string | undefined;
+  const drop = (key: string): void => { if (STANDARD_KEYWORDS.has(key)) stripped.add(key); else otherStripped = true; };
   const bound = (depth: number): boolean => {
     if (problem) return false;
     if (depth > SCHEMA_MAX_DEPTH) { problem = `schema nests deeper than ${SCHEMA_MAX_DEPTH} levels`; return false; }
     if (++nodes > SCHEMA_MAX_NODES) { problem = `schema has more than ${SCHEMA_MAX_NODES} nodes`; return false; }
     return true;
   };
-  /** Literal data (enum, const, required, ...): bounded like the rest, never rewritten. */
+  /** Literal data (enum, const, default): bounded like the rest, never rewritten. */
   const data = (value: unknown, depth: number): unknown => {
     if (!bound(depth)) return value;
     if (Array.isArray(value)) for (const v of value) data(v, depth + 1);
@@ -86,26 +95,28 @@ export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<stri
     return value;
   };
   const schemaAt = (value: unknown, depth: number): unknown => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return data(value, depth);
+    if (!value || typeof value !== "object" || Array.isArray(value)) { if (typeof value !== "boolean") problem ??= "a schema position holds neither an object nor a boolean"; return typeof value === "boolean" ? value : {}; }
     if (!bound(depth)) return value;
     const node = value as Record<string, unknown>;
-    // References are never followed: a chain of definitions that each cite their predecessor twice expands
-    // exponentially under validation. A reference becomes `{}` (accept anything); `$defs`/`definitions` are dropped.
-    for (const k of ["$ref", "$dynamicRef", "$recursiveRef"]) if (typeof node[k] === "string") { stripped.add(k); return {}; }
+    for (const k of ["$ref", "$dynamicRef", "$recursiveRef"]) if (typeof node[k] === "string") { drop(k); return {}; }
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(node)) {
-      if (key === "pattern" || key === "format") { if (typeof v !== "object") { stripped.add(key); continue; } }
-      if (key === "patternProperties" || key === "$defs" || key === "definitions") { stripped.add(key); continue; }
-      if (SCHEMA_MAP.has(key) && v && typeof v === "object" && !Array.isArray(v)) {
+      if (key === "type" && (typeof v === "string" || (Array.isArray(v) && v.every((t) => typeof t === "string")))) out.type = v;
+      else if (key === "required" && Array.isArray(v) && v.every((t) => typeof t === "string")) out.required = data(v, depth + 1);
+      else if (KEEP_NUMBER.has(key) && typeof v === "number") out[key] = v;
+      else if (KEEP_TEXT.has(key) && typeof v === "string") out[key] = v;
+      else if (KEEP_DATA.has(key)) out[key] = data(v, depth + 1);
+      else if (key === "properties" && v && typeof v === "object" && !Array.isArray(v)) {
         bound(depth + 1);
-        out[key] = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, sub]) => [name, schemaAt(sub, depth + 2)]));
-      } else if (SCHEMA_LIST.has(key) && Array.isArray(v)) out[key] = v.map((sub) => schemaAt(sub, depth + 1));
-      else if (SCHEMA_ONE.has(key)) out[key] = schemaAt(v, depth + 1);
-      else out[key] = data(v, depth + 1);
+        out.properties = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, sub]) => [name, schemaAt(sub, depth + 2)]));
+      } else if (key === "items" && v && typeof v === "object" && !Array.isArray(v)) out.items = schemaAt(v, depth + 1);
+      else if (key === "additionalProperties" && (typeof v === "boolean" || (v && typeof v === "object" && !Array.isArray(v)))) out.additionalProperties = typeof v === "boolean" ? v : schemaAt(v, depth + 1);
+      else drop(key === "items" && Array.isArray(v) ? "items(tuple)" : key);
     }
     return out;
   };
   const result = schemaAt(schema, 0);
+  if (otherStripped) stripped.add("(other)");
   return problem ? { ok: false, reason: problem } : { ok: true, schema: result as Record<string, unknown>, stripped: [...stripped] };
 }
 
@@ -207,35 +218,57 @@ export class McpClient {
     return value;
   }
   /** Records never carry raw MCP-originated text: every payload is scrubbed, messages byte-bounded. */
-  readonly #rec = (event: McpRecord): Promise<void> => this.options.record({ type: event.type, payload: this.#clean(event.payload) });
+  readonly #rec = (event: McpRecord): Promise<void> => this.options.record({ type: event.type, payload: this.#bounded(this.#clean(event.payload)) });
+  /** Every string in a record is bounded as its FINAL value. */
+  #bounded<T>(value: T): T {
+    if (typeof value === "string") return boundBytes(value, MAX_MESSAGE_BYTES) as T;
+    if (Array.isArray(value)) return value.map((v) => this.#bounded(v)) as T;
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, this.#bounded(v)])) as T;
+    return value;
+  }
+  /** The one writer of caller-visible message text: scrubbed, then bounded as the final string (any prefix included). */
+  #final(text: string): string { return boundBytes(this.#scrub(text), MAX_MESSAGE_BYTES); }
+  /** A tool as it may appear in a record: a validated name, else its digest only. */
+  #toolRef(rawName: string): string {
+    return TOOL_NAME.test(rawName) && this.#scrub(rawName) === rawName ? rawName : `sha256:${createHash("sha256").update(rawName).digest("hex").slice(0, 16)}`;
+  }
   /** The SDK validates `structuredContent` against a tool's outputSchema with a backtracking regex engine: so the
    *  schema is sanitized exactly like an input schema BEFORE the SDK sees it (stripped keywords recorded, an
    *  oversize/over-deep schema dropped with a recorded refusal). */
   #sanitizeOutputSchemas(message: JSONRPCMessage): JSONRPCMessage {
-    const result = (message as { result?: { tools?: unknown } }).result;
+    const result = (message as { result?: { tools?: unknown; content?: unknown } }).result;
+    // A tool result larger than the bound never reaches the SDK's validators: it becomes an error response.
+    if (result && "content" in result) {
+      const bytes = utf8Bytes(JSON.stringify(result));
+      if (bytes > MCP_LIMITS.maxResultBytes) return { jsonrpc: "2.0", id: (message as { id: number }).id, error: { code: -32000, message: `cognate:result_too_large:${bytes}` } } as JSONRPCMessage;
+    }
     if (!result || !Array.isArray(result.tools)) return message;
     const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
     const tools = result.tools.map((raw: Record<string, unknown>) => {
       if (raw.outputSchema === undefined) return raw;
       const { outputSchema, ...rest } = raw;
-      const name = this.#scrub(String(raw.name ?? ""));
-      const text = JSON.stringify(outputSchema ?? {});
-      const cleaned = this.#clean(JSON.parse(text)) as { $async?: unknown };
+      const rawName = String(raw.name ?? "");
+      const name = this.#toolRef(rawName);
       const refuse = (reason: string): Record<string, unknown> => {
         void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "refused", reasonCode: "schema-refused", tool: name, reason: `outputSchema: ${reason}` } }).catch(() => {});
         return rest;
       };
+      // Names and bounds are validated BEFORE anything is audited or cleaned: a rejected tool is referenced by digest only.
+      if (utf8Bytes(rawName) > 256) return rest;
+      const text = JSON.stringify(outputSchema ?? {});
       if (utf8Bytes(text) > MCP_LIMITS.maxSchemaBytes) return refuse("schema exceeds the byte bound");
+      const cleaned = this.#clean(JSON.parse(text)) as { $async?: unknown };
       if (cleaned.$async) return refuse("asynchronous schemas are not accepted");
       const safe = sanitizeSchema(cleaned);
       if (!safe.ok) return refuse(safe.reason);
-      if (safe.stripped.length > 0) void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", tool: name, reason: "outputSchema keywords that run a backtracking regex engine were stripped", stripped: safe.stripped } }).catch(() => {});
+      if (safe.stripped.length > 0) void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", tool: name, reason: "outputSchema keywords outside the structural allowlist were stripped", stripped: safe.stripped } }).catch(() => {});
       return { ...rest, outputSchema: safe.schema };
     });
     return { ...message, result: { ...result, tools } } as JSONRPCMessage;
   }
+  /** Our own errors (record failures): scrubbed text. Never used for text that came from the server. */
   #message(error: unknown): string {
-    return boundBytes(this.#scrub(error instanceof Error ? error.message : String(error)), MAX_MESSAGE_BYTES);
+    return this.#final(error instanceof Error ? error.message : String(error));
   }
 
   static async connect(channel: StdioChannel, options: McpClientOptions): Promise<McpClient> {
@@ -275,9 +308,10 @@ export class McpClient {
     const refused: { tool: string; reason: string }[] = [];
     for (const raw of listed.tools.slice(0, MCP_LIMITS.maxTools)) {
       const rawName = String(raw.name);
+      // Validate the name FIRST; a rejected name is referenced by digest only, never recorded or listed.
+      if (!TOOL_NAME.test(rawName)) { excluded.push({ name: this.#toolRef(rawName), reason: "name violates the tool-name pattern" }); continue; }
       const name = this.#scrub(rawName);
-      if (name !== rawName) { excluded.push({ name: name.slice(0, 64), reason: "name carried secret material" }); continue; }
-      if (!TOOL_NAME.test(name)) { excluded.push({ name: name.slice(0, 64), reason: "name violates the tool-name pattern" }); continue; }
+      if (name !== rawName) { excluded.push({ name: this.#toolRef(rawName), reason: "name carried secret material" }); continue; }
       const description = this.#scrub(String(raw.description ?? ""));
       if (utf8Bytes(description) > MCP_LIMITS.maxDescriptionBytes) { excluded.push({ name, reason: "description exceeds the byte bound" }); continue; }
       const schemaText = JSON.stringify(raw.inputSchema ?? {});
@@ -293,12 +327,12 @@ export class McpClient {
         const validate = this.#ajv.compile(safe.schema);
         tools.set(name, { def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: safe.schema }, validate });
       } catch (error) {
-        excluded.push({ name, reason: `input schema does not compile: ${this.#message(error)}` });
+        excluded.push({ name, reason: describeOpaque("input schema does not compile", error instanceof Error ? error.message : String(error)) });
       }
     }
     const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
     for (const r of refused) await this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "refused", reasonCode: "schema-refused", tool: r.tool, reason: r.reason } }).catch(() => {});
-    if (sanitized.length > 0) await this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", reason: "server-supplied schema keywords that run a backtracking regex engine were stripped", stripped: sanitized } }).catch(() => {});
+    if (sanitized.length > 0) await this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", reason: "server-supplied schema keywords outside the structural allowlist were stripped", stripped: sanitized } }).catch(() => {});
     if (truncatedByPages || cursor) excluded.push({ name: "*", reason: "further tools pages were not read (page or tool bound reached)" });
     if (listed.tools.length > MCP_LIMITS.maxTools) excluded.push({ name: "*", reason: `${listed.tools.length - MCP_LIMITS.maxTools} tools beyond the ${MCP_LIMITS.maxTools}-tool bound` });
     this.#tools = tools;
@@ -314,7 +348,7 @@ export class McpClient {
     const base = { capabilityId: this.options.capabilityId, version: this.options.version, serverId: this.options.serverId, ...(this.options.sessionId ? { sessionId: this.options.sessionId } : {}), callId, tool: name, actorId: call.actorId };
     const refuse = async (code: string, message: string): Promise<McpCallOutcome> => {
       await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "refused", code } }).catch(() => {});
-      return { ok: false, code, message: boundBytes(this.#scrub(message), MAX_MESSAGE_BYTES) };
+      return { ok: false, code, message: this.#final(message) };
     };
     if (this.#closed) return refuse("server_not_running", `MCP server ${this.options.serverId} is not running`);
     const entry = this.#tools.get(name);
@@ -326,12 +360,12 @@ export class McpClient {
     const snapshot = JSON.parse(argText) as Record<string, unknown>;
     const verdict = entry.validate(snapshot) as unknown;
     if (verdict instanceof Promise) { void verdict.catch(() => {}); return refuse("schema_invalid", "the server's schema is asynchronous and cannot be enforced"); }
-    if (!verdict) return refuse("schema_invalid", `arguments for ${name} violate the server's schema: ${this.#ajv.errorsText(entry.validate.errors)}`);
+    if (!verdict) return refuse("schema_invalid", `arguments for ${name} violate the server's schema: ${(entry.validate.errors ?? []).slice(0, 5).map((e) => `${e.keyword} at ${e.instancePath || "/"}`).join("; ")}`);
     // Record BEFORE the call is sent: an unrecordable invocation is not made.
     try {
       await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "started", argumentsSha256: createHash("sha256").update(argText).digest("hex"), argumentBytes: argBytes } });
     } catch (error) {
-      return { ok: false, code: "record_failed", message: `the invocation could not be recorded, so it was not sent: ${this.#message(error)}` };
+      return { ok: false, code: "record_failed", message: this.#final(`the invocation could not be recorded, so it was not sent: ${error instanceof Error ? error.message : String(error)}`) };
     }
     let outcome: McpCallOutcome;
     try {
@@ -342,11 +376,17 @@ export class McpClient {
       const cleaned = this.#clean(result);
       const bytes = utf8Bytes(JSON.stringify(cleaned));
       outcome = bytes > MCP_LIMITS.maxResultBytes
-        ? { ok: false, code: "result_too_large", message: `the tool result is ${bytes} bytes after redaction; the bound is ${MCP_LIMITS.maxResultBytes}` }
+        ? { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${bytes} bytes after redaction; the bound is ${MCP_LIMITS.maxResultBytes}`) }
         : { ok: true, result: cleaned, bytes };
     } catch (error) {
-      const message = this.#message(error);
-      outcome = { ok: false, code: /timed out|timeout/i.test(message) ? "deadline_exceeded" : this.#closed ? "server_not_running" : "tool_error", message };
+      // Server-originated text is never carried onward: the caller gets a code, the byte count and a digest.
+      const raw = error instanceof Error ? error.message : String(error);
+      const oversize = /cognate:result_too_large:(\d+)/.exec(raw);
+      if (oversize) outcome = { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${oversize[1]} bytes; the bound is ${MCP_LIMITS.maxResultBytes}`) };
+      else {
+        const code = /timed out|timeout/i.test(raw) ? "deadline_exceeded" : this.#closed ? "server_not_running" : "tool_error";
+        outcome = { ok: false, code, message: this.#final(describeOpaque(code === "tool_error" ? "the server reported an error" : code === "deadline_exceeded" ? "the call timed out" : "the server is not running", raw)) };
+      }
     }
     await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}) } }).catch(() => {});
     return outcome;

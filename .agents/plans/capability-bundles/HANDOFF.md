@@ -147,3 +147,7 @@ Accepted residual risk (documented on the PR):
 - Bundle-authored code never runs in-process (the dispatcher mounts app-owned adapters)
 - Authority enforcement: the dispatcher decides per invocation from the commit-synchronous index
 - The authority index's sequence number is the live-discovery signal for the descriptor refresh
+
+## T3 residual: uncontained-local process tracking
+
+Boot reconciliation ends a spawn's whole process group, derived from every process still carrying the spawn's `COGNATE_SPAWN_ID` marker (governed children are group leaders), plus any recorded pgid proven ours. Residual: under the uncontained-local posture, a hostile child that starts its own session AND clears the marker can escape tracking. That is inherent to uncontained execution; the containment posture is the boundary, not process tracking. Anything that cannot be verified dead keeps its slot reserved as `reconcile-incomplete`.
