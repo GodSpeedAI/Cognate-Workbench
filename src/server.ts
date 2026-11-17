@@ -11,6 +11,7 @@ import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRuntime } from "@godspeedai/cognate-runtime-bun";
+import { authorizeAssignmentAction } from "./assignments/assignmentBinding.ts";
 import { storeConfigFor } from "./store.ts";
 import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
 import type { ActionPolicy, Runtime } from "@godspeedai/cognate-runtime-bun";
@@ -379,7 +380,7 @@ function buildPolicy(): Policy {
   );
 }
 
-function buildActionPolicy(): ActionPolicy {
+export function buildActionPolicy(): ActionPolicy {
   return {
     authorize: (request) => {
       // Capability-bundles tranche P (§1.1): expert runs start from the completion bridge — the
@@ -389,6 +390,8 @@ function buildActionPolicy(): ActionPolicy {
       // WHO may start the run at all.
       const expertBridgeCaller = (request.caller.actor.kind === "system" && request.caller.actor.id === SYSTEM_CALLER.actor.id)
         || (request.caller.actor.kind === "agent" && request.caller.actor.id.startsWith("wb-agent:") && request.caller.tenant === LOCAL_OPERATOR.tenant);
+      const assignmentRule = authorizeAssignmentAction(request);
+      if (assignmentRule) return assignmentRule;
       if (request.action === "run.start" && request.resource === EXPERT_AGENT && !expertBridgeCaller) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
       if (request.action === "thread.state.update" && (request.resource === EXPERTS_THREAD || request.resource.startsWith("experts:partition:") || request.resource === SCHEDULES_THREAD) && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Experts and schedule state mutations require validated capabilities"};
       // T8: the identity/session ledger and the aggregate containment ledger are system-owned
