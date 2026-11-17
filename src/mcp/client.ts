@@ -124,22 +124,9 @@ export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<stri
 export interface TransportHooks {
   /** Every outbound message: the client correlates a call's request id here and may rewrite the message. */
   readonly onOutbound?: (message: JSONRPCMessage) => JSONRPCMessage;
-  /** An inbound message exceeded the per-message cap. True when a request is pending for `id` (a synthetic error is forwarded for it). */
-  readonly onOversize?: (id: string | number | undefined, bytes: number, sha256: string) => boolean;
-  /** An oversize message that matched no pending request was dropped (a counter only: nothing is stored per message). */
-  readonly onDropped?: () => void;
-}
-const ID_SCAN_PREFIX = 4096;
-const ID_SCAN_TAIL = 256;
-const ID_FIELD = /"id"\s*:\s*(-?\d{1,15}|"[^"\\]{0,64}")/g;
-/** The id of an oversize message, from a bounded prefix and tail only (the message is never parsed). */
-function scanId(prefix: Buffer, tail: Buffer): string | number | undefined {
-  for (const part of [prefix, tail]) {
-    ID_FIELD.lastIndex = 0;
-    const m = ID_FIELD.exec(part.toString("latin1"));
-    if (m) return m[1]!.startsWith('"') ? m[1]!.slice(1, -1) : Number(m[1]);
-  }
-  return undefined;
+  /** An inbound line exceeded the cap: a protocol violation for the WHOLE connection. It is never attributed to a request;
+   *  the transport closes the connection right after this call. */
+  readonly onOversize?: (bytes: number, sha256: string) => void;
 }
 
 export class ChannelTransport implements Transport {
@@ -147,53 +134,49 @@ export class ChannelTransport implements Transport {
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
   #closed = false;
-  // One inbound line at a time. Under the cap it is buffered; over the cap it is DISCARDED as it arrives, keeping only
-  // a bounded prefix and tail (to find its id), its length and its SHA-256: memory stays bounded whatever the server sends.
+  // One inbound line at a time. Under the cap its bytes are COPIED into `#pieces` (never a view of a larger chunk). Over the
+  // cap nothing more is kept: only a running byte count and an incremental SHA-256 until the next newline.
   #pieces: Buffer[] = [];
+  #held = 0;
   #total = 0;
   #discarding = false;
-  #prefix: Buffer = Buffer.alloc(0);
-  #tail: Buffer = Buffer.alloc(0);
   #hash: ReturnType<typeof createHash> | undefined;
+  /** Transport-level counters (inspection and tests): the most bytes ever buffered at once. */
+  peakBufferedBytes = 0;
   /** `filter` sees every message BEFORE the SDK does: nothing server-supplied reaches the SDK unsanitized. */
   constructor(private readonly channel: StdioChannel, private readonly filter?: (message: JSONRPCMessage) => JSONRPCMessage, private readonly hooks: TransportHooks = {}) {}
 
   #take(piece: Buffer): void {
     this.#total += piece.length;
-    if (this.#discarding) {
-      this.#hash!.update(piece);
-      this.#tail = Buffer.concat([this.#tail, piece]).subarray(-ID_SCAN_TAIL);
+    if (this.#discarding) { this.#hash!.update(piece); return; }
+    if (this.#held + piece.length > MCP_LIMITS.maxResultBytes) {
+      this.#discarding = true;
+      this.#hash = createHash("sha256");
+      for (const kept of this.#pieces) this.#hash.update(kept);
+      this.#hash.update(piece);
+      this.#pieces = [];
+      this.#held = 0;
       return;
     }
-    this.#pieces.push(piece);
-    if (this.#total > MCP_LIMITS.maxResultBytes) {
-      this.#discarding = true;
-      const held = Buffer.concat(this.#pieces);
-      this.#pieces = [];
-      this.#prefix = held.subarray(0, ID_SCAN_PREFIX);
-      this.#tail = held.subarray(Math.max(0, held.length - ID_SCAN_TAIL));
-      this.#hash = createHash("sha256").update(held);
-    }
+    this.#pieces.push(Buffer.from(piece));
+    this.#held += piece.length;
+    this.peakBufferedBytes = Math.max(this.peakBufferedBytes, this.#held);
   }
 
   #endLine(): void {
     const discarding = this.#discarding;
     const total = this.#total;
-    const prefix = this.#prefix;
-    const tail = this.#tail;
     const sha = this.#hash?.digest("hex");
     const line = discarding ? undefined : Buffer.concat(this.#pieces).toString("utf8");
     this.#pieces = [];
+    this.#held = 0;
     this.#total = 0;
     this.#discarding = false;
-    this.#prefix = Buffer.alloc(0);
-    this.#tail = Buffer.alloc(0);
     this.#hash = undefined;
     try {
       if (discarding) {
-        const id = scanId(prefix, tail);
-        if (this.hooks.onOversize?.(id, total, sha!) && id !== undefined) this.onmessage?.({ jsonrpc: "2.0", id, error: { code: -32000, message: "message exceeds the byte bound" } } as JSONRPCMessage);
-        else this.hooks.onDropped?.();
+        this.hooks.onOversize?.(total, sha!);
+        void this.close().catch(() => {});
         return;
       }
       if (!line || line.trim() === "") return;
@@ -213,7 +196,7 @@ export class ChannelTransport implements Transport {
   async start(): Promise<void> {
     this.channel.onData((chunk) => {
       let offset = 0;
-      while (offset < chunk.length) {
+      while (offset < chunk.length && !this.#closed) {
         const nl = chunk.indexOf(10, offset);
         this.#take(chunk.subarray(offset, nl < 0 ? chunk.length : nl));
         if (nl < 0) break;
@@ -274,10 +257,41 @@ export interface McpClientOptions {
   readonly connectTimeoutMs?: number;
 }
 
+/** Strict hand check of a tools/call result envelope. Anything off-shape is rejected (the caller reports output_invalid). */
+const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const str = (v: unknown): boolean => typeof v === "string";
+function knownContent(item: unknown): boolean {
+  if (!isPlain(item)) return false;
+  switch (item.type) {
+    case "text": return str(item.text);
+    case "image": case "audio": return str(item.data) && str(item.mimeType);
+    case "resource": return isPlain(item.resource) && str(item.resource.uri);
+    case "resource_link": return str(item.uri) && str(item.name);
+    default: return false;
+  }
+}
+function parseEnvelope(raw: unknown): { isError?: boolean; content?: unknown[]; structuredContent?: Record<string, unknown>; _meta?: Record<string, unknown> } | undefined {
+  if (!isPlain(raw)) return undefined;
+  if (raw.isError !== undefined && typeof raw.isError !== "boolean") return undefined;
+  if (raw.content !== undefined && !(Array.isArray(raw.content) && raw.content.every(knownContent))) return undefined;
+  if (raw.structuredContent !== undefined && !isPlain(raw.structuredContent)) return undefined;
+  if (raw._meta !== undefined && !isPlain(raw._meta)) return undefined;
+  return raw as never;
+}
+/** Size and digest of a server error's payload; a payload that cannot be serialized is recorded as unmeasurable, never thrown. */
+function measureError(error: unknown): { bytes: number | null; sha256: string | null; unmeasurable?: true } {
+  try {
+    const payload = error instanceof McpError ? JSON.stringify({ code: error.code, message: error.message, data: (error as { data?: unknown }).data ?? null }) : error instanceof Error ? error.message : String(error);
+    return { bytes: utf8Bytes(payload), sha256: createHash("sha256").update(payload).digest("hex") };
+  } catch {
+    return { bytes: null, sha256: null, unmeasurable: true };
+  }
+}
+
 interface PendingCall {
   id?: string | number;
   deadlineFired: boolean;
-  failure: { readonly kind: "result_too_large"; readonly bytes: number; readonly sha256: string } | null;
+  failure: { readonly kind: "result_too_large"; readonly bytes: number; readonly sha256: string; readonly attributed: false } | null;
 }
 const CORRELATION_META = "io.cognate/correlation";
 
@@ -288,7 +302,6 @@ export class McpClient {
   /** In-flight tools/call requests: our own state is what classifies a failure, never error text. */
   readonly #byCorrelation = new Map<string, PendingCall>();
   readonly #pendingById = new Map<string | number, PendingCall>();
-  #droppedOversize = 0;
   readonly #ajv = new Ajv({ strict: false });
 
   private constructor(private readonly sdk: Client, private readonly transport: ChannelTransport, private readonly options: McpClientOptions) {}
@@ -358,8 +371,7 @@ export class McpClient {
     const holder: { client?: McpClient } = {};
     const transport = new ChannelTransport(channel, (message) => (holder.client ? holder.client.#sanitizeOutputSchemas(message) : stripOutputSchemas(message)), {
       onOutbound: (message) => (holder.client ? holder.client.#correlate(message) : message),
-      onOversize: (id, bytes, sha256) => (holder.client ? holder.client.#oversize(id, bytes, sha256) : false),
-      onDropped: () => { if (holder.client) holder.client.#droppedOversize += 1; },
+      onOversize: (bytes, sha256) => { if (holder.client) holder.client.#oversize(bytes, sha256); },
     });
     // No capabilities declared: sampling, roots and elicitation are refused by construction.
     const sdk = new Client({ name: "cognate-workbench", version: "1" }, { capabilities: {} });
@@ -384,15 +396,16 @@ export class McpClient {
     void _old;
     return { ...message, params: { ...params, ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}) } } as JSONRPCMessage;
   }
-  #oversize(id: string | number | undefined, bytes: number, sha256: string): boolean {
-    const pending = id === undefined ? undefined : this.#pendingById.get(id);
-    if (!pending) return false;
-    pending.failure ??= { kind: "result_too_large", bytes, sha256 };
-    return true;
+  /** An oversize inbound line is a protocol violation for the whole connection: there is no attribution, so EVERY pending
+   *  call fails as result_too_large (attributed:false) and the transport closes the connection (the normal stop path). */
+  #oversize(bytes: number, sha256: string): void {
+    for (const pending of this.#byCorrelation.values()) pending.failure ??= { kind: "result_too_large", bytes, sha256, attributed: false };
+    void this.#rec({ type: "authority.decision.recorded", payload: { point: "mcp-client", capability: this.options.capabilityId, operation: "transport", serverId: this.options.serverId, version: this.options.version, decisionId: randomUUID(), outcome: "refused", reasonCode: "oversize-message", reason: "an inbound message exceeded the byte bound; the connection was closed", bytes, sha256, attributed: false } }).catch(() => {});
   }
   /** Inspection: in-flight calls (must return to 0) and the oversize messages dropped with no request pending. */
   get pendingCount(): number { return this.#pendingById.size + this.#byCorrelation.size; }
-  get droppedOversize(): number { return this.#droppedOversize; }
+  /** Inspection: the most bytes the transport ever buffered for one line. */
+  get peakBufferedBytes(): number { return this.transport.peakBufferedBytes; }
 
   get closed(): boolean { return this.#closed; }
   get excluded(): readonly { name: string; reason: string }[] { return this.#excluded; }
@@ -486,41 +499,55 @@ export class McpClient {
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let measured: { bytes: number | null; sha256: string | null; unmeasurable?: true } | undefined;
     try {
-      const remaining = deadlineAt - Date.now();
-      if (remaining <= 0) { pending.deadlineFired = true; throw new Error("deadline consumed before the call was sent"); }
-      this.#byCorrelation.set(correlation, pending);
-      timer = setTimeout(() => { pending.deadlineFired = true; controller.abort(); }, remaining);
-      call.signal?.addEventListener("abort", onAbort, { once: true });
-      if (call.signal?.aborted) onAbort();
-      // `request`, not `callTool`: the SDK never validates structuredContent (a backtracking validator on server data).
-      // The transport has already refused any oversize message; we validate with the sanitized schema, then scrub, then re-check.
-      const result = (await this.sdk.request({ method: "tools/call", params: { name, arguments: snapshot, _meta: { [CORRELATION_META]: correlation } } }, ResultSchema, { timeout: remaining + 5000, signal: controller.signal })) as { structuredContent?: unknown; isError?: boolean };
-      if (entry.validateOut && !result.isError) {
-        const ok = result.structuredContent !== undefined && (entry.validateOut(result.structuredContent) as unknown) === true;
-        if (!ok) { await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: "output_invalid" } }).catch(() => {}); return { ok: false, code: "output_invalid", message: this.#final(`the result of ${this.#toolRef(name)} does not satisfy its output schema`) }; }
+      try {
+        const remaining = deadlineAt - Date.now();
+        if (remaining <= 0) { pending.deadlineFired = true; throw new Error("deadline consumed before the call was sent"); }
+        this.#byCorrelation.set(correlation, pending);
+        timer = setTimeout(() => { pending.deadlineFired = true; controller.abort(); }, remaining);
+        call.signal?.addEventListener("abort", onAbort, { once: true });
+        if (call.signal?.aborted) onAbort();
+        // `request`, not `callTool`: the SDK never validates structuredContent (a backtracking validator on server data).
+        // The transport has already closed the connection on any oversize message; we validate the envelope strictly, then the
+        // structured content with the sanitized schema, then scrub, then re-check the bound.
+        const raw = await this.sdk.request({ method: "tools/call", params: { name, arguments: snapshot, _meta: { [CORRELATION_META]: correlation } } }, ResultSchema, { timeout: remaining + 5000, signal: controller.signal });
+        const result = parseEnvelope(raw);
+        if (!result) outcome = { ok: false, code: "output_invalid", message: this.#final(`the result of ${this.#toolRef(name)} is not a valid tool result`) };
+        else if (entry.validateOut && result.isError !== true && !(result.structuredContent !== undefined && (entry.validateOut(result.structuredContent) as unknown) === true)) outcome = { ok: false, code: "output_invalid", message: this.#final(`the result of ${this.#toolRef(name)} does not satisfy its output schema`) };
+        else {
+          const cleaned = this.#clean(result);
+          const bytes = utf8Bytes(JSON.stringify(cleaned));
+          outcome = bytes > MCP_LIMITS.maxResultBytes
+            ? { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${bytes} bytes after redaction; the bound is ${MCP_LIMITS.maxResultBytes}`) }
+            : { ok: true, result: cleaned, bytes };
+        }
+      } catch (error) {
+        if (pending.failure) outcome = { ok: false, code: "result_too_large", message: this.#final(`an inbound message of ${pending.failure.bytes} bytes (sha256 ${pending.failure.sha256.slice(0, 16)}) exceeded the ${MCP_LIMITS.maxResultBytes}-byte bound; not attributable to a request, the connection was closed`) };
+        else if (pending.deadlineFired) outcome = { ok: false, code: "deadline_exceeded", message: this.#final("the call did not finish before its deadline") };
+        else if (this.#closed) outcome = { ok: false, code: "server_not_running", message: this.#final(`MCP server ${this.options.serverId} is not running`) };
+        else if (call.signal?.aborted) outcome = { ok: false, code: "cancelled", message: this.#final("the call was cancelled by the caller") };
+        else {
+          measured = measureError(error);
+          outcome = { ok: false, code: "server_error", message: this.#final(measured.unmeasurable ? "the server reported an error (unmeasurable)" : `the server reported an error (${measured.bytes} bytes, sha256 ${measured.sha256!.slice(0, 16)})`) };
+        }
       }
-      const cleaned = this.#clean(result);
-      const bytes = utf8Bytes(JSON.stringify(cleaned));
-      outcome = bytes > MCP_LIMITS.maxResultBytes
-        ? { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${bytes} bytes after redaction; the bound is ${MCP_LIMITS.maxResultBytes}`) }
-        : { ok: true, result: cleaned, bytes };
-    } catch (error) {
-      if (pending.failure) outcome = { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${pending.failure.bytes} bytes (sha256 ${pending.failure.sha256.slice(0, 16)}); the bound is ${MCP_LIMITS.maxResultBytes}`) };
-      else if (pending.deadlineFired) outcome = { ok: false, code: "deadline_exceeded", message: this.#final("the call did not finish before its deadline") };
-      else if (this.#closed) outcome = { ok: false, code: "server_not_running", message: this.#final(`MCP server ${this.options.serverId} is not running`) };
-      else if (call.signal?.aborted) outcome = { ok: false, code: "cancelled", message: this.#final("the call was cancelled by the caller") };
-      else {
-        const payload = error instanceof McpError ? JSON.stringify({ code: error.code, message: error.message, data: (error as { data?: unknown }).data ?? null }) : error instanceof Error ? error.message : String(error);
-        outcome = { ok: false, code: "server_error", message: this.#final(describeOpaque("the server reported an error", payload)) };
-      }
+    } catch {
+      // Classification itself failed: a fixed outcome, never an exception.
+      outcome = { ok: false, code: "server_error", message: "the server reported an error (unclassifiable)" };
     } finally {
       if (timer) clearTimeout(timer);
       call.signal?.removeEventListener("abort", onAbort);
       this.#byCorrelation.delete(correlation);
       if (pending.id !== undefined) this.#pendingById.delete(pending.id);
     }
-    await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}) } }).catch(() => {});
+    // Every call ends with a finished record: the full one, else a minimal fixed one.
+    const finished = { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code };
+    try {
+      await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...finished, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}), ...(pending.failure ? { oversizeBytes: pending.failure.bytes, oversizeSha256: pending.failure.sha256, attributed: false } : {}), ...(measured ? { serverErrorBytes: measured.bytes, serverErrorSha256: measured.sha256, ...(measured.unmeasurable ? { unmeasurable: true } : {}) } : {}) } });
+    } catch {
+      await this.options.record({ type: "capability.mcp.tool_invoked", payload: { capabilityId: this.options.capabilityId, serverId: this.options.serverId, callId, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code } }).catch(() => {});
+    }
     return outcome;
   }
 

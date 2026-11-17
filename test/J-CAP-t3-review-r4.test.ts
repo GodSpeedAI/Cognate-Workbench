@@ -8,7 +8,7 @@ import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { reconcileSpawnLedger, type LedgerEvent } from "../src/capabilities/execSpawn.ts";
 import * as mcpManage from "../src/capabilities/mcpManage.ts";
-import { McpClient, sanitizeSchema, utf8Bytes } from "../src/mcp/client.ts";
+import { ChannelTransport, MCP_LIMITS, McpClient, sanitizeSchema, utf8Bytes } from "../src/mcp/client.ts";
 import { AuthorityIndex } from "../src/workbench/authorityIndex.ts";
 import { createRuntimeMutex } from "../src/workbench/runtimeMutex.ts";
 import { LOCAL_POSTURE, authorStub, sleep, stubManifest } from "./mcp-helpers.ts";
@@ -65,20 +65,22 @@ describe("J-CAP-t3-review-r4 item 2: a fatal initialisation failure does not rec
 });
 
 // ---- a scripted stdio MCP server for the client-level tests ----
-function scripted(options: { tools: Record<string, unknown>[]; call?: (params: { arguments?: unknown }) => { result?: unknown; error?: { code: number; message: string } } | null }) {
+function scripted(options: { tools: Record<string, unknown>[]; raw?: (id: number) => string | null; call?: (params: { arguments?: unknown }) => { result?: unknown; error?: { code: number; message: string } } | null }) {
   let onData: (chunk: Buffer) => void = () => {};
   const seen: unknown[] = [];
   const callIds: number[] = [];
+  const state = { closed: false };
   const reply = (frame: Record<string, unknown>) => queueMicrotask(() => onData(Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`)));
   return {
-    seen, callIds,
-    onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() {}, emit(chunk: Buffer) { onData(chunk); },
+    seen, callIds, state,
+    onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() { state.closed = true; }, emit(chunk: Buffer) { onData(chunk); },
     write(data: string) {
       for (const line of data.split("\n").filter(Boolean)) {
         const m = JSON.parse(line) as { id?: number; method?: string; params?: { protocolVersion?: string; arguments?: unknown; _meta?: unknown } };
         if (m.method === "tools/call") { seen.push(m.params?._meta); callIds.push(m.id as number); }
         if (m.method === "initialize") reply({ id: m.id, result: { protocolVersion: m.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "f", version: "1" } } });
         else if (m.method === "tools/list") reply({ id: m.id, result: { tools: options.tools } });
+        else if (m.method === "tools/call" && options.raw) { const line = options.raw(m.id as number); if (line) queueMicrotask(() => onData(Buffer.from(`${line}\n`))); }
         else if (m.method === "tools/call") { const out = options.call ? options.call(m.params ?? {}) : { result: { content: [{ type: "text", text: "ok" }] } }; if (out) reply({ id: m.id, ...out }); }
       }
     },
@@ -262,27 +264,6 @@ describe("J-CAP-t3-review-r4 design: size is bounded per message, whatever its s
     expect(await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" })).toMatchObject({ ok: false, code: "result_too_large" });
     expect(client.pendingCount).toBe(0);
   });
-
-  test("1,000 unsolicited oversize messages are dropped and counted; no per-message state accumulates", async () => {
-    const channel = scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] });
-    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
-    const line = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: 987654, result: { pad: "p".repeat(270_000) } })}\n`);
-    for (let i = 0; i < 1000; i++) channel.emit(line);
-    expect(client.droppedOversize).toBe(1000);
-    expect(client.pendingCount).toBe(0);
-    expect(await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" })).toMatchObject({ ok: true });
-  });
-
-  test("an oversize message split across many chunks is discarded as it arrives and is still answered for its request", async () => {
-    const channel = scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => null });
-    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
-    const call = client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" });
-    await sleep(30);
-    // The id is the LAST member, so only the tail scan can find it.
-    const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", result: { content: [{ type: "text", text: "z".repeat(600_000) }] }, id: channel.callIds[0] }) + "\n");
-    for (let o = 0; o < body.length; o += 50_000) channel.emit(body.subarray(o, o + 50_000));
-    expect(await call).toMatchObject({ ok: false, code: "result_too_large" });
-  });
 });
 
 describe("J-CAP-t3-review-r4 design: classification comes from our own state", () => {
@@ -368,5 +349,92 @@ describe("J-CAP-t3-review-r4 thread: the spawned record's pgid reaches reconcili
       await reconcileSpawnLedger({ graceMs: 300, ledger: async () => {}, slots: { acquire: async () => ({ slotId: "" }), release: async () => {} } }, [row]);
       expect(alive(child)).toBe(false);
     } finally { try { process.kill(child, 9); } catch { /* gone */ } }
+  });
+});
+
+// ---- Oversize is a protocol violation for the whole connection; strict envelope; the failure path never throws ----
+
+describe("J-CAP-t3-review-r4 simple rules: oversize closes the connection and fails every pending call", () => {
+  const settle = async (channel: ReturnType<typeof scripted>, client: McpClient, records: { type: string; payload: Record<string, unknown> }[], emit: () => void) => {
+    const calls = [client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" }), client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" })];
+    await sleep(40);
+    expect(channel.callIds.length).toBe(2);
+    emit();
+    const outcomes = await Promise.all(calls);
+    expect(outcomes.map((o) => (o.ok ? "ok" : o.code))).toEqual(["result_too_large", "result_too_large"]);
+    expect(channel.state.closed).toBe(true);
+    expect(client.closed).toBe(true);
+    expect(client.pendingCount).toBe(0);
+    const violation = records.find((r) => r.payload.reasonCode === "oversize-message")!;
+    expect(violation.payload).toMatchObject({ attributed: false });
+    expect(typeof violation.payload.sha256).toBe("string");
+    expect(records.filter((r) => r.payload.phase === "finished" && r.payload.attributed === false).length).toBe(2);
+  };
+
+  test("a message whose id sits in the middle is not attributed: both pending calls fail and the connection closes", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const channel = scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => null });
+    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    await settle(channel, client, records, () => {
+      const half = "m".repeat(150_000);
+      channel.emit(Buffer.from(`{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"${half}"}]},"id":${channel.callIds[0]},"_pad":"${half}"}\n`));
+    });
+  });
+
+  test("an oversized notification is the same: no misattribution, connection closed", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const channel = scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => null });
+    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    await settle(channel, client, records, () => channel.emit(Buffer.from(`{"jsonrpc":"2.0","method":"notifications/message","params":{"pad":"${"n".repeat(300_000)}"}}\n`)));
+  });
+
+  test("one 32 MB chunk with no newline never buffers more than the cap (transport counter), and the next newline ends it", async () => {
+    let onData: (chunk: Buffer) => void = () => {};
+    let closed = false;
+    let seen: { bytes: number; sha256: string } | undefined;
+    const transport = new ChannelTransport({ onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() { closed = true; }, write() {} } as never, undefined, { onOversize: (bytes, sha256) => { seen = { bytes, sha256 }; } });
+    await transport.start();
+    const big = Buffer.alloc(32 * 1024 * 1024, 97);
+    onData(big);
+    expect(transport.peakBufferedBytes).toBeLessThanOrEqual(MCP_LIMITS.maxResultBytes);
+    onData(Buffer.from("\n"));
+    expect(seen).toMatchObject({ bytes: 32 * 1024 * 1024 });
+    expect(seen!.sha256).toBe((await import("node:crypto")).createHash("sha256").update(big).digest("hex"));
+    await sleep(10);
+    expect(closed).toBe(true);
+  });
+});
+
+describe("J-CAP-t3-review-r4 simple rules: the result envelope is validated strictly", () => {
+  test("isError:'false' with structuredContent {v:'bad'} against an integer schema is output_invalid, never ok", async () => {
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" }, outputSchema: { type: "object", properties: { v: { type: "integer" } } } }], call: () => ({ result: { isError: "false", content: [{ type: "text", text: "x" }], structuredContent: { v: "bad" } } }) }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
+    expect(await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" })).toMatchObject({ ok: false, code: "output_invalid" });
+  });
+  test.each([
+    ["content is not an array", { content: "x" }],
+    ["content item has an unknown shape", { content: [{ type: "weird" }] }],
+    ["structuredContent is an array", { content: [], structuredContent: [1] }],
+  ])("%s is output_invalid", async (_label, result) => {
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => ({ result }) }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
+    expect(await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" })).toMatchObject({ ok: false, code: "output_invalid" });
+  });
+});
+
+describe("J-CAP-t3-review-r4 simple rules: a non-object _meta is never ok", () => {
+  test("the SDK's JSON-RPC layer drops the malformed response; the call ends not-ok at its deadline", async () => {
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => ({ result: { content: [], _meta: "m" } }) }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
+    expect((await client.callTool("t", {}, { timeoutMs: 200, actorId: "t" })).ok).toBe(false);
+  });
+});
+
+describe("J-CAP-t3-review-r4 simple rules: the failure path never throws", () => {
+  test("40,000 nested arrays in a server error's data still produce a server_error outcome and a finished record", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const deep = `${"[".repeat(40_000)}${"]".repeat(40_000)}`;
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], raw: (id) => `{"jsonrpc":"2.0","id":${id},"error":{"code":-32000,"message":"x","data":${deep}}}` }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    const outcome = await client.callTool("t", {}, { timeoutMs: 3000, actorId: "t" });
+    expect(outcome).toMatchObject({ ok: false, code: "server_error" });
+    expect(records.some((r) => r.payload.phase === "finished" && r.payload.outcome === "server_error")).toBe(true);
+    expect(client.pendingCount).toBe(0);
   });
 });

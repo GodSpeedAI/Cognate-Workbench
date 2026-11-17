@@ -387,10 +387,10 @@ describe("J-CAP-mcp: the lifecycle through the app (CUJ 3, local world)", () => 
         expect(utf8Bytes("é".repeat(10))).toBe(20);
         expect(MCP_LIMITS.maxResultBytes).toBe(256 * 1024);
 
-        // Stop: termination outcome recorded, process gone, calls refused.
-        await client.invoke("capability.mcp.stop", { capabilityId: CAP, serverId: "stub" });
+        // An oversize inbound message is a protocol violation for the whole connection (review-r4): the connection is closed
+        // through the normal stop path, termination outcome recorded, process gone, calls refused.
         const exited = await waitUntil("exited record", async () => (await eventsOfType(app, "capability.mcp.exited"))[0]);
-        expect(exited.payload).toMatchObject({ outcome: "stopped", stopReason: "operator-stop", termination: "group-kill" });
+        expect(exited.payload).toMatchObject({ outcome: "stopped", stopReason: "channel-closed", termination: "group-kill" });
         await waitUntil("process gone", async () => !alive(started.pid));
         const after = (await client.invoke("tool.capability_invoke", { capabilityId: CAP, tool: "mcp.stub.echo", arguments: { text: "x" } })) as Invoked;
         expect(after).toMatchObject({ ok: false, code: "server_not_running" });
