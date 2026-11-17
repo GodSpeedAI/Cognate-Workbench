@@ -74,8 +74,11 @@ export type WireId = number | (string & { readonly [tag]: "wire-id" });
 const WIRE_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
 export const parseWireId = (value: unknown): WireId | undefined => (typeof value === "number" && Number.isFinite(value) ? value : typeof value === "string" && WIRE_ID.test(value) ? (value as WireId) : undefined);
 /** Build trusted text; interpolations must themselves be typed (codes, numbers, ids, digests, trusted text). */
-export const text = (parts: TemplateStringsArray, ...values: readonly (RecordCode | number | boolean | Sha256 | MintedId | Trusted)[]): Trusted =>
-  parts.reduce((out, part, i) => `${out}${part}${i < values.length ? String(values[i]) : ""}`, "") as Trusted;
+export const text = (parts: TemplateStringsArray, ...values: readonly (RecordCode | number | boolean | Sha256 | MintedId | Trusted)[]): Trusted => {
+  // Only a real template literal (its strings array and `raw` are frozen by the engine) is source text; a forged array is not.
+  if (!Array.isArray(parts) || !Object.isFrozen(parts) || !Array.isArray(parts.raw) || !Object.isFrozen(parts.raw)) throw new TypeError("text`` accepts only a template literal");
+  return parts.reduce((out, part, i) => `${out}${part}${i < values.length ? String(values[i]) : ""}`, "") as Trusted;
+};
 /** Size and digest of a value serialized by the ingress boundary; the only trace of server text. */
 export const describeDigest = (what: Trusted, bytes: number | null, sha256: Sha256 | null): Trusted =>
   (bytes === null || sha256 === null ? `${what} (unmeasurable)` : `${what} (${bytes} bytes, sha256 ${sha256.slice(0, 16)})`) as Trusted;

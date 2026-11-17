@@ -232,7 +232,9 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   };
   const release = (): Promise<void> => deps.slots.release(slot.slotId, Date.now() - startedMs).catch(() => {});
 
-  const denied = await deps.beforeIntent();
+  // The slot is held from the acquire to the spawn: an authorizer that throws is a refusal that releases it, like every other exit before the spawn.
+  let denied: Awaited<ReturnType<typeof deps.beforeIntent>>;
+  try { denied = await deps.beforeIntent(); } catch (error) { denied = { code: "authorizer-error", reason: redact(error instanceof Error ? error.message : String(error)) }; }
   if (denied) { await release(); return refuse(denied.code, denied.reason); }
   try {
     await deps.ledger(spawnId, [{

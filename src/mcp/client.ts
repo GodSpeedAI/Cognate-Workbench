@@ -62,6 +62,8 @@ export function boundBytes(value: string, max: number): string {
   return `${value.slice(0, end)}${marker}`;
 }
 const MAX_MESSAGE_BYTES = 512;
+/** How long a channel close may take before the connection stops waiting for it. */
+const CHANNEL_CLOSE_MS = 1000;
 
 /** Untrusted schema handling (section 11, input and output schemas alike): the server validates its own input, so our
  *  validation is defence in depth and is reduced to an ALLOWLIST of cheap structural keywords. Anything else (patterns,
@@ -255,7 +257,12 @@ export class ChannelTransport implements Transport {
     if (this.#closed) return;
     this.#closed = true;
     this.#queue = [];
-    try { await this.channel.close(); } finally { this.onclose?.(); }
+    // The connection is torn down FIRST (the SDK rejects and clears every pending handler and timeout in `onclose`), so a
+    // channel whose close stalls can never leave a handler behind; the channel close itself is bounded.
+    try { this.onclose?.(); } finally {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { await Promise.race([this.channel.close(), new Promise<void>((resolve) => { timer = setTimeout(resolve, CHANNEL_CLOSE_MS); })]); } finally { if (timer) clearTimeout(timer); }
+    }
   }
 }
 
@@ -326,6 +333,8 @@ export class McpClient {
   readonly #byCorrelation = new Map<string, PendingCall>();
   readonly #pendingById = new Map<RpcId, PendingCall>();
   readonly #ajv = new Ajv({ strict: false });
+  /** The compiler's own meta-schemas, present before any server schema: not ours to count or release. */
+  readonly #baseline = new Set<unknown>((this.#ajv as unknown as { _cache: Map<unknown, unknown> })._cache.keys());
   readonly #ids: { capabilityId: MintedId; version: MintedId; serverId: MintedId; sessionId?: MintedId };
 
   private constructor(private readonly sdk: Client, private readonly transport: ChannelTransport, private readonly options: McpClientOptions) {
@@ -391,7 +400,7 @@ export class McpClient {
     const sdk = new Client({ name: "cognate-workbench", version: "1" }, { capabilities: {} });
     const client = new McpClient(sdk, transport, options);
     holder.client = client;
-    transport.onclose = () => { client.#closed = true; };
+    transport.onclose = () => { client.#release(); };
     try {
       await sdk.connect(transport, { timeout: options.connectTimeoutMs ?? 15_000 });
       await client.refreshTools();
@@ -433,7 +442,26 @@ export class McpClient {
   get pendingCount(): number { return this.#pendingById.size + this.#byCorrelation.size; }
   get peakBufferedBytes(): number { return this.transport.peakBufferedBytes; }
   /** Ground truth for the buffering cap: what the transport holds now and its high-water marks, summed from its structures. */
-  get retained(): Retained { return this.transport.retained; }
+  get retained(): Retained & { readonly schemaCache: number } { return { ...this.transport.retained, schemaCache: this.schemaCacheBytes }; }
+  /** Ground truth: the bytes of every schema the compiler cache holds right now, summed from the cache itself (it holds none between compiles). */
+  get schemaCacheBytes(): number {
+    let bytes = 0;
+    const cache = (this.#ajv as unknown as { _cache: Map<unknown, unknown> })._cache;
+    for (const key of cache.keys()) if (!this.#baseline.has(key)) bytes += utf8Bytes(JSON.stringify(key) ?? "");
+    return bytes;
+  }
+  /** Compile a schema and drop it from the compiler's cache at once: the validator lives on, the schema JSON is not retained twice. */
+  #compile(schema: Record<string, unknown>): ValidateFunction {
+    try { return this.#ajv.compile(schema); } finally { this.#ajv.removeSchema(schema); }
+  }
+  /** Release every per-connection resource that is ours: in-flight tables, the compiler cache. Idempotent and synchronous;
+   *  the SDK's own handlers and timeouts are released by its `onclose`, which the transport runs on every close path. */
+  #release(): void {
+    this.#closed = true;
+    this.#byCorrelation.clear();
+    this.#pendingById.clear();
+    for (const key of [...(this.#ajv as unknown as { _cache: Map<unknown, unknown> })._cache.keys()]) if (!this.#baseline.has(key)) this.#ajv.removeSchema(key as object);
+  }
   get retainedPeaks(): ChannelTransport["peaks"] { return this.transport.peaks; }
 
   get closed(): boolean { return this.#closed; }
@@ -475,9 +503,9 @@ export class McpClient {
       if (!safe.ok) { excluded.push({ name: ref, reason: safe.reason }); refused.push({ tool: ref, reason: safe.reason }); continue; }
       if (safe.stripped.length > 0) sanitized.push({ tool: ref, keywords: safe.stripped });
       try {
-        const validate = this.#ajv.compile(safe.schema);
+        const validate = this.#compile(safe.schema);
         const outSchema = (raw as { outputSchema?: unknown }).outputSchema;
-        const validateOut = outSchema && typeof outSchema === "object" ? this.#ajv.compile(outSchema as Record<string, unknown>) : undefined;
+        const validateOut = outSchema && typeof outSchema === "object" ? this.#compile(outSchema as Record<string, unknown>) : undefined;
         tools.set(name, { ...(validateOut ? { validateOut } : {}), def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: safe.schema }, validate });
       } catch (error) {
         excluded.push({ name: ref, reason: `input schema does not compile (${digestOfError(error).bytes ?? "?"} bytes)` });
@@ -588,10 +616,13 @@ export class McpClient {
     }
   }
 
-  async close(): Promise<void> {
-    this.#closed = true;
+  /** The ONE release path: every fault and close ends here. Never hangs (the channel close is bounded) and never throws. */
+  async dispose(): Promise<void> {
+    this.#release();
     await this.sdk.close().catch(() => {});
+    this.#release();
   }
+  close(): Promise<void> { return this.dispose(); }
 }
 
 /** The size and digest of an error whose text may quote a server (the SDK's own messages can). Never throws. */
