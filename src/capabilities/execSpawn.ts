@@ -261,8 +261,9 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   const pump = async (stream: ReadableStream<Uint8Array>, sink: (chunk: Buffer) => void): Promise<void> => {
     try { for await (const chunk of stream) sink(Buffer.from(chunk)); } catch { /* closed */ }
   };
-  void pump(proc.stdout as ReadableStream<Uint8Array>, (chunk) => { for (const l of dataListeners) l(chunk); });
-  void pump(proc.stderr as ReadableStream<Uint8Array>, (chunk) => { stderrBytes += chunk.length; stderrHash.update(chunk); });
+  let stderrSealed = false;
+  const stdoutDrained = pump(proc.stdout as ReadableStream<Uint8Array>, (chunk) => { for (const l of dataListeners) l(chunk); });
+  const stderrDrained = pump(proc.stderr as ReadableStream<Uint8Array>, (chunk) => { if (stderrSealed) return; stderrBytes += chunk.length; stderrHash.update(chunk); });
 
   let stopping = false;
   let stopReason: string | undefined;
@@ -304,7 +305,14 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     const info: ExitInfo = { outcome, exitCode, ...(stopReason ? { stopReason } : {}) };
     // Anything that survived is recorded as reconcile-incomplete (the boot sweep re-ends it); the slot stays reserved.
     const recorded = survivors ? "reconcile-incomplete" : outcome;
-    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: recorded, ...(survivors ? { reconciled: "reconcile-incomplete", endedAs: outcome } : {}), exitCode, ...(stopReason ? { stopReason } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrBytes, stderrSha256: stderrHash.digest("hex") } }]).catch(() => {});
+    // Process exit and pipe end-of-file are separate events: wait (bounded, a surviving descendant can hold the pipe open)
+    // for both pumps before the stderr digest is taken, then seal it so a late chunk is ignored rather than throwing.
+    let drainTimer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all([stdoutDrained, stderrDrained]), new Promise((resolve) => { drainTimer = setTimeout(resolve, 1000); })]);
+    clearTimeout(drainTimer);
+    stderrSealed = true;
+    const stderrSha256 = stderrHash.digest("hex");
+    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: recorded, ...(survivors ? { reconciled: "reconcile-incomplete", endedAs: outcome } : {}), exitCode, ...(stopReason ? { stopReason } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrBytes, stderrSha256 } }]).catch(() => {});
     if (!survivors) await release(); // survivors keep the slot reserved: the boot sweep reconciles them
     for (const l of closeListeners) l();
     return info;

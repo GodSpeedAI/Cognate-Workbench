@@ -322,15 +322,17 @@ export class McpClient {
     const result = (message as { result?: { tools?: unknown } }).result;
     if (!result || !Array.isArray(result.tools)) return message;
     const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
-    const tools = result.tools.map((raw: Record<string, unknown>) => {
+    // At most one refusal record and one sanitization record per message, however many tools it carries; tools past the
+    // bound lose their outputSchema without a record (refreshTools drops them anyway).
+    const refusals: { tool: string; reason: string }[] = [];
+    const sanitizations: { tool: string; keywords: string[] }[] = [];
+    const tools = result.tools.map((raw: Record<string, unknown>, index: number) => {
       if (raw.outputSchema === undefined) return raw;
       const { outputSchema, ...rest } = raw;
+      if (index >= MCP_LIMITS.maxTools) return rest;
       const rawName = String(raw.name ?? "");
       const name = this.#toolRef(rawName);
-      const refuse = (reason: string): Record<string, unknown> => {
-        void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "refused", reasonCode: "schema-refused", tool: name, reason: `outputSchema: ${reason}` } }).catch(() => {});
-        return rest;
-      };
+      const refuse = (reason: string): Record<string, unknown> => { refusals.push({ tool: name, reason: `outputSchema: ${reason}` }); return rest; };
       // Names and bounds are validated BEFORE anything is audited or cleaned: a rejected tool is referenced by digest only.
       if (utf8Bytes(rawName) > 256) return rest;
       const text = JSON.stringify(outputSchema ?? {});
@@ -339,9 +341,11 @@ export class McpClient {
       if (cleaned.$async) return refuse("asynchronous schemas are not accepted");
       const safe = sanitizeSchema(cleaned);
       if (!safe.ok) return refuse(safe.reason);
-      if (safe.stripped.length > 0) void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", tool: name, reason: "outputSchema keywords outside the structural allowlist were stripped", stripped: safe.stripped } }).catch(() => {});
+      if (safe.stripped.length > 0) sanitizations.push({ tool: name, keywords: safe.stripped });
       return { ...rest, outputSchema: safe.schema };
     });
+    if (refusals.length > 0) void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "refused", reasonCode: "schema-refused", reason: `outputSchema refused for ${refusals.length} tool(s)`, tool: refusals[0]!.tool, tools: refusals } }).catch(() => {});
+    if (sanitizations.length > 0) void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", reason: "outputSchema keywords outside the structural allowlist were stripped", stripped: [...new Set(sanitizations.flatMap((x) => x.keywords))], tools: sanitizations } }).catch(() => {});
     return { ...message, result: { ...result, tools } } as JSONRPCMessage;
   }
   /** Our own errors (record failures): scrubbed text. Never used for text that came from the server. */

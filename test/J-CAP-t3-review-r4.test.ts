@@ -314,3 +314,59 @@ describe("J-CAP-t3-review-r4 design: classification comes from our own state", (
     expect(JSON.stringify(channel.seen)).not.toContain("io.cognate");
   });
 });
+
+// ---- CodeRabbit threads on be04c66 ----
+
+describe("J-CAP-t3-review-r4 thread: the stderr digest covers the whole stream", () => {
+  test("3 MB written to stderr right before exit is counted and hashed completely", async () => {
+    const events: LedgerEvent[] = [];
+    const { createExecutionWorldRegistry, localExecutionWorld } = await import("@godspeedai/cognate-execution");
+    const { spawnGoverned } = await import("../src/capabilities/execSpawn.ts");
+    const result = await spawnGoverned({
+      registry: createExecutionWorldRegistry([localExecutionWorld()]), getPosture: () => LOCAL_POSTURE, resolveSecret: async () => undefined,
+      ledger: async (_id, evs) => { events.push(...evs); }, recordRefusal: async () => {},
+      slots: { acquire: async () => ({ slotId: "s" }), release: async () => {} },
+      localHostSpawnAllowed: () => true, beforeIntent: async () => undefined, graceMs: 300, killMs: 300,
+    }, { capabilityId: CAP, version: "v", serverId: "stub", worldId: "local", argv: ["bun", "-e", 'process.stderr.write(Buffer.alloc(3_000_000, 97))'], cwd: "/", bundleDir: "/nonexistent/bundle", secrets: [], restrictions: {}, stop: "graceful" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await result.handle.exited;
+    const exited = events.find((e) => e.type === "capability.mcp.exited")!;
+    expect(exited.payload.stderrBytes).toBe(3_000_000);
+    expect(exited.payload.stderrSha256).toBe((await import("node:crypto")).createHash("sha256").update(Buffer.alloc(3_000_000, 97)).digest("hex"));
+  });
+});
+
+describe("J-CAP-t3-review-r4 thread: the output-schema audit is bounded per message", () => {
+  test("a tools list of 1,000 tools with refused output schemas writes at most one refusal record", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const tools = Array.from({ length: 1000 }, (_, i) => ({ name: `t${i}`, description: "d", inputSchema: { type: "object" }, outputSchema: { type: "object", $async: true } }));
+    await McpClient.connect(scripted({ tools }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    expect(records.filter((r) => r.payload.reasonCode === "schema-refused" && String(r.payload.reason).startsWith("outputSchema")).length).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("J-CAP-t3-review-r4 thread: the spawned record's pgid reaches reconciliation", () => {
+  test("a row folded from intended + spawned carries the group, and reconciliation ends a descendant that cleared its marker", async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { reduceWorkbench } = await import("../src/workbench/reducer.ts");
+    const bundleDir = await mkdtemp(join(tmpdir(), "t3r4-bundle-"));
+    const spawnId = `spawn-${randomBytes(4).toString("hex")}`;
+    const leader = Bun.spawn(["sh", "-c", "env -i sh -c 'sleep 30; :' & echo $!; exit 0"], { cwd: bundleDir, env: { ...cleanEnv, COGNATE_SPAWN_ID: spawnId } as Record<string, string>, detached: true, stdout: "pipe", stderr: "ignore" });
+    const child = Number(new TextDecoder().decode((await leader.stdout.getReader().read()).value).trim());
+    await leader.exited;
+    try {
+      const store = new Map<string, unknown>();
+      const get = (k: string) => store.get(k) as never;
+      const apply = (type: string, payload: Record<string, unknown>) => { for (const w of reduceWorkbench(type, payload, "2026-01-01T00:00:00Z", "e", get)) store.set(w.key, w.value); };
+      apply("capability.mcp.spawn.intended", { ...baseRow, bundleDir, spawnId, slotId: "sl-f" });
+      apply("capability.mcp.spawned", { spawnId, pid: leader.pid, pgid: leader.pid });
+      const row = store.get(`spawn/${spawnId}`) as never as Parameters<typeof reconcileSpawnLedger>[1][number];
+      expect(row.pgid).toBe(leader.pid);
+      expect(alive(child)).toBe(true);
+      await reconcileSpawnLedger({ graceMs: 300, ledger: async () => {}, slots: { acquire: async () => ({ slotId: "" }), release: async () => {} } }, [row]);
+      expect(alive(child)).toBe(false);
+    } finally { try { process.kill(child, 9); } catch { /* gone */ } }
+  });
+});
