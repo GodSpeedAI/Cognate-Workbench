@@ -40,6 +40,45 @@ const TOOL_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
 const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const isServerId = (value: string): boolean => SERVER_ID.test(value);
 export const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8");
+/** Cut a string to a UTF-8 byte bound on a character boundary. */
+export function boundBytes(value: string, max: number): string {
+  if (utf8Bytes(value) <= max) return value;
+  let out = value.slice(0, max);
+  while (utf8Bytes(out) > max) out = out.slice(0, -1);
+  return `${out}...`;
+}
+const MAX_MESSAGE_BYTES = 512;
+
+/** Untrusted schema sanitization (section 11): the server validates its own input, so keywords that run a
+ *  backtracking regex engine on the event loop (`pattern`, `patternProperties`, every `format`) are stripped,
+ *  and depth and node count are bounded. Returns what was stripped, or a refusal reason. */
+const SCHEMA_STRIP = new Set(["pattern", "patternProperties", "format"]);
+const SCHEMA_MAX_DEPTH = 16;
+const SCHEMA_MAX_NODES = 512;
+export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<string, unknown>; stripped: string[] } | { ok: false; reason: string } {
+  const stripped = new Set<string>();
+  let nodes = 0;
+  let problem: string | undefined;
+  const walk = (value: unknown, depth: number): unknown => {
+    if (problem) return value;
+    if (depth > SCHEMA_MAX_DEPTH) { problem = `schema nests deeper than ${SCHEMA_MAX_DEPTH} levels`; return value; }
+    if (Array.isArray(value)) return value.map((v) => walk(v, depth + 1));
+    if (value && typeof value === "object") {
+      if (++nodes > SCHEMA_MAX_NODES) { problem = `schema has more than ${SCHEMA_MAX_NODES} nodes`; return value; }
+      const out: Record<string, unknown> = {};
+      for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+        // A property NAMED "pattern" lives under `properties` and is data, not a keyword.
+        if (SCHEMA_STRIP.has(key) && typeof v !== "object") { stripped.add(key); continue; }
+        if (key === "patternProperties") { stripped.add(key); continue; }
+        out[key] = walk(v, depth + 1);
+      }
+      return out;
+    }
+    return value;
+  };
+  const result = walk(schema, 0);
+  return problem ? { ok: false, reason: problem } : { ok: true, schema: result as Record<string, unknown>, stripped: [...stripped] };
+}
 
 export class ChannelTransport implements Transport {
   onclose?: () => void;
@@ -108,6 +147,8 @@ export interface McpClientOptions {
   readonly sessionId?: string;
   /** Record path (the spawn-ledger stream). A failing record refuses the call (record before act). */
   readonly record: (event: McpRecord) => Promise<void>;
+  /** Scrubs this server's resolved secrets (and encodings) from every string that leaves the client. */
+  readonly scrub?: (text: string) => string;
   readonly connectTimeoutMs?: number;
 }
 
@@ -118,6 +159,19 @@ export class McpClient {
   readonly #ajv = new Ajv({ strict: false });
 
   private constructor(private readonly sdk: Client, private readonly transport: ChannelTransport, private readonly options: McpClientOptions) {}
+
+  readonly #scrub = (text: string): string => (this.options.scrub ? this.options.scrub(text) : text);
+  #clean<T>(value: T): T {
+    if (typeof value === "string") return this.#scrub(value) as T;
+    if (Array.isArray(value)) return value.map((v) => this.#clean(v)) as T;
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [this.#scrub(k), this.#clean(v)])) as T;
+    return value;
+  }
+  /** Records never carry raw MCP-originated text: every payload is scrubbed, messages byte-bounded. */
+  readonly #rec = (event: McpRecord): Promise<void> => this.options.record({ type: event.type, payload: this.#clean(event.payload) });
+  #message(error: unknown): string {
+    return boundBytes(this.#scrub(error instanceof Error ? error.message : String(error)), MAX_MESSAGE_BYTES);
+  }
 
   static async connect(channel: StdioChannel, options: McpClientOptions): Promise<McpClient> {
     if (!isServerId(options.serverId)) throw new Error(`invalid MCP server id ${options.serverId}`);
@@ -150,23 +204,34 @@ export class McpClient {
     const listed = { tools: collected };
     const tools = new Map<string, { def: McpToolDef; validate: ValidateFunction }>();
     const excluded: { name: string; reason: string }[] = [];
+    const sanitized: { tool: string; keywords: string[] }[] = [];
+    const refused: { tool: string; reason: string }[] = [];
     for (const raw of listed.tools.slice(0, MCP_LIMITS.maxTools)) {
-      const name = String(raw.name);
+      const rawName = String(raw.name);
+      const name = this.#scrub(rawName);
+      if (name !== rawName) { excluded.push({ name: name.slice(0, 64), reason: "name carried secret material" }); continue; }
       if (!TOOL_NAME.test(name)) { excluded.push({ name: name.slice(0, 64), reason: "name violates the tool-name pattern" }); continue; }
-      const description = String(raw.description ?? "");
+      const description = this.#scrub(String(raw.description ?? ""));
       if (utf8Bytes(description) > MCP_LIMITS.maxDescriptionBytes) { excluded.push({ name, reason: "description exceeds the byte bound" }); continue; }
       const schemaText = JSON.stringify(raw.inputSchema ?? {});
-      if (utf8Bytes(schemaText) > MCP_LIMITS.maxSchemaBytes) { excluded.push({ name, reason: "input schema exceeds the byte bound" }); continue; }
+      if (utf8Bytes(schemaText) > MCP_LIMITS.maxSchemaBytes) { excluded.push({ name, reason: "input schema exceeds the byte bound" }); refused.push({ tool: name, reason: "input schema exceeds the byte bound" }); continue; }
       if (tools.has(name)) { excluded.push({ name, reason: "duplicate tool name" }); continue; }
+      const parsed = this.#clean(JSON.parse(schemaText)) as { $async?: unknown };
       // An `$async` schema would make `validate` return a Promise (truthy): never accept one.
-      if ((JSON.parse(schemaText) as { $async?: unknown }).$async) { excluded.push({ name, reason: "asynchronous input schemas are not accepted" }); continue; }
+      if (parsed.$async) { excluded.push({ name, reason: "asynchronous input schemas are not accepted" }); continue; }
+      const safe = sanitizeSchema(parsed);
+      if (!safe.ok) { excluded.push({ name, reason: safe.reason }); refused.push({ tool: name, reason: safe.reason }); continue; }
+      if (safe.stripped.length > 0) sanitized.push({ tool: name, keywords: safe.stripped });
       try {
-        const validate = this.#ajv.compile(JSON.parse(schemaText) as object);
-        tools.set(name, { def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: JSON.parse(schemaText) as Record<string, unknown> }, validate });
+        const validate = this.#ajv.compile(safe.schema);
+        tools.set(name, { def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: safe.schema }, validate });
       } catch (error) {
-        excluded.push({ name, reason: `input schema does not compile: ${error instanceof Error ? error.message : String(error)}` });
+        excluded.push({ name, reason: `input schema does not compile: ${this.#message(error)}` });
       }
     }
+    const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
+    for (const r of refused) await this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "refused", reasonCode: "schema-refused", tool: r.tool, reason: r.reason } }).catch(() => {});
+    if (sanitized.length > 0) await this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", reason: "server-supplied schema keywords that run a backtracking regex engine were stripped", stripped: sanitized } }).catch(() => {});
     if (truncatedByPages || cursor) excluded.push({ name: "*", reason: "further tools pages were not read (page or tool bound reached)" });
     if (listed.tools.length > MCP_LIMITS.maxTools) excluded.push({ name: "*", reason: `${listed.tools.length - MCP_LIMITS.maxTools} tools beyond the ${MCP_LIMITS.maxTools}-tool bound` });
     this.#tools = tools;
@@ -181,8 +246,8 @@ export class McpClient {
     const callId = call.callId ?? randomUUID();
     const base = { capabilityId: this.options.capabilityId, version: this.options.version, serverId: this.options.serverId, ...(this.options.sessionId ? { sessionId: this.options.sessionId } : {}), callId, tool: name, actorId: call.actorId };
     const refuse = async (code: string, message: string): Promise<McpCallOutcome> => {
-      await this.options.record({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "refused", code } }).catch(() => {});
-      return { ok: false, code, message };
+      await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "refused", code } }).catch(() => {});
+      return { ok: false, code, message: boundBytes(this.#scrub(message), MAX_MESSAGE_BYTES) };
     };
     if (this.#closed) return refuse("server_not_running", `MCP server ${this.options.serverId} is not running`);
     const entry = this.#tools.get(name);
@@ -195,9 +260,9 @@ export class McpClient {
     if (!verdict) return refuse("schema_invalid", `arguments for ${name} violate the server's schema: ${this.#ajv.errorsText(entry.validate.errors)}`);
     // Record BEFORE the call is sent: an unrecordable invocation is not made.
     try {
-      await this.options.record({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "started", argumentsSha256: createHash("sha256").update(argText).digest("hex"), argumentBytes: argBytes } });
+      await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "started", argumentsSha256: createHash("sha256").update(argText).digest("hex"), argumentBytes: argBytes } });
     } catch (error) {
-      return { ok: false, code: "record_failed", message: `the invocation could not be recorded, so it was not sent: ${error instanceof Error ? error.message : String(error)}` };
+      return { ok: false, code: "record_failed", message: `the invocation could not be recorded, so it was not sent: ${this.#message(error)}` };
     }
     let outcome: McpCallOutcome;
     try {
@@ -207,12 +272,12 @@ export class McpClient {
       const bytes = utf8Bytes(JSON.stringify(result));
       outcome = bytes > MCP_LIMITS.maxResultBytes
         ? { ok: false, code: "result_too_large", message: `the tool result is ${bytes} bytes; the bound is ${MCP_LIMITS.maxResultBytes}` }
-        : { ok: true, result, bytes };
+        : { ok: true, result: this.#clean(result), bytes };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = this.#message(error);
       outcome = { ok: false, code: /timed out|timeout/i.test(message) ? "deadline_exceeded" : this.#closed ? "server_not_running" : "tool_error", message };
     }
-    await this.options.record({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}) } }).catch(() => {});
+    await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}) } }).catch(() => {});
     return outcome;
   }
 

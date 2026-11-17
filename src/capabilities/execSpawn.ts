@@ -128,6 +128,10 @@ export interface SpawnHandle {
   readonly pid: number;
   readonly channel: StdioChannel;
   readonly exited: Promise<ExitInfo>;
+  /** Process group id (the child leads its own group). */
+  readonly pgid: number;
+  /** Scrubs this server's resolved secret values (and their encodings) out of anything MCP-originated. */
+  readonly scrubber: Scrubber;
   /** Initiates termination synchronously (state flips and the first signal is sent before this returns). */
   stop(reason: string, mode?: "graceful" | "emergency"): void;
   readonly stopping: boolean;
@@ -135,7 +139,37 @@ export interface SpawnHandle {
 
 export type SpawnResult = { readonly ok: true; readonly handle: SpawnHandle } | { readonly ok: false; readonly code: string; readonly reason: string };
 
-const redactor = (secrets: readonly string[]) => (text: string): string => secrets.filter((s) => s.length >= 4).reduce((acc, s) => acc.split(s).join("[redacted]"), text);
+/** Secrets shorter than this (UTF-8 bytes) are not scrubbed: too short to match meaningfully. */
+const MIN_SCRUB_BYTES = 8;
+
+/** The scrubber for one server's resolved secrets: the exact value plus its common encodings (base64 in
+ *  its standard/URL-safe, padded/unpadded forms, URL-encoded, hex) become `[REDACTED:<NAME>]`. Applied to
+ *  everything MCP-originated before it is returned, recorded or logged. */
+export interface Scrubber {
+  text(value: string): string;
+  deep<T>(value: T): T;
+}
+export function makeScrubber(secrets: readonly { readonly name: string; readonly value: string }[]): Scrubber {
+  const patterns: { needle: string; mark: string }[] = [];
+  for (const { name, value } of secrets) {
+    if (Buffer.byteLength(value, "utf8") < MIN_SCRUB_BYTES) continue;
+    const mark = `[REDACTED:${name}]`;
+    const bytes = Buffer.from(value, "utf8");
+    const b64 = bytes.toString("base64");
+    const variants = new Set([value, b64, b64.replace(/=+$/, ""), bytes.toString("base64url"), encodeURIComponent(value), bytes.toString("hex"), bytes.toString("hex").toUpperCase()]);
+    for (const needle of variants) if (needle) patterns.push({ needle, mark });
+  }
+  // Longest first, so an encoding that contains a shorter variant is replaced whole.
+  patterns.sort((a, b) => b.needle.length - a.needle.length);
+  const text = (value: string): string => patterns.reduce((acc, p) => (acc.includes(p.needle) ? acc.split(p.needle).join(p.mark) : acc), value);
+  const deep = <T,>(value: T): T => {
+    if (typeof value === "string") return text(value) as T;
+    if (Array.isArray(value)) return value.map((v) => deep(v)) as T;
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [text(k), deep(v)])) as T;
+    return value;
+  };
+  return { text, deep };
+}
 
 export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Promise<SpawnResult> {
   const refuse = async (code: string, reason: string, extra: Record<string, unknown> = {}): Promise<SpawnResult> => {
@@ -149,18 +183,22 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   if (!decision.ok) return refuse(decision.code, decision.reason, decision.coreViolation ? { coreViolation: true } : {});
   if (world.kind !== "local") return refuse("stream-port-unavailable", `world ${world.worldId} (${world.kind}) exposes no streaming process port; an MCP server cannot be held over it in this release`);
   if (!deps.localHostSpawnAllowed()) return refuse("posture-contained", "the execution posture is contained: host-process spawns on the local world are refused");
+  if (process.platform === "win32") return refuse("no-process-groups", "this platform cannot give a spawned server its own process group, so it cannot be stopped as a group: refusing, not falling back");
   if (request.argv.length === 0) return refuse("empty-argv", "the server declares no command");
 
   // Secrets: env-only, fail closed on a missing key.
   const env: Record<string, string> = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
   const resolved: string[] = [];
+  const resolvedNamed: { name: string; value: string }[] = [];
   for (const secret of request.secrets) {
     const value = await deps.resolveSecret(secret.key).catch(() => undefined);
     if (value === undefined || value === "") return refuse("missing-secret", `secret key ${secret.key} (for ${secret.env}) is not in the secret store`);
     env[secret.env] = value;
     resolved.push(value);
+    resolvedNamed.push({ name: secret.env, value });
   }
-  const redact = redactor(resolved);
+  const scrubber = makeScrubber(resolvedNamed);
+  const redact = scrubber.text;
 
   let slot: { slotId: string };
   try {
@@ -194,7 +232,9 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn([...request.argv], { cwd: request.cwd, env, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: true });
+    // The spawn id travels in the environment (not a secret): descendants inherit it, so the boot sweep can find every
+    // process of a spawn even when its leader is gone and it recorded nothing yet.
+    proc = Bun.spawn([...request.argv], { cwd: request.cwd, env: { ...env, COGNATE_SPAWN_ID: spawnId }, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: true });
   } catch (error) {
     const message = redact(error instanceof Error ? error.message : String(error));
     await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: "spawn-failed", exitCode: null, stderrTail: message.slice(0, 512) } }]).catch(() => {});
@@ -232,20 +272,31 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     setTimeout(() => killGroup("SIGKILL"), grace + killAfter).unref?.();
   };
 
+  const groupAlive = (): boolean => { try { process.kill(-pid, 0); return true; } catch { return false; } };
+  const waitGroupGone = async (ms: number): Promise<boolean> => {
+    const until = Date.now() + ms;
+    while (groupAlive() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
+    return !groupAlive();
+  };
   const exited: Promise<ExitInfo> = (async () => {
     const exitCode = await proc.exited;
-    // Anything left in the group dies with the server (group-kill discipline, §6.1).
-    killGroup("SIGKILL");
+    // Whatever is left in the leader's group is ended as a group: TERM, KILL after the grace period; the slot is
+    // released only once nothing of the group is alive (section 6.1).
+    let survivors = false;
+    if (groupAlive()) {
+      killGroup("SIGTERM");
+      if (!(await waitGroupGone(grace))) { killGroup("SIGKILL"); survivors = !(await waitGroupGone(killAfter + 1000)); }
+    }
     const outcome = stopping ? "stopped" : exitCode === 0 ? "exited" : "crashed";
     const info: ExitInfo = { outcome, exitCode, ...(stopReason ? { stopReason } : {}) };
-    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome, exitCode, ...(stopReason ? { stopReason } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrTail: redact(stderrTail).slice(-512) } }]).catch(() => {});
-    await release();
+    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome, exitCode, ...(stopReason ? { stopReason } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrTail: redact(stderrTail).slice(-512) } }]).catch(() => {});
+    if (!survivors) await release(); // survivors keep the slot reserved: the boot sweep reconciles them
     for (const l of closeListeners) l();
     return info;
   })();
 
   const handle: SpawnHandle = {
-    spawnId, pid, exited, stop,
+    spawnId, pid, pgid: pid, scrubber, exited, stop,
     get stopping() { return stopping; },
     channel: {
       write: (data) => { stdin.write(data); stdin.flush?.(); },
@@ -255,7 +306,7 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     },
   };
   try {
-    await queued([{ type: "capability.mcp.spawned", payload: { ...base, pid } }]);
+    await queued([{ type: "capability.mcp.spawned", payload: { ...base, pid, pgid: pid } }]);
   } catch (error) {
     stop("unrecorded", "emergency");
     await exited;
@@ -265,23 +316,33 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
 }
 
 export interface LedgerRow {
-  readonly spawnId: string; readonly status: string; readonly pid?: number | null; readonly bundleDir?: string; readonly argv?: readonly string[];
+  readonly spawnId: string; readonly status: string; readonly pid?: number | null; readonly pgid?: number | null; readonly bundleDir?: string; readonly argv?: readonly string[];
   readonly capabilityId: string; readonly version: string; readonly serverId: string; readonly sessionId?: string; readonly worldId: string; readonly worldKind?: string; readonly slotId?: string;
 }
 
-/** Boot-sweep reconciliation (§6.3): every intent without a terminal record reconciles to a
- *  recorded outcome. `confirmed`: kill by recorded pid after checking the process still carries the
- *  version-directory signature; `intended`: best-effort signature kill scoped to the version
- *  directory path (never a bare cmdline match); then record. The caller runs this before any spawn. */
-export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slots">, rows: readonly LedgerRow[], proc: { readonly readCmdline: (pid: number) => Promise<string | undefined>; readonly readCwd: (pid: number) => Promise<string | undefined>; readonly listPids: () => Promise<number[]> } = procfs): Promise<{ spawnId: string; outcome: string }[]> {
+export interface ProcView {
+  readCmdline(pid: number): Promise<string | undefined>;
+  readCwd(pid: number): Promise<string | undefined>;
+  listPids(): Promise<number[]>;
+  /** Every live process whose environment carries this spawn's id (the leader AND its descendants, even after the leader died). */
+  pidsWithSpawnId(spawnId: string): Promise<number[]>;
+}
+
+/** Boot-sweep reconciliation (section 6.3): every intent without a terminal record reconciles to a
+ *  recorded outcome. A spawn's processes are found by the spawn id in their environment (leader and
+ *  descendants alike, whether or not the leader still lives, whether or not the spawn was confirmed),
+ *  and by the version-directory signature (command line or cwd) for ledgers that predate the marker.
+ *  They are ended as a set: TERM, KILL after the grace period, and the slot is released only when none
+ *  survives. The caller runs this before any new spawn. */
+export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slots"> & { readonly graceMs?: number }, rows: readonly LedgerRow[], proc: ProcView = procfs): Promise<{ spawnId: string; outcome: string }[]> {
+  const grace = deps.graceMs ?? 1000;
   const results: { spawnId: string; outcome: string }[] = [];
+  const signal = (pid: number, sig: NodeJS.Signals): void => { try { process.kill(pid, sig); } catch { /* gone */ } };
   for (const row of rows) {
     if (row.status !== "intended" && row.status !== "confirmed") continue;
     const signature = row.bundleDir ?? "";
-    // Identity: the process runs under the version directory (its cwd, or its command line names it)
-    // AND its program is the declared one. A relative command (`bun server.mjs` with cwd = the
-    // version directory) is identified by its cwd.
     const program = (row.argv?.[0] ?? "").split("/").pop() ?? "";
+    // Signature identity (older ledgers): the process runs under the version directory AND is the declared program.
     const matches = async (pid: number): Promise<boolean> => {
       if (!signature) return false;
       const cmdline = await proc.readCmdline(pid);
@@ -290,27 +351,54 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
       return underDir && (!program || cmdline.includes(program));
     };
     let outcome = "reconciled-unknown";
+    let survivors = false;
     if (row.worldKind === "local") {
-      if (row.status === "confirmed" && typeof row.pid === "number") {
-        if (await matches(row.pid)) { try { process.kill(-row.pid, "SIGKILL"); } catch { try { process.kill(row.pid, "SIGKILL"); } catch { /* gone */ } } outcome = "reconciled-killed"; }
-        else outcome = "reconciled-gone";
-      } else if (signature) {
-        for (const pid of await proc.listPids()) if (pid !== process.pid && await matches(pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
-      }
+      const targets = async (): Promise<Set<number>> => {
+        const found = new Set(await proc.pidsWithSpawnId(row.spawnId));
+        if (row.status === "confirmed" && typeof row.pid === "number" && (await matches(row.pid))) found.add(row.pid);
+        else if (row.status === "intended" && signature) for (const pid of await proc.listPids()) if (pid !== process.pid && (await matches(pid))) found.add(pid);
+        found.delete(process.pid);
+        return found;
+      };
+      const first = await targets();
+      if (first.size > 0) {
+        const group = row.pgid ?? row.pid;
+        for (const pid of first) signal(pid, "SIGTERM");
+        if (typeof group === "number" && group > 1) signal(-group, "SIGTERM");
+        const until = Date.now() + grace;
+        let left = first;
+        while (left.size > 0 && Date.now() < until) { await new Promise((resolve) => setTimeout(resolve, 25)); left = new Set((await targets())); }
+        if (left.size > 0) {
+          for (const pid of left) signal(pid, "SIGKILL");
+          if (typeof group === "number" && group > 1) signal(-group, "SIGKILL");
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          survivors = (await targets()).size > 0;
+        }
+        outcome = survivors ? "reconciled-survivors" : row.status === "confirmed" ? "reconciled-killed" : "reconciled-unknown";
+      } else if (row.status === "confirmed") outcome = "reconciled-gone";
     }
-    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, exitCode: null } }]);
-    if (row.slotId) await deps.slots.release(row.slotId, 0).catch(() => {});
+    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), exitCode: null } }]);
+    // A slot is released only when nothing of the spawn survives; survivors keep it reserved (and are reported).
+    if (row.slotId && !survivors) await deps.slots.release(row.slotId, 0).catch(() => {});
     results.push({ spawnId: row.spawnId, outcome });
   }
   return results;
 }
 
-const procfs = {
+const procfs: ProcView = {
   async readCmdline(pid: number): Promise<string | undefined> {
     try { return (await readFile(`/proc/${pid}/cmdline`, "utf8")).replaceAll("\0", " "); } catch { return undefined; }
   },
   async readCwd(pid: number): Promise<string | undefined> {
     try { return await readlink(`/proc/${pid}/cwd`); } catch { return undefined; }
+  },
+  async pidsWithSpawnId(spawnId: string): Promise<number[]> {
+    const marker = `COGNATE_SPAWN_ID=${spawnId}\0`;
+    const found: number[] = [];
+    for (const pid of await this.listPids()) {
+      try { if ((await readFile(`/proc/${pid}/environ`, "utf8")).includes(marker)) found.push(pid); } catch { /* not ours or gone */ }
+    }
+    return found;
   },
   async listPids(): Promise<number[]> {
     try { return (await readdir("/proc")).filter((n) => /^\d+$/.test(n)).map(Number); } catch { return []; }

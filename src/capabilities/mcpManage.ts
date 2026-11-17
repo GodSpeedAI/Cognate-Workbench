@@ -18,7 +18,7 @@ import type { Component, CapabilityContract, HandlerContext, SemanticRef } from 
 import type { DurableStore, StoredEvent } from "@godspeedai/cognate-events";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { randomUUID } from "node:crypto";
-import { McpClient, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
+import { McpClient, boundBytes, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
 import { authorizeCapabilityOp, type Actor, type CapabilityOp } from "../workbench/authoritySelection.ts";
 import type { AuthorityIndex } from "../workbench/authorityIndex.ts";
 import type { LifecycleRecorder } from "../workbench/lifecycleRecorder.ts";
@@ -58,6 +58,8 @@ export interface McpSupervisorOptions {
   readonly probes?: SpawnDeps["probes"];
   readonly graceMs?: number;
   readonly killMs?: number;
+  /** Period of the authority re-check of running servers (catches runtime disable, the section 1.5 invariant and clock expiry). */
+  readonly reauthorizeMs?: number;
   /** True in the server: no spawn is admitted until `reconcileBoot` has finished successfully. */
   readonly bootGate?: boolean;
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
@@ -103,8 +105,10 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
   const running = new Map<string, Running>();
   const graceMs = options.graceMs ?? 3000;
   // Boot gate: the boot sweep may kill by signature, so a spawn must never overlap it; a failed sweep keeps spawning disabled.
-  let openGate: (ok: boolean) => void = () => {};
-  const gate: Promise<boolean> = options.bootGate ? new Promise<boolean>((resolve) => { openGate = resolve; }) : Promise.resolve(true);
+  let gateState: "pending" | "open" | "failed" = options.bootGate ? "pending" : "open";
+  let settleGate: (ok: boolean) => void = () => {};
+  const gate: Promise<boolean> = options.bootGate ? new Promise<boolean>((resolve) => { settleGate = resolve; }) : Promise.resolve(true);
+  const openGate = (ok: boolean): void => { gateState = ok ? "open" : "failed"; settleGate(ok); };
   let shuttingDown = false;
   const pendingStarts = new Set<Promise<unknown>>();
   const tracked = <T,>(promise: Promise<T>): Promise<T> => {
@@ -133,12 +137,15 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
   const decision = (capabilityId: string, operation: string, actor: Actor, outcome: "refused" | "allowed", reasonCode: string, reason: string, extra: Record<string, unknown> = {}): Promise<void> =>
     options.recordDecision({ type: "authority.decision.recorded", payload: { decisionId: randomUUID(), point: "mcp-manage", actorId: actor.id, actorKind: actor.kind, capability: capabilityId, operation, outcome, reasonCode, reason, ...extra } });
 
+  let enabledCache = false;
+  let indexReady = false;
   interface Prep { enabled: boolean; deploymentOk: boolean; index: AuthorityIndex | undefined }
   const prepare = async (): Promise<Prep> => {
     let enabled = false;
     try { enabled = (await options.isEnabled()) === true; } catch { enabled = false; }
+    enabledCache = enabled;
     let index: AuthorityIndex | undefined = options.getIndex();
-    if (index) { try { await index.ready; } catch { index = undefined; } }
+    if (index) { try { await index.ready; indexReady = true; } catch { index = undefined; } }
     return { enabled, deploymentOk: options.deploymentOk ? options.deploymentOk() : true, index };
   };
   const check = (op: CapabilityOp, prep: Prep, ctx: { actor: Actor; runId?: string }, capabilityId: string, sessionId: string | undefined) =>
@@ -179,8 +186,35 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     }
   };
 
-  const watch = (store: DurableStore): (() => void) => store.onCommitted((events: readonly StoredEvent[]) => {
+  /** Re-run THE authorization function for every live server (section 6.1/CUJ 12 beyond suspensions): a server whose
+   *  authority is gone (operator root or any grant revoked/expired, runtime disabled, section 1.5 invariant failed) is
+   *  killed as a group and the loss is recorded. Synchronous over committed index state. */
+  const reauthorizeAll = (): void => {
+    if (!indexReady) return;
+    for (const entry of [...running.values()]) {
+      if (entry.state !== "running" && entry.state !== "starting") continue; // draining servers are already being stopped
+      const auth = authorizeCapabilityOp("mcp.start", { enabled: enabledCache, deploymentOk: options.deploymentOk ? options.deploymentOk() : true, index: options.getIndex(), actor: { id: "operator", kind: "user" }, capabilityId: entry.capabilityId, ...(entry.sessionId ? { sessionId: entry.sessionId } : {}), permission: "mcp.server", nowMs: nowMs() });
+      if (auth.ok) continue;
+      initiateStop(entry, `authority-lost:${auth.code}`, true);
+      void decision(entry.capabilityId, "mcp.reauthorize", { id: "system", kind: "system" }, "refused", auth.code, boundBytes(auth.reason, 512), { serverId: entry.serverId, version: entry.version }).catch(() => {});
+    }
+  };
+
+  const watch = (store: DurableStore): (() => void) => {
+    const unlisten = watchCommits(store);
+    const timer = setInterval(() => { void (async () => { try { enabledCache = (await options.isEnabled()) === true; } catch { enabledCache = false; } reauthorizeAll(); })(); }, options.reauthorizeMs ?? 5000);
+    timer.unref?.();
+    return () => { clearInterval(timer); unlisten(); };
+  };
+
+  const watchCommits = (store: DurableStore): (() => void) => store.onCommitted((events: readonly StoredEvent[]) => {
     for (const event of events) {
+      if (event.eventType === "authority.grant.revoked" || event.eventType === "authority.grant.expired") {
+        // The index's own listener may run after this one in the same notification: re-check again once it has.
+        reauthorizeAll();
+        queueMicrotask(reauthorizeAll);
+        continue;
+      }
       if (event.tenant !== options.tenant) continue;
       const p = (event.payload ?? {}) as Record<string, unknown>;
       const capabilityId = String(p.capabilityId ?? "");
@@ -215,7 +249,8 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       return { ok: false as const, code, reason };
     };
     if (shuttingDown) return refuse("shutting-down", "the runtime is shutting down; no new servers are started");
-    if (!(await gate)) return refuse("reconcile-failed", "the boot reconciliation of the spawn ledger did not finish; spawning stays disabled");
+    // Callers wait for the gate BEFORE taking the shared mutex (the sweep runs inside it); here it is only checked.
+    if (gateState !== "open") return refuse("reconcile-failed", "the boot reconciliation of the spawn ledger did not finish; spawning stays disabled");
     const first = check("mcp.start", await prepare(), ctx, capabilityId, sessionId);
     if (!first.ok) return refuse(first.code, first.reason);
     if (!isServerId(serverId)) return refuse("invalid-server-id", `invalid MCP server id ${serverId}`);
@@ -277,11 +312,12 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       entry.client = await McpClient.connect(spawned.handle.channel, {
         capabilityId, version: slotRow.version, serverId, ...(sessionId ? { sessionId } : {}),
         record: (event: McpRecord) => record(event.type, event.payload, `calls:${capabilityId}:${serverId}`),
+        scrub: spawned.handle.scrubber.text,
       });
     } catch (error) {
       spawned.handle.stop("handshake-failed", "emergency");
       await spawned.handle.exited;
-      return refuse("handshake-failed", `MCP handshake with ${serverId} failed: ${error instanceof Error ? error.message : String(error)}`, { spawnId: spawned.handle.spawnId });
+      return refuse("handshake-failed", `MCP handshake with ${serverId} failed: ${boundBytes(spawned.handle.scrubber.text(error instanceof Error ? error.message : String(error)), 512)}`, { spawnId: spawned.handle.spawnId });
     }
     entry.starting = false;
     if (entry.cancelled) {
@@ -330,11 +366,11 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
         throw new Error(`capability.mcp: ${reason}`);
       };
 
-      provide("capability.mcp.start", (input: { capabilityId: string; serverId: string; worldId?: string; sessionId?: string }, ctx) => mutex.run(async () => {
+      provide("capability.mcp.start", async (input: { capabilityId: string; serverId: string; worldId?: string; sessionId?: string }, ctx) => { await gate; return mutex.run(async () => {
         const result = await tracked(startServer(ctx, { capabilityId: String(input.capabilityId ?? ""), serverId: String(input.serverId ?? ""), worldId: String(input.worldId ?? "local"), sessionId: slotOf(input) }));
         if (!result.ok) throw new Error(`capability.mcp.start: ${result.reason}`);
         return { capabilityId: input.capabilityId, serverId: input.serverId, state: result.state, pid: result.pid, tools: result.tools };
-      }));
+      }); });
 
       provide("capability.mcp.stop", (input: { capabilityId: string; serverId: string; sessionId?: string }, ctx) => mutex.run(async () => {
         const capabilityId = String(input.capabilityId ?? "");
@@ -366,7 +402,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
         return { capabilityId, state: after?.state ?? "unknown", reasons: after?.suspensionReasons ?? [] };
       }));
 
-      provide("capability.bundle.resume", (input: { capabilityId: string; clearedReason: string; sessionId?: string; worldId?: string }, ctx) => mutex.run(async () => {
+      provide("capability.bundle.resume", async (input: { capabilityId: string; clearedReason: string; sessionId?: string; worldId?: string }, ctx) => { await gate; return mutex.run(async () => {
         const capabilityId = String(input.capabilityId ?? "");
         const sessionId = slotOf(input);
         const clearedReason = String(input.clearedReason ?? "");
@@ -402,7 +438,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
           }
         }
         return { capabilityId, state: after?.state ?? "unknown", reasons: after?.suspensionReasons ?? [], respawned };
-      }));
+      }); });
     },
   });
 

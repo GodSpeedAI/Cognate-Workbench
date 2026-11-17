@@ -36,6 +36,7 @@ import { LOCAL_ROOT_ID } from "./authorityGrants.ts";
 import { createRuntimeMutex } from "../workbench/runtimeMutex.ts";
 import { authorizeCapabilityOp, permissionCovered, principalForActor, sessionOfRun, type Actor, type Authorization, type CapabilityOp, type Failure } from "../workbench/authoritySelection.ts";
 import type { McpHost } from "./mcpManage.ts";
+import { boundBytes } from "../mcp/client.ts";
 import { randomUUID } from "node:crypto";
 
 export interface DispatcherInterpreterInput {
@@ -347,7 +348,8 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
           await recordDecision(capabilityId, operation, ctx.actor, "allowed", "within-ceiling-and-grant", `${permission} covered by ceiling and grant ${decision.grantId}`, { version: entry.version });
           const result = await dispatch(entry, run, ctx.actor, callDeadlineMs(requestedDeadlineMs));
           if (!result.ok) {
-            await recordDecision(capabilityId, operation, ctx.actor, "refused", result.code, result.message, { version: entry.version });
+            // A refusal record carries a code and a byte-bounded message, never an unbounded raw error text.
+            await recordDecision(capabilityId, operation, ctx.actor, "refused", result.code, boundBytes(result.message, 512), { version: entry.version });
             if (result.code === "integrity") await integrityFault(entry, g.index);
           }
           return { ...result, version: entry.version, decidingPoint: "dispatcher" };

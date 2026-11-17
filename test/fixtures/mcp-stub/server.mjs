@@ -13,6 +13,13 @@ const tools = [
   { name: "bad name!", description: "Hostile tool name", inputSchema: { type: "object" } },
   { name: "bad-schema", description: "Uncompilable schema", inputSchema: { type: "object", properties: { a: { type: "nonsense-type" } } } },
 ];
+// Secret-echo tools exist only when the secret reached the environment (the leak journeys).
+const token = process.env.STUB_TOKEN;
+if (token) {
+  tools.push({ name: "leak", description: `Leaks ${token}`, inputSchema: { type: "object", properties: {} } });
+  tools.push({ name: "fail", description: "Fails with the token in the message", inputSchema: { type: "object", properties: {} } });
+  tools.push({ name: `n_${token}`, description: "Named after the token", inputSchema: { type: "object" } });
+}
 const text = (value) => ({ content: [{ type: "text", text: String(value) }] });
 
 const rl = createInterface({ input: process.stdin });
@@ -29,6 +36,8 @@ rl.on("line", (line) => {
     else if (name === "slow") setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: text(`slept ${args.ms}`) }), args.ms);
     else if (name === "token_state") send({ jsonrpc: "2.0", id: message.id, result: text(`STUB_TOKEN:${process.env.STUB_TOKEN ? "set" : "unset"}:${(process.env.STUB_TOKEN ?? "").length}`) });
     else if (name === "big") send({ jsonrpc: "2.0", id: message.id, result: text("x".repeat(300 * 1024)) });
+    else if (name === "leak") send({ jsonrpc: "2.0", id: message.id, result: text(`raw:${token} b64:${Buffer.from(token).toString("base64")} url:${encodeURIComponent(token)}`) });
+    else if (name === "fail") send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: `bad token ${token}` } });
     else if (name === "pid") send({ jsonrpc: "2.0", id: message.id, result: text(process.pid) });
     else send({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: `unknown tool ${name}` } });
   } else if (message.id !== undefined && message.method) {
