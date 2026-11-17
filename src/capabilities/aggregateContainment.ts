@@ -49,6 +49,8 @@ export interface ContainmentExecution {
   /** The kernel CPU cap booked conservatively for this execution (0 when no cap applies). */
   readonly cpuSeconds: number;
   readonly addressSpaceBytes: number | null;
+  /** Long-lease slot class (T3, design 6.2): held by a spawned server for its whole life, never reaped by lease. */
+  readonly longLease?: true;
   outcome?: ContainmentOutcome;
   wallMs?: number;
   endedAt?: string;
@@ -175,14 +177,14 @@ export async function acquireContainedSlot(service: RuntimeService, caller: Call
     const windowMs = (quotas.cpuWindowHours ?? 24) * 60 * 60 * 1000;
     const windowStart = windowStartMs(quotas, nowMs);
     for (const execution of Object.values(state.executions)) {
-      if (execution.status === "reserved" && execution.leaseUntilMs < nowMs) {
+      if (execution.status === "reserved" && !execution.longLease && execution.leaseUntilMs < nowMs) {
         state.executions[execution.id] = { ...execution, status: "completed", outcome: "reaped", endedAt: new Date(nowMs).toISOString() };
       }
     }
     for (const [id, execution] of Object.entries(state.executions)) {
       if (execution.status === "completed" && Date.parse(execution.endedAt ?? execution.reservedAt) < windowStart) delete state.executions[id];
     }
-    const live = Object.values(state.executions).filter(execution => execution.status === "reserved");
+    const live = Object.values(state.executions).filter(execution => execution.status === "reserved" && !execution.longLease);
     if (quotas.maxConcurrent !== undefined && live.length + 1 > quotas.maxConcurrent) {
       throw new ContainmentQuotaError("max_concurrent", `Aggregate contained-execution ceiling exceeded: ${live.length} live execution(s) across processes already hold ${quotas.maxConcurrent} allowed slot(s); new work is refused until a slot releases`);
     }
@@ -227,7 +229,7 @@ export async function reconcileContainmentAtBoot(service: RuntimeService, caller
   const nowMs = Date.now();
   for (let attempt = 0; attempt < 30; attempt++) {
     const { state, version } = await readState(service, caller);
-    const lapsed = Object.values(state.executions).filter(execution => execution.status === "reserved" && execution.leaseUntilMs < nowMs);
+    const lapsed = Object.values(state.executions).filter(execution => execution.status === "reserved" && !execution.longLease && execution.leaseUntilMs < nowMs);
     if (lapsed.length === 0) return 0;
     for (const execution of lapsed) {
       state.executions[execution.id] = { ...execution, status: "completed", outcome: "reaped", endedAt: new Date(nowMs).toISOString() };
@@ -342,4 +344,28 @@ export function aggregateContainedRegistry(base: ExecutionWorldRegistry, options
     list: () => base.list(),
     dispose: () => base.dispose(),
   };
+}
+
+/** Per-world cap on long-lived spawned processes (a dedicated slot class beside the exec-shaped
+ *  slots; same ledger thread, so one accounting truth). */
+export const LONG_LEASE_PER_WORLD = 4;
+
+/** Acquire a long-lease slot for a spawned server. Refuses (typed, fail-closed) at the per-world
+ *  cap. The slot is released by the spawn's terminal record or the boot sweep, never by a lease. */
+export async function acquireLongLeaseSlot(service: RuntimeService, caller: Caller, input: { readonly worldId: string; readonly cap?: number }): Promise<{ readonly slotId: string }> {
+  const cap = input.cap ?? LONG_LEASE_PER_WORLD;
+  const nowMs = Date.now();
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const { state, version } = await readState(service, caller);
+    const held = Object.values(state.executions).filter(e => e.status === "reserved" && e.longLease && e.worldId === input.worldId).length;
+    if (held + 1 > cap) throw new ContainmentQuotaError("max_concurrent", `Long-lease slot cap reached on world ${input.worldId}: ${held} of ${cap} slot(s) held; the spawn is refused.`);
+    const slotId = `long-${nowMs.toString(36)}-${attempt.toString(36)}-${Math.floor(Math.random() * 2 ** 31).toString(36)}`;
+    state.executions[slotId] = { id: slotId, worldId: input.worldId, status: "reserved", reservedAt: new Date(nowMs).toISOString(), leaseUntilMs: 0, cpuSeconds: 0, addressSpaceBytes: null, longLease: true };
+    if (await writeState(service, caller, state, version, `containment-long-acquire:${slotId}`)) return { slotId };
+  }
+  throw new Error("Aggregate containment ledger is busy; retry the spawn");
+}
+
+export async function releaseLongLeaseSlot(service: RuntimeService, caller: Caller, slotId: string, outcome: ContainmentOutcome, wallMs: number): Promise<void> {
+  await releaseContainedSlot(service, caller, slotId, outcome, wallMs);
 }
