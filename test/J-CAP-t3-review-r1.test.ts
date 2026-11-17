@@ -93,14 +93,17 @@ describe("J-CAP-t3-review-r1 finding 2: revoked or lapsed authority stops runnin
       const booted = await boot(home, { graceMs: 400, killMs: 400, reauthorizeMs: 100 });
       const { app, client } = booted;
       const previous = process.env.COGNATE_POSTGRES_URL;
+      const previousSingleWriter = process.env.COGNATE_CAPABILITY_SINGLE_WRITER; // CI declares it: the invariant fails only without it
       try {
         await install(booted, home, [{ id: "stub", command: ["bun", "${bundleDir}/server.mjs"] }]);
         const started = (await client.invoke("capability.mcp.start", { capabilityId: CAP, serverId: "stub" })) as { pid: number };
+        delete process.env.COGNATE_CAPABILITY_SINGLE_WRITER;
         process.env.COGNATE_POSTGRES_URL = "postgres://unused.invalid/db"; // external PostgreSQL without a single-writer declaration
         await waitUntil("process gone", async () => !alive(started.pid), 6000);
         await waitUntil("authority-lost record", async () => (await exits(app)).some((e) => String(e.stopReason).startsWith("authority-lost:deployment-invariant")) || undefined, 6000);
       } finally {
         if (previous === undefined) delete process.env.COGNATE_POSTGRES_URL; else process.env.COGNATE_POSTGRES_URL = previous;
+        if (previousSingleWriter === undefined) delete process.env.COGNATE_CAPABILITY_SINGLE_WRITER; else process.env.COGNATE_CAPABILITY_SINGLE_WRITER = previousSingleWriter;
         await app.stop();
       }
     });
