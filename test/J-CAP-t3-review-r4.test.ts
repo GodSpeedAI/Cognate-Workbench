@@ -484,10 +484,10 @@ describe("J-CAP-t3-review-r4 threads: identity, malformed entries, listings, fal
   test("the fallback finished record keeps the call's identity", async () => {
     const records: { type: string; payload: Record<string, unknown> }[] = [];
     const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { if (e.payload.phase === "finished" && !records.some((r) => r.payload.phase === "failed-once")) { records.push({ type: e.type, payload: { phase: "failed-once" } }); throw new Error("first write fails"); } records.push(e); } });
-    expect(await client.callTool("t", {}, { timeoutMs: 3000, actorId: "t", callId: "call-fallback" })).toMatchObject({ ok: true });
+    expect(await client.callTool("t", {}, { timeoutMs: 3000, actorId: "t", callId: "0f0f0f0f-0000-4000-8000-00000000fa11" })).toMatchObject({ ok: true });
     const finished = records.filter((r) => r.payload.phase === "finished");
     expect(finished.length).toBe(1); // the retry carries the same record id: one record
-    expect(finished[0]!.payload.callId).toBe("call-fallback");
+    expect(finished[0]!.payload.callId).toBe("0f0f0f0f-0000-4000-8000-00000000fa11");
   });
 
   test("a slow started-recorder counts against the deadline: the call returns at its deadline and nothing is sent", async () => {

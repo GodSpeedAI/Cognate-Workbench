@@ -25,6 +25,7 @@ import { LOCAL_POSTURE, sleep } from "./mcp-helpers.ts";
 const RUNS = Number(process.env.FC_RUNS ?? 200);
 const CAP_BYTES = MCP_LIMITS.maxResultBytes;
 /** FC_INV selects invariants (default all); used to show each one red against an older head independently. */
+const callIdOf = (i: number): string => `00000000-0000-4000-8000-${i.toString(16).padStart(12, "0")}`;
 const ON = new Set((process.env.FC_INV ?? "I1,I2,I3,I4").split(","));
 const STREAM = "calls:gen";
 
@@ -200,7 +201,7 @@ async function runInner(sc: Scenario, emitted: Buffer[], logs: string[]): Promis
     const name = names.length > 0 && c.pick % 5 !== 4 ? names[c.pick % names.length]! : c.unknownName;
     const started = performance.now();
     try {
-      const o = await client.callTool(name, c.args && typeof c.args === "object" && !Array.isArray(c.args) ? c.args as Record<string, unknown> : {}, { timeoutMs: c.timeoutMs, actorId: "gen", callId: `call-${i}` });
+      const o = await client.callTool(name, c.args && typeof c.args === "object" && !Array.isArray(c.args) ? c.args as Record<string, unknown> : {}, { timeoutMs: c.timeoutMs, actorId: "gen", callId: callIdOf(i) });
       outcomes[i] = o;
       count(o.ok ? "ok" : o.code);
       count(`kind:${c.behavior.kind}`);
@@ -221,7 +222,7 @@ async function runInner(sc: Scenario, emitted: Buffer[], logs: string[]): Promis
   if (ON.has("I2")) for (let i = 0; i < sc.calls.length; i++) {
     expect(outcomes[i], `call ${i} threw`).not.toBe("threw");
     const o = outcomes[i] as Exclude<(typeof outcomes)[number], "threw">;
-    const finished = stored.filter((p) => p.phase === "finished" && p.callId === `call-${i}`);
+    const finished = stored.filter((p) => p.phase === "finished" && p.callId === callIdOf(i));
     expect(finished.length, `call ${i}: finished records in the store (${sc.recorder})`).toBeLessThanOrEqual(1);
     if (!(!o.ok && o.code === "record_failed")) expect(finished.length, `call ${i}: result delivered without a confirmed finished record (${sc.recorder})`).toBe(1);
     else expect("result" in o, "record_failed withholds the result").toBe(false);

@@ -16,7 +16,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ResultSchema, type JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import Ajv, { type ValidateFunction } from "ajv";
 import { INGRESS, isPlain, type Inbound, LineFramer, measureJson, parseToolResult, snapshotJson, jsonBytes, unsupportedRequestReply, type RpcId, type Violation } from "./ingress.ts";
-import { adoptId, boundText, digestId, mintId, sha256Of, shortSha, text, type CallCode, type MintedId, type RecordCode, type Sha256, type StripClass, type Trusted, type TypedPayload } from "./typedRecord.ts";
+import { adoptId, adoptMinted, boundText, digestId, mintId, sha256Of, shortSha, text, type CallCode, type MintedId, type RecordCode, type Sha256, type StripClass, type Trusted, type TypedPayload } from "./typedRecord.ts";
 
 /** The wrapper-owned byte channel to a spawned server: what the SDK transport needs, nothing more. */
 export interface StdioChannel {
@@ -470,13 +470,17 @@ export class McpClient {
   /** Live tools/list, validated as untrusted data. */
   async refreshTools(): Promise<readonly McpToolDef[]> {
     // Follow nextCursor (the MCP pagination contract), bounded by pages and by the tool bound.
-    const collected: Awaited<ReturnType<Client["listTools"]>>["tools"] = [];
+    // Not `sdk.listTools`: it compiles every output schema into the SDK's own, uncounted Ajv cache. A passthrough request leaves
+    // the SDK holding no schema; validation is ours, in the counted compiler.
+    type Listed = { name: unknown; description?: unknown; inputSchema?: unknown; outputSchema?: unknown };
+    const collected: Listed[] = [];
     let cursor: string | undefined;
     let truncatedByPages = false;
     for (let page = 0; page < 8; page++) {
-      const listed = await this.sdk.listTools(cursor ? { cursor } : undefined, { timeout: 15_000 });
-      collected.push(...listed.tools);
-      cursor = listed.nextCursor;
+      const listed = await this.sdk.request({ method: "tools/list", params: cursor ? { cursor } : {} }, ResultSchema, { timeout: 15_000 }) as { tools?: unknown; nextCursor?: unknown };
+      if (!Array.isArray(listed.tools)) throw new Error("tools/list returned no tools array");
+      collected.push(...(listed.tools as unknown[]).filter((t): t is Listed => isPlain(t) && typeof (t as Listed).name === "string"));
+      cursor = typeof listed.nextCursor === "string" && listed.nextCursor ? listed.nextCursor : undefined;
       if (!cursor || collected.length > MCP_LIMITS.maxTools) break;
       if (page === 7) truncatedByPages = true;
     }
@@ -534,7 +538,7 @@ export class McpClient {
     const onAbort = (): void => controller.abort();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      base = { ...this.#ids, callId: adoptId(call.callId ?? String(mintId())), tool: digestId(name), actorId: adoptId(call.actorId) };
+      base = { ...this.#ids, callId: adoptMinted(call.callId), tool: digestId(name), actorId: adoptId(call.actorId) };
       outcome = await this.#execute(name, args, call, deadlineAt, pending, correlation, controller, base, trace, (t) => { timer = t; }, onAbort);
     } catch {
       outcome = INTERNAL;

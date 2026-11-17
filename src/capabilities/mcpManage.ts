@@ -19,7 +19,7 @@ import type { DurableStore, StoredEvent } from "@godspeedai/cognate-events";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { randomUUID } from "node:crypto";
 import { McpClient, McpConnectError, boundBytes, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
-import { adoptId, describeDigest, digestText, operatorText, type Trusted, type TypedPayload } from "../mcp/typedRecord.ts";
+import { adoptId, digestId, mintId, describeDigest, digestText, operatorText, type Trusted, type TypedPayload } from "../mcp/typedRecord.ts";
 import { authorizeCapabilityOp, type Actor, type CapabilityOp } from "../workbench/authoritySelection.ts";
 import type { AuthorityIndex } from "../workbench/authorityIndex.ts";
 import type { LifecycleRecorder } from "../workbench/lifecycleRecorder.ts";
@@ -267,7 +267,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     if (gateState !== "open") return refuse("reconcile-failed", operatorText("the boot reconciliation of the spawn ledger did not finish; spawning stays disabled"));
     const first = check("mcp.start", await prepare(), ctx, capabilityId, sessionId);
     if (!first.ok) return refuse(first.code, operatorText(first.reason));
-    if (!isServerId(serverId)) return refuse("invalid-server-id", operatorText(`invalid MCP server id ${serverId}`));
+    if (!isServerId(serverId)) return refuse("invalid-server-id", describeDigest(operatorText("invalid MCP server id"), digestText(serverId).bytes, digestText(serverId).sha256));
     const slotRow = first.row!;
     const bundle = await bundleOf(capabilityId, slotRow.version);
     const decl = bundle?.manifest.mcpServers?.find((s) => s.id === serverId);
@@ -352,7 +352,12 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       if (!m) return { ok: false, code: "unknown_tool", message: describeDigest(operatorText("the tool reference is not an mcp.<serverId>.<tool> id"), digestText(toolRef).bytes, digestText(toolRef).sha256), retryable: false };
       // Snapshot, synchronously: the server this call belongs to, and its in-flight count.
       const entry = running.get(serverKey(capabilityId, sessionId, m[1]!));
-      if (!entry || entry.version !== version || !entry.accepting || !entry.client) return { ok: false, code: "server_not_running", message: `MCP server ${m[1]} of ${capabilityId} is not accepting calls`, retryable: true };
+      if (!entry || entry.version !== version || !entry.accepting || !entry.client) {
+        // I2: a refusal at the host boundary is still a call: exactly one durable finished record, or `record_failed`.
+        const recordId = mintId();
+        try { await record("capability.mcp.tool_invoked", { capabilityId: adoptId(capabilityId), version: adoptId(version), serverId: adoptId(m[1]!), ...(sessionId ? { sessionId: adoptId(sessionId) } : {}), callId: mintId(), tool: digestId(m[2]!), actorId: adoptId(call.actorId), phase: "finished", recordId, outcome: "server_not_running" }, `calls:${capabilityId}:${m[1]!}`, recordId); } catch { return { ok: false, code: "record_failed", message: "the refusal could not be recorded", retryable: false }; }
+        return { ok: false, code: "server_not_running", message: `MCP server ${m[1]} of ${capabilityId} is not accepting calls`, retryable: true };
+      }
       const client = entry.client;
       entry.inFlight += 1;
       try {
