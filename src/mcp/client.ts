@@ -11,9 +11,9 @@
 // recorded BEFORE it is sent (`capability.mcp.tool_invoked`, phase started) and after it ends
 // (phase finished); arguments are recorded as a digest and a byte count, never as content.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import { deserializeMessage, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { McpError, ResultSchema, type JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import Ajv, { type ValidateFunction } from "ajv";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -120,33 +120,105 @@ export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<stri
   return problem ? { ok: false, reason: problem } : { ok: true, schema: result as Record<string, unknown>, stripped: [...stripped] };
 }
 
+/** What the transport reports to its client. Nothing here is derived from message text. */
+export interface TransportHooks {
+  /** Every outbound message: the client correlates a call's request id here and may rewrite the message. */
+  readonly onOutbound?: (message: JSONRPCMessage) => JSONRPCMessage;
+  /** An inbound message exceeded the per-message cap. True when a request is pending for `id` (a synthetic error is forwarded for it). */
+  readonly onOversize?: (id: string | number | undefined, bytes: number, sha256: string) => boolean;
+  /** An oversize message that matched no pending request was dropped (a counter only: nothing is stored per message). */
+  readonly onDropped?: () => void;
+}
+const ID_SCAN_PREFIX = 4096;
+const ID_SCAN_TAIL = 256;
+const ID_FIELD = /"id"\s*:\s*(-?\d{1,15}|"[^"\\]{0,64}")/g;
+/** The id of an oversize message, from a bounded prefix and tail only (the message is never parsed). */
+function scanId(prefix: Buffer, tail: Buffer): string | number | undefined {
+  for (const part of [prefix, tail]) {
+    ID_FIELD.lastIndex = 0;
+    const m = ID_FIELD.exec(part.toString("latin1"));
+    if (m) return m[1]!.startsWith('"') ? m[1]!.slice(1, -1) : Number(m[1]);
+  }
+  return undefined;
+}
+
 export class ChannelTransport implements Transport {
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
-  readonly #buffer = new ReadBuffer({ maxBufferSize: MCP_LIMITS.maxLineBytes });
   #closed = false;
+  // One inbound line at a time. Under the cap it is buffered; over the cap it is DISCARDED as it arrives, keeping only
+  // a bounded prefix and tail (to find its id), its length and its SHA-256: memory stays bounded whatever the server sends.
+  #pieces: Buffer[] = [];
+  #total = 0;
+  #discarding = false;
+  #prefix: Buffer = Buffer.alloc(0);
+  #tail: Buffer = Buffer.alloc(0);
+  #hash: ReturnType<typeof createHash> | undefined;
   /** `filter` sees every message BEFORE the SDK does: nothing server-supplied reaches the SDK unsanitized. */
-  constructor(private readonly channel: StdioChannel, private readonly filter?: (message: JSONRPCMessage) => JSONRPCMessage) {}
+  constructor(private readonly channel: StdioChannel, private readonly filter?: (message: JSONRPCMessage) => JSONRPCMessage, private readonly hooks: TransportHooks = {}) {}
+
+  #take(piece: Buffer): void {
+    this.#total += piece.length;
+    if (this.#discarding) {
+      this.#hash!.update(piece);
+      this.#tail = Buffer.concat([this.#tail, piece]).subarray(-ID_SCAN_TAIL);
+      return;
+    }
+    this.#pieces.push(piece);
+    if (this.#total > MCP_LIMITS.maxResultBytes) {
+      this.#discarding = true;
+      const held = Buffer.concat(this.#pieces);
+      this.#pieces = [];
+      this.#prefix = held.subarray(0, ID_SCAN_PREFIX);
+      this.#tail = held.subarray(Math.max(0, held.length - ID_SCAN_TAIL));
+      this.#hash = createHash("sha256").update(held);
+    }
+  }
+
+  #endLine(): void {
+    const discarding = this.#discarding;
+    const total = this.#total;
+    const prefix = this.#prefix;
+    const tail = this.#tail;
+    const sha = this.#hash?.digest("hex");
+    const line = discarding ? undefined : Buffer.concat(this.#pieces).toString("utf8");
+    this.#pieces = [];
+    this.#total = 0;
+    this.#discarding = false;
+    this.#prefix = Buffer.alloc(0);
+    this.#tail = Buffer.alloc(0);
+    this.#hash = undefined;
+    try {
+      if (discarding) {
+        const id = scanId(prefix, tail);
+        if (this.hooks.onOversize?.(id, total, sha!) && id !== undefined) this.onmessage?.({ jsonrpc: "2.0", id, error: { code: -32000, message: "message exceeds the byte bound" } } as JSONRPCMessage);
+        else this.hooks.onDropped?.();
+        return;
+      }
+      if (!line || line.trim() === "") return;
+      const message = deserializeMessage(line);
+      // Server-initiated REQUESTS are not supported (no sampling/roots in v1): never surfaced.
+      if ("method" in message && "id" in message) {
+        void this.send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "server-initiated requests are not supported" } } as JSONRPCMessage).catch(() => {});
+        return;
+      }
+      this.onmessage?.(this.filter ? this.filter(message) : message);
+    } catch {
+      // The message of a framing/parse error can quote the server's stdout: never forwarded.
+      this.onerror?.(new Error("the server wrote a malformed message to stdout"));
+    }
+  }
 
   async start(): Promise<void> {
     this.channel.onData((chunk) => {
-      try {
-        this.#buffer.append(chunk);
-        for (;;) {
-          const message = this.#buffer.readMessage();
-          if (message === null) break;
-          // Server-initiated REQUESTS are not supported (no sampling/roots in v1): never surfaced.
-          if ("method" in message && "id" in message) {
-            void this.send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "server-initiated requests are not supported" } } as JSONRPCMessage).catch(() => {});
-            continue;
-          }
-          this.onmessage?.(this.filter ? this.filter(message) : message);
-        }
-      } catch (error) {
-        // The message of a framing/parse error can quote the server's stdout: never forwarded.
-        void error;
-        this.onerror?.(new Error("the server wrote a malformed or oversized message to stdout"));
+      let offset = 0;
+      while (offset < chunk.length) {
+        const nl = chunk.indexOf(10, offset);
+        this.#take(chunk.subarray(offset, nl < 0 ? chunk.length : nl));
+        if (nl < 0) break;
+        this.#endLine();
+        offset = nl + 1;
       }
     });
     this.channel.onClose(() => {
@@ -158,7 +230,7 @@ export class ChannelTransport implements Transport {
 
   async send(message: JSONRPCMessage): Promise<void> {
     if (this.#closed) throw new Error("MCP channel is closed");
-    await this.channel.write(serializeMessage(message));
+    await this.channel.write(serializeMessage(this.hooks.onOutbound ? this.hooks.onOutbound(message) : message));
   }
 
   async close(): Promise<void> {
@@ -202,12 +274,21 @@ export interface McpClientOptions {
   readonly connectTimeoutMs?: number;
 }
 
+interface PendingCall {
+  id?: string | number;
+  deadlineFired: boolean;
+  failure: { readonly kind: "result_too_large"; readonly bytes: number; readonly sha256: string } | null;
+}
+const CORRELATION_META = "io.cognate/correlation";
+
 export class McpClient {
-  #tools = new Map<string, { def: McpToolDef; validate: ValidateFunction }>();
+  #tools = new Map<string, { def: McpToolDef; validate: ValidateFunction; validateOut?: ValidateFunction }>();
   #excluded: { name: string; reason: string }[] = [];
   #closed = false;
-  /** Internal failure tokens issued by this client (token -> payload); only a lookup recognises one. */
-  readonly #internal = new Map<string, number>();
+  /** In-flight tools/call requests: our own state is what classifies a failure, never error text. */
+  readonly #byCorrelation = new Map<string, PendingCall>();
+  readonly #pendingById = new Map<string | number, PendingCall>();
+  #droppedOversize = 0;
   readonly #ajv = new Ajv({ strict: false });
 
   private constructor(private readonly sdk: Client, private readonly transport: ChannelTransport, private readonly options: McpClientOptions) {}
@@ -239,17 +320,6 @@ export class McpClient {
    *  oversize/over-deep schema dropped with a recorded refusal). */
   #sanitizeOutputSchemas(message: JSONRPCMessage): JSONRPCMessage {
     const result = (message as { result?: { tools?: unknown } }).result;
-    // The WHOLE serialized result (content, structuredContent, _meta, anything) is measured here, before the SDK sees it:
-    // an oversize result never reaches its validators. The refusal is a typed internal error: its token is issued here and
-    // can only be recognised by a lookup, never by parsing text the server could forge.
-    if (result && !Array.isArray(result.tools)) {
-      const bytes = utf8Bytes(JSON.stringify(result));
-      if (bytes > MCP_LIMITS.maxResultBytes) {
-        const token = randomUUID();
-        this.#internal.set(token, bytes);
-        return { jsonrpc: "2.0", id: (message as { id: number }).id, error: { code: -32000, message: `cognate-internal:${token}` } } as JSONRPCMessage;
-      }
-    }
     if (!result || !Array.isArray(result.tools)) return message;
     const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
     const tools = result.tools.map((raw: Record<string, unknown>) => {
@@ -282,7 +352,11 @@ export class McpClient {
   static async connect(channel: StdioChannel, options: McpClientOptions): Promise<McpClient> {
     if (!isServerId(options.serverId)) throw new Error(`invalid MCP server id ${options.serverId}`);
     const holder: { client?: McpClient } = {};
-    const transport = new ChannelTransport(channel, (message) => (holder.client ? holder.client.#sanitizeOutputSchemas(message) : stripOutputSchemas(message)));
+    const transport = new ChannelTransport(channel, (message) => (holder.client ? holder.client.#sanitizeOutputSchemas(message) : stripOutputSchemas(message)), {
+      onOutbound: (message) => (holder.client ? holder.client.#correlate(message) : message),
+      onOversize: (id, bytes, sha256) => (holder.client ? holder.client.#oversize(id, bytes, sha256) : false),
+      onDropped: () => { if (holder.client) holder.client.#droppedOversize += 1; },
+    });
     // No capabilities declared: sampling, roots and elicitation are refused by construction.
     const sdk = new Client({ name: "cognate-workbench", version: "1" }, { capabilities: {} });
     const client = new McpClient(sdk, transport, options);
@@ -292,6 +366,29 @@ export class McpClient {
     await client.refreshTools();
     return client;
   }
+
+  /** Correlate an outbound tools/call with its pending entry by request id; the correlation key never reaches the server. */
+  #correlate(message: JSONRPCMessage): JSONRPCMessage {
+    const m = message as { method?: string; id?: string | number; params?: { _meta?: Record<string, unknown> } };
+    const key = m.method === "tools/call" ? m.params?._meta?.[CORRELATION_META] : undefined;
+    if (typeof key !== "string") return message;
+    const pending = this.#byCorrelation.get(key);
+    if (pending && m.id !== undefined) { pending.id = m.id; this.#pendingById.set(m.id, pending); }
+    const { [CORRELATION_META]: _drop, ...meta } = m.params?._meta ?? {};
+    void _drop;
+    const { _meta: _old, ...params } = m.params ?? {};
+    void _old;
+    return { ...message, params: { ...params, ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}) } } as JSONRPCMessage;
+  }
+  #oversize(id: string | number | undefined, bytes: number, sha256: string): boolean {
+    const pending = id === undefined ? undefined : this.#pendingById.get(id);
+    if (!pending) return false;
+    pending.failure ??= { kind: "result_too_large", bytes, sha256 };
+    return true;
+  }
+  /** Inspection: in-flight calls (must return to 0) and the oversize messages dropped with no request pending. */
+  get pendingCount(): number { return this.#pendingById.size + this.#byCorrelation.size; }
+  get droppedOversize(): number { return this.#droppedOversize; }
 
   get closed(): boolean { return this.#closed; }
   get excluded(): readonly { name: string; reason: string }[] { return this.#excluded; }
@@ -310,7 +407,7 @@ export class McpClient {
       if (page === 7) truncatedByPages = true;
     }
     const listed = { tools: collected };
-    const tools = new Map<string, { def: McpToolDef; validate: ValidateFunction }>();
+    const tools = new Map<string, { def: McpToolDef; validate: ValidateFunction; validateOut?: ValidateFunction }>();
     const excluded: { name: string; reason: string }[] = [];
     const sanitized: { tool: string; keywords: string[] }[] = [];
     const refused: { tool: string; reason: string }[] = [];
@@ -333,7 +430,9 @@ export class McpClient {
       if (safe.stripped.length > 0) sanitized.push({ tool: name, keywords: safe.stripped });
       try {
         const validate = this.#ajv.compile(safe.schema);
-        tools.set(name, { def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: safe.schema }, validate });
+        const outSchema = (raw as { outputSchema?: unknown }).outputSchema;
+        const validateOut = outSchema && typeof outSchema === "object" ? this.#ajv.compile(outSchema as Record<string, unknown>) : undefined;
+        tools.set(name, { ...(validateOut ? { validateOut } : {}), def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: safe.schema }, validate });
       } catch (error) {
         excluded.push({ name, reason: describeOpaque("input schema does not compile", error instanceof Error ? error.message : String(error)) });
       }
@@ -376,27 +475,46 @@ export class McpClient {
       return { ok: false, code: "record_failed", message: this.#final(`the invocation could not be recorded, so it was not sent: ${error instanceof Error ? error.message : String(error)}`) };
     }
     let outcome: McpCallOutcome;
+    // Our own state classifies every failure: the size gate (transport), our deadline timer, and the channel. Error
+    // text from the server is never read, only digested.
+    const pending: PendingCall = { deadlineFired: false, failure: null };
+    const correlation = randomUUID();
+    const controller = new AbortController();
+    const onAbort = (): void => controller.abort();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const remaining = deadlineAt - Date.now();
-      if (remaining <= 0) throw new Error("request timed out before it was sent (the invocation record consumed the deadline)");
-      const result = await this.sdk.callTool({ name, arguments: snapshot }, undefined, { timeout: remaining, ...(call.signal ? { signal: call.signal } : {}) });
-      // Scrub first: redaction can expand a result, and the bound applies to what is actually returned.
+      if (remaining <= 0) { pending.deadlineFired = true; throw new Error("deadline consumed before the call was sent"); }
+      this.#byCorrelation.set(correlation, pending);
+      timer = setTimeout(() => { pending.deadlineFired = true; controller.abort(); }, remaining);
+      call.signal?.addEventListener("abort", onAbort, { once: true });
+      if (call.signal?.aborted) onAbort();
+      // `request`, not `callTool`: the SDK never validates structuredContent (a backtracking validator on server data).
+      // The transport has already refused any oversize message; we validate with the sanitized schema, then scrub, then re-check.
+      const result = (await this.sdk.request({ method: "tools/call", params: { name, arguments: snapshot, _meta: { [CORRELATION_META]: correlation } } }, ResultSchema, { timeout: remaining + 5000, signal: controller.signal })) as { structuredContent?: unknown; isError?: boolean };
+      if (entry.validateOut && !result.isError) {
+        const ok = result.structuredContent !== undefined && (entry.validateOut(result.structuredContent) as unknown) === true;
+        if (!ok) { await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: "output_invalid" } }).catch(() => {}); return { ok: false, code: "output_invalid", message: this.#final(`the result of ${this.#toolRef(name)} does not satisfy its output schema`) }; }
+      }
       const cleaned = this.#clean(result);
       const bytes = utf8Bytes(JSON.stringify(cleaned));
       outcome = bytes > MCP_LIMITS.maxResultBytes
         ? { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${bytes} bytes after redaction; the bound is ${MCP_LIMITS.maxResultBytes}`) }
         : { ok: true, result: cleaned, bytes };
     } catch (error) {
-      // Server-originated text is never carried onward: the caller gets a code, the byte count and a digest.
-      const raw = error instanceof Error ? error.message : String(error);
-      const token = /cognate-internal:([0-9a-f-]{36})/.exec(raw)?.[1];
-      const oversize = token ? this.#internal.get(token) : undefined;
-      if (token && oversize !== undefined) { this.#internal.delete(token); outcome = { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${oversize} bytes; the bound is ${MCP_LIMITS.maxResultBytes}`) }; }
+      if (pending.failure) outcome = { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${pending.failure.bytes} bytes (sha256 ${pending.failure.sha256.slice(0, 16)}); the bound is ${MCP_LIMITS.maxResultBytes}`) };
+      else if (pending.deadlineFired) outcome = { ok: false, code: "deadline_exceeded", message: this.#final("the call did not finish before its deadline") };
+      else if (this.#closed) outcome = { ok: false, code: "server_not_running", message: this.#final(`MCP server ${this.options.serverId} is not running`) };
+      else if (call.signal?.aborted) outcome = { ok: false, code: "cancelled", message: this.#final("the call was cancelled by the caller") };
       else {
-        // Classified from OUR state (the clock, the channel), never from error text the server could write.
-        const code = this.#closed ? "server_not_running" : Date.now() >= deadlineAt - 25 || call.signal?.aborted ? "deadline_exceeded" : "server_error";
-        outcome = { ok: false, code, message: this.#final(describeOpaque(code === "server_error" ? "the server reported an error" : code === "deadline_exceeded" ? "the call timed out" : "the server is not running", raw)) };
+        const payload = error instanceof McpError ? JSON.stringify({ code: error.code, message: error.message, data: (error as { data?: unknown }).data ?? null }) : error instanceof Error ? error.message : String(error);
+        outcome = { ok: false, code: "server_error", message: this.#final(describeOpaque("the server reported an error", payload)) };
       }
+    } finally {
+      if (timer) clearTimeout(timer);
+      call.signal?.removeEventListener("abort", onAbort);
+      this.#byCorrelation.delete(correlation);
+      if (pending.id !== undefined) this.#pendingById.delete(pending.id);
     }
     await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}) } }).catch(() => {});
     return outcome;
