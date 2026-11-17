@@ -749,7 +749,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     slots: {
       acquire: (worldId) => acquireLongLeaseSlot(governedService, SYSTEM_CALLER, { worldId }),
       release: (slotId, wallMs) => releaseLongLeaseSlot(governedService, SYSTEM_CALLER, slotId, "completed", wallMs),
-      releaseAll: () => releaseAllLongLeaseSlots(governedService, SYSTEM_CALLER),
+      releaseAll: (keep) => releaseAllLongLeaseSlots(governedService, SYSTEM_CALLER, keep),
     },
     bootGate: true,
     getPosture: (worldId) => postureRecords.get(worldId),

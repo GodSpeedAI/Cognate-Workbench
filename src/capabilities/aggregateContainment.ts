@@ -375,10 +375,10 @@ export async function releaseLongLeaseSlot(service: RuntimeService, caller: Call
  *  reserved is orphaned - whether its spawn never reached an intent record or its release failed
  *  after the terminal record. Valid under the single-committing-process invariant (section 1.5) and
  *  only before this process spawns anything. */
-export async function releaseAllLongLeaseSlots(service: RuntimeService, caller: Caller): Promise<number> {
+export async function releaseAllLongLeaseSlots(service: RuntimeService, caller: Caller, keep: readonly string[] = []): Promise<number> {
   for (let attempt = 0; attempt < 30; attempt++) {
     const { state, version } = await readState(service, caller);
-    const held = Object.values(state.executions).filter(e => e.status === "reserved" && e.longLease);
+    const held = Object.values(state.executions).filter(e => e.status === "reserved" && e.longLease && !keep.includes(e.id));
     if (held.length === 0) return 0;
     const nowIso = new Date().toISOString();
     for (const e of held) state.executions[e.id] = { ...e, status: "completed", outcome: "reaped", endedAt: nowIso };

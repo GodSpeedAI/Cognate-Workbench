@@ -53,6 +53,8 @@ export interface McpSupervisorOptions {
   readonly registry: () => ExecutionWorldRegistry;
   readonly resolveSecret: (key: string) => Promise<string | undefined>;
   readonly slots: SpawnDeps["slots"];
+  /** Process view seam (tests); defaults to /proc. */
+  readonly proc?: SpawnDeps["proc"];
   readonly getPosture: (worldId: string) => PostureRecord | undefined;
   readonly localHostSpawnAllowed: () => boolean;
   readonly probes?: SpawnDeps["probes"];
@@ -280,7 +282,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       spawned = await spawnGoverned({
         registry: options.registry(), getPosture: options.getPosture, resolveSecret: options.resolveSecret, ledger,
         recordRefusal: async (req, code, reason, extra) => { await decision(req.capabilityId, "mcp.spawn", ctx.actor, "refused", code, reason, { serverId: req.serverId, worldId: req.worldId, point: "spawn", ...extra }); },
-        slots: options.slots, localHostSpawnAllowed: options.localHostSpawnAllowed,
+        slots: options.slots, ...(options.proc ? { proc: options.proc } : {}), localHostSpawnAllowed: options.localHostSpawnAllowed,
         ...(options.probes ? { probes: options.probes } : {}),
         // The LAST step before the intent commit: authorization over the live index, nothing awaited between.
         beforeIntent: async () => {
@@ -449,10 +451,11 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       try {
         const { reconcileSpawnLedger } = await import("./execSpawn.ts");
         const rows = (await options.readRows()).filter((r) => r.key.startsWith("spawn/")).map((r) => r.value as never);
-        const outcomes = await mutex.run(() => reconcileSpawnLedger({ ledger, slots: options.slots }, rows));
+        const outcomes = await mutex.run(() => reconcileSpawnLedger({ ledger, slots: options.slots }, rows, options.proc));
         // Every ledger row is terminal now and nothing has spawned in this process: any long-lease slot still
         // reserved is orphaned (a spawn that never reached its intent, or a failed release) and is freed.
-        await options.slots.releaseAll?.();
+        // Slots whose reconciliation is incomplete (survivors) stay reserved.
+        await options.slots.releaseAll?.(outcomes.filter((o) => o.outcome === "reconcile-incomplete" && o.slotId).map((o) => o.slotId as string));
         openGate(true);
         return outcomes;
       } catch (error) {

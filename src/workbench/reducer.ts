@@ -480,8 +480,8 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const prev = get(key) as { [k: string]: unknown } | undefined;
       if (eventType === "capability.mcp.spawn.intended") return [{ key, value: j({ ...p, status: "intended", intendedAt: recordedAt }) }];
       if (!prev) return [];
-      if (eventType === "capability.mcp.spawned") return [{ key, value: j({ ...prev, status: prev.status === "exited" || prev.status === "reconciled-unknown" ? prev.status : "confirmed", pid: p.pid ?? null, spawnedAt: recordedAt }) }];
-      return [{ key, value: j({ ...prev, status: p.outcome === "reconciled-unknown" ? "reconciled-unknown" : "exited", outcome: p.outcome ?? "unknown", exitCode: p.exitCode ?? null, stopReason: p.stopReason ?? null, termination: p.termination ?? null, stderrTail: p.stderrTail ?? null, endedAt: recordedAt }) }];
+      if (eventType === "capability.mcp.spawned") return [{ key, value: j({ ...prev, status: prev.status === "exited" || prev.status === "reconciled-unknown" || prev.status === "reconcile-incomplete" ? prev.status : "confirmed", pid: p.pid ?? null, spawnedAt: recordedAt }) }];
+      return [{ key, value: j({ ...prev, status: p.outcome === "reconcile-incomplete" || p.reconciled === "reconcile-incomplete" ? "reconcile-incomplete" : p.outcome === "reconciled-unknown" ? "reconciled-unknown" : "exited", outcome: p.outcome ?? "unknown", exitCode: p.exitCode ?? null, stopReason: p.stopReason ?? null, termination: p.termination ?? null, stderrBytes: p.stderrBytes ?? null, stderrSha256: p.stderrSha256 ?? null, endedAt: recordedAt }) }];
     }
     case "authority.grant.issued":
     case "authority.grant.revoked":

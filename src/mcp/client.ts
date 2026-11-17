@@ -49,7 +49,7 @@ export function boundBytes(value: string, max: number): string {
 }
 const MAX_MESSAGE_BYTES = 512;
 
-/** Untrusted schema sanitization (section 11): the server validates its own input, so keywords that run a
+/** Untrusted schema sanitization (section 11, input and output schemas alike): the server validates its own input, so keywords that run a
  *  backtracking regex engine on the event loop (`pattern`, `patternProperties`, every `format`) are stripped,
  *  and depth and node count are bounded. Returns what was stripped, or a refusal reason. */
 const SCHEMA_STRIP = new Set(["pattern", "patternProperties", "format"]);
@@ -70,8 +70,13 @@ export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<stri
         // A property NAMED "pattern" lives under `properties` and is data, not a keyword.
         if (SCHEMA_STRIP.has(key) && typeof v !== "object") { stripped.add(key); continue; }
         if (key === "patternProperties") { stripped.add(key); continue; }
+        // References are never followed: a chain of definitions that each cite their predecessor twice expands
+        // exponentially under validation. `$defs`/`definitions` are dropped; every `$ref` becomes `{}` (accept anything).
+        if ((key === "$defs" || key === "definitions") && v && typeof v === "object") { stripped.add(key); continue; }
         out[key] = walk(v, depth + 1);
       }
+      if (typeof out.$ref === "string") { stripped.add("$ref"); return {}; }
+      for (const k of ["$dynamicRef", "$recursiveRef"]) if (k in out) { stripped.add(k); return {}; }
       return out;
     }
     return value;
@@ -104,7 +109,9 @@ export class ChannelTransport implements Transport {
           this.onmessage?.(this.filter ? this.filter(message) : message);
         }
       } catch (error) {
-        this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+        // The message of a framing/parse error can quote the server's stdout: never forwarded.
+        void error;
+        this.onerror?.(new Error("the server wrote a malformed or oversized message to stdout"));
       }
     });
     this.channel.onClose(() => {

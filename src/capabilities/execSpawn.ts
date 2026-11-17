@@ -19,7 +19,7 @@
 //    through it: those worlds refuse with `stream-port-unavailable` (recorded) once the matrix passes.
 import type { ExecutionWorldProvider, ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { readdir, readFile, readlink } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { StdioChannel } from "../mcp/client.ts";
 
 export type Level = "enforced" | "partial" | "not-enforced";
@@ -111,7 +111,9 @@ export interface SpawnDeps {
   readonly ledger: (spawnId: string, events: readonly LedgerEvent[]) => Promise<void>;
   /** Decision record for a refusal (point "spawn"). */
   readonly recordRefusal: (request: SpawnRequest, code: string, reason: string, extra?: Record<string, unknown>) => Promise<void>;
-  readonly slots: { acquire(worldId: string): Promise<{ slotId: string }>; release(slotId: string, wallMs: number): Promise<void>; /** Boot: free every long-lease slot still reserved after the ledger sweep. */ releaseAll?(): Promise<unknown> };
+  /** Process view seam (tests); defaults to /proc. */
+  readonly proc?: ProcView;
+  readonly slots: { acquire(worldId: string): Promise<{ slotId: string }>; release(slotId: string, wallMs: number): Promise<void>; /** Boot: free every long-lease slot still reserved after the sweep, except the slots in `keep` (survivors). */ releaseAll?(keep: readonly string[]): Promise<unknown> };
   /** The app's execution posture permits host-process spawns on the `local` world. */
   readonly localHostSpawnAllowed: () => boolean;
   /** The LAST step before the intent commit: the authorization (authorizeCapabilityOp). */
@@ -252,15 +254,15 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   const stdin = proc.stdin as unknown as { write(data: string): unknown; flush?(): unknown; end(): unknown };
   const dataListeners: ((chunk: Buffer) => void)[] = [];
   const closeListeners: (() => void)[] = [];
-  // Redaction happens on a retained window that is wider than any secret (never on a slice that could
-  // cut one in half), then the record keeps only the redacted tail.
-  const window = Math.max(8192, 2 * Math.max(0, ...resolved.map((v) => v.length)) + 1024);
-  let stderrTail = "";
+  // Server stderr content is never recorded: truncating before redaction can leave a suffix of an encoded secret,
+  // so the record keeps only the byte count and a SHA-256 of the whole stream.
+  const stderrHash = createHash("sha256");
+  let stderrBytes = 0;
   const pump = async (stream: ReadableStream<Uint8Array>, sink: (chunk: Buffer) => void): Promise<void> => {
     try { for await (const chunk of stream) sink(Buffer.from(chunk)); } catch { /* closed */ }
   };
   void pump(proc.stdout as ReadableStream<Uint8Array>, (chunk) => { for (const l of dataListeners) l(chunk); });
-  void pump(proc.stderr as ReadableStream<Uint8Array>, (chunk) => { stderrTail = (stderrTail + chunk.toString("utf8")).slice(-window); });
+  void pump(proc.stderr as ReadableStream<Uint8Array>, (chunk) => { stderrBytes += chunk.length; stderrHash.update(chunk); });
 
   let stopping = false;
   let stopReason: string | undefined;
@@ -280,7 +282,7 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   };
 
   const groupAlive = (): boolean => { try { process.kill(-pid, 0); return true; } catch { return false; } };
-  const holders = async (): Promise<number[]> => (await procfs.pidsWithSpawnId(spawnId)).filter((p) => p !== process.pid);
+  const holders = async (): Promise<number[]> => (await (deps.proc ?? procfs).pidsWithSpawnId(spawnId)).filter((p) => p !== process.pid);
   /** Alive means: the group answers a probe OR any process still carries the spawn's marker (a descendant that left the group). */
   const anythingAlive = async (): Promise<boolean> => groupAlive() || (await holders()).length > 0;
   const signalAll = async (sig: NodeJS.Signals): Promise<void> => { killGroup(sig); for (const h of await holders()) { try { process.kill(h, sig); } catch { /* gone */ } } };
@@ -300,7 +302,9 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     }
     const outcome = stopping ? "stopped" : exitCode === 0 ? "exited" : "crashed";
     const info: ExitInfo = { outcome, exitCode, ...(stopReason ? { stopReason } : {}) };
-    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome, exitCode, ...(stopReason ? { stopReason } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrTail: redact(stderrTail).slice(-512) } }]).catch(() => {});
+    // Anything that survived is recorded as reconcile-incomplete (the boot sweep re-ends it); the slot stays reserved.
+    const recorded = survivors ? "reconcile-incomplete" : outcome;
+    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: recorded, ...(survivors ? { reconciled: "reconcile-incomplete", endedAs: outcome } : {}), exitCode, ...(stopReason ? { stopReason } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrBytes, stderrSha256: stderrHash.digest("hex") } }]).catch(() => {});
     if (!survivors) await release(); // survivors keep the slot reserved: the boot sweep reconciles them
     for (const l of closeListeners) l();
     return info;
@@ -345,12 +349,12 @@ export interface ProcView {
  *  and by the version-directory signature (command line or cwd) for ledgers that predate the marker.
  *  They are ended as a set: TERM, KILL after the grace period, and the slot is released only when none
  *  survives. The caller runs this before any new spawn. */
-export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slots"> & { readonly graceMs?: number }, rows: readonly LedgerRow[], proc: ProcView = procfs): Promise<{ spawnId: string; outcome: string }[]> {
+export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slots"> & { readonly graceMs?: number }, rows: readonly LedgerRow[], proc: ProcView = procfs): Promise<{ spawnId: string; outcome: string; slotId?: string }[]> {
   const grace = deps.graceMs ?? 1000;
-  const results: { spawnId: string; outcome: string }[] = [];
+  const results: { spawnId: string; outcome: string; slotId?: string }[] = [];
   const signal = (pid: number, sig: NodeJS.Signals): void => { try { process.kill(pid, sig); } catch { /* gone */ } };
   for (const row of rows) {
-    if (row.status !== "intended" && row.status !== "confirmed") continue;
+    if (row.status !== "intended" && row.status !== "confirmed" && row.status !== "reconcile-incomplete") continue;
     const signature = row.bundleDir ?? "";
     const program = (row.argv?.[0] ?? "").split("/").pop() ?? "";
     // Signature identity (older ledgers): the process runs under the version directory AND is the declared program.
@@ -395,7 +399,7 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
     await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), exitCode: null } }]);
     // A slot is released only when nothing of the spawn survives; survivors keep it reserved (and are reported).
     if (row.slotId && !survivors) await deps.slots.release(row.slotId, 0).catch(() => {});
-    results.push({ spawnId: row.spawnId, outcome });
+    results.push({ spawnId: row.spawnId, outcome, ...(row.slotId ? { slotId: row.slotId } : {}) });
   }
   return results;
 }
