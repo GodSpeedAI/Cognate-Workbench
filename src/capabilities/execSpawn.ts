@@ -221,7 +221,8 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   }
   const startedMs = Date.now();
   const spawnId = `spawn-${randomUUID()}`;
-  const base = { spawnId: adoptId(spawnId), capabilityId: adoptId(request.capabilityId), version: adoptId(request.version), serverId: adoptId(request.serverId), ...(request.sessionId ? { sessionId: adoptId(request.sessionId) } : {}), worldId: adoptId(world.worldId), worldKind: adoptId(world.kind) };
+  // Identity fields are runtime-authored and READ BACK by resume and reconciliation: they are preserved exactly (never normalized).
+  const base = { spawnId: adoptId(spawnId), capabilityId: trusted(request.capabilityId), version: trusted(request.version), serverId: trusted(request.serverId), ...(request.sessionId ? { sessionId: trusted(request.sessionId) } : {}), worldId: trusted(world.worldId), worldKind: trusted(world.kind) };
   // One stream per spawn: its records commit strictly in order (CAS on the stream version).
   let chain: Promise<unknown> = Promise.resolve();
   const queued = (events: readonly LedgerEvent[]): Promise<void> => {
@@ -438,7 +439,7 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
       // and every later boot re-checks it, until the group has no live member at all.
       if (groupUnverified) { survivors = true; outcome = "reconcile-incomplete"; }
     }
-    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: adoptId(row.spawnId), capabilityId: adoptId(row.capabilityId), version: adoptId(row.version), serverId: adoptId(row.serverId), ...(row.sessionId ? { sessionId: adoptId(row.sessionId) } : {}), worldId: adoptId(row.worldId), outcome: adoptId(outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown"), reconciled: adoptId(outcome), ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true, reason: adoptId("group-unverified") } : {}), exitCode: null } }]);
+    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: trusted(row.spawnId), capabilityId: trusted(row.capabilityId), version: trusted(row.version), serverId: trusted(row.serverId), ...(row.sessionId ? { sessionId: trusted(row.sessionId) } : {}), worldId: trusted(row.worldId), outcome: adoptId(outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown"), reconciled: adoptId(outcome), ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true, reason: adoptId("group-unverified") } : {}), exitCode: null } }]);
     // A slot is released only when nothing of the spawn survives; survivors keep it reserved (and are reported).
     if (row.slotId && !survivors) await deps.slots.release(row.slotId, 0).catch(() => {});
     results.push({ spawnId: row.spawnId, outcome, ...(row.slotId ? { slotId: row.slotId } : {}) });

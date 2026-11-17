@@ -13,6 +13,7 @@ import { acquireLongLeaseSlot, releaseAllLongLeaseSlots, releaseLongLeaseSlot, C
 import { decideContainment, reconcileSpawnLedger, spawnGoverned, worldMatrix, type LedgerEvent, type PostureRecord, type SpawnDeps, type SpawnRequest } from "../src/capabilities/execSpawn.ts";
 import { createMcpSupervisor } from "../src/capabilities/mcpManage.ts";
 import { MCP_LIMITS, McpClient, utf8Bytes } from "../src/mcp/client.ts";
+import { digestId } from "../src/mcp/typedRecord.ts";
 import { authorizeCapabilityOp } from "../src/workbench/authoritySelection.ts";
 import { AuthorityIndex } from "../src/workbench/authorityIndex.ts";
 import { bootApp, enableCapabilityRuntime, registerBundle, SYSTEM, waitUntil, withTempHome, allEvents, wbRows } from "./wb-helpers.ts";
@@ -319,7 +320,7 @@ describe("J-CAP-mcp: the client treats the server as untrusted (tools/list pages
     const { channel } = fakeServer([{ tools: [tool("sync", { type: "object", properties: { n: { type: "integer" } } }), tool("lazy", { $async: true, type: "object", properties: { n: { type: "integer" } } })] }]);
     const client = await McpClient.connect(channel, { capabilityId: CAP, version: "v", serverId: "fake", record: async () => {} });
     expect(client.tools().map((t) => t.name)).toEqual(["sync"]);
-    expect(client.excluded).toEqual([{ name: "lazy", reason: "asynchronous input schemas are not accepted" }]);
+    expect(client.excluded).toEqual([{ name: digestId("lazy"), reason: "asynchronous input schemas are not accepted" }]);
     expect(await client.callTool("sync", { n: "x" }, { timeoutMs: 1000, actorId: "t" })).toMatchObject({ ok: false, code: "schema_invalid" });
   });
 

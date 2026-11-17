@@ -1,7 +1,8 @@
 // The one ingress boundary for server-originated bytes (root-cause class fix, review-r4). Everything a spawned MCP server
 // writes passes through here, in this order, before the SDK client or any consumer sees a value:
 //   1. a stream cap: a line is buffered only up to `maxMessageBytes` (a copy of the current partial line, never a view of
-//      a larger chunk); beyond it nothing more is kept, only a running byte count and an incremental SHA-256;
+//      a larger chunk); the moment a line crosses it the violation is reported (byte count and SHA-256 of what was received
+//      so far) and the framer stops, so an unterminated oversize line cannot hold a connection open;
 //   2. a depth limit (`maxDepth`), checked on the bytes BEFORE any JSON parse, so a deeply nested document can never
 //      overflow a recursive parser, stringifier or validator downstream;
 //   3. a strict JSON-RPC envelope, producing typed values (`Inbound`).
@@ -97,9 +98,6 @@ export function parseInbound(line: Uint8Array, bytes = line.length): Inbound | V
 export class LineFramer {
   #pieces: Buffer[] = [];
   #held = 0;
-  #total = 0;
-  #discarding = false;
-  #hash: ReturnType<typeof newSha256> | undefined;
   #stopped = false;
   /** The most bytes ever buffered for one line (transport-level counter for the cap invariant). */
   peakBufferedBytes = 0;
@@ -111,7 +109,22 @@ export class LineFramer {
     let offset = 0;
     while (offset < chunk.length && !this.#stopped) {
       const nl = chunk.indexOf(10, offset);
-      this.#take(chunk.subarray(offset, nl < 0 ? chunk.length : nl));
+      const piece = chunk.subarray(offset, nl < 0 ? chunk.length : nl);
+      if (this.#held + piece.length > INGRESS.maxMessageBytes) {
+        // Crossed the cap: report now (what was received so far) and stop; nothing more is read from this connection.
+        const hash = newSha256();
+        for (const kept of this.#pieces) hash.update(kept);
+        hash.update(piece);
+        this.#stopped = true;
+        const bytes = this.#held + piece.length;
+        this.#pieces = [];
+        this.#held = 0;
+        events.push({ kind: "violation", violation: { reason: "oversize", bytes, sha256: hash.digest() } });
+        break;
+      }
+      this.#pieces.push(Buffer.from(piece)); // a copy: never a view that would pin a larger chunk
+      this.#held += piece.length;
+      this.peakBufferedBytes = Math.max(this.peakBufferedBytes, this.#held);
       if (nl < 0) break;
       const event = this.#end();
       if (event) events.push(event);
@@ -120,36 +133,12 @@ export class LineFramer {
     return events;
   }
 
-  #take(piece: Buffer): void {
-    this.#total += piece.length;
-    if (this.#discarding) { this.#hash!.update(piece); return; }
-    if (this.#held + piece.length > INGRESS.maxMessageBytes) {
-      this.#discarding = true;
-      this.#hash = newSha256();
-      for (const kept of this.#pieces) this.#hash.update(kept);
-      this.#hash.update(piece);
-      this.#pieces = [];
-      this.#held = 0;
-      return;
-    }
-    this.#pieces.push(Buffer.from(piece)); // a copy: never a view that would pin a larger chunk
-    this.#held += piece.length;
-    this.peakBufferedBytes = Math.max(this.peakBufferedBytes, this.#held);
-  }
-
   #end(): FrameEvent | undefined {
-    const discarding = this.#discarding;
-    const total = this.#total;
-    const sha = this.#hash?.digest();
-    const line = discarding ? undefined : Buffer.concat(this.#pieces);
+    const line = Buffer.concat(this.#pieces);
     this.#pieces = [];
     this.#held = 0;
-    this.#total = 0;
-    this.#discarding = false;
-    this.#hash = undefined;
-    if (discarding) { this.#stopped = true; return { kind: "violation", violation: { reason: "oversize", bytes: total, sha256: sha! } }; }
-    if (!line || line.length === 0 || (line.length < 64 && line.toString("utf8").trim() === "")) return undefined;
-    const parsed = parseInbound(line, total);
+    if (line.length === 0 || (line.length < 64 && line.toString("utf8").trim() === "")) return undefined;
+    const parsed = parseInbound(line);
     if ("reason" in parsed) { this.#stopped = true; return { kind: "violation", violation: parsed }; }
     return { kind: "message", message: parsed };
   }

@@ -32,7 +32,7 @@ const json: fc.Arbitrary<unknown> = fc.letrec((tie) => ({
   tree: fc.oneof({ depthSize: "small" }, fc.string({ maxLength: 40 }), fc.integer(), fc.boolean(), fc.constant(null), fc.array(tie("tree"), { maxLength: 3 }), fc.dictionary(fc.string({ maxLength: 12 }), tie("tree"), { maxKeys: 3 })),
 })).tree;
 const validName = fc.stringMatching(/^[A-Za-z0-9_.-]{16,40}$/);
-const tool = fc.record({ name: fc.oneof(validName, validName, fc.string({ minLength: 1, maxLength: 300 })), description: text, extra: json, extraKey: fc.string({ minLength: 1, maxLength: 24 }), withOutput: fc.boolean() });
+const tool = fc.record({ name: fc.oneof(validName, validName, fc.string({ minLength: 1, maxLength: 300 })), description: text, extra: json, extraKey: fc.string({ minLength: 1, maxLength: 24 }), withOutput: fc.boolean(), quirk: fc.constantFrom("none" as const, "none" as const, "async" as const, "bigDescription" as const, "hugeSchema" as const) });
 const behavior = fc.oneof(
   fc.record({ kind: fc.constant("ok" as const), text, delay: fc.nat(25), structured: fc.boolean() }),
   fc.record({ kind: fc.constant("error" as const), message: text, data: json }),
@@ -49,6 +49,8 @@ const scenario = fc.record({
   splits: fc.array(fc.integer({ min: 1, max: 6000 }), { maxLength: 5 }),
   handshake: fc.constantFrom("ok" as const, "ok" as const, "ok" as const, "ok" as const, "error" as const, "garbage" as const),
   handshakeText: text,
+  duplicateFirstTool: fc.boolean(),
+  recorder: fc.constantFrom("fast" as const, "fast" as const, "slow" as const, "stuck-finished" as const),
 });
 type Scenario = typeof scenario extends fc.Arbitrary<infer T> ? T : never;
 
@@ -93,7 +95,8 @@ async function runScenario(sc: Scenario): Promise<void> {
           else if (sc.handshake === "garbage") emit(Buffer.from(`${sc.handshakeText} {{not json\n`));
           else emit(frame({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: m.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "f", version: "1" } } }));
         } else if (m.method === "tools/list") {
-          emit(frame({ jsonrpc: "2.0", id: m.id, result: { tools: sc.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: { type: "object", additionalProperties: true, [t.extraKey]: t.extra }, ...(t.withOutput ? { outputSchema: { type: "object", [t.extraKey]: t.extra } } : {}) })) } }));
+          const listed = sc.duplicateFirstTool ? [sc.tools[0]!, ...sc.tools] : sc.tools;
+          emit(frame({ jsonrpc: "2.0", id: m.id, result: { tools: listed.map((t) => ({ name: t.name, description: t.quirk === "bigDescription" ? t.description.repeat(200) : t.description, inputSchema: { type: "object", additionalProperties: true, [t.extraKey]: t.extra, ...(t.quirk === "async" ? { $async: true } : {}), ...(t.quirk === "hugeSchema" ? { blob: "y".repeat(20_000) } : {}) }, ...(t.withOutput ? { outputSchema: { type: "object", [t.extraKey]: t.extra } } : {}) })) } }));
         } else if (m.method === "tools/call") {
           const b = sc.calls[arrivals++ % sc.calls.length]!.behavior;
           if (b.kind === "ok") emit(frame({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text: b.text }], ...(b.structured ? { structuredContent: { v: b.text } } : {}) } }), b.delay);
@@ -115,7 +118,7 @@ async function runScenario(sc: Scenario): Promise<void> {
   const records: McpRecord[] = [];
   let client: McpClient;
   try {
-    client = await McpClient.connect(channel as never, { capabilityId: "capability.bundle.props", version: "v", serverId: "gen", record: async (e) => { records.push(e); }, connectTimeoutMs: 400 });
+    client = await McpClient.connect(channel as never, { capabilityId: "capability.bundle.props", version: "v", serverId: "gen", record: async (e) => { if (sc.recorder === "slow") await sleep(30); if (sc.recorder === "stuck-finished" && e.payload.phase === "finished") return new Promise<void>(() => {}); records.push(e); }, connectTimeoutMs: 400 });
   } catch (error) {
     // A failed handshake is a defined outcome; it must carry no server text.
     expect(String((error as Error).message), "a failed handshake must not carry server text").toBe("MCP handshake failed");
@@ -149,7 +152,8 @@ async function runScenario(sc: Scenario): Promise<void> {
   if (ON.has("I2")) for (let i = 0; i < sc.calls.length; i++) {
     expect(outcomes[i], `call ${i} threw`).not.toBe("threw");
     const finished = records.filter((r) => r.type === "capability.mcp.tool_invoked" && r.payload.phase === "finished" && r.payload.callId === `call-${i}`);
-    expect(finished.length, `call ${i}: finished records`).toBe(1);
+    if (sc.recorder === "stuck-finished") expect(finished.length, `call ${i}: finished records`).toBeLessThanOrEqual(1);
+    else expect(finished.length, `call ${i}: finished records`).toBe(1);
     const t = timings[i]!;
     expect(t.ended - t.started, `call ${i}: elapsed`).toBeLessThan(t.timeoutMs + 400);
   }
@@ -173,7 +177,7 @@ function assertNoLeak(emitted: Buffer[], records: McpRecord[], messages: string[
 
 // Counterexamples found against 1d84225 (seeds 1605260349 I1, -187584161 I2, 666881820 I3, 1997416318 handshake), kept as
 // fixed examples. Each is the shrunk shape of the generated failure.
-const base = { tools: [{ name: "_A-0A-a.a.A.000.", description: "                ", extra: [] as unknown, extraKey: " ", withOutput: false }], splits: [] as number[], parallel: false, handshake: "ok" as const, handshakeText: "                " };
+const base = { tools: [{ name: "_A-0A-a.a.A.000.", description: "                ", extra: [] as unknown, extraKey: " ", withOutput: false, quirk: "none" as const }], splits: [] as number[], parallel: false, handshake: "ok" as const, handshakeText: "                ", duplicateFirstTool: false, recorder: "fast" as const };
 const call = (behavior: Scenario["calls"][number]["behavior"], pick = 0) => ({ pick, unknownName: "                ", args: {} as unknown, timeoutMs: 40, behavior });
 const FIXED: Scenario[] = [
   { ...base, calls: [call({ kind: "earlyExit" })] }, // I1: a 16-byte tool name was recorded verbatim
@@ -181,6 +185,8 @@ const FIXED: Scenario[] = [
   { ...base, calls: [call({ kind: "oversize", size: CAP_BYTES + 150_000, newline: false, as: "result" })] }, // I3: an unterminated oversize line
   { ...base, calls: [call({ kind: "error", message: "                ", data: {} })], handshake: "garbage" }, // handshake error text
   { ...base, calls: [call({ kind: "deepError", depth: 20_000 })] }, // a deeply nested error payload
+  { ...base, tools: [{ ...base.tools[0]!, quirk: "async" as const }], calls: [call({ kind: "hang" })] }, // an excluded tool must not be listed by name (review thread)
+  { ...base, recorder: "stuck-finished" as const, calls: [call({ kind: "ok", text: "                ", delay: 0, structured: false })] }, // a recorder that never settles
 ];
 
 describe("J-CAP-t3-properties: the MCP client against a generated adversarial server", () => {

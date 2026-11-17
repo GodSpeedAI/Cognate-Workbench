@@ -15,7 +15,7 @@ import { serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ResultSchema, type JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import Ajv, { type ValidateFunction } from "ajv";
-import { INGRESS, LineFramer, measureJson, parseToolResult, snapshotJson, jsonBytes, type RpcId, type Violation } from "./ingress.ts";
+import { isPlain, LineFramer, measureJson, parseToolResult, snapshotJson, jsonBytes, type RpcId, type Violation } from "./ingress.ts";
 import { adoptId, digestId, mintId, sha256Of, text, trusted, type CallCode, type MintedId, type RecordCode, type Sha256, type Trusted, type TypedPayload } from "./typedRecord.ts";
 
 /** The wrapper-owned byte channel to a spawned server: what the SDK transport needs, nothing more. */
@@ -152,7 +152,18 @@ export class ChannelTransport implements Transport {
           this.hooks.onServerError?.(m.id, m.code, m.digest);
           this.onmessage?.({ jsonrpc: "2.0", id: m.id, error: { code: m.code, message: "server error" } } as JSONRPCMessage);
         } else if (m.kind === "notification") this.onmessage?.({ jsonrpc: "2.0", method: m.method, ...(m.params ? { params: m.params } : {}) } as JSONRPCMessage);
-        else { const wire = { jsonrpc: "2.0", id: m.id, result: m.result } as JSONRPCMessage; this.onmessage?.(this.filter ? this.filter(wire) : wire); }
+        else {
+          const wire = { jsonrpc: "2.0", id: m.id, result: m.result } as JSONRPCMessage;
+          let out: JSONRPCMessage;
+          try { out = this.filter ? this.filter(wire) : wire; } catch {
+            // An entry that is not what the envelope promised: the same connection-level violation as malformed bytes.
+            const size = measureJson(m.result);
+            this.hooks.onViolation?.({ reason: "malformed", bytes: size.bytes ?? 0, sha256: size.sha256 ?? sha256Of("") });
+            void this.close().catch(() => {});
+            return;
+          }
+          this.onmessage?.(out);
+        }
       }
     });
     this.channel.onClose(() => {
@@ -214,6 +225,16 @@ export class McpConnectError extends Error {
   constructor(readonly digest: { readonly bytes: number | null; readonly sha256: Sha256 | null }) { super("MCP handshake failed"); }
 }
 
+/** How long past its deadline a call may wait for its finished record. */
+const FINISH_GRACE_MS = 250;
+/** Wait for a promise at most `ms` (the promise itself is left running). */
+function settleWithin(promise: Promise<void>, ms: number): Promise<"done" | "failed" | "timeout"> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve("timeout"), Math.max(0, ms));
+    promise.then(() => { clearTimeout(timer); resolve("done"); }, () => { clearTimeout(timer); resolve("failed"); });
+  });
+}
+
 /** Per-call state, owned by us: classification of a failure comes from here, never from error text or elapsed time. */
 interface PendingCall {
   id?: RpcId;
@@ -260,6 +281,8 @@ export class McpClient {
     if (!result || !Array.isArray(result.tools)) return message;
     const refusals: { tool: MintedId; reason: Trusted }[] = [];
     const sanitizations: { tool: MintedId; keywords: Trusted[] }[] = [];
+    // Every entry is checked before any field is read: a non-object entry is malformed input (a protocol violation).
+    if (!result.tools.every(isPlain)) throw new Error("malformed tools list");
     const tools = result.tools.map((raw: Record<string, unknown>, index: number) => {
       if (raw.outputSchema === undefined) return raw;
       const { outputSchema, ...rest } = raw;
@@ -364,15 +387,15 @@ export class McpClient {
       const name = this.#scrub(rawName);
       if (name !== rawName) { excluded.push({ name: ref, reason: "name carried secret material" }); continue; }
       const description = this.#scrub(String(raw.description ?? ""));
-      if (utf8Bytes(description) > MCP_LIMITS.maxDescriptionBytes) { excluded.push({ name, reason: "description exceeds the byte bound" }); continue; }
+      if (utf8Bytes(description) > MCP_LIMITS.maxDescriptionBytes) { excluded.push({ name: ref, reason: "description exceeds the byte bound" }); continue; }
       const snap = snapshotJson<{ $async?: unknown }>(raw.inputSchema, MCP_LIMITS.maxSchemaBytes);
-      if (!snap) { excluded.push({ name, reason: "input schema exceeds the byte bound" }); refused.push({ tool: ref, reason: trusted("input schema exceeds the byte bound") }); continue; }
-      if (tools.has(name)) { excluded.push({ name, reason: "duplicate tool name" }); continue; }
+      if (!snap) { excluded.push({ name: ref, reason: "input schema exceeds the byte bound" }); refused.push({ tool: ref, reason: trusted("input schema exceeds the byte bound") }); continue; }
+      if (tools.has(name)) { excluded.push({ name: ref, reason: "duplicate tool name" }); continue; }
       const parsed = this.#clean(snap.value);
       // An `$async` schema would make `validate` return a Promise (truthy): never accept one.
-      if (parsed && typeof parsed === "object" && (parsed as { $async?: unknown }).$async) { excluded.push({ name, reason: "asynchronous input schemas are not accepted" }); continue; }
+      if (parsed && typeof parsed === "object" && (parsed as { $async?: unknown }).$async) { excluded.push({ name: ref, reason: "asynchronous input schemas are not accepted" }); continue; }
       const safe = sanitizeSchema(parsed);
-      if (!safe.ok) { excluded.push({ name, reason: safe.reason }); refused.push({ tool: ref, reason: trusted(safe.reason) }); continue; }
+      if (!safe.ok) { excluded.push({ name: ref, reason: safe.reason }); refused.push({ tool: ref, reason: trusted(safe.reason) }); continue; }
       if (safe.stripped.length > 0) sanitized.push({ tool: ref, keywords: safe.stripped.map(trusted) });
       try {
         const validate = this.#ajv.compile(safe.schema);
@@ -380,7 +403,7 @@ export class McpClient {
         const validateOut = outSchema && typeof outSchema === "object" ? this.#ajv.compile(outSchema as Record<string, unknown>) : undefined;
         tools.set(name, { ...(validateOut ? { validateOut } : {}), def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: safe.schema }, validate });
       } catch (error) {
-        excluded.push({ name, reason: `input schema does not compile (${digestOfError(error).bytes ?? "?"} bytes)` });
+        excluded.push({ name: ref, reason: `input schema does not compile (${digestOfError(error).bytes ?? "?"} bytes)` });
       }
     }
     for (const r of refused) await this.#decision("refused", "schema-refused", r.reason, { tool: r.tool }).catch(() => {});
@@ -423,8 +446,11 @@ export class McpClient {
       ...(pending.failure ? { violation: pending.failure.reason === "oversize" ? "oversize-message" : pending.failure.reason === "too-deep" ? "too-deep-message" : "malformed-message", violationBytes: pending.failure.bytes, violationSha256: pending.failure.sha256, attributed: false } : {}),
       ...(pending.serverError ? { serverErrorBytes: pending.serverError.bytes, serverErrorSha256: pending.serverError.sha256 } : {}),
     };
-    try { await this.#rec("capability.mcp.tool_invoked", finished); } catch {
-      try { await this.#rec("capability.mcp.tool_invoked", { phase: "finished", outcome: outcome.ok ? "ok" : outcome.code }); } catch { /* the recorder is down: nothing more can be done */ }
+    // The wait for the finished record is part of the call's time: deadline + a short grace. A recorder that is slower or never
+    // settles cannot hold the call; its write is left to land on its own (never duplicated).
+    const until = deadlineAt + FINISH_GRACE_MS;
+    if ((await settleWithin(this.#rec("capability.mcp.tool_invoked", finished), until - Date.now())) === "failed") {
+      await settleWithin(this.#rec("capability.mcp.tool_invoked", { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code }), until - Date.now());
     }
     return outcome;
   }
@@ -444,12 +470,10 @@ export class McpClient {
     const verdict = entry.validate(snapshot) as unknown;
     if (verdict instanceof Promise) { void verdict.catch(() => {}); return fail("schema_invalid", trusted("the server's schema is asynchronous and cannot be enforced")); }
     if (!verdict) return fail("schema_invalid", text`arguments for ${tool} violate the server's schema (${entry.validate.errors?.length ?? 0} violation(s))`);
-    // Record BEFORE the call is sent: an unrecordable invocation is not made.
-    try {
-      await this.#rec("capability.mcp.tool_invoked", { ...base, phase: "started", argumentsSha256: sha256Of(argText), argumentBytes: argBytes });
-    } catch {
-      return fail("record_failed", trusted("the invocation could not be recorded, so it was not sent"));
-    }
+    // Record BEFORE the call is sent: an unrecordable invocation is not made. The wait counts against the call's deadline.
+    const wrote = await settleWithin(this.#rec("capability.mcp.tool_invoked", { ...base, phase: "started", argumentsSha256: sha256Of(argText), argumentBytes: argBytes }), deadlineAt - Date.now());
+    if (wrote === "failed") return fail("record_failed", trusted("the invocation could not be recorded, so it was not sent"));
+    if (wrote === "timeout") { pending.deadlineFired = true; return fail("deadline_exceeded", trusted("the invocation record consumed the deadline; nothing was sent")); }
     trace.started = true;
     try {
       const remaining = deadlineAt - Date.now();

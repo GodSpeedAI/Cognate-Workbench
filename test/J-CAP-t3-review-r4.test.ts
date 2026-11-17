@@ -399,7 +399,7 @@ describe("J-CAP-t3-review-r4 simple rules: oversize closes the connection and fa
     await settle(channel, client, records, () => channel.emit(Buffer.from(`{"jsonrpc":"2.0","method":"notifications/message","params":{"pad":"${"n".repeat(300_000)}"}}\n`)));
   });
 
-  test("one 32 MB chunk with no newline never buffers more than the cap (transport counter), and the next newline ends it", async () => {
+  test("one 32 MB chunk with no newline is reported at once, never buffers more than the cap (transport counter), and closes", async () => {
     let onData: (chunk: Buffer) => void = () => {};
     let closed = false;
     let seen: { bytes: number; sha256: string } | undefined;
@@ -408,8 +408,7 @@ describe("J-CAP-t3-review-r4 simple rules: oversize closes the connection and fa
     const big = Buffer.alloc(32 * 1024 * 1024, 97);
     onData(big);
     expect(transport.peakBufferedBytes).toBeLessThanOrEqual(MCP_LIMITS.maxResultBytes);
-    onData(Buffer.from("\n"));
-    expect(seen).toMatchObject({ bytes: 32 * 1024 * 1024 });
+    expect(seen).toMatchObject({ bytes: 32 * 1024 * 1024 }); // reported when the cap was crossed: no newline needed
     expect(seen!.sha256).toBe((await import("node:crypto")).createHash("sha256").update(big).digest("hex"));
     await sleep(10);
     expect(closed).toBe(true);
@@ -447,5 +446,64 @@ describe("J-CAP-t3-review-r4 simple rules: the failure path never throws", () =>
     expect(outcome).toMatchObject({ ok: false, code: "server_error" });
     expect(records.some((r) => r.payload.phase === "finished" && r.payload.outcome === "server_error")).toBe(true);
     expect(client.pendingCount).toBe(0);
+  });
+});
+
+// ---- CodeRabbit threads on d540597 ----
+
+describe("J-CAP-t3-review-r4 threads: identity, malformed entries, listings, fallback records, deadline-bounded recording", () => {
+  test("a session id with a space is preserved exactly in the durable spawn row (resume compares it)", async () => {
+    const { createExecutionWorldRegistry, localExecutionWorld } = await import("@godspeedai/cognate-execution");
+    const { spawnGoverned } = await import("../src/capabilities/execSpawn.ts");
+    const events: LedgerEvent[] = [];
+    const result = await spawnGoverned({
+      registry: createExecutionWorldRegistry([localExecutionWorld()]), getPosture: () => LOCAL_POSTURE, resolveSecret: async () => undefined,
+      ledger: async (_id, evs) => { events.push(...evs); }, recordRefusal: async () => {},
+      slots: { acquire: async () => ({ slotId: "s" }), release: async () => {} },
+      localHostSpawnAllowed: () => true, beforeIntent: async () => undefined, graceMs: 100, killMs: 100,
+    }, { capabilityId: CAP, version: "v", serverId: "stub", sessionId: "session one", worldId: "local", argv: ["sh", "-c", "exit 0"], cwd: "/", bundleDir: "/nonexistent/bundle", secrets: [], restrictions: {}, stop: "graceful" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await result.handle.exited;
+    for (const e of events) expect((e.payload as Record<string, unknown>).sessionId).toBe("session one");
+  });
+
+  test("tools:[null] is a protocol violation: connect fails, the connection closes, nothing throws out of the data handler", async () => {
+    const channel = scripted({ tools: [null as never] });
+    await expect(McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {}, connectTimeoutMs: 500 })).rejects.toThrow(/handshake failed/);
+    expect(channel.state.closed).toBe(true);
+  });
+
+  test("the exclusion listing names a tool only by digest, whatever the reason", async () => {
+    const name = "a-long-tool-name-over-16";
+    const client = await McpClient.connect(scripted({ tools: [{ name, description: "d", inputSchema: { type: "object", $async: true } }, { name: "second-long-tool-name", description: "x".repeat(3000), inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
+    expect(client.excluded.length).toBe(2);
+    expect(JSON.stringify(client.excluded)).not.toContain("long-tool-name");
+  });
+
+  test("the fallback finished record keeps the call's identity", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { if (e.payload.phase === "finished" && e.payload.resultBytes !== undefined) throw new Error("detailed write fails"); records.push(e); } });
+    expect(await client.callTool("t", {}, { timeoutMs: 3000, actorId: "t", callId: "call-fallback" })).toMatchObject({ ok: true });
+    const finished = records.filter((r) => r.payload.phase === "finished");
+    expect(finished.length).toBe(1);
+    expect(finished[0]!.payload.callId).toBe("call-fallback");
+  });
+
+  test("a slow started-recorder counts against the deadline: the call returns at its deadline and nothing is sent", async () => {
+    const channel = scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] });
+    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { if (e.payload.phase === "started") await sleep(1000); } });
+    const started = performance.now();
+    const outcome = await client.callTool("t", {}, { timeoutMs: 60, actorId: "t" });
+    expect(performance.now() - started).toBeLessThan(400);
+    expect(outcome).toMatchObject({ ok: false, code: "deadline_exceeded" });
+    expect(channel.callIds.length).toBe(0);
+  });
+
+  test("a finished-recorder that never settles cannot hold the call", async () => {
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: (e) => (e.payload.phase === "finished" ? new Promise<void>(() => {}) : Promise.resolve()) });
+    const started = performance.now();
+    expect(await client.callTool("t", {}, { timeoutMs: 100, actorId: "t" })).toMatchObject({ ok: true });
+    expect(performance.now() - started).toBeLessThan(700);
   });
 });
