@@ -19,7 +19,8 @@
 //    through it: those worlds refuse with `stream-port-unavailable` (recorded) once the matrix passes.
 import type { ExecutionWorldProvider, ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { readdir, readFile, readlink } from "node:fs/promises";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { adoptId, digestText, newSha256, operatorJson, trusted, type TypedPayload, type Trusted } from "../mcp/typedRecord.ts";
 import type { StdioChannel } from "../mcp/client.ts";
 
 export type Level = "enforced" | "partial" | "not-enforced";
@@ -101,7 +102,7 @@ export interface SpawnRequest {
   readonly stop: "graceful" | "emergency";
 }
 
-export type LedgerEvent = { readonly type: string; readonly payload: Record<string, unknown> };
+export type LedgerEvent = { readonly type: "capability.mcp.spawn.intended" | "capability.mcp.spawned" | "capability.mcp.exited"; readonly payload: TypedPayload };
 
 export interface SpawnDeps {
   readonly registry: ExecutionWorldRegistry;
@@ -110,9 +111,11 @@ export interface SpawnDeps {
   /** Commit ledger records (one stream per spawn). A throw means "not recorded". */
   readonly ledger: (spawnId: string, events: readonly LedgerEvent[]) => Promise<void>;
   /** Decision record for a refusal (point "spawn"). */
-  readonly recordRefusal: (request: SpawnRequest, code: string, reason: string, extra?: Record<string, unknown>) => Promise<void>;
+  readonly recordRefusal: (request: SpawnRequest, code: string, reason: Trusted, extra?: TypedPayload) => Promise<void>;
   /** Process view seam (tests); defaults to /proc. */
   readonly proc?: ProcView;
+  /** How long past the kill grace a survivor is waited for (ms); tests shorten it. */
+  readonly reapWaitMs?: number;
   readonly slots: { acquire(worldId: string): Promise<{ slotId: string }>; release(slotId: string, wallMs: number): Promise<void>; /** Boot: free every long-lease slot still reserved after the sweep, except the slots in `keep` (survivors). */ releaseAll?(keep: readonly string[]): Promise<unknown> };
   /** The app's execution posture permits host-process spawns on the `local` world. */
   readonly localHostSpawnAllowed: () => boolean;
@@ -179,8 +182,9 @@ export function makeScrubber(secrets: readonly { readonly name: string; readonly
 }
 
 export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Promise<SpawnResult> {
-  const refuse = async (code: string, reason: string, extra: Record<string, unknown> = {}): Promise<SpawnResult> => {
-    await deps.recordRefusal(request, code, reason, extra).catch(() => {});
+  // The reasons below are composed here from the operator's registry and our own codes (never from a server).
+  const refuse = async (code: string, reason: string, extra: TypedPayload = {}): Promise<SpawnResult> => {
+    await deps.recordRefusal(request, code, trusted(reason), extra).catch(() => {});
     return { ok: false, code, reason };
   };
   if (!deps.registry.has(request.worldId)) return refuse("world-unavailable", `execution world ${request.worldId} is not connected`);
@@ -217,7 +221,7 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   }
   const startedMs = Date.now();
   const spawnId = `spawn-${randomUUID()}`;
-  const base = { spawnId, capabilityId: request.capabilityId, version: request.version, serverId: request.serverId, ...(request.sessionId ? { sessionId: request.sessionId } : {}), worldId: world.worldId, worldKind: world.kind };
+  const base = { spawnId: adoptId(spawnId), capabilityId: adoptId(request.capabilityId), version: adoptId(request.version), serverId: adoptId(request.serverId), ...(request.sessionId ? { sessionId: adoptId(request.sessionId) } : {}), worldId: adoptId(world.worldId), worldKind: adoptId(world.kind) };
   // One stream per spawn: its records commit strictly in order (CAS on the stream version).
   let chain: Promise<unknown> = Promise.resolve();
   const queued = (events: readonly LedgerEvent[]): Promise<void> => {
@@ -232,7 +236,7 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   try {
     await deps.ledger(spawnId, [{
       type: "capability.mcp.spawn.intended",
-      payload: { ...base, argv: [...request.argv], cwd: request.cwd, bundleDir: request.bundleDir, secretRefs: request.secrets.map((s) => ({ env: s.env, key: s.key })), slotId: slot.slotId, stop: request.stop, restrictions: request.restrictions as unknown as Record<string, unknown>, relaxed: decision.relaxed as unknown as Record<string, unknown>[], termination: decision.termination },
+      payload: { ...base, argv: request.argv.map(trusted), cwd: trusted(request.cwd), bundleDir: trusted(request.bundleDir), secretRefs: request.secrets.map((x) => ({ env: trusted(x.env), key: trusted(x.key) })), slotId: adoptId(slot.slotId), stop: adoptId(request.stop), restrictions: operatorJson(request.restrictions), relaxed: operatorJson(decision.relaxed), termination: adoptId(decision.termination) },
     }]);
   } catch (error) {
     await release();
@@ -246,7 +250,8 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     proc = Bun.spawn([...request.argv], { cwd: request.cwd, env: { ...env, COGNATE_SPAWN_ID: spawnId }, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: true });
   } catch (error) {
     const message = redact(error instanceof Error ? error.message : String(error));
-    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: "spawn-failed", exitCode: null, stderrTail: message.slice(0, 512) } }]).catch(() => {});
+    const failure = digestText(message);
+    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: adoptId("spawn-failed"), exitCode: null, errorBytes: failure.bytes, errorSha256: failure.sha256 } }]).catch(() => {});
     await release();
     return { ok: false, code: "spawn-failed", reason: message };
   }
@@ -256,7 +261,7 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   const closeListeners: (() => void)[] = [];
   // Server stderr content is never recorded: truncating before redaction can leave a suffix of an encoded secret,
   // so the record keeps only the byte count and a SHA-256 of the whole stream.
-  const stderrHash = createHash("sha256");
+  const stderrHash = newSha256();
   let stderrBytes = 0;
   const pump = async (stream: ReadableStream<Uint8Array>, sink: (chunk: Buffer) => void): Promise<void> => {
     try { for await (const chunk of stream) sink(Buffer.from(chunk)); } catch { /* closed */ }
@@ -299,7 +304,7 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     let survivors = false;
     if (await anythingAlive()) {
       await signalAll("SIGTERM");
-      if (!(await waitGroupGone(grace))) { await signalAll("SIGKILL"); survivors = !(await waitGroupGone(killAfter + 1000)); }
+      if (!(await waitGroupGone(grace))) { await signalAll("SIGKILL"); survivors = !(await waitGroupGone(killAfter + (deps.reapWaitMs ?? 1000))); }
     }
     const outcome = stopping ? "stopped" : exitCode === 0 ? "exited" : "crashed";
     const info: ExitInfo = { outcome, exitCode, ...(stopReason ? { stopReason } : {}) };
@@ -311,8 +316,8 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
     await Promise.race([Promise.all([stdoutDrained, stderrDrained]), new Promise((resolve) => { drainTimer = setTimeout(resolve, 1000); })]);
     clearTimeout(drainTimer);
     stderrSealed = true;
-    const stderrSha256 = stderrHash.digest("hex");
-    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: recorded, ...(survivors ? { reconciled: "reconcile-incomplete", endedAs: outcome } : {}), exitCode, ...(stopReason ? { stopReason } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: decision.termination === "enforced" ? "group-kill" : "best-effort", stderrBytes, stderrSha256 } }]).catch(() => {});
+    const stderrSha256 = stderrHash.digest();
+    await queued([{ type: "capability.mcp.exited", payload: { ...base, outcome: adoptId(recorded), ...(survivors ? { reconciled: adoptId("reconcile-incomplete"), endedAs: adoptId(outcome) } : {}), exitCode, ...(stopReason ? { stopReason: adoptId(stopReason) } : {}), pgid: pid, ...(survivors ? { survivors: true } : {}), termination: adoptId(decision.termination === "enforced" ? "group-kill" : "best-effort"), stderrBytes, stderrSha256 } }]).catch(() => {});
     if (!survivors) await release(); // survivors keep the slot reserved: the boot sweep reconciles them
     for (const l of closeListeners) l();
     return info;
@@ -433,7 +438,7 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
       // and every later boot re-checks it, until the group has no live member at all.
       if (groupUnverified) { survivors = true; outcome = "reconcile-incomplete"; }
     }
-    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true, reason: "group-unverified" } : {}), exitCode: null } }]);
+    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: adoptId(row.spawnId), capabilityId: adoptId(row.capabilityId), version: adoptId(row.version), serverId: adoptId(row.serverId), ...(row.sessionId ? { sessionId: adoptId(row.sessionId) } : {}), worldId: adoptId(row.worldId), outcome: adoptId(outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown"), reconciled: adoptId(outcome), ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true, reason: adoptId("group-unverified") } : {}), exitCode: null } }]);
     // A slot is released only when nothing of the spawn survives; survivors keep it reserved (and are reported).
     if (row.slotId && !survivors) await deps.slots.release(row.slotId, 0).catch(() => {});
     results.push({ spawnId: row.spawnId, outcome, ...(row.slotId ? { slotId: row.slotId } : {}) });

@@ -166,7 +166,19 @@ describe("J-CAP-t3-review-r4 items 5 and 6: no server-originated text is persist
     });
   });
 
-  test("stdout junk, a call error and an oversized tool name leave no private text in any record", async () => {
+  test("non-protocol stdout is a protocol violation: the start fails and no record carries the junk", async () => {
+    await withTempHome(async (home) => {
+      const { app, client } = await bootApp(home, { executionPostureRecords: [LOCAL_POSTURE], mcpSupervisorTimings: { graceMs: 400, killMs: 400 } });
+      try {
+        await enableCapabilityRuntime(app, client);
+        await install(app, client, home, "junk");
+        await expect(client.invoke("capability.mcp.start", { capabilityId: CAP, serverId: "hostile" })).rejects.toThrow(/handshake/);
+        expect(JSON.stringify(await allEvents(app))).not.toContain("PRIVATE-STDOUT-JUNK");
+      } finally { await app.stop?.(); }
+    });
+  });
+
+  test("a call error and an oversized tool name leave no private text in any record", async () => {
     await withTempHome(async (home) => {
       const { app, client } = await bootApp(home, { executionPostureRecords: [LOCAL_POSTURE], mcpSupervisorTimings: { graceMs: 400, killMs: 400 } });
       try {
@@ -177,7 +189,6 @@ describe("J-CAP-t3-review-r4 items 5 and 6: no server-originated text is persist
         await sleep(100);
         const text = JSON.stringify(await allEvents(app));
         expect(text).not.toContain("PRIVATE-CALL-TEXT");
-        expect(text).not.toContain("PRIVATE-STDOUT-JUNK");
         expect(text).not.toContain("PRIVATE-NAME-");
       } finally { await app.stop?.(); }
     });
@@ -314,7 +325,7 @@ describe("J-CAP-t3-review-r4 thread: the stderr digest covers the whole stream",
     await result.handle.exited;
     const exited = events.find((e) => e.type === "capability.mcp.exited")!;
     expect(exited.payload.stderrBytes).toBe(3_000_000);
-    expect(exited.payload.stderrSha256).toBe((await import("node:crypto")).createHash("sha256").update(Buffer.alloc(3_000_000, 97)).digest("hex"));
+    expect((exited.payload as Record<string, unknown>).stderrSha256).toBe((await import("node:crypto")).createHash("sha256").update(Buffer.alloc(3_000_000, 97)).digest("hex"));
   });
 });
 
@@ -392,7 +403,7 @@ describe("J-CAP-t3-review-r4 simple rules: oversize closes the connection and fa
     let onData: (chunk: Buffer) => void = () => {};
     let closed = false;
     let seen: { bytes: number; sha256: string } | undefined;
-    const transport = new ChannelTransport({ onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() { closed = true; }, write() {} } as never, undefined, { onOversize: (bytes, sha256) => { seen = { bytes, sha256 }; } });
+    const transport = new ChannelTransport({ onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() { closed = true; }, write() {} } as never, undefined, { onViolation: (v) => { seen = { bytes: v.bytes, sha256: v.sha256 }; } });
     await transport.start();
     const big = Buffer.alloc(32 * 1024 * 1024, 97);
     onData(big);

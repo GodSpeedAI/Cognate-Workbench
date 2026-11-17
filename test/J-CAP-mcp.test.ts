@@ -147,7 +147,7 @@ describe("J-CAP-mcp: record-before-spawn, secrets, slots, sweep (CUJ 3)", () => 
     const result = await spawnGoverned(deps({ ledger: events, slots: { acquire: async () => ({ slotId: "s9" }), release: async (id) => { released.push(id); } } }), request({ argv: ["/nonexistent/binary-xyz"], cwd: "/" }));
     expect(result).toMatchObject({ ok: false, code: "spawn-failed" });
     expect(events.map((e) => e.type)).toEqual(["capability.mcp.spawn.intended", "capability.mcp.exited"]);
-    expect(events[1]!.payload.outcome).toBe("spawn-failed");
+    expect((events[1]!.payload as Record<string, unknown>).outcome).toBe("spawn-failed");
     expect(released).toEqual(["s9"]);
   });
 
@@ -161,7 +161,7 @@ describe("J-CAP-mcp: record-before-spawn, secrets, slots, sweep (CUJ 3)", () => 
       if (result.ok) await result.handle.exited;
       expect(readFileSync(out, "utf8")).toBe(SECRET);
       expect(JSON.stringify(events)).not.toContain(SECRET);
-      expect(events[0]!.payload.secretRefs).toEqual([{ env: "STUB_TOKEN", key: "stub-token" }]);
+      expect((events[0]!.payload as Record<string, unknown>).secretRefs).toEqual([{ env: "STUB_TOKEN", key: "stub-token" }]);
 
       const refusals: string[] = [];
       const intents: LedgerEvent[] = [];
@@ -255,7 +255,7 @@ describe("J-CAP-mcp: record-before-spawn, secrets, slots, sweep (CUJ 3)", () => 
     if (result.ok) await result.handle.exited;
     const serialized = JSON.stringify(events);
     expect(serialized).not.toContain("kkkkkkkkkkkkkkkk"); // no fragment of the secret body survives
-    expect(events.at(-1)!.payload.outcome).toBe("crashed");
+    expect((events.at(-1)!.payload as Record<string, unknown>).outcome).toBe("crashed");
   });
 
   test("boot gate: no spawn before the reconciliation, and a failed reconciliation keeps spawning disabled; a shut-down supervisor admits none", async () => {

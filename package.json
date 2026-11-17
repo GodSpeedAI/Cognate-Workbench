@@ -60,6 +60,7 @@
     "@types/react-dom": "19.2.2",
     "@types/ssh2": "^1.15.5",
     "agent-browser": "^0.41.1",
+    "fast-check": "4.10.2",
     "typescript": "7.0.2"
   },
   "description": "Capability-native agent Workbench, powered by the published Cognate SDK",

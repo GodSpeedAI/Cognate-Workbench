@@ -180,7 +180,7 @@ describe("J-CAP-t3-review-r1 finding 4: an untrusted schema cannot freeze the ap
 
   test("oversize, over-deep and over-wide schemas are refused with a recorded refusal", async () => {
     let deep: Record<string, unknown> = { type: "string" };
-    for (let i = 0; i < 40; i++) deep = { type: "object", properties: { x: deep } };
+    for (let i = 0; i < 20; i++) deep = { type: "object", properties: { x: deep } }; // 40 JSON levels: over the schema bound, under the ingress depth limit
     const wide = { type: "object", properties: Object.fromEntries(Array.from({ length: 700 }, (_, i) => [`p${i}`, { type: "string" }])) };
     const records: { type: string; payload: Record<string, unknown> }[] = [];
     const client = await McpClient.connect(server([deep, wide, { type: "object" }]) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });

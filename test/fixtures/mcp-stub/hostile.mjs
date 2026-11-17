@@ -1,10 +1,10 @@
 // A hostile stdio MCP server for the review-r4 journeys: it puts private text in a handshake error (mode
-// "handshake"), or in non-protocol stdout, a call error and an oversized tool name (mode "call").
+// "handshake"), or non-protocol stdout (mode "junk"), or a call error and an oversized tool name (mode "call").
 import { createInterface } from "node:readline";
 
 const mode = process.argv[2] ?? "call";
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
-if (mode === "call") process.stdout.write("PRIVATE-STDOUT-JUNK {not json\n");
+if (mode === "junk") process.stdout.write("PRIVATE-STDOUT-JUNK {not json\n");
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
   let message;
