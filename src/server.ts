@@ -27,6 +27,9 @@ import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
 import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
+import { createMcpSupervisor, type McpSupervisor } from "./capabilities/mcpManage.ts";
+import { acquireLongLeaseSlot, releaseLongLeaseSlot } from "./capabilities/aggregateContainment.ts";
+import type { PostureRecord } from "./capabilities/execSpawn.ts";
 import { runStartResolverComponent } from "./agents/runStartResolver.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
@@ -187,6 +190,11 @@ export interface ServerOptions {
   readonly extraMediators?: readonly MediatorSpec[];
   /** Test seam (capability runtime T2): fault/observation points inside the dispatcher. Never set in production. */
   readonly capabilityRuntimeHooks?: CapabilityRuntimeHooks;
+  /** Operator-authored execution-posture records (design 6.2): per world, the weaker enforcement
+   *  levels the operator accepts for executable payloads. Absent = every unenforceable restriction refuses. */
+  readonly executionPostureRecords?: readonly PostureRecord[];
+  /** Supervisor timings for executable payloads (graceful drain, SIGTERM-to-SIGKILL). Defaults apply in production. */
+  readonly mcpSupervisorTimings?: { readonly graceMs?: number; readonly killMs?: number };
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -326,6 +334,11 @@ const GRANTED_CAPABILITIES = [
   // T2: the run-start resolver's read-only faces (data and records, never authority).
   "capability.harness.resolve",
   "capability.harness.refresh",
+  // T3: MCP server lifecycle and operator suspension. Operator-only (authorizeCapabilityOp).
+  "capability.mcp.start",
+  "capability.mcp.stop",
+  "capability.bundle.suspend",
+  "capability.bundle.resume",
 ];
 
 function buildPolicy(): Policy {
@@ -717,6 +730,32 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       return false;
     },
   });
+  // T3: the MCP supervisor (spawn boundary, server lifecycle, the dispatcher's MCP host). All of its
+  // dependencies are lazy: it is constructed before the runtime exists.
+  const postureRecords = new Map((options.executionPostureRecords ?? []).map((r) => [r.worldId, r] as const));
+  const mcpSupervisor: McpSupervisor = createMcpSupervisor({
+    tenant: LOCAL_OPERATOR.tenant,
+    getRecorder: () => capabilityRuntimeRecorder,
+    getIndex: () => capabilityRuntimeIndex,
+    isEnabled: async () => isCapabilityRuntimeEnabled(),
+    deploymentOk: () => capabilityDeploymentOk(),
+    mutex: capabilityMutex,
+    readRows: async () => (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows.map((r) => ({ key: r.key, value: r.value })),
+    recordDecision: async (event) => {
+      await capabilityRuntimeRecorder.commitBatch(`decisions:${String(event.payload.capability ?? "runtime")}`, [event]);
+    },
+    registry: () => executionWorlds,
+    resolveSecret: (key) => secrets.get(key),
+    slots: {
+      acquire: (worldId) => acquireLongLeaseSlot(governedService, SYSTEM_CALLER, { worldId }),
+      release: (slotId, wallMs) => releaseLongLeaseSlot(governedService, SYSTEM_CALLER, slotId, "completed", wallMs),
+    },
+    getPosture: (worldId) => postureRecords.get(worldId),
+    localHostSpawnAllowed: () => executionPosture === "uncontained-local",
+    probes: async (provider) => ({ prlimitVerified: await provider.process.exec({ argv: ["sh", "-c", "command -v prlimit >/dev/null 2>&1"], cwd: "/", timeoutMs: 10_000 }).then((r) => r.exitCode === 0).catch(() => false) }),
+    ...(options.mcpSupervisorTimings ?? {}),
+    semanticRefs: capabilityRuntimeRefs,
+  });
   const runtime: Runtime = await createRuntime({
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
@@ -846,9 +885,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
           await capabilityRuntimeRecorder.commitBatch(`decisions:${String((event.payload as Record<string, unknown>).capability ?? "runtime")}`, [event as { type: string; payload: Record<string, unknown> }]);
         },
         activeSet: [],
+        getMcpHost: () => mcpSupervisor.host,
         ...(options.capabilityRuntimeHooks ? { hooks: options.capabilityRuntimeHooks } : {}),
         semanticRefs: capabilityRuntimeRefs,
       }),
+      mcpSupervisor.component(),
       runStartResolverComponent({
         isEnabled: isCapabilityRuntimeEnabled,
         deploymentOk: capabilityDeploymentOk,
@@ -913,6 +954,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }
     }
   })();
+  // T3: suspension/deactivation/uninstall/repoint/session expiry stop servers in the commit's own turn;
+  // the boot sweep then reconciles every spawn the ledger left non-terminal (before any new spawn).
+  const unwatchMcp = mcpSupervisor.watch(runtime.store);
+  void capabilityRuntimeIndex.ready.then(() => mcpSupervisor.reconcileBoot()).catch(() => {});
   const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex, new Date(), capabilityMutex).catch(() => {}); }, 60_000);
   grantExpirySweep.unref?.();
 
@@ -1339,6 +1384,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     operatorSessionToken: operatorSession.token,
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
+      unwatchMcp();
+      await mcpSupervisor.shutdown();
       await terminalService.dispose();
       await browserService.dispose();
       await harnessHost.shutdown();

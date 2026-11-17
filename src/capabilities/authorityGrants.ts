@@ -23,7 +23,7 @@ const GRANT_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 const PRINCIPAL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 /** Structural v1 allowance sets (§1.3): what the level constants permit. A permission outside
  *  the set is refused at issue — the allowance family itself is deliberately not a record. */
-const KNOWN_PERMISSIONS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate", "bundle.deactivate", "*"]);
+const KNOWN_PERMISSIONS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate", "bundle.deactivate", "mcp.server", "*"]);
 
 export interface AuthorityGrantsOptions {
   /** The shared runtime mutex (activation, deactivation, uninstall, grant issue/revoke). */

@@ -34,6 +34,23 @@ export interface BundleManifestData {
   readonly complements?: readonly string[];
   readonly owns?: readonly string[];
   readonly harness?: unknown;
+  /** Executable payloads (T3): MCP servers the governed spawn boundary may run (design §2.2, §6). */
+  readonly mcpServers?: readonly McpServerDecl[];
+}
+
+export interface McpServerDecl {
+  readonly id: string;
+  /** argv; `${bundleDir}` is the only placeholder (the verified version directory). Never carries secrets. */
+  readonly command: readonly string[];
+  /** Secret REFERENCES: store key -> environment variable. Values resolve at spawn, env-only. */
+  readonly secrets?: readonly { readonly env: string; readonly key: string }[];
+  readonly restrictions?: {
+    readonly filesystem?: readonly string[];
+    readonly network?: { readonly outbound: readonly string[] };
+    readonly caps?: { readonly memoryBytes?: number; readonly cpuSeconds?: number };
+    readonly subprocess?: boolean;
+  };
+  readonly stop?: "graceful" | "emergency";
 }
 
 export interface Descriptor {
