@@ -4,6 +4,7 @@
 // The provider-parameterized part (local / SSH / WSL) asserts the matrix and the honest refusal for
 // worlds whose framework process port exposes no stream (see execSpawn.ts).
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -151,7 +152,7 @@ describe("J-CAP-mcp: record-before-spawn, secrets, slots, sweep (CUJ 3)", () => 
   });
 
   test("secrets reach the child's environment only: never argv, never a record; a missing key refuses before any intent", async () => {
-    const SECRET = "tok-9f8e7d6c5b4a-SECRET";
+    const SECRET = `tok-${randomUUID()}-SECRET`;
     await withTempHome(async (home) => {
       const events: LedgerEvent[] = [];
       const out = join(home, "env.txt");
@@ -294,7 +295,7 @@ describe("J-CAP-mcp: the lifecycle through the app (CUJ 3, local world)", () => 
   }, 120000);
 
   test("secrets resolve env-only through the store: the child sees the value, no event and no argv does", async () => {
-    const SECRET = "tok-1a2b3c4d5e6f-NEVER-RECORD";
+    const SECRET = `tok-${randomUUID()}-NEVER-RECORD`;
     await withTempHome(async (home) => {
       const { app, client } = await boot(home);
       try {
