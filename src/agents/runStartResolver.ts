@@ -26,6 +26,7 @@ import type { Component, CapabilityContract, HandlerContext, SemanticRef } from 
 import type { Json } from "@godspeedai/cognate-events";
 import type { AuthorityIndex, ActivationRow } from "../workbench/authorityIndex.ts";
 import { DescriptorRegistry, assembleDescriptorSection, type BundleManifestData, type Descriptor } from "../capabilities/skillLoader.ts";
+import { principalForActor, governingActivation, liveClamp, liveAuthorityFor, liveGrant, permissionCovered } from "../workbench/authoritySelection.ts";
 import { INSTRUCTION_SECTIONS, composeSections, effectiveToolset, orderSources, sha, validateHarness, hasHarness, type PatchSource } from "../workbench/harnessPatches.ts";
 
 export interface ResolverRow { readonly key: string; readonly value: unknown }
@@ -41,6 +42,9 @@ export interface RunStartResolverDeps {
 export interface ResolveInput {
   readonly runId?: string;
   readonly sessionId?: string;
+  /** The run's responsible principal (R2-2): patches apply only when its grant ∩ the operator
+   *  root's covers harness.modify. Absent = nothing is authorized to apply patches. */
+  readonly principalId?: string;
   readonly preset?: string;
   /** The base preset's tool names (`PRESET_TOOLS[preset]`) — the delta is computed against it. */
   readonly baseTools?: readonly string[];
@@ -62,6 +66,8 @@ export type ResolveResult =
       readonly descriptorHash: string;
       /** The record the loop emits as `capability.harness.assembled`. */
       readonly assembled: RecordedEvent;
+      /** `authority.decision.recorded` records for patches refused at assembly; the loop emits them. */
+      readonly decisions?: readonly RecordedEvent[];
     };
 
 export type RefreshResult =
@@ -95,13 +101,17 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
     const rows = new Map((await deps.readRows()).map((r) => [r.key, r.value] as const));
     const now = (deps.now ?? (() => new Date()))().getTime();
     const out: Eligible[] = [];
-    for (const row of index.activations.values()) {
-      if (row.state !== "active" || row.suspensionReasons.length > 0) continue;
-      if (row.sessionId && row.sessionId !== sessionId) continue;
-      if (row.clampProvenance !== "operator") {
-        const clamp = [...index.grants.values()].find((g) => g.grantId === row.clampProvenance);
-        if (!clamp || clamp.status !== "active" || (clamp.expiresAt && new Date(clamp.expiresAt).getTime() <= now)) continue;
-      }
+    const seen = new Set<string>();
+    for (const candidate of index.activations.values()) {
+      const slot = `${candidate.capabilityId}|${candidate.level}`;
+      if (seen.has(slot)) continue;
+      seen.add(slot);
+      // R2-3: the SAME governing-row selection as the dispatcher — a session row that exists
+      // governs (a suspended one blocks; it is never skipped in favour of the persistent row).
+      const governing = governingActivation(index, candidate.capabilityId, candidate.level, sessionId, true);
+      const row = governing.row;
+      if (!row || row.state !== "active" || row.suspensionReasons.length > 0) continue;
+      if (!liveClamp(index, row, now).ok) continue;
       const activation = rows.get(`activation/${row.capabilityId}/${row.level}${row.sessionId ? `/${row.sessionId}` : ""}`) as { activatedAt?: string } | undefined;
       const version = rows.get(`bundle-version/${row.capabilityId}/${row.version}`) as { manifest?: BundleManifestData | null } | undefined;
       out.push({ row, activatedAt: activation?.activatedAt ?? "", manifest: version?.manifest ?? undefined });
@@ -115,8 +125,9 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
     return assembleDescriptorSection(built);
   };
 
-  const patchSources = (eligible: readonly Eligible[]): PatchSource[] => {
+  const patchSources = (index: AuthorityIndex, eligible: readonly Eligible[], principalId: string | undefined, decisions: RecordedEvent[], runId: string | undefined): PatchSource[] => {
     const out: PatchSource[] = [];
+    const now = (deps.now ?? (() => new Date()))().getTime();
     for (const e of eligible) {
       if (!e.manifest) continue;
       // Patches apply only inside the activation's ceiling: harness.modify must be covered.
@@ -128,6 +139,16 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
         continue; // re-validated on read: a declaration that no longer validates contributes nothing
       }
       if (!hasHarness(harness)) continue;
+      // R2-2: the responsible principal's grant ∩ the live root grant must cover harness.modify.
+      const refuse = (reasonCode: string, reason: string) => {
+        decisions.push({ type: "authority.decision.recorded", payload: { decisionId: `harness-patch:${runId ?? "run"}:${e.row.capabilityId}`, point: "run-start", actorId: principalId ?? "unknown", actorKind: "agent", capability: e.row.capabilityId, operation: "harness.apply", outcome: "refused", reasonCode, reason } });
+      };
+      if (!principalId) { refuse("no-principal", "the run carries no responsible principal; harness patches are not applied"); continue; }
+      const grant = liveGrant(index, principalId, now);
+      if (!grant.ok) { refuse(grant.code, grant.reason); continue; }
+      if (!permissionCovered(grant.grant.permissions, "harness.modify")) { refuse("beyond-grant", `the grant of ${principalId} does not cover harness.modify`); continue; }
+      const authority = liveAuthorityFor(index, e.row, "harness.modify", now);
+      if (!authority.ok) { refuse(authority.code, authority.reason); continue; }
       out.push({ capabilityId: e.row.capabilityId, version: e.row.version, level: e.row.level, ...(e.row.sessionId ? { sessionId: e.row.sessionId } : {}), activatedAt: e.activatedAt, harness });
     }
     return out;
@@ -147,7 +168,8 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
       if (!index) return { enabled: true, refused: true, reasonCode: "index-unavailable", reason: "the capability authority index is unavailable — the run refuses to start (fail-closed, §3.2)" };
       const sequence = index.sequence();
       const eligible = await eligibleFor(index, input.sessionId);
-      const sources = orderSources(patchSources(eligible));
+      const decisions: RecordedEvent[] = [];
+      const sources = orderSources(patchSources(index, eligible, input.principalId, decisions, input.runId));
       const composed = composeSections({}, sources);
       const descriptor = descriptorSection(eligible);
       const base = input.baseTools ?? [];
@@ -189,6 +211,7 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
         sequence,
         descriptorHash,
         assembled,
+        ...(decisions.length > 0 ? { decisions } : {}),
       };
     },
 
@@ -239,7 +262,9 @@ export function runStartResolverComponent(options: RunStartResolverDeps & { read
     activate(fiber) {
       fiber.provide(contracts[0] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {
         const input = (raw ?? {}) as ResolveInput;
-        return (await resolver.resolve({ ...input, runId: input.runId ?? ctx.runId })) as unknown as Json;
+        const principal = principalForActor(ctx.actor, ctx.runId);
+        // The principal is derived from the call's actor, never from the input.
+        return (await resolver.resolve({ ...input, runId: input.runId ?? ctx.runId, principalId: principal.ok ? principal.principalId : undefined })) as unknown as Json;
       });
       fiber.provide(contracts[1] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {
         const input = (raw ?? {}) as { sessionId?: string; sinceSequence?: number; runId?: string };

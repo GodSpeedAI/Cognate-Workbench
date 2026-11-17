@@ -68,6 +68,14 @@ describe("J-CAP-harness", () => {
         await client.invoke("capability.bundle.activate", { capabilityId: "capability.bundle.h-one" });
         await waitUntil("h-one activation row", async () => (await wbRows(app)).get("activation/capability.bundle.h-one/user"));
 
+        // R2-2: the run's responsible principal (wb-agent:coding) holds no harness.modify grant yet,
+        // so the patch is NOT applied (refused and recorded) even though the activation is live.
+        const ungranted = await runAndInspect(app, client, aimock.port, seeded, "run-ungranted");
+        expect(ungranted.seen.body).not.toContain("Run the repo formatter before every edit.");
+        await waitUntil("harness-apply refusal", async () => [...(await wbRows(app))].map(([, v]) => v as Record<string, unknown>).find((d) => d.operation === "harness.apply" && d.reasonCode === "no-grant"));
+        await client.invoke("authority.grant.issue", { grantId: "grant-coding", principalId: "wb-agent:coding", permissions: ["capability.invoke", "skill.load", "harness.modify"] });
+        await waitUntil("coding grant indexed", async () => (await client.invoke("authority.grant.list", {}) as { grants: { grantId: string }[] }).grants.some((g) => g.grantId === "grant-coding"));
+
         // The NEXT run demonstrably uses both modifications.
         const used = await runAndInspect(app, client, aimock.port, seeded, "run-with-h-one");
         expect(used.seen.body).toContain("Run the repo formatter before every edit.");
@@ -162,7 +170,7 @@ describe("J-CAP-harness", () => {
 
   describe("run-start resolver (unit): fail-closed and live discovery", () => {
     const row = (capabilityId: string): ActivationRow => ({ capabilityId, level: "user", version: "v1", ceiling: ["capability.invoke", "skill.load"], clampProvenance: "operator", state: "active", suspensionReasons: [] });
-    const fakeIndex = (rows: ActivationRow[], sequence: () => number): AuthorityIndex => ({ activations: new Map(rows.map((r) => [r.capabilityId, r])), grants: new Map(), ready: Promise.resolve(), sequence } as unknown as AuthorityIndex);
+    const fakeIndex = (rows: ActivationRow[], sequence: () => number): AuthorityIndex => ({ activations: new Map(rows.map((r) => [r.capabilityId, r])), grants: new Map(), ready: Promise.resolve(), sequence, selectActivation: (capabilityId: string) => rows.find((r) => r.capabilityId === capabilityId) } as unknown as AuthorityIndex);
     const bundleRow = (capabilityId: string) => ({ key: `bundle-version/${capabilityId}/v1`, value: { manifest: { name: capabilityId, purpose: `purpose of ${capabilityId}`, skills: [{ name: "guide", entry: "G.md", isEntryDocument: true }] } } });
 
     test("index unavailable at run start: the run refuses to start (fail-closed)", async () => {

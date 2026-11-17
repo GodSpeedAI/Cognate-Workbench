@@ -33,8 +33,16 @@ export interface AuthorityGrantsOptions {
    *  workbench projection; the component stays decoupled from projection plumbing). */
   readonly isRemediationVerified: () => boolean | Promise<boolean>;
   /** §1.5 predicate input: the supported single-committing-process store kinds. */
-  readonly storeKind: "pg0" | "memory" | "external-postgres";
+  readonly storeKind: "pg0" | "memory" | "external-postgres" | "external-postgres-single-writer";
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
+}
+
+/** §1.5: an external PostgreSQL is a multi-writer store UNLESS the operator declares the deployment
+ *  single-committing-process (`COGNATE_CAPABILITY_SINGLE_WRITER=1`) — a fact the operator asserts
+ *  (one process on a dedicated database), never inferred. */
+export function classifyCapabilityStore(env: Readonly<Record<string, string | undefined>>): AuthorityGrantsOptions["storeKind"] {
+  if (!env.COGNATE_POSTGRES_URL) return "pg0";
+  return env.COGNATE_CAPABILITY_SINGLE_WRITER === "1" ? "external-postgres-single-writer" : "external-postgres";
 }
 
 const CONTRACT_IDS = ["authority.grant.issue", "authority.grant.revoke", "authority.grant.list", "capability.runtime.enable"] as const;

@@ -23,14 +23,14 @@ import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
-import { authorityGrantsComponent, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
+import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
 import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
 import { runStartResolverComponent } from "./agents/runStartResolver.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
-import { agentExpert } from "./agents/agentExpert.ts";
+import { createAgentExpert } from "./agents/agentExpert.ts";
 import { expertsComponent, ExpertsService } from "./experts/service.ts";
 import { ExpertCompletionBridge } from "./experts/bridge.ts";
 import { reconcileBilling, runInvocationInspector } from "./experts/billing.ts";
@@ -51,7 +51,7 @@ import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/rea
 import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent, AGENT_CONFIG } from "./agents/agentConfig.ts";
-import { agentCodingAgent } from "./agents/agentCoding.ts";
+import { createAgentCodingAgent } from "./agents/agentCoding.ts";
 import { agentHarnessAgent } from "./agents/agentHarness.ts";
 import { harnessComponent } from "./capabilities/harness.ts";
 import { terminalComponent } from "./capabilities/terminal.ts";
@@ -682,7 +682,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let pollApprovals: (() => Promise<number>) | undefined;
   let capabilityRuntimeIndex!: AuthorityIndex;
   let capabilityRuntimeRecorder!: LifecycleRecorder;
-  const capabilityStoreKind: "pg0" | "memory" | "external-postgres" = process.env.COGNATE_POSTGRES_URL ? "external-postgres" : "pg0";
+  const capabilityStoreKind = classifyCapabilityStore(process.env);
   const isRemediationVerified = async (): Promise<boolean> => {
     const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
     return rows.some((r) => r.key === "runtime/remediation");
@@ -696,6 +696,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       return false;
     }
   };
+  const capabilityAwareCoding = createAgentCodingAgent({ isCapabilityRuntimeEnabled });
   const runtime: Runtime = await createRuntime({
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
@@ -716,7 +717,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, agentCodingAgent, agentHarnessAgent, agentCognitiveAgent, agentExpert],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding)],
     components: [
       terminalComponent({
         getService,

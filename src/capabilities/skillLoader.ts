@@ -14,7 +14,8 @@
 // `capability.integrity_failed` + an `integrity` suspension. The authoring source is never read.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { scanBundle, versionHashFor } from "./bundleStore.ts";
+import { createHash } from "node:crypto";
+import { BUNDLE_LIMITS, scanBundle, versionHashFor } from "./bundleStore.ts";
 
 export const DESCRIPTOR_BUDGETS = { perCapabilityTokens: 400, aggregateTokens: 4000, maxSkillLines: 8, maxToolLines: 8 } as const;
 /** Conservative token estimate (4 chars per token) — the same scale the budgets are pinned to. */
@@ -84,13 +85,11 @@ export function assembleDescriptorSection(descriptors: readonly Descriptor[], bu
   const sorted = [...descriptors].sort((a, b) => (a.capabilityId < b.capabilityId ? -1 : a.capabilityId > b.capabilityId ? 1 : 0));
   const included: Descriptor[] = [];
   const omitted: string[] = [];
-  let used = 0;
   const reserve = 40; // room for the omitted-notice line
+  // R2-6: the budget counts the joining newlines too — measure the joined text, not a sum.
   for (const d of sorted) {
-    if (used + d.tokens + reserve <= budgetTokens) {
-      included.push(d);
-      used += d.tokens;
-    } else omitted.push(d.capabilityId);
+    if (estimateTokens([...included.map((i) => i.text), d.text].join("\n")) + reserve <= budgetTokens) included.push(d);
+    else omitted.push(d.capabilityId);
   }
   const lines = included.map((d) => d.text);
   if (omitted.length > 0) lines.push(`(${omitted.length} further capabilities omitted: aggregate descriptor budget of ${budgetTokens} tokens reached)`);
@@ -140,13 +139,25 @@ export async function loadSkill(bundle: LoadableBundle, requested: unknown): Pro
   // Closed vocabulary: a manifest skill by name or by its declared entry path — nothing else.
   const skill = bundle.manifest.skills.find((s) => s.name === id || s.entry === id);
   if (!skill) return { ok: false, code: "not_found", message: `skill ${id} is not declared by ${bundle.capabilityId}@${bundle.versionHash}`, retryable: false };
-  if (!(await verifyBundleIntegrity(bundle.dir, bundle.versionHash, bundle.manifest))) {
-    return { ok: false, code: "integrity", message: `${bundle.capabilityId}@${bundle.versionHash}: version directory failed its integrity check — load refused`, retryable: false };
-  }
+  // R2-5: verify and serve the SAME bytes. The directory scan must reproduce the recorded identity;
+  // the entry is then read exactly once, bounded, hashed, compared with the verified digest, and
+  // those very bytes are returned — never re-read after the check.
+  const integrity = (): SkillLoadResult => ({ ok: false, code: "integrity", message: `${bundle.capabilityId}@${bundle.versionHash}: version directory failed its integrity check — load refused`, retryable: false });
+  let digest: string | undefined;
   try {
-    const content = await readFile(join(bundle.dir, skill.entry), "utf8");
-    return { ok: true, result: { skillId: id, name: skill.name, entry: skill.entry, isEntryDocument: skill.isEntryDocument === true, version: bundle.versionHash, content } };
+    const scanned = await scanBundle(bundle.dir);
+    if (versionHashFor(scanned.manifest, bundle.manifest) !== bundle.versionHash) return integrity();
+    digest = scanned.manifest.find((line) => line.slice(0, line.lastIndexOf(":")) === skill.entry)?.slice(skill.entry.length + 1);
   } catch {
-    return { ok: false, code: "not_found", message: `skill entry ${skill.entry} is missing from ${bundle.capabilityId}@${bundle.versionHash}`, retryable: false };
+    return integrity();
   }
+  if (!digest) return { ok: false, code: "not_found", message: `skill entry ${skill.entry} is missing from ${bundle.capabilityId}@${bundle.versionHash}`, retryable: false };
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(join(bundle.dir, skill.entry));
+  } catch {
+    return integrity();
+  }
+  if (bytes.byteLength > BUNDLE_LIMITS.maxFileBytes || createHash("sha256").update(bytes).digest("hex") !== digest) return integrity();
+  return { ok: true, result: { skillId: id, name: skill.name, entry: skill.entry, isEntryDocument: skill.isEntryDocument === true, version: bundle.versionHash, content: bytes.toString("utf8") } };
 }

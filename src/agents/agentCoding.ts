@@ -463,7 +463,12 @@ async function invokeTool(
   }
 }
 
-export const agentCodingAgent: AgentDefinition = {
+export interface AgentCodingDeps {
+  /** Durable runtime-enablement read (§1.7). Absent = the capability runtime is off for this agent. */
+  readonly isCapabilityRuntimeEnabled?: () => Promise<boolean>;
+}
+
+export const createAgentCodingAgent = (deps: AgentCodingDeps = {}): AgentDefinition => ({
   id: AGENT_CODING,
   version: "1.0.0",
   async run(input, ctx) {
@@ -474,7 +479,13 @@ export const agentCodingAgent: AgentDefinition = {
     // from durable activation state. Disabled runtime = no-op; enabled with the index
     // unavailable = the run refuses to start (fail-closed, recorded). Nothing mutates a running
     // run's configuration; only the discovery section refreshes (below).
-    const harness = (await ctx.invoke("capability.harness.resolve", { sessionId, runId: ctx.runId, ...(isAgentPreset(preset) ? { preset, baseTools: PRESET_TOOLS[preset] } : {}) } as unknown as Json)) as unknown as
+    // Disabled runtime: no resolver call at all — no patches, no new capability traffic. The
+    // enablement read is recorded once per run (replay-stable) when the host provides a step box.
+    const readEnabled = deps.isCapabilityRuntimeEnabled;
+    const runtimeEnabled = readEnabled
+      ? await ((ctx as { step?: <T>(id: string, fn: () => Promise<T>) => Promise<T> }).step ? ctx.step("capability-runtime-enabled", async () => (await readEnabled()) === true) : readEnabled().then((v) => v === true, () => false))
+      : false;
+    const harness = (runtimeEnabled ? await ctx.invoke("capability.harness.resolve", { sessionId, runId: ctx.runId, ...(isAgentPreset(preset) ? { preset, baseTools: PRESET_TOOLS[preset] } : {}) } as unknown as Json) : { enabled: false }) as unknown as
       | { enabled: false }
       | { enabled: true; refused: true; reasonCode: string; reason: string }
       | { enabled: true; refused?: false; instructions: string; toolset: readonly string[] | null; sequence: number; assembled: { type: string; payload: Record<string, unknown> } };
@@ -483,6 +494,9 @@ export const agentCodingAgent: AgentDefinition = {
       throw new Error(`run refused to start: ${harness.reason}`);
     }
     const resolvedHarness = harness.enabled && !harness.refused ? harness : undefined;
+    for (const decision of (resolvedHarness as { decisions?: readonly { type: string; payload: Record<string, unknown> }[] } | undefined)?.decisions ?? []) {
+      await ctx.emit(decision.type, decision.payload as unknown as Json);
+    }
     const turnTools = expertExecution
       ? [...toolsForExpert(expertExecution)]
       : [...toolsForPreset(preset, TOOL_DEFS, resolvedHarness?.toolset ?? undefined), ...(caseId ? UI_TOOL_DEFS : [])];
@@ -867,4 +881,6 @@ export const agentCodingAgent: AgentDefinition = {
     await ctx.emit("message.completed", { sessionId, workspaceId, text });
     return { text };
   },
-};
+});
+
+export const agentCodingAgent: AgentDefinition = createAgentCodingAgent();

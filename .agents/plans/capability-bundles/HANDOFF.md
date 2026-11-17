@@ -95,6 +95,11 @@
 ### Review round 1 (`test/J-CAP-review-r1.test.ts`)
 - R1-1 session from run context, fail-closed suspension; R1-2 version identity = payload + whole manifest (`versionHashFor(payload, manifest)`, `verifyBundleIntegrity(dir, hash, manifest)`; reducer never rewrites a registered version row); R1-3 activation ceiling = requirements ∩ agent grant ∩ operator root (refuses `beyond-operator` / `no-root-grant`); R1-4 grant and clamp expiry checked at decision time against the injected `now`; R1-5 descriptor marker tokens reserved inside the 400-token budget
 
+### Review round 2 and CI (`test/J-CAP-review-r2.test.ts`)
+- A1 decision: the §1.5 store invariant is unchanged. `classifyCapabilityStore` treats an external PostgreSQL (`COGNATE_POSTGRES_URL`) as multi-writer unless the OPERATOR declares `COGNATE_CAPABILITY_SINGLE_WRITER=1` (kind `external-postgres-single-writer`). CI shards each own one PostgreSQL service and one test process, so `verify.yml` declares it; no test-only bypass exists in src.
+- A2: `createAgentCodingAgent({ isCapabilityRuntimeEnabled })`; with the runtime disabled (or no probe) the loop makes no `capability.harness.resolve` call at all. The enablement read is boxed in `ctx.step`.
+- B1-B3 share `src/workbench/authoritySelection.ts` (principal mapping, live grants, governing-row selection, live clamp/root) between the dispatcher and the resolver. B2: the resolver derives the run's principal from the call actor and applies patches only if principal grant ∩ live root cover `harness.modify`; refusals return as `decisions` the loop emits. B4: activation re-checks gate + authorize immediately before the commit and again after it (suspends on lapse); grants live on other streams, so this narrows rather than eliminates the window. B5: skill load scans, then reads the entry once and hashes those bytes against the verified digest. B6: the aggregate budget measures the joined text.
+
 ## Verification state
 - CI is the authoritative gate since PR #37: four timing-balanced test shards, each with its own
   PostgreSQL service. The local chunked run (3 sequential `bun test` runs) is a fallback; on the
