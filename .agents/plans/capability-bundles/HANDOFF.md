@@ -122,6 +122,21 @@
   in isolation; chunk 3 1,120/0. The single-process `just verify` has documented host-concurrency
   flakes (pg0 saturation).
 
+## Blind review of the T2 remainder (PR #38)
+Codex (GPT Sol 6.1, read-only) reviewed the tranche in four full rounds plus a fix verification:
+5, 6, 8 and 5 findings, every one reproduced and fixed with a red-then-green test
+(`test/J-CAP-review-r1..r4.test.ts`). Round 3 drove the structural fix: one decision point,
+`authorizeCapabilityOp`, for every entry point (pinned by a registry test), and one runtime mutex
+for activation, deactivation, uninstall, grant issue/revoke and the grant expiry sweep.
+
+Accepted residual risk (documented on the PR):
+- The lifecycle recorder awaits a stream read inside its CAS append, so "no await between the final
+  authorization and the append" holds only up to that read. Every path that can revoke or expire a
+  grant (the revoke handler and the expiry sweep) holds the same mutex, so no revocation can
+  interleave there under the §1.5 single-writer invariant. What remains is a grant whose expiry
+  instant passes during that read: the mutating op may commit, but every later invocation
+  re-checks expiry and refuses, and deactivation only reduces authority.
+
 ## Key infrastructure notes
 - pg0 shared instance: max_connections saturates under peak parallel load; the verify recipe pre-starts it; bootApp retries the transient signature
 - The lifecycleRecorder writes through the store's conditional-commit API directly (not ctx.emit)

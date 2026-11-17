@@ -910,7 +910,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }
     }
   })();
-  const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex).catch(() => {}); }, 60_000);
+  const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex, new Date(), capabilityMutex).catch(() => {}); }, 60_000);
   grantExpirySweep.unref?.();
 
   finishExpertsBoot(experts);

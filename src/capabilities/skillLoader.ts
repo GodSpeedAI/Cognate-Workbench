@@ -94,7 +94,12 @@ export function assembleDescriptorSection(descriptors: readonly Descriptor[], bu
     else omitted.push(d.capabilityId);
   }
   const lines = included.map((d) => d.text);
-  if (omitted.length > 0) lines.push(notice(omitted.length));
+  // The notice is appended only when it fits. A budget too small for the notice included nothing
+  // (the reserve exceeded it), so the section stays empty; the omitted ids are still returned to
+  // the caller, so nothing is dropped silently.
+  if (omitted.length > 0 && estimateTokens([...lines, notice(omitted.length)].join("\n")) <= budgetTokens) {
+    lines.push(notice(omitted.length));
+  }
   const text = lines.join("\n");
   return { text, tokens: estimateTokens(text), included: included.map((d) => d.capabilityId), omitted };
 }

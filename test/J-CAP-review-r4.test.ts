@@ -166,6 +166,35 @@ describe("J-CAP-review-r4", () => {
     });
   });
 
+  describe("R4 verification: budget notice and expiry sweep", () => {
+    test("a budget too small for the omitted notice yields an empty section, never an overflow", () => {
+      const d: Descriptor = { capabilityId: "c0", version: "v", text: "x", tokens: estimateTokens("x"), truncated: false } as Descriptor;
+      for (const budget of [0, 1, 5, 40]) {
+        const section = assembleDescriptorSection([d, { ...d, capabilityId: "c1" }], budget);
+        expect(estimateTokens(section.text)).toBeLessThanOrEqual(budget);
+        expect(encode(section.text).length).toBeLessThanOrEqual(budget);
+        expect(section.included.length + section.omitted.length).toBe(2);
+      }
+    });
+    test("the expiry sweep waits for the runtime mutex before committing", async () => {
+      const { createRuntimeMutex } = await import("../src/workbench/runtimeMutex.ts");
+      const { sweepExpiredGrants } = await import("../src/capabilities/authorityGrants.ts");
+      const mutex = createRuntimeMutex();
+      const commits: string[] = [];
+      const recorder = { commitGrantRevocationBatch: async (a: { grantId: string }) => { commits.push(a.grantId); return []; } };
+      const index = { grants: new Map([["g1", { grantId: "g1", status: "active", expiresAt: "2000-01-01T00:00:00Z" }]]), activations: new Map() };
+      let release!: () => void;
+      const held = mutex.run(() => new Promise<void>((r) => { release = r; }));
+      const sweep = sweepExpiredGrants(recorder as never, index as never, new Date(), mutex);
+      await sleep(20);
+      expect(commits).toEqual([]);
+      release();
+      await held;
+      expect(await sweep).toBe(1);
+      expect(commits).toEqual(["g1"]);
+    });
+  });
+
   describe("R4-5 registration refusals reach the audit trail", () => {
     const bundles = (started: unknown[]) => capture(capabilityBundlesComponent({
       getService: () => ({ startRun: async (_c: unknown, req: unknown) => { started.push(req); return { runId: "r" }; } }) as never,

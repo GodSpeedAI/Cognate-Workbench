@@ -150,8 +150,15 @@ export function seedOperatorRootGrant(recorder: LifecycleRecorder): Promise<unkn
 }
 
 /** Grant expiry sweep: called from the boot interval; expires grants whose wall clock passed
- *  `expiresAt`, producing the same CAS batch as revocation with reason `grant-expired`. */
-export async function sweepExpiredGrants(recorder: LifecycleRecorder, index: AuthorityIndex, now = new Date()): Promise<number> {
+ *  `expiresAt`, producing the same CAS batch as revocation with reason `grant-expired`.
+ *  It holds the shared runtime mutex like revocation does (review R4 verification): otherwise an
+ *  activation committing concurrently could clamp to a grant the sweep is expiring, and escape its
+ *  suspension. */
+export async function sweepExpiredGrants(recorder: LifecycleRecorder, index: AuthorityIndex, now = new Date(), mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex): Promise<number> {
+  return mutex ? mutex.run(() => sweepExpiredGrantsLocked(recorder, index, now)) : sweepExpiredGrantsLocked(recorder, index, now);
+}
+
+async function sweepExpiredGrantsLocked(recorder: LifecycleRecorder, index: AuthorityIndex, now: Date): Promise<number> {
   let expired = 0;
   for (const grant of index.grants.values()) {
     if (grant.status !== "active" || !grant.expiresAt) continue;
