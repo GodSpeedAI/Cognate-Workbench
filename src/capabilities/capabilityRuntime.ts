@@ -33,6 +33,7 @@ import type { AuthorityIndex, ActivationRow } from "../workbench/authorityIndex.
 import { detectHarnessConflicts, hasHarness, patchedRecord, validateHarness, EMPTY_HARNESS, type HarnessDeclaration } from "../workbench/harnessPatches.ts";
 import { loadSkill, verifyBundleIntegrity, type BundleManifestData, type LoadableBundle } from "./skillLoader.ts";
 import { LOCAL_ROOT_ID } from "./authorityGrants.ts";
+import { createRuntimeMutex } from "../workbench/runtimeMutex.ts";
 import { authorizeCapabilityOp, permissionCovered, principalForActor, sessionOfRun, type Actor, type Authorization, type CapabilityOp, type Failure } from "../workbench/authoritySelection.ts";
 import { randomUUID } from "node:crypto";
 
@@ -54,6 +55,7 @@ export interface DispatcherInterpreter {
 interface HandlerEntry {
   readonly capabilityId: string;
   readonly version: string;
+  readonly sessionId: string | undefined;
   readonly bundle: LoadableBundle;
   readonly interpreter: DispatcherInterpreter;
   readonly scopeId: string;
@@ -92,6 +94,8 @@ export interface CapabilityRuntimeOptions {
   /** Boot-rebuilt rows the dispatcher mounts from (fold-first/mount-second, §4.2.8). */
   readonly activeSet: readonly { capabilityId: string; version: string; dir: string }[];
   readonly hooks?: CapabilityRuntimeHooks;
+  /** The shared runtime mutex (activation, deactivation, uninstall, grant issue/revoke). */
+  readonly mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex;
   /** The §1.5 deployment invariant, re-evaluated per decision (default: satisfied). */
   readonly deploymentOk?: () => boolean;
   /** The injected clock: every expiry decision compares against it (default: wall clock). */
@@ -101,7 +105,7 @@ export interface CapabilityRuntimeOptions {
 type Ctx = { actor: Actor; runId?: string };
 
 const DEFAULT_REQUIREMENTS: readonly string[] = ["capability.invoke", "skill.load"];
-const keyOf = (capabilityId: string, version: string): string => `${capabilityId}@${version}`;
+const keyOf = (capabilityId: string, version: string, sessionId?: string): string => `${capabilityId}|${sessionId ?? ""}@${version}`;
 
 export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): Component {
   const nowMs = (): number => (options.now ?? (() => new Date()))().getTime();
@@ -141,11 +145,11 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
     };
   }
 
-  const mountInterpreter = async (bundle: LoadableBundle): Promise<HandlerEntry> => {
+  const mountInterpreter = async (bundle: LoadableBundle, sessionId?: string): Promise<HandlerEntry> => {
     const version = bundle.versionHash;
-    const key = keyOf(bundle.capabilityId, version);
-    const scopeId = `cap-runtime:${bundle.capabilityId}:${version}`;
-    const entry: HandlerEntry = { capabilityId: bundle.capabilityId, version, bundle, interpreter: interpreterFor(bundle), scopeId, handle: undefined, inFlight: 0 };
+    const key = keyOf(bundle.capabilityId, version, sessionId);
+    const scopeId = `cap-runtime:${bundle.capabilityId}:${sessionId ?? "persistent"}:${version}`;
+    const entry: HandlerEntry = { capabilityId: bundle.capabilityId, version, sessionId, bundle, interpreter: interpreterFor(bundle), scopeId, handle: undefined, inFlight: 0 };
     const adapter: Component = {
       id: scopeId,
       async activate(fiber) {
@@ -294,7 +298,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         // ---- synchronous critical section: decision, snapshot, counter (no await inside) ----
         const auth = check(permission === "skill.load" ? "skill.load" : "invoke", prep, ctx, capabilityId, permission);
         let failure: Failure | undefined = auth.ok ? undefined : auth;
-        const mounted = auth.ok ? table.get(keyOf(capabilityId, auth.row!.version)) : undefined;
+        const mounted = auth.ok ? table.get(keyOf(capabilityId, auth.row!.version, auth.row!.sessionId)) : undefined;
         if (auth.ok && !mounted) failure = { ok: false, code: "unmounted", reason: `capability ${capabilityId} version ${auth.row!.version} is committed active but has no mounted handler` };
         if (failure) {
           await recordDecision(capabilityId, operation, ctx.actor, "refused", failure.code, failure.reason);
@@ -379,12 +383,8 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
 
       // R3-6: activation and deactivation run one at a time (valid under the §1.5 single-writer
       // invariant), so conflict detection, authorization and the commit see one consistent state.
-      let serialTail: Promise<unknown> = Promise.resolve();
-      const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
-        const run = serialTail.then(fn, fn);
-        serialTail = run.then(() => undefined, () => undefined);
-        return run;
-      };
+      const mutex = options.mutex ?? createRuntimeMutex();
+      const serial = <T,>(fn: () => Promise<T>): Promise<T> => mutex.run(fn);
 
       provide("capability.bundle.activate", (input: { capabilityId: string; sessionId?: string }, ctx: Ctx) => serial(async () => {
         const capabilityId = String(input.capabilityId ?? "");
@@ -423,13 +423,13 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
 
         let entry: HandlerEntry;
         try {
-          entry = await mountInterpreter(bundle);
+          entry = await mountInterpreter(bundle, sessionId);
         } catch (error) {
           return refuse("mount-failed", `mount of ${capabilityId}@${bundle.versionHash} failed: ${error instanceof Error ? error.message : String(error)}`, failType, bundle.versionHash);
         }
         // After mount, before commit: any abort disposes the mounted handle (§4.3).
         const abort = async (code: string, reason: string): Promise<never> => {
-          if (table.get(keyOf(capabilityId, bundle.versionHash)) === entry) table.delete(keyOf(capabilityId, bundle.versionHash));
+          if (table.get(keyOf(capabilityId, bundle.versionHash, sessionId)) === entry) table.delete(keyOf(capabilityId, bundle.versionHash, sessionId));
           await entry.handle?.dispose("aborted before commit").catch(() => {});
           return refuse(code, reason, failType, bundle.versionHash);
         };
@@ -448,6 +448,12 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
           await liveSources(g.index, capabilityId),
         );
         if (conflictsNow.length > 0) return abort("conflict", `co-activation refused at commit: ${conflictsNow.map((c) => `${c.surface} (${c.capabilities.join(" vs ")})`).join("; ")}`);
+        // R4-1: the bundle must STILL be installed, with this version present, inside the critical
+        // section (uninstall holds the same mutex, so it cannot interleave from here to the commit).
+        const rowsNow = await readRows();
+        const latestNow = rowsNow.get(`bundle/${capabilityId}`) as { uninstalled?: boolean } | undefined;
+        if (!latestNow || latestNow.uninstalled || !manifestOf(rowsNow, capabilityId, bundle.versionHash)) return abort("not-installed", `${capabilityId}@${bundle.versionHash} is no longer installed — activation aborted before commit`);
+        // R4-2: the LAST step before the commit — prepare, authorize, commit; nothing awaited between.
         const fresh = await prepare(ctx);
         const recheck = authorize(ctx, fresh, requirements, harness);
         if (!recheck.ok) return abort(recheck.code, `activation authorization stale at commit: ${recheck.reason}`);
@@ -469,7 +475,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         }
         // Commit visible: the new handle serves from now on; the old one drains, then goes.
         if (live) {
-          const old = table.get(keyOf(capabilityId, live.version));
+          const old = table.get(keyOf(capabilityId, live.version, sessionId));
           if (old) retire(old);
         }
         return { capabilityId, version: entry.version, state: "active", ...(live ? { repointedFrom: live.version } : {}) };
@@ -488,19 +494,26 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         const index = auth.index;
         const row = index.activations.get(index.activationKey(capabilityId, "user", sessionId));
         if (!row || (row.state !== "active" && row.state !== "suspended")) throw new Error(`capability.bundle.deactivate: ${capabilityId} has no live activation`);
-        const entries = [...table.values()].filter((e) => e.capabilityId === capabilityId);
+        // R4-3: only THIS activation's handlers (its scope: persistent or session) are removed.
+        const entries = [...table.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId);
         const busy = entries.reduce((n, e) => n + e.inFlight, 0);
         if (busy > 0) throw new Error(`capability.bundle.deactivate: ${capabilityId} has ${busy} in-flight call(s) — drain first`);
         let harness: HarnessDeclaration = EMPTY_HARNESS;
         try {
           harness = validateHarness(manifestOf(await readRows(), capabilityId, row.version)?.harness);
         } catch { /* a declaration that no longer validates contributed nothing */ }
+        // R4-2: re-authorize as the LAST step before the commit (the projection read above awaited).
+        const last = check("deactivate", await prepare(ctx), ctx, capabilityId, "bundle.deactivate");
+        if (!last.ok) {
+          await recordDecision(capabilityId, "deactivate", ctx.actor, "refused", last.code, `authorization lapsed before the deactivation commit: ${last.reason}`);
+          throw new Error(`capability.bundle.deactivate: ${last.reason}`);
+        }
         await commit(capabilityId, [
           { type: "capability.deactivated", payload: { capabilityId, level: "user", ...(sessionId ? { sessionId } : {}) } },
           ...patchedEvents(capabilityId, row.version, sessionId, harness, "removed"),
         ], "deactivate");
         for (const e of entries) {
-          table.delete(keyOf(e.capabilityId, e.version));
+          table.delete(keyOf(e.capabilityId, e.version, e.sessionId));
           retire(e);
         }
         return { capabilityId, state: "dormant" };

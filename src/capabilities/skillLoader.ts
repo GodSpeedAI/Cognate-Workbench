@@ -18,19 +18,9 @@ import { createHash } from "node:crypto";
 import { BUNDLE_LIMITS, scanBundle, versionHashFor } from "./bundleStore.ts";
 
 export const DESCRIPTOR_BUDGETS = { perCapabilityTokens: 400, aggregateTokens: 4000, maxSkillLines: 8, maxToolLines: 8 } as const;
-/** Token upper bound that never under-counts (R3-8): ASCII at 4 chars per token (the scale the
- *  budgets are pinned to); every other character at its UTF-8 byte length, since a tokenizer
- *  that falls back to bytes emits at most one token per byte. */
-export const estimateTokens = (text: string): number => {
-  let ascii = 0;
-  let other = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0)!;
-    if (code < 128) ascii += 1;
-    else other += code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return Math.ceil(ascii / 4) + other;
-};
+/** Token upper bound that never under-counts (R4-4): the UTF-8 byte length. Every BPE token
+ *  covers at least one byte, so tokens <= bytes for any text, ASCII or not. */
+export const estimateTokens = (text: string): number => Buffer.byteLength(text, "utf8");
 
 export interface BundleSkillDecl { readonly name: string; readonly entry: string; readonly isEntryDocument?: boolean; readonly trigger?: string }
 export interface BundleToolDecl { readonly id: string; readonly description: string; readonly inputSchema: Record<string, unknown> }
@@ -96,14 +86,15 @@ export function assembleDescriptorSection(descriptors: readonly Descriptor[], bu
   const sorted = [...descriptors].sort((a, b) => (a.capabilityId < b.capabilityId ? -1 : a.capabilityId > b.capabilityId ? 1 : 0));
   const included: Descriptor[] = [];
   const omitted: string[] = [];
-  const reserve = 40; // room for the omitted-notice line
+  const notice = (n: number): string => `(${n} further capabilities omitted: aggregate descriptor budget of ${budgetTokens} tokens reached)`;
+  const reserve = estimateTokens(`\n${notice(descriptors.length)}`); // room for the omitted-notice line, exact bound
   // R2-6: the budget counts the joining newlines too — measure the joined text, not a sum.
   for (const d of sorted) {
     if (estimateTokens([...included.map((i) => i.text), d.text].join("\n")) + reserve <= budgetTokens) included.push(d);
     else omitted.push(d.capabilityId);
   }
   const lines = included.map((d) => d.text);
-  if (omitted.length > 0) lines.push(`(${omitted.length} further capabilities omitted: aggregate descriptor budget of ${budgetTokens} tokens reached)`);
+  if (omitted.length > 0) lines.push(notice(omitted.length));
   const text = lines.join("\n");
   return { text, tokens: estimateTokens(text), included: included.map((d) => d.capabilityId), omitted };
 }

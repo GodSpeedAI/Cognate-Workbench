@@ -159,11 +159,13 @@ describe("J-CAP-review-r2", () => {
           await registerBundle(app, client, { capabilityId: CAP, sourceDir: dir, manifest: { name: "r2", purpose: "stale", skills: [{ name: "guide", entry: "GUIDE.md" }], requirements: ["capability.invoke", "skill.load"] } });
           await client.invoke("authority.grant.issue", { grantId: "grant-r2", principalId: "wb-agent:r2", permissions: ["bundle.activate", "capability.invoke", "skill.load"] });
           await waitUntil("grant indexed", async () => (await client.invoke("authority.grant.list", {}) as { grants: { grantId: string }[] }).grants.some((g) => g.grantId === "grant-r2"));
-          revoke = () => client.invoke("authority.grant.revoke", { grantId: "grant-r2" });
-          await expect(app.runtime.service.invoke({ actor: { id: "wb-agent:r2", kind: "agent" }, tenant: LOCAL_OPERATOR.tenant } as never, { capability: "capability.bundle.activate", input: { capabilityId: CAP } as never })).rejects.toThrow(/stale at commit|no active grant/);
-          await new Promise((r) => setTimeout(r, 300));
-          const activation = (await wbRows(app)).get(`activation/${CAP}/user`) as { state?: string } | undefined;
-          expect(activation?.state === "active").toBe(false);
+          // R4: grant revocation shares the runtime mutex, so a revoke raised during the mount queues
+          // behind the activation and then suspends it — the activation never survives its clamp.
+          revoke = () => { void client.invoke("authority.grant.revoke", { grantId: "grant-r2" }).catch(() => {}); return Promise.resolve(); };
+          await app.runtime.service.invoke({ actor: { id: "wb-agent:r2", kind: "agent" }, tenant: LOCAL_OPERATOR.tenant } as never, { capability: "capability.bundle.activate", input: { capabilityId: CAP } as never }).catch(() => {});
+          await waitUntil("grant revoked", async () => (await client.invoke("authority.grant.list", {}) as { grants: { grantId: string; status: string }[] }).grants.some((g) => g.grantId === "grant-r2" && g.status === "revoked"));
+          const after = await client.invoke("tool.skill_load", { capabilityId: CAP, skillId: "guide" }) as Record<string, unknown>;
+          expect(after.ok).toBe(false);
         } finally {
           await app.runtime.idle().catch(() => {});
           await app.stop();

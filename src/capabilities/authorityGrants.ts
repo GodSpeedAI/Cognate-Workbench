@@ -7,6 +7,8 @@
 // evidence marker is present in the fold AND the store is a supported
 // single-committing-process backend; unsupported modes fail closed (§1.5 deployment
 // invariant — never a silent revocation gap).
+import { authorizeCapabilityOp } from "../workbench/authoritySelection.ts";
+import { createRuntimeMutex } from "../workbench/runtimeMutex.ts";
 import type { Component, HandlerContext, SemanticRef, CapabilityContract } from "@godspeedai/cognate-kernel-api";
 import type { DurableStore } from "@godspeedai/cognate-events";
 import { randomUUID } from "node:crypto";
@@ -24,6 +26,8 @@ const PRINCIPAL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 const KNOWN_PERMISSIONS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate", "bundle.deactivate", "*"]);
 
 export interface AuthorityGrantsOptions {
+  /** The shared runtime mutex (activation, deactivation, uninstall, grant issue/revoke). */
+  readonly mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex;
   /** Lazy accessors: the component is constructed in the createRuntime options list, before
    *  the runtime (and its store/index rebuild) exists. Handlers only run post-boot. */
   readonly getStore: () => DurableStore;
@@ -61,8 +65,17 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
       const provide = <I, O>(id: (typeof CONTRACT_IDS)[number], handler: (input: I, ctx: HandlerContext) => Promise<O>) =>
         fiber.provide(contracts.find((c) => c.id === id) as CapabilityContract, async (raw, ctx) => handler(raw as I, ctx));
 
+      // R4-2: grant issue and revoke share the runtime mutex with activation/deactivation/uninstall,
+      // and pass through `authorizeCapabilityOp` as the last step before their commit.
+      const mutex = options.mutex ?? createRuntimeMutex();
+      const lastStep = async (op: "grant.issue" | "grant.revoke", ctx: HandlerContext): Promise<void> => {
+        const auth = authorizeCapabilityOp(op, { enabled: true, deploymentOk: true, index: options.getIndex(), actor: ctx.actor, runId: ctx.runId, nowMs: Date.now() });
+        if (!auth.ok) throw new Error(`${op === "grant.issue" ? "authority.grant.issue" : "authority.grant.revoke"}: ${auth.reason}`);
+      };
+
       provide("authority.grant.issue", async (input: { grantId?: string; principalId: string; permissions: readonly string[]; expiresAt?: string }, ctx) => {
         await requireOperator(ctx, "authority.grant.issue", inRunEmit(ctx));
+        return mutex.run(async () => {
         const grantId = input.grantId ?? `grant-${randomUUID().slice(0, 12)}`;
         if (!GRANT_ID.test(grantId) || !PRINCIPAL_ID.test(input.principalId)) throw new Error("authority.grant.issue: grant and principal ids must be safe identifiers");
         if (!input.principalId.startsWith("wb-agent:") && input.principalId !== LOCAL_ROOT_ID) throw new Error("authority.grant.issue: principals are wb-agent:* derivations or the operator root");
@@ -71,14 +84,17 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
         for (const permission of permissions) {
           if (!KNOWN_PERMISSIONS.has(permission)) throw new Error(`authority.grant.issue: unknown permission ${permission}`);
         }
+        await lastStep("grant.issue", ctx);
         await recorder().commitBatch(grantId, [
           { type: "authority.grant.issued", payload: { grantId, principalId: input.principalId, permissions, ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}) } },
         ], `issue:${grantId}`);
         return { grantId, principalId: input.principalId, permissions };
+        });
       });
 
       provide("authority.grant.revoke", async (input: { grantId: string }, ctx) => {
         await requireOperator(ctx, "authority.grant.revoke", inRunEmit(ctx));
+        return mutex.run(async () => {
         await options.getIndex().ready;
         const grant = options.getIndex().grantFor(input.grantId);
         const byId = [...options.getIndex().grants.values()].find((g) => g.grantId === input.grantId);
@@ -92,8 +108,10 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
             suspensions.push({ capabilityId: row.capabilityId, level: row.level, ...(row.sessionId ? { sessionId: row.sessionId } : {}) });
           }
         }
+        await lastStep("grant.revoke", ctx);
         await recorder().commitGrantRevocationBatch({ grantId: target.grantId, reason: "grant-revoked", suspensions });
         return { grantId: target.grantId, suspended: suspensions.length };
+        });
       });
 
       provide("authority.grant.list", async (_input, ctx) => {

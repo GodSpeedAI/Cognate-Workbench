@@ -59,7 +59,7 @@ export function liveAuthorityFor(index: AuthorityIndex, row: ActivationRow, perm
   return liveClamp(index, row, nowMs);
 }
 
-export type CapabilityOp = "invoke" | "skill.load" | "activate" | "deactivate" | "harness.resolve" | "harness.refresh" | "harness.apply";
+export type CapabilityOp = "invoke" | "skill.load" | "activate" | "deactivate" | "harness.resolve" | "harness.refresh" | "harness.apply" | "uninstall" | "grant.issue" | "grant.revoke";
 
 export interface AuthorizeArgs {
   /** The durable enablement marker (§1.7). */
@@ -84,6 +84,15 @@ export type Authorization = { readonly ok: true; readonly index: AuthorityIndex;
  *  intersected with the live root grant (expiry and revocation), and — for operations on a
  *  capability's activation — the governing row (session suspension wins; the session is the run's). */
 export function authorizeCapabilityOp(op: CapabilityOp, a: AuthorizeArgs): Authorization {
+  // Operator-only lifecycle acts (R4): the human decision itself — a direct operator outside any
+  // run. They carry no enablement or root-liveness precondition (revoking the root grant must
+  // never lock the operator out), but they pass through this function as the LAST step before
+  // their commit, so the one decision point covers every mutating op.
+  if (op === "uninstall" || op === "grant.issue" || op === "grant.revoke") {
+    if (a.actor.kind !== "user" || a.runId) return { ok: false, code: "operator-only", reason: `${op} is a human decision: only a direct operator may do this, not ${a.actor.kind} "${a.actor.id}"${a.runId ? ` inside run ${a.runId}` : ""}` };
+    if (!a.index) return { ok: false, code: "index-unavailable", reason: "the authority index is unavailable — failing closed" };
+    return { ok: true, index: a.index, principalId: LOCAL_ROOT_ID };
+  }
   if (!a.enabled) return { ok: false, code: "runtime-disabled", reason: "the capability runtime is not enabled (workbench.capability_runtime.enabled marker absent)" };
   if (!a.deploymentOk) return { ok: false, code: "deployment-invariant", reason: "the capability runtime is disabled: external PostgreSQL without an operator-declared single-writer deployment (§1.5)" };
   if (!a.index) return { ok: false, code: "index-unavailable", reason: "the authority index is unavailable — failing closed" };

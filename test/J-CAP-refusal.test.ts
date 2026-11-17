@@ -161,7 +161,7 @@ describe("J-CAP-refusal", () => {
     test("the shared operator guard still refuses every human-gated handler inside a run", async () => {
       const index = { ready: Promise.resolve(), activations: new Map(), grants: new Map() } as unknown as AuthorityIndex;
       const grants = capture(authorityGrantsComponent({ getStore: () => ({}) as never, getIndex: () => index, tenant: "local", isRemediationVerified: () => true, storeKind: "pg0" }));
-      const bundles = capture(capabilityBundlesComponent({ getService: () => ({}) as never, lifecycleRecorder: {} as never, authorityIndex: index, home: "/nonexistent", tenant: "local" }));
+      const bundles = capture(capabilityBundlesComponent({ getService: () => ({}) as never, lifecycleRecorder: () => ({}) as never, authorityIndex: () => index, home: "/nonexistent", tenant: "local" }));
       const attempts: [Map<string, Handler>, string, unknown][] = [
         [grants, "authority.grant.issue", { principalId: "wb-agent:x", permissions: ["skill.load"] }],
         [grants, "authority.grant.revoke", { grantId: "g" }],

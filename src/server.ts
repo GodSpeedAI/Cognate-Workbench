@@ -22,6 +22,7 @@ import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
 import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
+import { createRuntimeMutex } from "./workbench/runtimeMutex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
@@ -683,6 +684,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let capabilityRuntimeIndex!: AuthorityIndex;
   let capabilityRuntimeRecorder!: LifecycleRecorder;
   const capabilityStoreKind = classifyCapabilityStore(process.env);
+  // R4: ONE mutex for activation, deactivation, uninstall and grant issue/revoke (valid under §1.5).
+  const capabilityMutex = createRuntimeMutex();
   // R3-3: the §1.5 deployment invariant is re-evaluated at EVERY enablement check, not only when
   // the marker was written: an external PostgreSQL without the operator's single-writer
   // declaration disables the runtime now, whatever the marker says.
@@ -804,6 +807,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         catalogSemanticRef: t11["plugin.install"],
       }),
       authorityGrantsComponent({
+        mutex: capabilityMutex,
         getStore: () => runtime.store,
         getIndex: () => capabilityRuntimeIndex,
         tenant: LOCAL_OPERATOR.tenant,
@@ -812,9 +816,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityBundlesComponent({
+        mutex: capabilityMutex,
         getService,
-        lifecycleRecorder: capabilityRuntimeRecorder,
-        authorityIndex: capabilityRuntimeIndex,
+        lifecycleRecorder: () => capabilityRuntimeRecorder,
+        authorityIndex: () => capabilityRuntimeIndex,
         home,
         tenant: LOCAL_OPERATOR.tenant,
         getRegistry: () => executionWorlds,
@@ -823,6 +828,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityRuntimeComponent({
+        mutex: capabilityMutex,
         getKernel: () => runtime.kernel,
         getService,
         getRootScope: () => (runtime.kernel as unknown as { root: import("@godspeedai/cognate-kernel-api").Scope }).root,
