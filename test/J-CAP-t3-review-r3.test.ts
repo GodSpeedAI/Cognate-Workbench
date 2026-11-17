@@ -67,7 +67,7 @@ describe("J-CAP-t3-review-r3 finding 2: server schemas may not use references", 
     expect(validate({})).toBe(true);
     expect(performance.now() - started).toBeLessThan(20);
     // r4: the allowlist drops the combinator and the definitions before any reference is reached.
-    expect(safe.stripped).toEqual(expect.arrayContaining(["$defs", "allOf"]));
+    expect(safe.stripped).toEqual(expect.arrayContaining(["strip.reference", "strip.combinator"]));
     expect(JSON.stringify(safe.schema)).not.toContain("$ref");
   });
 
@@ -97,7 +97,7 @@ describe("J-CAP-t3-review-r3 finding 2: server schemas may not use references", 
     expect(JSON.stringify(client.tools())).not.toContain("$ref");
     const stripped = records.filter((r) => r.payload.reasonCode === "schema-sanitized").map((r) => JSON.stringify(r.payload.stripped));
     expect(stripped.length).toBeGreaterThanOrEqual(2); // input and output
-    expect(stripped.every((s) => s.includes("allOf"))).toBe(true);
+    expect(stripped.every((s) => s.includes("strip.combinator"))).toBe(true);
   });
 });
 
@@ -211,7 +211,7 @@ describe("J-CAP-t3-review-r3 thread: the sanitizer walks schema positions, not p
     expect(props.pattern).toEqual({ type: "string" });
     expect(props.kind).toEqual({ enum: ["format", "pattern", "$ref"], const: "pattern" });
     expect(safe.schema.required).toEqual(["patternProperties", "pattern"]);
-    expect(safe.stripped).toEqual(["pattern"]);
+    expect(safe.stripped).toEqual(["strip.pattern"]);
     const validate = new Ajv({ strict: false }).compile(safe.schema);
     expect(validate({ patternProperties: "x", pattern: "y" })).toBe(true);
   });

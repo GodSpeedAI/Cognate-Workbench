@@ -9,19 +9,23 @@
 // Oversize, too-deep or malformed input is a connection-level protocol violation: the caller closes the connection and
 // fails every pending call; nothing is ever attributed to a request by guessing.
 // Nothing outside this module parses or stringifies raw server data: sizes, snapshots and digests come from here.
-import { newSha256, sha256Of, type Sha256 } from "./typedRecord.ts";
+import { newSha256, parseWireId, sha256Of, type Sha256, type WireId } from "./typedRecord.ts";
 
-export const INGRESS = { maxMessageBytes: 256 * 1024, maxDepth: 64, maxIdLength: 64, maxMethodLength: 256 } as const;
+export const INGRESS = {
+  maxMessageBytes: 256 * 1024, maxDepth: 64, maxMethodLength: 256,
+  /** Backpressure: when this many received bytes are waiting to be framed, the stream is paused; it resumes below `queueLowBytes`. */
+  queueHighBytes: 128 * 1024, queueLowBytes: 32 * 1024,
+} as const;
 
 export type ViolationReason = "oversize" | "malformed" | "too-deep";
 export interface Violation { readonly reason: ViolationReason; readonly bytes: number; readonly sha256: Sha256 }
-export type RpcId = number | string;
+export type RpcId = WireId;
 export type Inbound =
   | { readonly kind: "response"; readonly id: RpcId; readonly result: Record<string, unknown> }
   | { readonly kind: "error"; readonly id: RpcId; readonly code: number; readonly digest: { readonly bytes: number | null; readonly sha256: Sha256 | null } }
   | { readonly kind: "notification"; readonly method: string; readonly params?: Record<string, unknown> }
   | { readonly kind: "request"; readonly id: RpcId };
-export type FrameEvent = { readonly kind: "message"; readonly message: Inbound } | { readonly kind: "violation"; readonly violation: Violation };
+export type FrameEvent = { readonly kind: "message"; readonly message: Inbound; readonly bytes: number } | { readonly kind: "violation"; readonly violation: Violation };
 
 export const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -68,7 +72,11 @@ export function snapshotJson<T = unknown>(value: unknown, maxBytes: number): { v
   }
 }
 
-const rpcId = (v: unknown): RpcId | undefined => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.length > 0 && v.length <= INGRESS.maxIdLength ? v : undefined);
+const rpcId = parseWireId;
+
+/** The one answer to a server-initiated request we do not support (no sampling, roots or elicitation): a fixed error built
+ *  from the typed id, serialized here so no server-chosen value is serialized anywhere else. */
+export const unsupportedRequestReply = (id: RpcId): string => `${JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "server-initiated requests are not supported" } })}\n`;
 
 /** Parse and strictly type one complete line. Returns a `Violation` for anything off-envelope. */
 export function parseInbound(line: Uint8Array, bytes = line.length): Inbound | Violation {
@@ -99,13 +107,15 @@ export class LineFramer {
   #pieces: Buffer[] = [];
   #held = 0;
   #stopped = false;
-  /** The most bytes ever buffered for one line (transport-level counter for the cap invariant). */
+  /** The most bytes ever buffered for one line (a high-water mark of the partial line). */
   peakBufferedBytes = 0;
 
   get stopped(): boolean { return this.#stopped; }
+  /** Bytes of the partial line held RIGHT NOW (summed from the stored pieces, not a counter). */
+  get heldBytes(): number { let n = 0; for (const p of this.#pieces) n += p.length; return n; }
 
-  push(chunk: Buffer): FrameEvent[] {
-    const events: FrameEvent[] = [];
+  /** Lazily frame one chunk: each event is produced when the consumer asks for it, so at most one parsed message is retained. */
+  *feed(chunk: Buffer): Generator<FrameEvent, void, undefined> {
     let offset = 0;
     while (offset < chunk.length && !this.#stopped) {
       const nl = chunk.indexOf(10, offset);
@@ -119,19 +129,21 @@ export class LineFramer {
         const bytes = this.#held + piece.length;
         this.#pieces = [];
         this.#held = 0;
-        events.push({ kind: "violation", violation: { reason: "oversize", bytes, sha256: hash.digest() } });
-        break;
+        yield { kind: "violation", violation: { reason: "oversize", bytes, sha256: hash.digest() } };
+        return;
       }
       this.#pieces.push(Buffer.from(piece)); // a copy: never a view that would pin a larger chunk
       this.#held += piece.length;
       this.peakBufferedBytes = Math.max(this.peakBufferedBytes, this.#held);
-      if (nl < 0) break;
-      const event = this.#end();
-      if (event) events.push(event);
+      if (nl < 0) return;
       offset = nl + 1;
+      const event = this.#end();
+      if (event) yield event;
     }
-    return events;
   }
+
+  /** Eager form of `feed` (every event of the chunk at once); for callers that hold the whole chunk anyway. */
+  push(chunk: Buffer): FrameEvent[] { return [...this.feed(chunk)]; }
 
   #end(): FrameEvent | undefined {
     const line = Buffer.concat(this.#pieces);
@@ -140,7 +152,7 @@ export class LineFramer {
     if (line.length === 0 || (line.length < 64 && line.toString("utf8").trim() === "")) return undefined;
     const parsed = parseInbound(line);
     if ("reason" in parsed) { this.#stopped = true; return { kind: "violation", violation: parsed }; }
-    return { kind: "message", message: parsed };
+    return { kind: "message", message: parsed, bytes: line.length };
   }
 }
 

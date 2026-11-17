@@ -19,7 +19,7 @@ import type { DurableStore, StoredEvent } from "@godspeedai/cognate-events";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
 import { randomUUID } from "node:crypto";
 import { McpClient, McpConnectError, boundBytes, isServerId, type McpRecord, type McpToolDef } from "../mcp/client.ts";
-import { adoptId, describeDigest, digestText, trusted, type Trusted, type TypedPayload } from "../mcp/typedRecord.ts";
+import { adoptId, describeDigest, digestText, operatorText, type Trusted, type TypedPayload } from "../mcp/typedRecord.ts";
 import { authorizeCapabilityOp, type Actor, type CapabilityOp } from "../workbench/authoritySelection.ts";
 import type { AuthorityIndex } from "../workbench/authorityIndex.ts";
 import type { LifecycleRecorder } from "../workbench/lifecycleRecorder.ts";
@@ -130,11 +130,11 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     return promise;
   };
 
-  const record = async (type: McpRecord["type"], payload: TypedPayload, stream: string): Promise<void> => {
+  const record = async (type: McpRecord["type"], payload: TypedPayload, stream: string, key: string): Promise<void> => {
     let lastError: unknown;
     for (let attempt = 0; attempt < 6; attempt++) {
       try {
-        await options.getRecorder().commitBatch(stream, [{ type, payload }]);
+        await options.getRecorder().commitBatch(stream, [{ type, payload }], key); // insert-if-absent by the minted record id
         return;
       } catch (error) {
         lastError = error;
@@ -210,7 +210,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       const auth = authorizeCapabilityOp("mcp.start", { enabled: enabledCache, deploymentOk: options.deploymentOk ? options.deploymentOk() : true, index: options.getIndex(), actor: { id: "operator", kind: "user" }, capabilityId: entry.capabilityId, ...(entry.sessionId ? { sessionId: entry.sessionId } : {}), permission: "mcp.server", nowMs: nowMs() });
       if (auth.ok) continue;
       initiateStop(entry, `authority-lost:${auth.code}`, true);
-      void decision(entry.capabilityId, "mcp.reauthorize", { id: "system", kind: "system" }, "refused", auth.code, trusted(boundBytes(auth.reason, 512)), { serverId: adoptId(entry.serverId), version: adoptId(entry.version) }).catch(() => {});
+      void decision(entry.capabilityId, "mcp.reauthorize", { id: "system", kind: "system" }, "refused", auth.code, operatorText(boundBytes(auth.reason, 512)), { serverId: adoptId(entry.serverId), version: adoptId(entry.version) }).catch(() => {});
     }
   };
 
@@ -262,22 +262,22 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       await decision(capabilityId, "mcp.start", ctx.actor, "refused", code, reason, { serverId: adoptId(serverId), worldId: adoptId(worldId), ...extra }).catch(() => {});
       return { ok: false as const, code, reason };
     };
-    if (shuttingDown) return refuse("shutting-down", trusted("the runtime is shutting down; no new servers are started"));
+    if (shuttingDown) return refuse("shutting-down", operatorText("the runtime is shutting down; no new servers are started"));
     // Callers wait for the gate BEFORE taking the shared mutex (the sweep runs inside it); here it is only checked.
-    if (gateState !== "open") return refuse("reconcile-failed", trusted("the boot reconciliation of the spawn ledger did not finish; spawning stays disabled"));
+    if (gateState !== "open") return refuse("reconcile-failed", operatorText("the boot reconciliation of the spawn ledger did not finish; spawning stays disabled"));
     const first = check("mcp.start", await prepare(), ctx, capabilityId, sessionId);
-    if (!first.ok) return refuse(first.code, trusted(first.reason));
-    if (!isServerId(serverId)) return refuse("invalid-server-id", trusted(`invalid MCP server id ${serverId}`));
+    if (!first.ok) return refuse(first.code, operatorText(first.reason));
+    if (!isServerId(serverId)) return refuse("invalid-server-id", operatorText(`invalid MCP server id ${serverId}`));
     const slotRow = first.row!;
     const bundle = await bundleOf(capabilityId, slotRow.version);
     const decl = bundle?.manifest.mcpServers?.find((s) => s.id === serverId);
-    if (!bundle || !decl) return refuse("unknown-server", trusted(`${capabilityId}@${slotRow.version} declares no MCP server ${serverId}`));
+    if (!bundle || !decl) return refuse("unknown-server", operatorText(`${capabilityId}@${slotRow.version} declares no MCP server ${serverId}`));
     const key = serverKey(capabilityId, sessionId, serverId);
     const existing = running.get(key);
     if (existing && existing.version === slotRow.version && existing.state !== "stopping") return { ok: true, state: existing.state, pid: existing.handle?.pid ?? 0, tools: existing.client?.tools().length ?? 0 };
-    if (existing) return refuse("still-stopping", trusted(`server ${serverId} of ${capabilityId} is still stopping; retry when it has exited`));
+    if (existing) return refuse("still-stopping", operatorText(`server ${serverId} of ${capabilityId} is still stopping; retry when it has exited`));
     // §4.4: the version directory must match its recorded hash before anything in it is executed.
-    if (!(await verifyBundleIntegrity(bundle.dir, slotRow.version, bundle.manifest))) return refuse("integrity", trusted(`version ${slotRow.version} of ${capabilityId} failed its integrity check`));
+    if (!(await verifyBundleIntegrity(bundle.dir, slotRow.version, bundle.manifest))) return refuse("integrity", operatorText(`version ${slotRow.version} of ${capabilityId} failed its integrity check`));
 
     const entry: Running = { key, capabilityId, version: slotRow.version, sessionId, serverId, worldId, decl, accepting: false, starting: true, inFlight: 0, state: "starting" };
     running.set(key, entry);
@@ -306,7 +306,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
         ...(options.killMs !== undefined ? { killMs: options.killMs } : {}), graceMs,
       }, request);
     } catch (error) {
-      { const d = digestText(error instanceof Error ? error.message : String(error)); return fail("spawn-error", describeDigest(trusted("the spawn failed"), d.bytes, d.sha256)); }
+      { const d = digestText(error instanceof Error ? error.message : String(error)); return fail("spawn-error", describeDigest(operatorText("the spawn failed"), d.bytes, d.sha256)); }
     }
     if (!spawned.ok) { running.delete(key); return { ok: false, code: spawned.code, reason: spawned.reason }; }
     entry.handle = spawned.handle;
@@ -320,27 +320,27 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     if (!post.ok || entry.cancelled) {
       spawned.handle.stop("authority-lapsed-during-start", "emergency");
       await spawned.handle.exited;
-      return refuse(post.ok ? "cancelled" : post.code, trusted(post.ok ? `start cancelled: ${entry.cancelled}` : `authorization lapsed during the start: ${post.reason}`), { spawnId: adoptId(spawned.handle.spawnId) });
+      return refuse(post.ok ? "cancelled" : post.code, operatorText(post.ok ? `start cancelled: ${entry.cancelled}` : `authorization lapsed during the start: ${post.reason}`), { spawnId: adoptId(spawned.handle.spawnId) });
     }
     try {
       entry.client = await McpClient.connect(spawned.handle.channel, {
         capabilityId, version: slotRow.version, serverId, ...(sessionId ? { sessionId } : {}),
-        record: (event: McpRecord) => record(event.type, event.payload, `calls:${capabilityId}:${serverId}`),
+        record: (event: McpRecord, key) => record(event.type, event.payload, `calls:${capabilityId}:${serverId}`, key),
         scrub: spawned.handle.scrubber.text,
       });
     } catch (error) {
       spawned.handle.stop("handshake-failed", "emergency");
       await spawned.handle.exited;
-      return refuse("handshake-failed", describeDigest(trusted(`MCP handshake with ${serverId} failed`), error instanceof McpConnectError ? error.digest.bytes : null, error instanceof McpConnectError ? error.digest.sha256 : null), { spawnId: adoptId(spawned.handle.spawnId) });
+      return refuse("handshake-failed", describeDigest(operatorText(`MCP handshake with ${serverId} failed`), error instanceof McpConnectError ? error.digest.bytes : null, error instanceof McpConnectError ? error.digest.sha256 : null), { spawnId: adoptId(spawned.handle.spawnId) });
     }
     entry.starting = false;
     if (entry.cancelled) {
       spawned.handle.stop(entry.cancelled, "emergency");
-      return refuse("cancelled", trusted(`start cancelled: ${entry.cancelled}`), { spawnId: adoptId(spawned.handle.spawnId) });
+      return refuse("cancelled", operatorText(`start cancelled: ${entry.cancelled}`), { spawnId: adoptId(spawned.handle.spawnId) });
     }
     entry.accepting = true;
     entry.state = "running";
-    await decision(capabilityId, "mcp.start", ctx.actor, "allowed", "started", trusted(`server ${serverId} spawned in ${worldId}`), { serverId: adoptId(serverId), worldId: adoptId(worldId), spawnId: adoptId(spawned.handle.spawnId), version: adoptId(slotRow.version) }).catch(() => {});
+    await decision(capabilityId, "mcp.start", ctx.actor, "allowed", "started", operatorText(`server ${serverId} spawned in ${worldId}`), { serverId: adoptId(serverId), worldId: adoptId(worldId), spawnId: adoptId(spawned.handle.spawnId), version: adoptId(slotRow.version) }).catch(() => {});
     return { ok: true, state: "running", pid: spawned.handle.pid, tools: entry.client.tools().length };
   };
 
@@ -349,7 +349,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     serversFor: (capabilityId, version, sessionId) => [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.version === version).map((e) => ({ serverId: e.serverId, state: e.state })),
     async call(capabilityId, version, sessionId, toolRef, args, call) {
       const m = /^mcp\.([a-z0-9][a-z0-9-]{0,31})\.(.+)$/.exec(toolRef);
-      if (!m) return { ok: false, code: "unknown_tool", message: describeDigest(trusted("the tool reference is not an mcp.<serverId>.<tool> id"), digestText(toolRef).bytes, digestText(toolRef).sha256), retryable: false };
+      if (!m) return { ok: false, code: "unknown_tool", message: describeDigest(operatorText("the tool reference is not an mcp.<serverId>.<tool> id"), digestText(toolRef).bytes, digestText(toolRef).sha256), retryable: false };
       // Snapshot, synchronously: the server this call belongs to, and its in-flight count.
       const entry = running.get(serverKey(capabilityId, sessionId, m[1]!));
       if (!entry || entry.version !== version || !entry.accepting || !entry.client) return { ok: false, code: "server_not_running", message: `MCP server ${m[1]} of ${capabilityId} is not accepting calls`, retryable: true };
@@ -376,7 +376,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
         fiber.provide(contracts.find((c) => c.id === id) as CapabilityContract, async (raw: unknown, ctx) => handler(raw as I, ctx as Ctx));
       const slotOf = (input: { sessionId?: string }): string | undefined => (typeof input.sessionId === "string" && input.sessionId ? input.sessionId : undefined);
       const refusing = async (capabilityId: string, op: string, ctx: Ctx, code: string, reason: string): Promise<never> => {
-        await decision(capabilityId, op, ctx.actor, "refused", code, trusted(reason)).catch(() => {});
+        await decision(capabilityId, op, ctx.actor, "refused", code, operatorText(reason)).catch(() => {});
         throw new Error(`capability.mcp: ${reason}`);
       };
 
@@ -478,7 +478,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     async failBoot(error) {
       openGate(false);
       // The cause is recorded by digest and size only (a boot error can quote arbitrary text).
-      await decision("runtime", "mcp.boot", { id: "system", kind: "system" }, "refused", "boot-init-failed", describeDigest(trusted("the authority index or projection failed to initialise; no spawn is admitted and the ledger was not reconciled"), digestText(error instanceof Error ? error.message : String(error)).bytes, digestText(error instanceof Error ? error.message : String(error)).sha256)).catch(() => {});
+      await decision("runtime", "mcp.boot", { id: "system", kind: "system" }, "refused", "boot-init-failed", describeDigest(operatorText("the authority index or projection failed to initialise; no spawn is admitted and the ledger was not reconciled"), digestText(error instanceof Error ? error.message : String(error)).bytes, digestText(error instanceof Error ? error.message : String(error)).sha256)).catch(() => {});
     },
     async shutdown() {
       shuttingDown = true;

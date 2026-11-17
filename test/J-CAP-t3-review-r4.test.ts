@@ -97,7 +97,7 @@ describe("J-CAP-t3-review-r4 item 3: server schemas are an allowlist and oversiz
     const outcome = await client.callTool("t", args, { timeoutMs: 5000, actorId: "t" });
     expect(performance.now() - started).toBeLessThan(50);
     expect(outcome.ok).toBe(true);
-    expect(JSON.stringify(records)).toContain("uniqueItems");
+    expect(JSON.stringify(records)).toContain("strip.unique");
   });
 
   test("only the structural keywords survive; the rest is recorded as stripped", () => {
@@ -112,7 +112,7 @@ describe("J-CAP-t3-review-r4 item 3: server schemas are an allowlist and oversiz
       type: "object", title: "t", description: "d", required: ["a"], additionalProperties: { type: "string" },
       properties: { a: { type: "array", items: { type: "integer", minimum: 0, maximum: 9, exclusiveMinimum: -1, exclusiveMaximum: 10 }, minItems: 0, maxItems: 4 }, b: { enum: [1, 2], const: 1, default: 1, minLength: 1, maxLength: 3 }, c: {}, d: {} },
     }));
-    expect(safe.stripped.sort()).toEqual(["(other)", "anyOf", "format", "items(tuple)", "multipleOf", "not", "uniqueItems"].sort());
+    expect([...safe.stripped].sort()).toEqual(["strip.combinator", "strip.format", "strip.other", "strip.unique"]);
   });
 
   test("a tool result over the bound is refused before the SDK validates it", async () => {
@@ -483,10 +483,10 @@ describe("J-CAP-t3-review-r4 threads: identity, malformed entries, listings, fal
 
   test("the fallback finished record keeps the call's identity", async () => {
     const records: { type: string; payload: Record<string, unknown> }[] = [];
-    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { if (e.payload.phase === "finished" && e.payload.resultBytes !== undefined) throw new Error("detailed write fails"); records.push(e); } });
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { if (e.payload.phase === "finished" && !records.some((r) => r.payload.phase === "failed-once")) { records.push({ type: e.type, payload: { phase: "failed-once" } }); throw new Error("first write fails"); } records.push(e); } });
     expect(await client.callTool("t", {}, { timeoutMs: 3000, actorId: "t", callId: "call-fallback" })).toMatchObject({ ok: true });
     const finished = records.filter((r) => r.payload.phase === "finished");
-    expect(finished.length).toBe(1);
+    expect(finished.length).toBe(1); // the retry carries the same record id: one record
     expect(finished[0]!.payload.callId).toBe("call-fallback");
   });
 
@@ -503,7 +503,7 @@ describe("J-CAP-t3-review-r4 threads: identity, malformed entries, listings, fal
   test("a finished-recorder that never settles cannot hold the call", async () => {
     const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: (e) => (e.payload.phase === "finished" ? new Promise<void>(() => {}) : Promise.resolve()) });
     const started = performance.now();
-    expect(await client.callTool("t", {}, { timeoutMs: 100, actorId: "t" })).toMatchObject({ ok: true });
+    expect(await client.callTool("t", {}, { timeoutMs: 100, actorId: "t" })).toMatchObject({ ok: false, code: "record_failed" }); // the result is withheld
     expect(performance.now() - started).toBeLessThan(700);
   });
 });

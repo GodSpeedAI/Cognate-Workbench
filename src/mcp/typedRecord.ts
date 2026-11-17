@@ -3,6 +3,12 @@
 // mint or adopt from our own runtime, or `Trusted` text authored by us. There is NO plain `string` field, so a string
 // that came from a server (or from anything unvetted) cannot be passed to a record: the compiler rejects it. Server text
 // reaches a record only as a byte count and a digest.
+//
+// BRANDS ARE CONSTRUCTIBLE ONLY IN THIS MODULE (a test fails on any `as Trusted|Sha256|MintedId` elsewhere). The
+// constructors are: `sha256Of`/`newSha256` (a hash), `mintId` (random), `digestId` (a hash in id shape), `text` (a tagged
+// template: its literal parts are compile-time source text and its holes accept only typed values), `adoptId` and
+// `operatorText` (runtime-authored data of OUR runtime or the verified registry; never called from the modules that
+// handle server bytes, `client.ts` and `ingress.ts`, which a test also enforces), and the closed code tables below.
 import { createHash, randomUUID } from "node:crypto";
 
 declare const tag: unique symbol;
@@ -20,7 +26,10 @@ export type RecordCode =
   | "mcp-client" | "tools.list" | "transport"
   | "schema-refused" | "schema-sanitized" | "oversize-message" | "malformed-message" | "too-deep-message"
   | "capability.mcp.tool_invoked" | "authority.decision.recorded"
+  | StripClass
   | CallCode;
+/** The class of a schema keyword that was stripped. A server-chosen keyword spelling is never recorded: only this class. */
+export type StripClass = "strip.reference" | "strip.pattern" | "strip.format" | "strip.combinator" | "strip.annotation" | "strip.unique" | "strip.other";
 /** How a tool call can end. */
 export type CallCode =
   | "ok" | "server_not_running" | "unknown_tool" | "arguments_too_large" | "schema_invalid" | "record_failed"
@@ -41,8 +50,29 @@ export const mintId = (): MintedId => randomUUID() as MintedId;
 export const adoptId = (value: string): MintedId => (ID_SHAPE.test(value) ? value : `sha256:${sha256Of(value).slice(0, 32)}`) as MintedId;
 /** A digest of a possibly hostile name, in the shape of an id: the only way a tool or other server-chosen name appears in a record. */
 export const digestId = (value: string): MintedId => `sha256:${sha256Of(value).slice(0, 32)}` as MintedId;
-/** Assert that text is authored by us or the operator's verified registry. Audited by grep: it is never applied to server-originated data. */
-export const trusted = (value: string): Trusted => value as Trusted;
+/** Text authored by OUR runtime or the operator's verified registry (a reason from our own authorizer, an argv from a verified manifest).
+ *  Never applied in `client.ts` or `ingress.ts` (enforced by a test); a server-originated string must not reach it. */
+export const operatorText = (value: string): Trusted => value as Trusted;
+/** The first 16 hex characters of a digest. */
+export const shortSha = (value: Sha256): Sha256 => value.slice(0, 16) as Sha256;
+/** Bound trusted text to a UTF-8 byte length, cutting on a code point boundary. */
+export function boundText(value: Trusted, max: number): Trusted {
+  if (Buffer.byteLength(value, "utf8") <= max) return value;
+  const marker = max >= 3 ? "..." : "";
+  let used = 0;
+  let end = 0;
+  for (const ch of value) {
+    const size = Buffer.byteLength(ch, "utf8");
+    if (used + size > max - marker.length) break;
+    used += size;
+    end += ch.length;
+  }
+  return `${value.slice(0, end)}${marker}` as Trusted;
+}
+/** A JSON-RPC id chosen by a server: a finite number, or a short string of a restricted alphabet. Anything else is not an id. */
+export type WireId = number | (string & { readonly [tag]: "wire-id" });
+const WIRE_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
+export const parseWireId = (value: unknown): WireId | undefined => (typeof value === "number" && Number.isFinite(value) ? value : typeof value === "string" && WIRE_ID.test(value) ? (value as WireId) : undefined);
 /** Build trusted text; interpolations must themselves be typed (codes, numbers, ids, digests, trusted text). */
 export const text = (parts: TemplateStringsArray, ...values: readonly (RecordCode | number | boolean | Sha256 | MintedId | Trusted)[]): Trusted =>
   parts.reduce((out, part, i) => `${out}${part}${i < values.length ? String(values[i]) : ""}`, "") as Trusted;

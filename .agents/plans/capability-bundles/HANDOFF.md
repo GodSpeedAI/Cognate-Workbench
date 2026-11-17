@@ -178,3 +178,29 @@ the finding (red first), not only a single example. Counterexamples ever found s
 Follow-up (not done): the residual in "uncontained-local process tracking" above is closed by containment, not tracking. A cgroup (v2)
 per spawn would let the sweep read `cgroup.procs` (positive proof of emptiness, no marker or pgid heuristics) and kill the whole
 cgroup; it needs a delegated cgroup subtree, so it belongs with the contained-posture work, not this tranche.
+
+## T3 round 7: invariants at ground truth (review of 4c11d46)
+
+Shared root cause of the round-7 findings: local surrogates (brands, counters, wrapper maps, attempted writes) were treated as
+end-to-end guarantees. Each invariant now has a commit point on, and an oracle reading, the ground truth where it is consumed.
+
+| Invariant | Enforced by | Oracle (ground truth) |
+|---|---|---|
+| I1 no server text in records | Brands constructible only in `typedRecord.ts` (`test/J-CAP-t3-brands.test.ts` fails on any `as Trusted/Sha256/MintedId/WireId/...` elsewhere, and on `operatorText`/`operatorJson` in `client.ts`/`ingress.ts`); stripped schema keywords recorded as our own `strip.*` class code, never the server's spelling | scan of the actual STORE rows, returned messages, listings and captured log lines for any 16-byte server window |
+| I2 one finished record | The durable finished record is the commit point: minted `recordId` is the store idempotency key (insert-if-absent), retried with the same id; result delivered only after confirmation, else `record_failed` with the result withheld; sync throw, rejection and stall all handled | finished records counted in the STORE per call (`<= 1` always, `== 1` unless `record_failed`) |
+| I3 bounded buffering | Transport queue consumed lazily one parsed message at a time; `pause()` (and an awaited listener, which holds the pipe read) at `queueHighBytes`, resume below `queueLowBytes`; a line over the cap stays a connection violation | high-water marks of partial line, queued chunks and parsed message, measured from the live structures |
+| I4 no pending state | any write fault (EPIPE, reject, sync throw), either pipe closing, closes the whole connection, which rejects every SDK handler | the SDK's own `_responseHandlers.size` |
+| I5 slot release | unchanged | `/proc` environ marker scan and `kill(-pgid, 0)` on REAL forking spawns (same group, `setsid`, nested) |
+| Ingress | ids typed (`WireId`: finite number or `[A-Za-z0-9_.:-]{1,64}`); server requests answered by ingress with a fixed error serialized in ingress | generator sends bad ids and server requests |
+
+Tool names: `manifest.tools` holds the bundle's own tool definitions (`{id, description, inputSchema}`), not MCP server tool names, so
+there is nothing integrity-verified to match a server's tool name against. Decision: a server tool name is recorded as a digest only.
+
+Generator additions: batching, EPIPE (throw and reject), half-closed pipes, stdout closing, recorder throw/reject/write-then-reject/
+stall, malformed results, bad ids, server requests, a pipe model that honours pause. `FC_STATS=1` prints the outcome tally.
+Counterexamples shrunk against 4c11d46 are fixed examples in the test.
+
+Residuals: (1) under uncontained-local a child that starts its own session AND clears its marker escapes tracking (see above);
+(2) the cgroup-per-spawn follow-up (`systemd-run --user --scope`, `cgroup.kill`) is not done; (3) a finished record that lands after
+the call returned `record_failed` exists in the store with the true outcome (it is never duplicated); (4) `operatorText`/`adoptId`
+take runtime-authored strings (our authorizer's reasons, manifest argv) and are trusted by convention outside the two server-byte modules.

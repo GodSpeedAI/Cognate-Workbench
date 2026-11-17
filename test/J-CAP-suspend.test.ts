@@ -136,6 +136,7 @@ describe("J-CAP-suspend: operator yank (CUJ 5)", () => {
         expect(cut.ok).toBe(false);
         expect(Date.now() - t0).toBeLessThan(2500);
         await waitUntil("process gone", async () => !alive(pid));
+        await waitUntil("exited ledger", async () => (await exits(app)).length > 0);
         expect((await exits(app))[0]).toMatchObject({ outcome: "stopped", stopReason: "suspended:operator-yank" });
       } finally {
         await app.stop();
