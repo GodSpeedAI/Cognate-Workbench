@@ -65,6 +65,17 @@
 - Test seams: `ServerOptions.capabilityRuntimeHooks` (never set in production) and `bootApp(home, extra)`
 - Suites: `test/J-CAP-reload.test.ts` (CUJ 2/13, 5 tests), `test/J-CAP-source.test.ts` (CUJ 8, ssh/wsl/local parameterized, 7 tests), `test/J-CAP-refusal.test.ts` (CUJ 4 bundle-path matrix + enablement gate, 2 tests), `test/J-CAP-harness.test.ts` (CUJ 11 + refusals + resolver units, 7 tests); `test/J-CAP-create.test.ts` now enables the runtime first
 
+### Tranche T3 — executables, committed (`feat/capability-runtime-t3`)
+- `src/mcp/client.ts`: official MCP SDK (`@modelcontextprotocol/sdk` 1.32.2, exact pin) behind `ChannelTransport`, a custom Transport over a wrapper-owned stdio channel. No client capabilities are declared (server-initiated requests refused). `tools/list` is untrusted data: name pattern, UTF-8 byte bounds (description, schema, result, arguments), ajv-compiled schemas, per-tool exclusion; every call is recorded before it is sent (`capability.mcp.tool_invoked` started/finished/refused; arguments as digest and byte count only).
+- `src/capabilities/execSpawn.ts`: the governed spawn wrapper. The §6.2 matrix as `worldMatrix`/`decideContainment` (unknown kind fails closed; a weaker posture needs an operator posture RECORD that is accurate and explained; an inaccurate record is a recorded core violation). Record-before-spawn ledger (`intended` with secret references only, `spawned`, `exited` / `reconciled-unknown`; one stream per spawn, ordered). Secrets env-only, redacted from everything kept. Long-lease slot class (`acquireLongLeaseSlot`, per-world cap, same containment ledger thread). Process-group ownership on the host-process path (`detached`, `kill(-pgid)`). Boot-sweep `reconcileSpawnLedger` (pid kill only under the version-directory signature).
+- `src/capabilities/mcpManage.ts`: `capability.mcp.start|stop`, `capability.bundle.suspend|resume` and the `McpHost` the dispatcher routes `mcp.<serverId>.<tool>` through. New `authorizeCapabilityOp` ops `mcp.start` (operator, enabled, deployment ok, target slot active and unsuspended, ceiling covers `mcp.server`, live clamp), `mcp.stop`, `suspend`, `resume` (operator-only family). All mutating acts run in the shared mutex; start authorizes first, as the last step before the intent commit, and again after the spawn. A store commit listener stops servers in the commit's own turn on suspension (including the grant revoke/expiry batch), deactivation, uninstall, repoint and session archive; graceful servers drain in-flight calls (bounded), emergency servers and `integrity` suspensions are killed at once.
+- Manifest: `mcpServers` (command with `${bundleDir}`, secret references, restrictions, stop mode), the `mcp.server` requirement/permission; the dispatcher requires `mcp.server` in addition to `capability.invoke` for MCP tools; callers may shorten (never extend) the per-call deadline (`deadlineMs`).
+- Reducer folds `spawn/<id>` rows from the ledger events; boot sweep wired in `server.ts` (before any new spawn).
+- Suites: `test/J-CAP-mcp.test.ts` (27; matrix per provider kind, record-before-spawn, secrets, slots, sweep, lifecycle, deadline, refusals, registry pin), `test/J-CAP-t3-review-r1.test.ts` and `r2` (review rounds 1 and 2), `test/J-CAP-suspend.test.ts` (7; CUJ 5 graceful/emergency/second reason, CUJ 12 revoke batch and scheduler expiry); fixtures `test/fixtures/mcp-stub/`, `test/mcp-helpers.ts`.
+- Secret scrubbing is defense in depth, not a guarantee. The scrubber replaces a server's resolved secrets and their common encodings (exact, base64, URL, hex, UTF-16LE/BE) with `[REDACTED:<NAME>]` in everything MCP-originated, and a secret under 8 bytes is never delivered (the start is refused and recorded). A server that is given a secret can still exfiltrate any other transformation of it, so the real control is the grant decision to give a secret to that server.
+- Reconciliation and the normal stop path release a slot only when the recorded process group answers no probe AND no process carries the spawn's `COGNATE_SPAWN_ID` marker; otherwise the slot stays reserved and `reconcile-incomplete` is recorded. Server output schemas are sanitized like input schemas before the SDK sees them.
+- Recorded limits (open for the owner): the framework `ProcessPort` is buffered (`exec` returns after exit, no stdin/stdout), so an MCP stream cannot be held over an SSH, WSL or bubblewrap provider: those worlds pass the matrix under an honest posture record and then refuse with `stream-port-unavailable` (recorded); only the local host-process path spawns (and only under `uncontained-local`). Posture records are an operator-supplied `ServerOptions.executionPostureRecords` input; an operator-authored recorded edit surface is not built. The workbench fold keeps only a grant's id and status (not principal, permissions or expiry), so a boot rebuild of the index from the fold loses them (fails closed; belongs to the T4 restart journey).
+
 ## What remains (in dependency order)
 
 ### T2 leftovers (deliberately not in this tranche slice)
@@ -72,13 +83,6 @@
 - Boot remount of the active set (`activeSet` is still `[]` in `server.ts`; folds into the T4 restart journey)
 - Activation/creation beyond an agent's grant refuses and records (D2's "park on the approval machinery" is not built)
 - Session-bound activation routing: the dispatcher now derives the session from the run's own start input (never from tool input) and fails closed (a session-scoped suspension refuses any agent-shaped call whose session is unknown). Still open: subagent child runs do not carry their parent's session, so they resolve as session-unknown; `capability.bundle.activate`/`deactivate` still take an explicit `sessionId` target. Capability-declarable 300 s deadlines remain open
-
-### T3 — executables
-1. **`src/mcp/client.ts`**: MCP protocol client — official TypeScript SDK with custom Transport adapter over execution-world provider streams; invocation-record emission
-2. **`src/capabilities/execSpawn.ts`**: governed spawn wrapper — per-provider containment matrix, record-before-spawn ledger, secrets env-only, posture-record checks, long-lease slot class, boot-sweep reconciliation
-3. **`src/capabilities/mcpManage.ts`**: MCP server lifecycle (start/stop/suspend/resume)
-4. **`test/fixtures/mcp-stub/`** + **`test/J-CAP-mcp.test.ts`** (CUJ 3)
-5. **`test/J-CAP-suspend.test.ts`** (CUJs 5, 12)
 
 ### T4 — presentation, safe mode, restart/persist
 1. **`src/ui/FragmentSlot.tsx`**: slot registry, React error boundaries, fail-closed registration, fault recording, governance-surface refusal
@@ -143,3 +147,67 @@ Accepted residual risk (documented on the PR):
 - Bundle-authored code never runs in-process (the dispatcher mounts app-owned adapters)
 - Authority enforcement: the dispatcher decides per invocation from the commit-synchronous index
 - The authority index's sequence number is the live-discovery signal for the descriptor refresh
+
+## T3 residual: uncontained-local process tracking
+
+Boot reconciliation ends a spawn's whole process group, derived from every process still carrying the spawn's `COGNATE_SPAWN_ID` marker (governed children are group leaders), plus any recorded pgid proven ours. Residual: under the uncontained-local posture, a hostile child that starts its own session AND clears the marker can escape tracking. That is inherent to uncontained execution; the containment posture is the boundary, not process tracking. Anything that cannot be verified dead keeps its slot reserved as `reconcile-incomplete`.
+
+## T3 invariants and the class fixes behind them (review-r4)
+
+Review rounds kept finding sibling instances, so the safety properties are now stated as invariants and tested with generated input
+(`test/J-CAP-t3-properties.test.ts`, fast-check; `FC_RUNS` runs per property, 200 in CI, 2,000 run locally with FC_RUNS=2000).
+A generated adversarial MCP server sends random bytes, split chunks, no newline, nested JSON, huge messages, forged errors, delays
+and early exits.
+
+- **I1** no record, returned message or exclusion listing contains any 16-byte substring of server-originated bytes.
+- **I2** every call ends in exactly one finished record within its deadline + epsilon, and nothing throws.
+- **I3** buffered bytes per connection stay at or under the cap (transport counter `peakBufferedBytes`).
+- **I4** pending state is empty after every call.
+- **I5** the slot is released iff nothing of the spawn survives (spawn path, `proc` seam).
+
+Class fixes: (1) `src/mcp/typedRecord.ts` gives records a closed field type (codes, numbers, booleans, `Sha256`, minted ids,
+`Trusted` text) so a server string cannot be recorded (compile error; guarded by a `@ts-expect-error` in the property test);
+(2) `src/mcp/ingress.ts` is the one boundary for server bytes: stream cap, depth limit before parse, strict envelope; oversize,
+too-deep or malformed input closes the connection and fails every pending call (`attributed:false`); (3) facts come only from our
+own per-call state (ingress verdict, our deadline timer, channel state), and every call writes exactly one finished record through a
+path that cannot throw; (4) fail closed: a slot is released only on positive proof that nothing survives.
+
+Review process: ask a reviewer to break a named invariant. A fix is accepted when the invariant's property test would have caught
+the finding (red first), not only a single example. Counterexamples ever found stay in the test as fixed examples.
+
+Follow-up (not done): the residual in "uncontained-local process tracking" above is closed by containment, not tracking. A cgroup (v2)
+per spawn would let the sweep read `cgroup.procs` (positive proof of emptiness, no marker or pgid heuristics) and kill the whole
+cgroup; it needs a delegated cgroup subtree, so it belongs with the contained-posture work, not this tranche.
+
+## T3 round 7: invariants at ground truth (review of 4c11d46)
+
+Shared root cause of the round-7 findings: local surrogates (brands, counters, wrapper maps, attempted writes) were treated as
+end-to-end guarantees. Each invariant now has a commit point on, and an oracle reading, the ground truth where it is consumed.
+
+| Invariant | Enforced by | Oracle (ground truth) |
+|---|---|---|
+| I1 no server text in records | Brands constructible only in `typedRecord.ts` (`test/J-CAP-t3-brands.test.ts` fails on any `as Trusted/Sha256/MintedId/WireId/...` elsewhere, and on `operatorText`/`operatorJson` in `client.ts`/`ingress.ts`); stripped schema keywords recorded as our own `strip.*` class code, never the server's spelling | scan of the actual STORE rows, returned messages, listings and captured log lines for any 16-byte server window |
+| I2 one finished record | The durable finished record is the commit point: minted `recordId` is the store idempotency key (insert-if-absent), retried with the same id; result delivered only after confirmation, else `record_failed` with the result withheld; sync throw, rejection and stall all handled | finished records counted in the STORE per call (`<= 1` always, `== 1` unless `record_failed`) |
+| I3 bounded buffering | Transport queue consumed lazily one parsed message at a time; `pause()` (and an awaited listener, which holds the pipe read) at `queueHighBytes`, resume below `queueLowBytes`; a line over the cap stays a connection violation | high-water marks of partial line, queued chunks and parsed message, measured from the live structures |
+| I4 no pending state | any write fault (EPIPE, reject, sync throw), either pipe closing, closes the whole connection, which rejects every SDK handler | the SDK's own `_responseHandlers.size` |
+| I5 slot release | unchanged | `/proc` environ marker scan and `kill(-pgid, 0)` on REAL forking spawns (same group, `setsid`, nested) |
+| Ingress | ids typed (`WireId`: finite number or `[A-Za-z0-9_.:-]{1,64}`); server requests answered by ingress with a fixed error serialized in ingress | generator sends bad ids and server requests |
+
+Tool names: `manifest.tools` holds the bundle's own tool definitions (`{id, description, inputSchema}`), not MCP server tool names, so
+there is nothing integrity-verified to match a server's tool name against. Decision: a server tool name is recorded as a digest only.
+
+Generator additions: batching, EPIPE (throw and reject), half-closed pipes, stdout closing, recorder throw/reject/write-then-reject/
+stall, malformed results, bad ids, server requests, a pipe model that honours pause. `FC_STATS=1` prints the outcome tally.
+Counterexamples shrunk against 4c11d46 are fixed examples in the test.
+
+Residuals: (1) under uncontained-local a child that starts its own session AND clears its marker escapes tracking (see above);
+(2) the cgroup-per-spawn follow-up (`systemd-run --user --scope`, `cgroup.kill`) is not done; (3) a finished record that lands after
+the call returned `record_failed` exists in the store with the true outcome (it is never duplicated); (4) `operatorText`/`adoptId`
+take runtime-authored strings (our authorizer's reasons, manifest argv) and are trusted by convention outside the two server-byte modules.
+
+## T3 round 10 (review of b372155)
+
+- **I1 scope.** I1 (no server text in records) covers the MCP and spawn capability records and logs. Tool results deliberately reach the agent conversation (`tool.call.completed`), because the model must see them. That is the product's tool-result channel, governed by session retention, not by I1. The client never adopts a caller-supplied `callId`: it mints its own UUID per call and records the caller's id only as a sha256 digest (`callerCallSha256`).
+- **I2.** `host.call` is one wrapper: every refusal path (`unknown_tool`, invalid reference, `server_not_running`) writes exactly one finished record with the refusal code, or returns `record_failed`.
+- **I3.** Each incoming chunk is checked on arrival against `INGRESS.maxRetainedBytes`; an oversize chunk is a protocol violation and closes the connection before anything is queued.
+- **I5 residual.** If the Workbench crashes between the spawn and the pgid confirmation, and the server clears its marker or environment, reconciliation can release the slot while the process survives. The fix is the cgroup-per-spawn follow-up (`systemd-run --user --scope`, `cgroup.kill`), Linux-only. Until then the capability runtime stays disabled by default.

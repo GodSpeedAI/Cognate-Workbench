@@ -35,6 +35,8 @@ import { loadSkill, verifyBundleIntegrity, type BundleManifestData, type Loadabl
 import { LOCAL_ROOT_ID } from "./authorityGrants.ts";
 import { createRuntimeMutex } from "../workbench/runtimeMutex.ts";
 import { authorizeCapabilityOp, permissionCovered, principalForActor, sessionOfRun, type Actor, type Authorization, type CapabilityOp, type Failure } from "../workbench/authoritySelection.ts";
+import type { McpHost } from "./mcpManage.ts";
+import { boundBytes } from "../mcp/client.ts";
 import { randomUUID } from "node:crypto";
 
 export interface DispatcherInterpreterInput {
@@ -64,6 +66,9 @@ interface HandlerEntry {
 }
 
 const DEFAULT_DEADLINE_MS = 60_000;
+/** A caller may only SHORTEN the default deadline (never extend it); fractions and junk fall back to the default. */
+const callDeadlineMs = (requested: number | undefined): number =>
+  typeof requested === "number" && Number.isInteger(requested) && requested >= 1 ? Math.min(requested, DEFAULT_DEADLINE_MS, MAX_DEADLINE_MS) : Math.min(DEFAULT_DEADLINE_MS, MAX_DEADLINE_MS);
 const MAX_DEADLINE_MS = 300_000;
 const MOUNT_TIMEOUT_MS = 30_000;
 
@@ -104,6 +109,8 @@ export interface CapabilityRuntimeOptions {
   readonly deploymentOk?: () => boolean;
   /** The injected clock: every expiry decision compares against it (default: wall clock). */
   readonly now?: () => Date;
+  /** T3: the MCP host MCP tools route through (lazy: the supervisor is built beside the runtime). */
+  readonly getMcpHost?: () => McpHost | undefined;
 }
 
 type Ctx = { actor: Actor; runId?: string };
@@ -123,12 +130,17 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
   const ajv = new Ajv({ strict: false });
   const table = new Map<string, HandlerEntry>(); // key: capabilityId@version (version-keyed)
 
-  function interpreterFor(bundle: LoadableBundle): DispatcherInterpreter {
+  function interpreterFor(bundle: LoadableBundle, sessionId: string | undefined): DispatcherInterpreter {
     const tools = bundle.manifest.tools ?? [];
     const validators = new Map(tools.map((t) => [t.id, ajv.compile(t.inputSchema)] as const));
-    return async (input) => {
+    return async (input, actor, deadlineMs) => {
       if (input.op === "tools.list") {
-        return { ok: true, result: { tools: tools.map((t) => ({ id: `${bundle.capabilityId}.${t.id}`, description: t.description, inputSchema: t.inputSchema })) } as unknown as Json };
+        const host = options.getMcpHost?.();
+        // MCP-supplied names and schemas are untrusted data (§11): they were validated by the client and are
+        // listed under the `mcp.` namespace, marked as server-supplied.
+        const mcpTools = host ? host.toolsFor(bundle.capabilityId, bundle.versionHash, sessionId).map((t) => ({ id: t.id, description: t.description, inputSchema: t.inputSchema, source: "mcp-server-supplied" })) : [];
+        const mcpServers = host ? host.serversFor(bundle.capabilityId, bundle.versionHash, sessionId) : [];
+        return { ok: true, result: { tools: tools.map((t) => ({ id: `${bundle.capabilityId}.${t.id}`, description: t.description, inputSchema: t.inputSchema })), mcpTools, mcpServers } as unknown as Json };
       }
       if (input.op === "skill.load") {
         const loaded = await loadSkill(bundle, input.skillId);
@@ -136,6 +148,13 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
       }
       if (input.op === "tool.invoke") {
         const given = input.tool ?? "";
+        const bare = given.startsWith(`${bundle.capabilityId}.`) ? given.slice(bundle.capabilityId.length + 1) : given;
+        if (bare.startsWith("mcp.")) {
+          const host = options.getMcpHost?.();
+          if (!host) return { ok: false, code: "unavailable", message: "no MCP host is wired", retryable: false };
+          const out = await host.call(bundle.capabilityId, bundle.versionHash, sessionId, bare, input.arguments ?? {}, { deadlineMs, actorId: actor.id });
+          return out.ok ? { ok: true, result: out.result as Json } : { ok: false, code: out.code, message: out.message, retryable: out.retryable };
+        }
         const name = given.startsWith(`${bundle.capabilityId}.`) ? given.slice(bundle.capabilityId.length + 1) : given;
         const validate = validators.get(name);
         if (!validate) return { ok: false, code: "unknown_tool", message: `${bundle.capabilityId} declares no tool ${given}`, retryable: false };
@@ -153,7 +172,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
     const version = bundle.versionHash;
     const key = keyOf(bundle.capabilityId, version, sessionId);
     const scopeId = `cap-runtime:${bundle.capabilityId}:${sessionId ?? "persistent"}:${version}`;
-    const entry: HandlerEntry = { capabilityId: bundle.capabilityId, version, sessionId, bundle, interpreter: interpreterFor(bundle), scopeId, handle: undefined, inFlight: 0 };
+    const entry: HandlerEntry = { capabilityId: bundle.capabilityId, version, sessionId, bundle, interpreter: interpreterFor(bundle, sessionId), scopeId, handle: undefined, inFlight: 0 };
     const adapter: Component = {
       id: scopeId,
       async activate(fiber) {
@@ -299,12 +318,20 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         permission: string,
         operation: string | undefined,
         run: DispatcherInterpreterInput,
+        requestedDeadlineMs?: number,
       ): Promise<Record<string, unknown>> => {
         const capabilityId = String(input.capabilityId ?? "");
         const prep = await prepare(ctx);
         // ---- synchronous critical section: decision, snapshot, counter (no await inside) ----
         const auth = check(permission === "skill.load" ? "skill.load" : "invoke", prep, ctx, capabilityId, permission);
         let failure: Failure | undefined = auth.ok ? undefined : auth;
+        // An MCP tool is an executable payload's tool: it additionally needs `mcp.server` under the
+        // activation ceiling, the actor's grant and the operator root (same decision function, same section).
+        const toolRef = run.op === "tool.invoke" ? String(run.tool ?? "") : "";
+        if (!failure && (toolRef.startsWith("mcp.") || toolRef.startsWith(`${capabilityId}.mcp.`))) {
+          const mcpAuth = check("invoke", prep, ctx, capabilityId, "mcp.server");
+          if (!mcpAuth.ok) failure = mcpAuth;
+        }
         const mounted = auth.ok ? table.get(keyOf(capabilityId, auth.row!.version, auth.row!.sessionId)) : undefined;
         if (auth.ok && !mounted) failure = { ok: false, code: "unmounted", reason: `capability ${capabilityId} version ${auth.row!.version} is committed active but has no mounted handler` };
         if (failure) {
@@ -319,9 +346,10 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         // ---- end critical section ----
         try {
           await recordDecision(capabilityId, operation, ctx.actor, "allowed", "within-ceiling-and-grant", `${permission} covered by ceiling and grant ${decision.grantId}`, { version: entry.version });
-          const result = await dispatch(entry, run, ctx.actor, Math.min(DEFAULT_DEADLINE_MS, MAX_DEADLINE_MS));
+          const result = await dispatch(entry, run, ctx.actor, callDeadlineMs(requestedDeadlineMs));
           if (!result.ok) {
-            await recordDecision(capabilityId, operation, ctx.actor, "refused", result.code, result.message, { version: entry.version });
+            // A refusal record carries a code and a byte-bounded message, never an unbounded raw error text.
+            await recordDecision(capabilityId, operation, ctx.actor, "refused", result.code, boundBytes(result.message, 512), { version: entry.version });
             if (result.code === "integrity") await integrityFault(entry, g.index);
           }
           return { ...result, version: entry.version, decidingPoint: "dispatcher" };
@@ -330,14 +358,14 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         }
       };
 
-      provide("tool.capability_invoke", async (input: { capabilityId: string; op?: string; tool?: string; arguments?: Record<string, unknown> }, ctx) => {
+      provide("tool.capability_invoke", async (input: { capabilityId: string; op?: string; tool?: string; arguments?: Record<string, unknown>; deadlineMs?: number }, ctx) => {
         const op = (input.op ?? "tool.invoke") as DispatcherInterpreterInput["op"];
         if (op !== "tools.list" && op !== "tool.invoke" && op !== "skill.load") {
           const reason = `unknown dispatcher operation ${String(op)} (closed vocabulary: tools.list, tool.invoke, skill.load)`;
           await recordDecision(String(input.capabilityId ?? ""), String(op), ctx.actor, "refused", "unknown-operation", reason);
           return { ok: false, code: "unknown_operation", message: reason, retryable: false, decidingPoint: "dispatcher" };
         }
-        return invokeFlow(input, ctx, op === "skill.load" ? "skill.load" : "capability.invoke", input.tool, { op, tool: input.tool, arguments: input.arguments, skillId: input.tool });
+        return invokeFlow(input, ctx, op === "skill.load" ? "skill.load" : "capability.invoke", input.tool, { op, tool: input.tool, arguments: input.arguments, skillId: input.tool }, input.deadlineMs);
       });
 
       provide("tool.skill_load", async (input: { capabilityId: string; skillId: string }, ctx) =>

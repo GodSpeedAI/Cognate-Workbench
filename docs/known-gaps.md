@@ -294,3 +294,10 @@ do exist. They are new evidence and do not reconstruct the missing legacy artifa
 - `justfile` — the real recipe list
 - `AGENTS.md`, `MIGRATION.md` — the standing constraints
 - `.agents/plans/unified_harness_experience_model_v2.md` — the plan sections that were not built
+
+## Capability runtime T3 (round 10)
+
+- **I1 scope.** I1 (no server text in records) covers the MCP and spawn capability records and logs. Tool results deliberately reach the agent conversation (`tool.call.completed`), because the model must see them. That is the product's tool-result channel, governed by session retention, not by I1. The client never adopts a caller-supplied `callId`: it mints its own UUID per call and records the caller's id only as a sha256 digest (`callerCallSha256`).
+- **I2.** `host.call` is one wrapper: every refusal path (`unknown_tool`, invalid reference, `server_not_running`) writes exactly one finished record with the refusal code, or returns `record_failed`.
+- **I3.** Each incoming chunk is checked on arrival against `INGRESS.maxRetainedBytes`; an oversize chunk is a protocol violation and closes the connection before anything is queued.
+- **I5 residual.** If the Workbench crashes between the spawn and the pgid confirmation, and the server clears its marker or environment, reconciliation can release the slot while the process survives. The fix is the cgroup-per-spawn follow-up (`systemd-run --user --scope`, `cgroup.kill`), Linux-only. Until then the capability runtime stays disabled by default.
