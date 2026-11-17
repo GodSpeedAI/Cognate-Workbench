@@ -65,6 +65,15 @@
 - Test seams: `ServerOptions.capabilityRuntimeHooks` (never set in production) and `bootApp(home, extra)`
 - Suites: `test/J-CAP-reload.test.ts` (CUJ 2/13, 5 tests), `test/J-CAP-source.test.ts` (CUJ 8, ssh/wsl/local parameterized, 7 tests), `test/J-CAP-refusal.test.ts` (CUJ 4 bundle-path matrix + enablement gate, 2 tests), `test/J-CAP-harness.test.ts` (CUJ 11 + refusals + resolver units, 7 tests); `test/J-CAP-create.test.ts` now enables the runtime first
 
+### Tranche T3 — executables, committed (`feat/capability-runtime-t3`)
+- `src/mcp/client.ts`: official MCP SDK (`@modelcontextprotocol/sdk` 1.32.2, exact pin) behind `ChannelTransport`, a custom Transport over a wrapper-owned stdio channel. No client capabilities are declared (server-initiated requests refused). `tools/list` is untrusted data: name pattern, UTF-8 byte bounds (description, schema, result, arguments), ajv-compiled schemas, per-tool exclusion; every call is recorded before it is sent (`capability.mcp.tool_invoked` started/finished/refused; arguments as digest and byte count only).
+- `src/capabilities/execSpawn.ts`: the governed spawn wrapper. The §6.2 matrix as `worldMatrix`/`decideContainment` (unknown kind fails closed; a weaker posture needs an operator posture RECORD that is accurate and explained; an inaccurate record is a recorded core violation). Record-before-spawn ledger (`intended` with secret references only, `spawned`, `exited` / `reconciled-unknown`; one stream per spawn, ordered). Secrets env-only, redacted from everything kept. Long-lease slot class (`acquireLongLeaseSlot`, per-world cap, same containment ledger thread). Process-group ownership on the host-process path (`detached`, `kill(-pgid)`). Boot-sweep `reconcileSpawnLedger` (pid kill only under the version-directory signature).
+- `src/capabilities/mcpManage.ts`: `capability.mcp.start|stop`, `capability.bundle.suspend|resume` and the `McpHost` the dispatcher routes `mcp.<serverId>.<tool>` through. New `authorizeCapabilityOp` ops `mcp.start` (operator, enabled, deployment ok, target slot active and unsuspended, ceiling covers `mcp.server`, live clamp), `mcp.stop`, `suspend`, `resume` (operator-only family). All mutating acts run in the shared mutex; start authorizes first, as the last step before the intent commit, and again after the spawn. A store commit listener stops servers in the commit's own turn on suspension (including the grant revoke/expiry batch), deactivation, uninstall, repoint and session archive; graceful servers drain in-flight calls (bounded), emergency servers and `integrity` suspensions are killed at once.
+- Manifest: `mcpServers` (command with `${bundleDir}`, secret references, restrictions, stop mode), the `mcp.server` requirement/permission; the dispatcher requires `mcp.server` in addition to `capability.invoke` for MCP tools; callers may shorten (never extend) the per-call deadline (`deadlineMs`).
+- Reducer folds `spawn/<id>` rows from the ledger events; boot sweep wired in `server.ts` (before any new spawn).
+- Suites: `test/J-CAP-mcp.test.ts` (21; matrix per provider kind, record-before-spawn, secrets, slots, sweep, lifecycle, deadline, refusals, registry pin), `test/J-CAP-suspend.test.ts` (6; CUJ 5 graceful/emergency/second reason, CUJ 12 revoke batch and scheduler expiry); fixtures `test/fixtures/mcp-stub/`, `test/mcp-helpers.ts`.
+- Recorded limits (open for the owner): the framework `ProcessPort` is buffered (`exec` returns after exit, no stdin/stdout), so an MCP stream cannot be held over an SSH, WSL or bubblewrap provider: those worlds pass the matrix under an honest posture record and then refuse with `stream-port-unavailable` (recorded); only the local host-process path spawns (and only under `uncontained-local`). Posture records are an operator-supplied `ServerOptions.executionPostureRecords` input; an operator-authored recorded edit surface is not built. The workbench fold keeps only a grant's id and status (not principal, permissions or expiry), so a boot rebuild of the index from the fold loses them (fails closed; belongs to the T4 restart journey).
+
 ## What remains (in dependency order)
 
 ### T2 leftovers (deliberately not in this tranche slice)
@@ -72,13 +81,6 @@
 - Boot remount of the active set (`activeSet` is still `[]` in `server.ts`; folds into the T4 restart journey)
 - Activation/creation beyond an agent's grant refuses and records (D2's "park on the approval machinery" is not built)
 - Session-bound activation routing: the dispatcher now derives the session from the run's own start input (never from tool input) and fails closed (a session-scoped suspension refuses any agent-shaped call whose session is unknown). Still open: subagent child runs do not carry their parent's session, so they resolve as session-unknown; `capability.bundle.activate`/`deactivate` still take an explicit `sessionId` target. Capability-declarable 300 s deadlines remain open
-
-### T3 — executables
-1. **`src/mcp/client.ts`**: MCP protocol client — official TypeScript SDK with custom Transport adapter over execution-world provider streams; invocation-record emission
-2. **`src/capabilities/execSpawn.ts`**: governed spawn wrapper — per-provider containment matrix, record-before-spawn ledger, secrets env-only, posture-record checks, long-lease slot class, boot-sweep reconciliation
-3. **`src/capabilities/mcpManage.ts`**: MCP server lifecycle (start/stop/suspend/resume)
-4. **`test/fixtures/mcp-stub/`** + **`test/J-CAP-mcp.test.ts`** (CUJ 3)
-5. **`test/J-CAP-suspend.test.ts`** (CUJs 5, 12)
 
 ### T4 — presentation, safe mode, restart/persist
 1. **`src/ui/FragmentSlot.tsx`**: slot registry, React error boundaries, fail-closed registration, fault recording, governance-surface refusal
