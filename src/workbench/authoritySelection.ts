@@ -22,10 +22,11 @@ export function principalForActor(actor: Actor, runId?: string): { ok: true; pri
 
 /** A live (active, unexpired on the injected clock) grant, or the named refusal. */
 export function liveGrant(index: AuthorityIndex, principalId: string, nowMs: number, label = "principal"): { ok: true; grant: GrantRow } | Failure {
-  const grant = index.grantFor(principalId);
-  if (!grant) return { ok: false, code: principalId === LOCAL_ROOT_ID ? "no-root-grant" : "no-grant", reason: `${label} ${principalId} holds no active grant` };
-  if (grant.expiresAt && new Date(grant.expiresAt).getTime() <= nowMs) return { ok: false, code: "grant-expired", reason: `grant ${grant.grantId} has expired` };
-  return { ok: true, grant };
+  const grant = index.grantFor(principalId, nowMs);
+  if (grant) return { ok: true, grant };
+  const lapsed = index.grantFor(principalId);
+  if (lapsed) return { ok: false, code: "grant-expired", reason: `grant ${lapsed.grantId} has expired` };
+  return { ok: false, code: principalId === LOCAL_ROOT_ID ? "no-root-grant" : "no-grant", reason: `${label} ${principalId} holds no active grant` };
 }
 
 /** The row that GOVERNS a call (§4.1, total): a session-scoped row governs whenever one exists for

@@ -391,7 +391,8 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const versionKey = row.versionHash ? `bundle-version/${capabilityId}/${row.versionHash}` : "";
       const existing = versionKey ? (get(versionKey) as { [k: string]: unknown } | undefined) : undefined;
       return [
-        { key: `bundle/${capabilityId}`, value: j(existing ?? row) },
+        // `registeredAt` is per REGISTRATION (CR-5): the uninstall key derives from it.
+        { key: `bundle/${capabilityId}`, value: j({ ...(existing ?? row), registeredAt: row.registeredAt }) },
         ...(versionKey && !existing ? [{ key: versionKey, value: j(row) }] : []),
       ];
     }
@@ -419,7 +420,7 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const retired = get(`binding-retired/${capabilityId}`) as { versions?: unknown } | undefined;
       const priorVersion = String(p.from ?? prev.version ?? "");
       return [
-        { key, value: j({ ...prev, version: p.to ?? prev.version, repointedAt: recordedAt }) },
+        { key, value: j({ ...prev, version: p.to ?? prev.version, ...(Array.isArray(p.ceiling) ? { ceiling: p.ceiling } : {}), ...(typeof p.clampProvenance === "string" ? { clampProvenance: p.clampProvenance } : {}), repointedAt: recordedAt }) },
         { key: `binding-retired/${capabilityId}`, value: j({ versions: [...((retired?.versions as readonly string[]) ?? []), priorVersion] }) },
       ];
     }

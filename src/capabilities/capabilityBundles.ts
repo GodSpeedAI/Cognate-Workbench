@@ -200,7 +200,11 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
           // R4-2: the LAST step before the commit.
           const last = authorizeCapabilityOp("uninstall", { enabled: true, deploymentOk: true, index, actor: ctx.actor, runId: ctx.runId, nowMs: Date.now() });
           if (!last.ok) throw new Error(`capability.bundle.uninstall: ${last.reason}`);
-          await options.lifecycleRecorder().commitBatch(capabilityId, [{ type: "capability.uninstalled", payload: { capabilityId } }], `uninstall:${capabilityId}`);
+          // CR-5: the idempotency key names THIS registration (version + registration time), so an
+          // uninstall after a re-registration is a new act, never a replay of the earlier one.
+          const registration = (await options.getService().readProjection(systemCaller, { name: "workbench" }).catch(() => ({ rows: [] as { key: string; value: unknown }[] }))).rows.find((r) => r.key === `bundle/${capabilityId}`)?.value as { versionHash?: string; registeredAt?: string } | undefined;
+          const key = `uninstall:${capabilityId}:${registration?.versionHash ?? "unknown"}:${registration?.registeredAt ?? randomUUID()}`;
+          await options.lifecycleRecorder().commitBatch(capabilityId, [{ type: "capability.uninstalled", payload: { capabilityId } }], key);
           return { capabilityId, uninstalled: true };
         });
       });

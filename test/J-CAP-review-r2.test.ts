@@ -48,17 +48,20 @@ describe("J-CAP-review-r2", () => {
       expect(classifyCapabilityStore({ COGNATE_POSTGRES_URL: "postgres://x", COGNATE_CAPABILITY_SINGLE_WRITER: "yes" })).toBe("external-postgres");
       expect(classifyCapabilityStore({ COGNATE_POSTGRES_URL: "postgres://x", COGNATE_CAPABILITY_SINGLE_WRITER: "1" })).toBe("external-postgres-single-writer");
     });
-    test("enable refuses external-postgres and accepts the declared single-writer kind", async () => {
+    test("enable refuses external-postgres and succeeds for the declared single-writer kind", async () => {
       const enable = async (storeKind: "external-postgres" | "external-postgres-single-writer") => {
         const handlers = new Map<string, Handler>();
-        const committed: unknown[] = [];
-        authorityGrantsComponent({ getStore: () => ({ appendConditional: async () => ({}) }) as never, getIndex: () => ({ ready: Promise.resolve() }) as never, tenant: "local", isRemediationVerified: async () => true, storeKind } as never)
+        const commits: unknown[] = [];
+        const store = { readStream: async () => [], commit: async (request: unknown) => { commits.push(request); return { kind: "committed", events: [] }; } };
+        authorityGrantsComponent({ getStore: () => store as never, getIndex: () => ({ ready: Promise.resolve() }) as never, tenant: "local", isRemediationVerified: async () => true, storeKind } as never)
           .activate({ provide: (c: { id: string }, h: Handler) => handlers.set(c.id, h), effects: { register() {} } } as never);
-        void committed;
-        return handlers.get("capability.runtime.enable")!({}, { actor: { id: "op", kind: "user" } });
+        const result = await handlers.get("capability.runtime.enable")!({}, { actor: { id: "op", kind: "user" } });
+        return { result, commits };
       };
       await expect(enable("external-postgres")).rejects.toThrow(/unsupported multi-writer store/);
-      await expect(enable("external-postgres-single-writer")).rejects.not.toThrow(/unsupported multi-writer store/);
+      const ok = await enable("external-postgres-single-writer");
+      expect(ok.result).toEqual({ enabled: true });
+      expect(ok.commits.length).toBe(1); // the enablement marker was actually committed
     });
   });
 

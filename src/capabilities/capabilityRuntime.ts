@@ -74,6 +74,8 @@ export interface CapabilityRuntimeHooks {
   /** Runs after the invocation snapshot is taken, before the interpreter — holds a call in flight. */
   readonly beforeInterpret?: (info: { capabilityId: string; version: string; op: string }) => void | Promise<void>;
   /** Runs after a replacement is mounted and before its pre-state check and `repointed` commit. */
+  /** Runs after the conflict/installation re-reads, immediately before the final authorization re-check. */
+  readonly beforeFinalRecheck?: (info: { capabilityId: string }) => void | Promise<void>;
   readonly beforeRepointCommit?: (info: { capabilityId: string; from: string; to: string }) => void | Promise<void>;
 }
 
@@ -96,6 +98,8 @@ export interface CapabilityRuntimeOptions {
   readonly hooks?: CapabilityRuntimeHooks;
   /** The shared runtime mutex (activation, deactivation, uninstall, grant issue/revoke). */
   readonly mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex;
+  /** Filled by the runtime: versions with a live handler entry (mounted or draining in-flight calls) — the GC reference set (CR-4). */
+  readonly versionRegistry?: { liveVersions: (capabilityId: string) => ReadonlySet<string> };
   /** The §1.5 deployment invariant, re-evaluated per decision (default: satisfied). */
   readonly deploymentOk?: () => boolean;
   /** The injected clock: every expiry decision compares against it (default: wall clock). */
@@ -276,11 +280,14 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
 
       /** §4.4: fail-closed load + `capability.integrity_failed` + reason-`integrity` suspension. */
       const integrityFault = async (entry: HandlerEntry, index: AuthorityIndex): Promise<void> => {
-        const row = index.selectActivation(entry.capabilityId, "user");
+        // CR-1: the fault belongs to the SLOT and VERSION that served the call. After a repoint the
+        // governing slot names another version: record the stale fault, suspend nothing.
+        const row = index.activations.get(index.activationKey(entry.capabilityId, "user", entry.sessionId));
+        const governs = row !== undefined && row.version === entry.version;
         const events: { type: string; payload: Record<string, unknown> }[] = [
-          { type: "capability.integrity_failed", payload: { capabilityId: entry.capabilityId, version: entry.version, reason: "version directory failed its recorded content hash" } },
+          { type: "capability.integrity_failed", payload: { capabilityId: entry.capabilityId, version: entry.version, ...(entry.sessionId ? { sessionId: entry.sessionId } : {}), ...(governs ? {} : { stale: true }), reason: "version directory failed its recorded content hash" } },
         ];
-        if (row && row.state === "active" && !row.suspensionReasons.includes("integrity")) {
+        if (row && governs && row.state === "active" && !row.suspensionReasons.includes("integrity")) {
           events.push({ type: "capability.suspended", payload: { capabilityId: entry.capabilityId, level: row.level, ...(row.sessionId ? { sessionId: row.sessionId } : {}), reason: "integrity" } });
         }
         await commit(entry.capabilityId, events, `integrity:${entry.capabilityId}:${entry.version}`).catch(() => {});
@@ -383,6 +390,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
 
       // R3-6: activation and deactivation run one at a time (valid under the §1.5 single-writer
       // invariant), so conflict detection, authorization and the commit see one consistent state.
+      if (options.versionRegistry) options.versionRegistry.liveVersions = (capabilityId) => new Set([...table.values()].filter((e) => e.capabilityId === capabilityId).map((e) => e.version));
       const mutex = options.mutex ?? createRuntimeMutex();
       const serial = <T,>(fn: () => Promise<T>): Promise<T> => mutex.run(fn);
 
@@ -454,12 +462,18 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         const latestNow = rowsNow.get(`bundle/${capabilityId}`) as { uninstalled?: boolean } | undefined;
         if (!latestNow || latestNow.uninstalled || !manifestOf(rowsNow, capabilityId, bundle.versionHash)) return abort("not-installed", `${capabilityId}@${bundle.versionHash} is no longer installed — activation aborted before commit`);
         // R4-2: the LAST step before the commit — prepare, authorize, commit; nothing awaited between.
+        await options.hooks?.beforeFinalRecheck?.({ capabilityId });
         const fresh = await prepare(ctx);
         const recheck = authorize(ctx, fresh, requirements, harness);
         if (!recheck.ok) return abort(recheck.code, `activation authorization stale at commit: ${recheck.reason}`);
+        // CR-6: the governing activation is re-read synchronously with the commit: a suspension (or
+        // any change) committed during the awaits above must not be overwritten.
+        const governing = g.index.activations.get(slot);
+        if (live && (!governing || governing.state !== "active" || governing.version !== live.version)) return abort("pre-state-changed", `the activation changed before the repoint commit (now ${governing?.state ?? "absent"}${governing ? ` at ${governing.version}` : ""}); the last known-good version stands`);
+        if (!live && governing && (governing.state === "active" || governing.state === "suspended")) return abort("pre-state-changed", "another activation committed before this one");
         try {
           const head = live
-            ? { type: "capability.repointed", payload: { capabilityId, level: "user", from: live.version, to: bundle.versionHash, ...(sessionId ? { sessionId } : {}) } }
+            ? { type: "capability.repointed", payload: { capabilityId, level: "user", from: live.version, to: bundle.versionHash, ceiling: recheck.ceiling, clampProvenance: recheck.clampProvenance, ...(sessionId ? { sessionId } : {}) } }
             : { type: "capability.activated", payload: { capabilityId, level: "user", version: bundle.versionHash, ceiling: recheck.ceiling, clampProvenance: recheck.clampProvenance, ...(sessionId ? { sessionId } : {}) } };
           await commit(capabilityId, [head, ...patchedEvents(capabilityId, bundle.versionHash, sessionId, harness, "applied")], live ? "repoint" : "activate");
         } catch (error) {

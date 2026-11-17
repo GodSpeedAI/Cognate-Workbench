@@ -686,6 +686,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const capabilityStoreKind = classifyCapabilityStore(process.env);
   // R4: ONE mutex for activation, deactivation, uninstall and grant issue/revoke (valid under §1.5).
   const capabilityMutex = createRuntimeMutex();
+  // CR-4: versions with a live handler entry (mounted or draining) are never pruned; the runtime fills it.
+  const capabilityVersionRegistry: { liveVersions: (capabilityId: string) => ReadonlySet<string> } = { liveVersions: () => new Set() };
   // R3-3: the §1.5 deployment invariant is re-evaluated at EVERY enablement check, not only when
   // the marker was written: an external PostgreSQL without the operator's single-writer
   // declaration disables the runtime now, whatever the marker says.
@@ -824,11 +826,12 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         tenant: LOCAL_OPERATOR.tenant,
         getRegistry: () => executionWorlds,
         // §4.2.3 GC reference rule: any version an activation row names is never pruned.
-        referencedVersions: (capabilityId) => new Set([...capabilityRuntimeIndex.activations.values()].filter((row) => row.capabilityId === capabilityId && row.state !== "retired").map((row) => row.version)),
+        referencedVersions: (capabilityId) => new Set([...capabilityRuntimeIndex.activations.values()].filter((row) => row.capabilityId === capabilityId && row.state !== "retired").map((row) => row.version).concat([...capabilityVersionRegistry.liveVersions(capabilityId)])),
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityRuntimeComponent({
         mutex: capabilityMutex,
+        versionRegistry: capabilityVersionRegistry,
         getKernel: () => runtime.kernel,
         getService,
         getRootScope: () => (runtime.kernel as unknown as { root: import("@godspeedai/cognate-kernel-api").Scope }).root,
