@@ -84,7 +84,7 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
  * posture (`uncontained-local`, `devAuth`) are out of T2 scope by design: the packaged app runs
  * its default posture.
  */
-export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks" | "executionPostureRecords" | "mcpSupervisorTimings">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   return await bootAppOnce(home, 0, extra);
 }
 
@@ -92,7 +92,7 @@ export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "
  *  race the same instance start and the losers get "Instance already running" from the pg0
  *  binary — the instance is up moments later. Retry the boot; per-attempt failures surface
  *  after the retries are spent. */
-async function bootAppOnce(home: string, attempt: number, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+async function bootAppOnce(home: string, attempt: number, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks" | "executionPostureRecords" | "mcpSupervisorTimings">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   const sidecar = process.env.COGNATE_TEST_SIDECAR;
   if (!sidecar) {
     let app: AppServer;

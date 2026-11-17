@@ -65,6 +65,9 @@ interface HandlerEntry {
 }
 
 const DEFAULT_DEADLINE_MS = 60_000;
+/** A caller may only SHORTEN the default deadline (never extend it); fractions and junk fall back to the default. */
+const callDeadlineMs = (requested: number | undefined): number =>
+  typeof requested === "number" && Number.isInteger(requested) && requested >= 1 ? Math.min(requested, DEFAULT_DEADLINE_MS, MAX_DEADLINE_MS) : Math.min(DEFAULT_DEADLINE_MS, MAX_DEADLINE_MS);
 const MAX_DEADLINE_MS = 300_000;
 const MOUNT_TIMEOUT_MS = 30_000;
 
@@ -314,6 +317,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         permission: string,
         operation: string | undefined,
         run: DispatcherInterpreterInput,
+        requestedDeadlineMs?: number,
       ): Promise<Record<string, unknown>> => {
         const capabilityId = String(input.capabilityId ?? "");
         const prep = await prepare(ctx);
@@ -341,7 +345,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         // ---- end critical section ----
         try {
           await recordDecision(capabilityId, operation, ctx.actor, "allowed", "within-ceiling-and-grant", `${permission} covered by ceiling and grant ${decision.grantId}`, { version: entry.version });
-          const result = await dispatch(entry, run, ctx.actor, Math.min(DEFAULT_DEADLINE_MS, MAX_DEADLINE_MS));
+          const result = await dispatch(entry, run, ctx.actor, callDeadlineMs(requestedDeadlineMs));
           if (!result.ok) {
             await recordDecision(capabilityId, operation, ctx.actor, "refused", result.code, result.message, { version: entry.version });
             if (result.code === "integrity") await integrityFault(entry, g.index);
@@ -352,14 +356,14 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         }
       };
 
-      provide("tool.capability_invoke", async (input: { capabilityId: string; op?: string; tool?: string; arguments?: Record<string, unknown> }, ctx) => {
+      provide("tool.capability_invoke", async (input: { capabilityId: string; op?: string; tool?: string; arguments?: Record<string, unknown>; deadlineMs?: number }, ctx) => {
         const op = (input.op ?? "tool.invoke") as DispatcherInterpreterInput["op"];
         if (op !== "tools.list" && op !== "tool.invoke" && op !== "skill.load") {
           const reason = `unknown dispatcher operation ${String(op)} (closed vocabulary: tools.list, tool.invoke, skill.load)`;
           await recordDecision(String(input.capabilityId ?? ""), String(op), ctx.actor, "refused", "unknown-operation", reason);
           return { ok: false, code: "unknown_operation", message: reason, retryable: false, decidingPoint: "dispatcher" };
         }
-        return invokeFlow(input, ctx, op === "skill.load" ? "skill.load" : "capability.invoke", input.tool, { op, tool: input.tool, arguments: input.arguments, skillId: input.tool });
+        return invokeFlow(input, ctx, op === "skill.load" ? "skill.load" : "capability.invoke", input.tool, { op, tool: input.tool, arguments: input.arguments, skillId: input.tool }, input.deadlineMs);
       });
 
       provide("tool.skill_load", async (input: { capabilityId: string; skillId: string }, ctx) =>
