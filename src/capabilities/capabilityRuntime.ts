@@ -33,7 +33,7 @@ import type { AuthorityIndex, ActivationRow } from "../workbench/authorityIndex.
 import { detectHarnessConflicts, hasHarness, patchedRecord, validateHarness, EMPTY_HARNESS, type HarnessDeclaration } from "../workbench/harnessPatches.ts";
 import { loadSkill, verifyBundleIntegrity, type BundleManifestData, type LoadableBundle } from "./skillLoader.ts";
 import { LOCAL_ROOT_ID } from "./authorityGrants.ts";
-import { governingActivation, liveAuthorityFor, liveGrant, permissionCovered, principalForActor, type Actor, type Failure } from "../workbench/authoritySelection.ts";
+import { authorizeCapabilityOp, permissionCovered, principalForActor, sessionOfRun, type Actor, type Authorization, type CapabilityOp, type Failure } from "../workbench/authoritySelection.ts";
 import { randomUUID } from "node:crypto";
 
 export interface DispatcherInterpreterInput {
@@ -92,6 +92,8 @@ export interface CapabilityRuntimeOptions {
   /** Boot-rebuilt rows the dispatcher mounts from (fold-first/mount-second, §4.2.8). */
   readonly activeSet: readonly { capabilityId: string; version: string; dir: string }[];
   readonly hooks?: CapabilityRuntimeHooks;
+  /** The §1.5 deployment invariant, re-evaluated per decision (default: satisfied). */
+  readonly deploymentOk?: () => boolean;
   /** The injected clock: every expiry decision compares against it (default: wall clock). */
   readonly now?: () => Date;
 }
@@ -228,58 +230,32 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         }
       })().catch(() => {});
 
-      type Gate = { ok: true; index: AuthorityIndex } | Failure;
-      /** The async prerequisites of a decision: enablement marker and index readiness. */
-      const gate = async (): Promise<Gate> => {
+      const sessionOf = (ctx: Ctx): Promise<string | undefined> => sessionOfRun(options.getService() as never, options.tenant, ctx.runId);
+
+      /** The async prerequisites of ANY authorization: enablement, deployment invariant, index
+       *  readiness, and the run's session (from the run context only). The decision itself is
+       *  `authorizeCapabilityOp`, evaluated synchronously over committed index state. */
+      interface Prep { enabled: boolean; deploymentOk: boolean; index: AuthorityIndex | undefined; sessionId: string | undefined }
+      const prepare = async (ctx: Ctx): Promise<Prep> => {
         let enabled = false;
         try {
           enabled = (await options.isEnabled?.()) === true;
         } catch {
           enabled = false;
         }
-        if (!enabled) return { ok: false, code: "runtime-disabled", reason: "the capability runtime is not enabled (workbench.capability_runtime.enabled marker absent)" };
-        const index = options.getIndex?.();
-        if (!index) return { ok: false, code: "index-unavailable", reason: "the authority index is unavailable — failing closed" };
-        try {
-          await index.ready;
-        } catch {
-          return { ok: false, code: "index-unavailable", reason: "the authority index failed to rebuild — failing closed" };
+        let index = options.getIndex?.();
+        if (index) {
+          try {
+            await index.ready;
+          } catch {
+            index = undefined;
+          }
         }
-        return { ok: true, index };
+        return { enabled, deploymentOk: options.deploymentOk ? options.deploymentOk() : true, index, sessionId: await sessionOf(ctx) };
       };
-
+      const check = (op: CapabilityOp, prep: Prep, ctx: Ctx, capabilityId: string | undefined, permission: string | undefined): Authorization =>
+        authorizeCapabilityOp(op, { enabled: prep.enabled, deploymentOk: prep.deploymentOk, index: prep.index, actor: ctx.actor, runId: ctx.runId, sessionId: prep.sessionId, capabilityId, permission, nowMs: nowMs() });
       const principalOf = principalForActor;
-
-      /** §1.4, synchronous over committed index state. Returns the governing row and entry. */
-      const decide = (index: AuthorityIndex, args: { capabilityId: string; permission: string; actor: Actor; runId?: string; sessionId?: string }):
-        { ok: true; row: ActivationRow; entry: HandlerEntry; grantId: string } | Failure => {
-        const principal = principalOf(args.actor, args.runId);
-        if (!principal.ok) return principal;
-        // R1-1/R2-3: the session comes from the run context, never tool input; the governing row
-        // is selected by the one function the run-start resolver also uses.
-        const governing = governingActivation(index, args.capabilityId, "user", args.sessionId, args.actor.kind !== "user" || Boolean(args.runId));
-        if (governing.blockedBy) return { ok: false, code: "suspended", reason: `activation of ${args.capabilityId} is suspended for session ${governing.blockedBy.sessionId} and this call carries no session — refusing (fail closed)` };
-        const row = governing.row;
-        if (!row) return { ok: false, code: "no-activation", reason: `capability ${args.capabilityId} has no activation` };
-        if (row.state !== "active" || row.suspensionReasons.length > 0) {
-          const suspended = row.state === "suspended" || row.suspensionReasons.length > 0;
-          return { ok: false, code: suspended ? "suspended" : `inactive:${row.state}`, reason: `activation of ${args.capabilityId} is ${row.state}${row.suspensionReasons.length ? ` (${row.suspensionReasons.join(", ")})` : ""}` };
-        }
-        if (!permissionCovered(row.ceiling, args.permission)) return { ok: false, code: "beyond-ceiling", reason: `${args.permission} exceeds the activation ceiling of ${args.capabilityId}` };
-        const live = liveGrant(index, principal.principalId, nowMs());
-        if (!live.ok) return live;
-        const grant = live.grant;
-        if (!permissionCovered(grant.permissions, args.permission)) return { ok: false, code: "beyond-grant", reason: `${args.permission} exceeds the grant of ${principal.principalId}` };
-        // R2-1: the live root grant and the live clamp are checked on EVERY invocation, whatever
-        // the clamp provenance (`operator` provenance means the root grant, which must be live).
-        const authority = liveAuthorityFor(index, row, args.permission, nowMs());
-        if (!authority.ok) return authority;
-        // The index names the governing version; its handle must be mounted (§4.3 reverse orphan:
-        // committed-active but unmounted refuses as `unmounted`, distinct from `suspended`).
-        const entry = table.get(keyOf(args.capabilityId, row.version));
-        if (!entry) return { ok: false, code: "unmounted", reason: `capability ${args.capabilityId} version ${row.version} is committed active but has no mounted handler` };
-        return { ok: true, row, entry, grantId: grant.grantId };
-      };
 
       const dispatch = async (entry: HandlerEntry, input: DispatcherInterpreterInput, actor: Actor, deadlineMs: number): Promise<InterpreterResult> => {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -306,19 +282,6 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         await commit(entry.capabilityId, events, `integrity:${entry.capabilityId}:${entry.version}`).catch(() => {});
       };
 
-      /** R1-1: the run's session, read from the run's own start input (set by the turn that began
-       *  it), never from the call's arguments. Unresolvable => undefined (callers fail closed). */
-      const sessionOf = async (ctx: Ctx): Promise<string | undefined> => {
-        if (!ctx.runId) return undefined;
-        try {
-          const run = await options.getService().getRun({ actor: { id: "system", kind: "system" }, tenant: options.tenant }, { runId: ctx.runId });
-          const value = (run.input as { sessionId?: unknown } | null)?.sessionId;
-          return typeof value === "string" && value ? value : undefined;
-        } catch {
-          return undefined;
-        }
-      };
-
       const invokeFlow = async (
         input: { capabilityId?: string },
         ctx: Ctx,
@@ -327,19 +290,20 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         run: DispatcherInterpreterInput,
       ): Promise<Record<string, unknown>> => {
         const capabilityId = String(input.capabilityId ?? "");
-        const sessionId = await sessionOf(ctx);
-        const g = await gate();
-        if (!g.ok) {
-          await recordDecision(capabilityId, operation, ctx.actor, "refused", g.code, g.reason);
-          return { ok: false, code: g.code === "runtime-disabled" || g.code === "index-unavailable" ? "unavailable" : "refused", message: g.reason, retryable: false, reasonCode: g.code, decidingPoint: "dispatcher" };
-        }
+        const prep = await prepare(ctx);
         // ---- synchronous critical section: decision, snapshot, counter (no await inside) ----
-        const decision = decide(g.index, { capabilityId, permission, actor: ctx.actor, runId: ctx.runId, sessionId });
-        if (!decision.ok) {
-          await recordDecision(capabilityId, operation, ctx.actor, "refused", decision.code, decision.reason);
-          return { ok: false, code: decision.code === "unmounted" ? "unavailable" : "refused", message: decision.reason, retryable: decision.code === "unmounted", reasonCode: decision.code, decidingPoint: "dispatcher" };
+        const auth = check(permission === "skill.load" ? "skill.load" : "invoke", prep, ctx, capabilityId, permission);
+        let failure: Failure | undefined = auth.ok ? undefined : auth;
+        const mounted = auth.ok ? table.get(keyOf(capabilityId, auth.row!.version)) : undefined;
+        if (auth.ok && !mounted) failure = { ok: false, code: "unmounted", reason: `capability ${capabilityId} version ${auth.row!.version} is committed active but has no mounted handler` };
+        if (failure) {
+          await recordDecision(capabilityId, operation, ctx.actor, "refused", failure.code, failure.reason);
+          const unavailable = failure.code === "unmounted" || failure.code === "runtime-disabled" || failure.code === "index-unavailable" || failure.code === "deployment-invariant";
+          return { ok: false, code: unavailable ? "unavailable" : "refused", message: failure.reason, retryable: failure.code === "unmounted", reasonCode: failure.code, decidingPoint: "dispatcher" };
         }
-        const entry = decision.entry;
+        const decision = { grantId: (auth as { grant: { grantId: string } }).grant.grantId };
+        const g = { index: (auth as { index: AuthorityIndex }).index };
+        const entry = mounted!;
         entry.inFlight += 1;
         // ---- end critical section ----
         try {
@@ -395,33 +359,34 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         return out;
       };
 
-      /** Who may activate, and what ceiling results: declared ∩ clamp grant (∩ operator root "*"). */
-      const authorize = (ctx: Ctx, index: AuthorityIndex, requirements: readonly string[], harness: HarnessDeclaration): { ok: true; ceiling: string[]; clampProvenance: string } | Failure => {
-        const principal = principalOf(ctx.actor, ctx.runId);
-        if (!principal.ok) return principal;
-        const grant = index.grantFor(principal.principalId);
-        if (!grant) return { ok: false, code: "no-grant", reason: `principal ${principal.principalId} holds no active grant` };
-        if (expired(grant.expiresAt)) return { ok: false, code: "grant-expired", reason: `grant ${grant.grantId} has expired` };
-        // A request beyond the grant would park on the approval machinery (§1.2); this release
-        // refuses and records it — the fail-closed stand-in, never a silent grant.
-        if (!permissionCovered(grant.permissions, "bundle.activate")) return { ok: false, code: "beyond-grant", reason: `activation requires bundle.activate in the grant of ${principal.principalId}` };
-        // §1.3 (R1-3): the ceiling is requirements ∩ actor grant ∩ operator-root permissions. No
-        // live root grant means no operator authority to intersect with — fail closed.
-        const root = index.grantFor(LOCAL_ROOT_ID);
-        if (!root) return { ok: false, code: "no-root-grant", reason: "the operator root holds no active grant — activation refused (fail closed)" };
-        if (expired(root.expiresAt)) return { ok: false, code: "grant-expired", reason: `operator root grant ${root.grantId} has expired` };
+      /** Who may activate, and what ceiling results: requirements ∩ actor grant ∩ operator root.
+       *  The permission checks (bundle.activate on actor AND root) are `authorizeCapabilityOp`'s. */
+      const authorize = (ctx: Ctx, prep: Prep, requirements: readonly string[], harness: HarnessDeclaration): { ok: true; ceiling: string[]; clampProvenance: string } | Failure => {
+        const auth = check("activate", prep, ctx, undefined, "bundle.activate");
+        if (!auth.ok) return auth;
+        const grant = auth.grant!;
+        const root = auth.root!;
         const ceiling = requirements.filter((r) => permissionCovered(grant.permissions, r) && permissionCovered(root.permissions, r));
         const clipped = requirements.filter((r) => permissionCovered(grant.permissions, r) && !permissionCovered(root.permissions, r));
         if (clipped.length > 0) return { ok: false, code: "beyond-operator", reason: `the operator root's permissions do not cover ${clipped.join(", ")}, which the bundle requires` };
         if (ceiling.length === 0) return { ok: false, code: "beyond-operator", reason: "the intersection of the bundle's requirements, the actor's grant and the operator root's permissions is empty" };
         if (hasHarness(harness) && !ceiling.includes("harness.modify")) return { ok: false, code: "harness-not-covered", reason: "the bundle declares harness surfaces but the actor's grant does not cover harness.modify" };
-        return { ok: true, ceiling, clampProvenance: principal.principalId === LOCAL_ROOT_ID ? "operator" : grant.grantId };
+        return { ok: true, ceiling, clampProvenance: auth.principalId === LOCAL_ROOT_ID ? "operator" : grant.grantId };
       };
 
       const patchedEvents = (capabilityId: string, version: string, sessionId: string | undefined, harness: HarnessDeclaration, change: "applied" | "removed") =>
         hasHarness(harness) ? [patchedRecord({ capabilityId, version, ...(sessionId ? { sessionId } : {}), harness }, change)] : [];
 
-      provide("capability.bundle.activate", async (input: { capabilityId: string; sessionId?: string }, ctx: Ctx) => {
+      // R3-6: activation and deactivation run one at a time (valid under the §1.5 single-writer
+      // invariant), so conflict detection, authorization and the commit see one consistent state.
+      let serialTail: Promise<unknown> = Promise.resolve();
+      const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
+        const run = serialTail.then(fn, fn);
+        serialTail = run.then(() => undefined, () => undefined);
+        return run;
+      };
+
+      provide("capability.bundle.activate", (input: { capabilityId: string; sessionId?: string }, ctx: Ctx) => serial(async () => {
         const capabilityId = String(input.capabilityId ?? "");
         const sessionId = typeof input.sessionId === "string" && input.sessionId ? input.sessionId : undefined;
         const refuse = async (code: string, reason: string, faultType?: string, version?: string): Promise<never> => {
@@ -429,12 +394,14 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
           if (faultType) await commit(capabilityId, [{ type: faultType, payload: { capabilityId, ...(version ? { version } : {}), reason: `${code}: ${reason}` } }], `fault:${capabilityId}`).catch(() => {});
           throw new Error(`capability.bundle.activate: ${reason}`);
         };
-        const g = await gate();
-        if (!g.ok) return refuse(g.code, g.reason);
+        const prep0 = await prepare(ctx);
+        const first = check("activate", prep0, ctx, capabilityId, "bundle.activate");
+        if (!first.ok) return refuse(first.code, first.reason);
+        const g = { index: first.index };
         const found = await bundleFor(capabilityId);
         if (!found) throw new Error(`capability.bundle.activate: ${capabilityId} is not a registered, installed bundle`);
         const { bundle, harness, requirements } = found;
-        const authority = authorize(ctx, g.index, requirements, harness);
+        const authority = authorize(ctx, prep0, requirements, harness);
         if (!authority.ok) return refuse(authority.code, authority.reason);
         const slot = g.index.activationKey(capabilityId, "user", sessionId);
         const existing = g.index.activations.get(slot);
@@ -474,9 +441,15 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         // R2-4: authorization is re-checked AT the commit, not trusted from the start of the
         // activation (mounting awaits): enablement, the activator's grant, the root grant and
         // expiry, evaluated synchronously against the index immediately before the commit call.
-        const fresh = await gate();
-        if (!fresh.ok) return abort(fresh.code, `activation authorization stale at commit: ${fresh.reason}`);
-        const recheck = authorize(ctx, fresh.index, requirements, harness);
+        // Inside the serialized section: conflicts are re-evaluated against live state, then the
+        // grants are re-read (prepare + check are evaluated against the index now).
+        const conflictsNow = detectHarnessConflicts(
+          { capabilityId, owns: bundle.manifest.owns ?? [], conflicts: bundle.manifest.conflicts ?? [], harness },
+          await liveSources(g.index, capabilityId),
+        );
+        if (conflictsNow.length > 0) return abort("conflict", `co-activation refused at commit: ${conflictsNow.map((c) => `${c.surface} (${c.capabilities.join(" vs ")})`).join("; ")}`);
+        const fresh = await prepare(ctx);
+        const recheck = authorize(ctx, fresh, requirements, harness);
         if (!recheck.ok) return abort(recheck.code, `activation authorization stale at commit: ${recheck.reason}`);
         try {
           const head = live
@@ -488,7 +461,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         }
         // The commit's own await is the residual window (grants live on other streams): verify once
         // more and, if authority vanished meanwhile, suspend at once and record.
-        const post = authorize(ctx, g.index, requirements, harness);
+        const post = authorize(ctx, await prepare(ctx), requirements, harness);
         if (!post.ok) {
           await commit(capabilityId, [{ type: "capability.suspended", payload: { capabilityId, level: "user", ...(sessionId ? { sessionId } : {}), reason: "grant-revoked" } }], "post-commit-suspend").catch(() => {});
           await recordDecision(capabilityId, "activate", ctx.actor, "refused", post.code, `authorization lapsed during the activation commit: ${post.reason}`);
@@ -500,19 +473,19 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
           if (old) retire(old);
         }
         return { capabilityId, version: entry.version, state: "active", ...(live ? { repointedFrom: live.version } : {}) };
-      });
+      }));
 
-      provide("capability.bundle.deactivate", async (input: { capabilityId: string; sessionId?: string }, ctx: Ctx) => {
+      provide("capability.bundle.deactivate", (input: { capabilityId: string; sessionId?: string }, ctx: Ctx) => serial(async () => {
         const capabilityId = String(input.capabilityId ?? "");
         const sessionId = typeof input.sessionId === "string" && input.sessionId ? input.sessionId : undefined;
-        const g = await gate();
-        const principal = principalOf(ctx.actor, ctx.runId);
-        const failure: Failure | undefined = !g.ok ? g : !principal.ok ? principal : undefined;
-        if (failure) {
-          await recordDecision(capabilityId, "deactivate", ctx.actor, "refused", failure.code, failure.reason);
-          throw new Error(`capability.bundle.deactivate: ${failure.reason}`);
+        // R3-5: deactivation is authorized like every other operation: bundle.deactivate on the
+        // actor's live grant ∩ the live root grant (the operator outside a run IS the root grant).
+        const auth = check("deactivate", await prepare(ctx), ctx, capabilityId, "bundle.deactivate");
+        if (!auth.ok) {
+          await recordDecision(capabilityId, "deactivate", ctx.actor, "refused", auth.code, auth.reason);
+          throw new Error(`capability.bundle.deactivate: ${auth.reason}`);
         }
-        const index = (g as { ok: true; index: AuthorityIndex }).index;
+        const index = auth.index;
         const row = index.activations.get(index.activationKey(capabilityId, "user", sessionId));
         if (!row || (row.state !== "active" && row.state !== "suspended")) throw new Error(`capability.bundle.deactivate: ${capabilityId} has no live activation`);
         const entries = [...table.values()].filter((e) => e.capabilityId === capabilityId);
@@ -531,7 +504,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
           retire(e);
         }
         return { capabilityId, state: "dormant" };
-      });
+      }));
     },
   };
 }

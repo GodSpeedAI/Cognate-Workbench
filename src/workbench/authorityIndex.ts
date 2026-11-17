@@ -56,6 +56,11 @@ export class AuthorityIndex {
   }
 
   async #rebuild(rows: readonly { key: string; value: unknown }[]): Promise<void> {
+    // Idempotent (R3-1): one entry per grant id and one commit subscription, however often it runs.
+    this.#unlisten?.();
+    this.#unlisten = undefined;
+    this.grants.clear();
+    this.activations.clear();
     for (const row of rows) {
       if (row.key.startsWith("activation/")) {
         const v = row.value as ActivationRow;
@@ -64,7 +69,6 @@ export class AuthorityIndex {
       } else if (row.key.startsWith("grant/")) {
         const v = row.value as GrantRow;
         this.grants.set(this.grantKey(v.grantId), v);
-        this.grants.set(`principal:${v.principalId}:${v.grantId}`, v);
         this.#sequence += 1;
       }
     }

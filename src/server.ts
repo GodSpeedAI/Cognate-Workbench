@@ -683,6 +683,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let capabilityRuntimeIndex!: AuthorityIndex;
   let capabilityRuntimeRecorder!: LifecycleRecorder;
   const capabilityStoreKind = classifyCapabilityStore(process.env);
+  // R3-3: the §1.5 deployment invariant is re-evaluated at EVERY enablement check, not only when
+  // the marker was written: an external PostgreSQL without the operator's single-writer
+  // declaration disables the runtime now, whatever the marker says.
+  const capabilityDeploymentOk = (): boolean => classifyCapabilityStore(process.env) !== "external-postgres";
+  let deploymentRefusalRecorded = false;
   const isRemediationVerified = async (): Promise<boolean> => {
     const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
     return rows.some((r) => r.key === "runtime/remediation");
@@ -696,7 +701,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       return false;
     }
   };
-  const capabilityAwareCoding = createAgentCodingAgent({ isCapabilityRuntimeEnabled });
+  const capabilityAwareCoding = createAgentCodingAgent({
+    isCapabilityRuntimeEnabled: async () => {
+      if (!(await isCapabilityRuntimeEnabled())) return false;
+      if (capabilityDeploymentOk()) return true;
+      if (!deploymentRefusalRecorded) {
+        deploymentRefusalRecorded = true;
+        await capabilityRuntimeRecorder?.commitBatch("decisions:runtime", [{ type: "authority.decision.recorded", payload: { decisionId: `deployment-invariant:${Date.now()}`, point: "enablement", actorId: "system", actorKind: "system", capability: "runtime", outcome: "refused", reasonCode: "deployment-invariant", reason: "capability runtime disabled: external PostgreSQL without an operator-declared single-writer deployment (§1.5)" } }]).catch(() => {});
+      }
+      return false;
+    },
+  });
   const runtime: Runtime = await createRuntime({
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
@@ -815,6 +830,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         getRecorder: () => capabilityRuntimeRecorder,
         getIndex: () => capabilityRuntimeIndex,
         isEnabled: isCapabilityRuntimeEnabled,
+        deploymentOk: capabilityDeploymentOk,
         // Decision records ride their own stream per capability so an audit append never races
         // the capability's lifecycle CAS (activate/repoint) on the same stream.
         recordDecision: async (event) => {
@@ -826,6 +842,9 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }),
       runStartResolverComponent({
         isEnabled: isCapabilityRuntimeEnabled,
+        deploymentOk: capabilityDeploymentOk,
+        getService: () => governedService,
+        tenant: LOCAL_OPERATOR.tenant,
         getIndex: () => capabilityRuntimeIndex,
         readRows: async () => (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows,
         semanticRefs: capabilityRuntimeRefs,

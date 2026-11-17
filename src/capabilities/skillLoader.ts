@@ -18,8 +18,19 @@ import { createHash } from "node:crypto";
 import { BUNDLE_LIMITS, scanBundle, versionHashFor } from "./bundleStore.ts";
 
 export const DESCRIPTOR_BUDGETS = { perCapabilityTokens: 400, aggregateTokens: 4000, maxSkillLines: 8, maxToolLines: 8 } as const;
-/** Conservative token estimate (4 chars per token) — the same scale the budgets are pinned to. */
-export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+/** Token upper bound that never under-counts (R3-8): ASCII at 4 chars per token (the scale the
+ *  budgets are pinned to); every other character at its UTF-8 byte length, since a tokenizer
+ *  that falls back to bytes emits at most one token per byte. */
+export const estimateTokens = (text: string): number => {
+  let ascii = 0;
+  let other = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (code < 128) ascii += 1;
+    else other += code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return Math.ceil(ascii / 4) + other;
+};
 
 export interface BundleSkillDecl { readonly name: string; readonly entry: string; readonly isEntryDocument?: boolean; readonly trigger?: string }
 export interface BundleToolDecl { readonly id: string; readonly description: string; readonly inputSchema: Record<string, unknown> }
@@ -63,7 +74,7 @@ export function buildDescriptor(capabilityId: string, version: string, manifest:
     truncated = true;
     let keep = lines[0]!.length;
     while (!fits() && keep > 0) {
-      keep = Math.max(0, keep - Math.max(1, Math.ceil((estimateTokens([lines[0]!, TRUNCATION_MARKER].join("\n")) - DESCRIPTOR_BUDGETS.perCapabilityTokens) * 4)));
+      keep = Math.floor(keep * 0.9);
       lines[0] = lines[0]!.slice(0, keep);
     }
   }

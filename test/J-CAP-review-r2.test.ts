@@ -107,7 +107,7 @@ describe("J-CAP-review-r2", () => {
     const resolveWith = async (grants: Record<string, unknown>[], principalId: string | undefined) => {
       const index = mkIndex([row()], grants);
       const resolver = createRunStartResolver({ isEnabled: async () => true, getIndex: () => index, readRows: async () => manifestRows(patch) });
-      const r = await resolver.resolve({ runId: "run", sessionId: "S", ...(principalId ? { principalId } : {}), preset: "standard", baseTools: PRESET_TOOLS.standard });
+      const r = await resolver.resolve({ runId: "run", sessionId: "S", ...(principalId ? { actor: { id: principalId, kind: "agent" } } : {}), preset: "standard", baseTools: PRESET_TOOLS.standard });
       if (!r.enabled || r.refused) throw new Error("expected resolved");
       return r;
     };
@@ -129,7 +129,7 @@ describe("J-CAP-review-r2", () => {
     const rows = [row(), row({ sessionId: "S", state: "suspended", suspensionReasons: ["operator-yank"] })];
     const resolve = async (sessionId: string | undefined) => {
       const index = mkIndex(rows, [agentGrant, rootGrant]);
-      const r = await createRunStartResolver({ isEnabled: async () => true, getIndex: () => index, readRows: async () => manifestRows(patch) }).resolve({ runId: "run", ...(sessionId ? { sessionId } : {}), principalId: "wb-agent:coding", preset: "standard", baseTools: PRESET_TOOLS.standard });
+      const r = await createRunStartResolver({ isEnabled: async () => true, getIndex: () => index, readRows: async () => manifestRows(patch) }).resolve({ runId: "run", ...(sessionId ? { sessionId } : {}), actor: { id: "wb-agent:coding", kind: "agent" }, preset: "standard", baseTools: PRESET_TOOLS.standard });
       if (!r.enabled || r.refused) throw new Error("expected resolved");
       return r;
     };

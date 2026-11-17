@@ -26,13 +26,15 @@ import type { Component, CapabilityContract, HandlerContext, SemanticRef } from 
 import type { Json } from "@godspeedai/cognate-events";
 import type { AuthorityIndex, ActivationRow } from "../workbench/authorityIndex.ts";
 import { DescriptorRegistry, assembleDescriptorSection, type BundleManifestData, type Descriptor } from "../capabilities/skillLoader.ts";
-import { principalForActor, governingActivation, liveClamp, liveAuthorityFor, liveGrant, permissionCovered } from "../workbench/authoritySelection.ts";
+import { authorizeCapabilityOp, governingActivation, liveClamp, sessionOfRun } from "../workbench/authoritySelection.ts";
 import { INSTRUCTION_SECTIONS, composeSections, effectiveToolset, orderSources, sha, validateHarness, hasHarness, type PatchSource } from "../workbench/harnessPatches.ts";
 
 export interface ResolverRow { readonly key: string; readonly value: unknown }
 
 export interface RunStartResolverDeps {
   readonly isEnabled: () => Promise<boolean>;
+  /** The §1.5 deployment invariant, re-evaluated per call (default: satisfied). */
+  readonly deploymentOk?: () => boolean;
   readonly getIndex: () => AuthorityIndex;
   readonly readRows: () => Promise<readonly ResolverRow[]>;
   /** Wall clock; injectable for tests of grant-expiry legs. */
@@ -44,7 +46,7 @@ export interface ResolveInput {
   readonly sessionId?: string;
   /** The run's responsible principal (R2-2): patches apply only when its grant ∩ the operator
    *  root's covers harness.modify. Absent = nothing is authorized to apply patches. */
-  readonly principalId?: string;
+  readonly actor?: { readonly id: string; readonly kind: string };
   readonly preset?: string;
   /** The base preset's tool names (`PRESET_TOOLS[preset]`) — the delta is computed against it. */
   readonly baseTools?: readonly string[];
@@ -83,6 +85,7 @@ interface Eligible {
 }
 
 export function createRunStartResolver(deps: RunStartResolverDeps) {
+  const deploymentOk = (): boolean => (deps.deploymentOk ? deps.deploymentOk() : true);
   const descriptors = new DescriptorRegistry();
   /** Section hashes whose full text has already been recorded (per process). */
   const recordedHashes = new Set<string>();
@@ -125,9 +128,10 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
     return assembleDescriptorSection(built);
   };
 
-  const patchSources = (index: AuthorityIndex, eligible: readonly Eligible[], principalId: string | undefined, decisions: RecordedEvent[], runId: string | undefined): PatchSource[] => {
+  const patchSources = (index: AuthorityIndex, eligible: readonly Eligible[], input: ResolveInput, decisions: RecordedEvent[]): PatchSource[] => {
     const out: PatchSource[] = [];
     const now = (deps.now ?? (() => new Date()))().getTime();
+    const runId = input.runId;
     for (const e of eligible) {
       if (!e.manifest) continue;
       // Patches apply only inside the activation's ceiling: harness.modify must be covered.
@@ -139,16 +143,14 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
         continue; // re-validated on read: a declaration that no longer validates contributes nothing
       }
       if (!hasHarness(harness)) continue;
-      // R2-2: the responsible principal's grant ∩ the live root grant must cover harness.modify.
+      // R2-2/R3: authorized by the one function — the responsible principal's live grant ∩ the live
+      // root grant must cover harness.modify under the governing row.
       const refuse = (reasonCode: string, reason: string) => {
-        decisions.push({ type: "authority.decision.recorded", payload: { decisionId: `harness-patch:${runId ?? "run"}:${e.row.capabilityId}`, point: "run-start", actorId: principalId ?? "unknown", actorKind: "agent", capability: e.row.capabilityId, operation: "harness.apply", outcome: "refused", reasonCode, reason } });
+        decisions.push({ type: "authority.decision.recorded", payload: { decisionId: `harness-patch:${runId ?? "run"}:${e.row.capabilityId}`, point: "run-start", actorId: input.actor?.id ?? "unknown", actorKind: input.actor?.kind ?? "agent", capability: e.row.capabilityId, operation: "harness.apply", outcome: "refused", reasonCode, reason } });
       };
-      if (!principalId) { refuse("no-principal", "the run carries no responsible principal; harness patches are not applied"); continue; }
-      const grant = liveGrant(index, principalId, now);
-      if (!grant.ok) { refuse(grant.code, grant.reason); continue; }
-      if (!permissionCovered(grant.grant.permissions, "harness.modify")) { refuse("beyond-grant", `the grant of ${principalId} does not cover harness.modify`); continue; }
-      const authority = liveAuthorityFor(index, e.row, "harness.modify", now);
-      if (!authority.ok) { refuse(authority.code, authority.reason); continue; }
+      if (!input.actor) { refuse("no-principal", "the run carries no responsible principal; harness patches are not applied"); continue; }
+      const auth = authorizeCapabilityOp("harness.apply", { enabled: true, deploymentOk: deploymentOk(), index, actor: input.actor, runId, sessionId: input.sessionId, capabilityId: e.row.capabilityId, permission: "harness.modify", nowMs: now });
+      if (!auth.ok) { refuse(auth.code, auth.reason); continue; }
       out.push({ capabilityId: e.row.capabilityId, version: e.row.version, level: e.row.level, ...(e.row.sessionId ? { sessionId: e.row.sessionId } : {}), activatedAt: e.activatedAt, harness });
     }
     return out;
@@ -163,13 +165,15 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
 
   return {
     async resolve(input: ResolveInput): Promise<ResolveResult> {
-      if (!(await deps.isEnabled())) return { enabled: false };
-      const index = await awaitIndex();
-      if (!index) return { enabled: true, refused: true, reasonCode: "index-unavailable", reason: "the capability authority index is unavailable — the run refuses to start (fail-closed, §3.2)" };
+      const enabled = (await deps.isEnabled()) === true;
+      const index = enabled ? await awaitIndex() : undefined;
+      const gate = authorizeCapabilityOp("harness.resolve", { enabled, deploymentOk: deploymentOk(), index, actor: input.actor ?? { id: "system", kind: "agent" }, runId: input.runId, sessionId: input.sessionId, nowMs: Date.now() });
+      if (!gate.ok && (gate.code === "runtime-disabled" || gate.code === "deployment-invariant")) return { enabled: false };
+      if (!gate.ok || !index) return { enabled: true, refused: true, reasonCode: "index-unavailable", reason: "the capability authority index is unavailable — the run refuses to start (fail-closed, §3.2)" };
       const sequence = index.sequence();
       const eligible = await eligibleFor(index, input.sessionId);
       const decisions: RecordedEvent[] = [];
-      const sources = orderSources(patchSources(index, eligible, input.principalId, decisions, input.runId));
+      const sources = orderSources(patchSources(index, eligible, input, decisions));
       const composed = composeSections({}, sources);
       const descriptor = descriptorSection(eligible);
       const base = input.baseTools ?? [];
@@ -216,9 +220,13 @@ export function createRunStartResolver(deps: RunStartResolverDeps) {
     },
 
     /** Model-turn-boundary refresh: a counter comparison; the section is re-read only on change. */
-    async refresh(input: { readonly runId?: string; readonly sessionId?: string; readonly sinceSequence: number }): Promise<RefreshResult> {
-      const index = await awaitIndex();
-      if (!index) return { changed: false, sequence: input.sinceSequence };
+    async refresh(input: { readonly runId?: string; readonly sessionId?: string; readonly actor?: { readonly id: string; readonly kind: string }; readonly sinceSequence: number }): Promise<RefreshResult> {
+      // R3-7: refresh decides through the same function — disabled runtime or a failed deployment
+      // invariant means no refresh at all.
+      const enabled = (await deps.isEnabled()) === true;
+      const index = enabled ? await awaitIndex() : undefined;
+      const gate = authorizeCapabilityOp("harness.refresh", { enabled, deploymentOk: deploymentOk(), index, actor: input.actor ?? { id: "system", kind: "agent" }, runId: input.runId, sessionId: input.sessionId, nowMs: Date.now() });
+      if (!gate.ok || !index) return { changed: false, sequence: input.sinceSequence };
       const sequence = index.sequence();
       if (sequence === input.sinceSequence) return { changed: false, sequence };
       const eligible = await eligibleFor(index, input.sessionId);
@@ -250,7 +258,7 @@ export type RunStartResolver = ReturnType<typeof createRunStartResolver>;
 /** The resolver's kernel face: two read-only capabilities the loop reaches through `ctx.invoke`
  *  (so replay sees the same answer at the same step). Agent and system principals may call them;
  *  they return data and records, never authority. */
-export function runStartResolverComponent(options: RunStartResolverDeps & { readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>> }): Component {
+export function runStartResolverComponent(options: RunStartResolverDeps & { readonly getService: () => unknown; readonly tenant: string; readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>> }): Component {
   const resolver = createRunStartResolver(options);
   const contracts: CapabilityContract[] = [
     { id: "capability.harness.resolve", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.harness.resolve"] },
@@ -261,14 +269,15 @@ export function runStartResolverComponent(options: RunStartResolverDeps & { read
     provides: contracts,
     activate(fiber) {
       fiber.provide(contracts[0] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {
-        const input = (raw ?? {}) as ResolveInput;
-        const principal = principalForActor(ctx.actor, ctx.runId);
-        // The principal is derived from the call's actor, never from the input.
-        return (await resolver.resolve({ ...input, runId: input.runId ?? ctx.runId, principalId: principal.ok ? principal.principalId : undefined })) as unknown as Json;
+        // R3-2: the session comes from the run context only; input `sessionId` is not read.
+        const input = (raw ?? {}) as Omit<ResolveInput, "sessionId" | "actor">;
+        const sessionId = await sessionOfRun(options.getService() as never, options.tenant, ctx.runId);
+        return (await resolver.resolve({ ...input, runId: ctx.runId ?? input.runId, sessionId, actor: ctx.actor })) as unknown as Json;
       });
       fiber.provide(contracts[1] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {
-        const input = (raw ?? {}) as { sessionId?: string; sinceSequence?: number; runId?: string };
-        return (await resolver.refresh({ sessionId: input.sessionId, sinceSequence: Number(input.sinceSequence ?? 0), runId: input.runId ?? ctx.runId })) as unknown as Json;
+        const input = (raw ?? {}) as { sinceSequence?: number };
+        const sessionId = await sessionOfRun(options.getService() as never, options.tenant, ctx.runId);
+        return (await resolver.refresh({ sessionId, sinceSequence: Number(input.sinceSequence ?? 0), runId: ctx.runId, actor: ctx.actor })) as unknown as Json;
       });
     },
   };

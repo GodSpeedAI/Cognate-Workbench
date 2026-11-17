@@ -58,3 +58,73 @@ export function liveAuthorityFor(index: AuthorityIndex, row: ActivationRow, perm
   if (!permissionCovered(root.grant.permissions, permission)) return { ok: false, code: "beyond-operator", reason: `${permission} exceeds the operator root's permissions` };
   return liveClamp(index, row, nowMs);
 }
+
+export type CapabilityOp = "invoke" | "skill.load" | "activate" | "deactivate" | "harness.resolve" | "harness.refresh" | "harness.apply";
+
+export interface AuthorizeArgs {
+  /** The durable enablement marker (§1.7). */
+  readonly enabled: boolean;
+  /** The §1.5 deployment invariant, re-evaluated for THIS call (never remembered from boot). */
+  readonly deploymentOk: boolean;
+  readonly index: AuthorityIndex | undefined;
+  readonly actor: Actor;
+  readonly runId?: string;
+  /** From the run context ONLY (`sessionOfRun`) — never from call input. */
+  readonly sessionId?: string;
+  readonly capabilityId?: string;
+  readonly permission?: string;
+  readonly nowMs: number;
+}
+
+export type Authorization = { readonly ok: true; readonly index: AuthorityIndex; readonly principalId: string; readonly grant?: GrantRow; readonly root?: GrantRow; readonly row?: ActivationRow } | Failure;
+
+/** THE authorization function (review R3): every capability-runtime entry point — invoke, skill
+ *  load, activate, deactivate, harness resolve/refresh/apply — decides here, in one place:
+ *  enablement and the §1.5 deployment invariant, the principal, the principal's live grant
+ *  intersected with the live root grant (expiry and revocation), and — for operations on a
+ *  capability's activation — the governing row (session suspension wins; the session is the run's). */
+export function authorizeCapabilityOp(op: CapabilityOp, a: AuthorizeArgs): Authorization {
+  if (!a.enabled) return { ok: false, code: "runtime-disabled", reason: "the capability runtime is not enabled (workbench.capability_runtime.enabled marker absent)" };
+  if (!a.deploymentOk) return { ok: false, code: "deployment-invariant", reason: "the capability runtime is disabled: external PostgreSQL without an operator-declared single-writer deployment (§1.5)" };
+  if (!a.index) return { ok: false, code: "index-unavailable", reason: "the authority index is unavailable — failing closed" };
+  const index = a.index;
+  const principal = principalForActor(a.actor, a.runId);
+  if (!principal.ok) return principal;
+  if (op === "harness.resolve" || op === "harness.refresh") return { ok: true, index, principalId: principal.principalId };
+
+  let row: ActivationRow | undefined;
+  if ((op === "invoke" || op === "skill.load" || op === "harness.apply") && a.capabilityId) {
+    const governing = governingActivation(index, a.capabilityId, "user", a.sessionId, a.actor.kind !== "user" || Boolean(a.runId));
+    if (governing.blockedBy) return { ok: false, code: "suspended", reason: `activation of ${a.capabilityId} is suspended for session ${governing.blockedBy.sessionId} and this call carries no session — refusing (fail closed)` };
+    row = governing.row;
+    if (!row) return { ok: false, code: "no-activation", reason: `capability ${a.capabilityId} has no activation` };
+    if (row.state !== "active" || row.suspensionReasons.length > 0) {
+      const suspended = row.state === "suspended" || row.suspensionReasons.length > 0;
+      return { ok: false, code: suspended ? "suspended" : `inactive:${row.state}`, reason: `activation of ${a.capabilityId} is ${row.state}${row.suspensionReasons.length ? ` (${row.suspensionReasons.join(", ")})` : ""}` };
+    }
+    if (a.permission && op !== "harness.apply" && !permissionCovered(row.ceiling, a.permission)) return { ok: false, code: "beyond-ceiling", reason: `${a.permission} exceeds the activation ceiling of ${a.capabilityId}` };
+  }
+  const live = liveGrant(index, principal.principalId, a.nowMs);
+  if (!live.ok) return live;
+  if (a.permission && !permissionCovered(live.grant.permissions, a.permission)) return { ok: false, code: "beyond-grant", reason: `${a.permission} exceeds the grant of ${principal.principalId}` };
+  const root = liveGrant(index, LOCAL_ROOT_ID, a.nowMs, "operator root");
+  if (!root.ok) return root;
+  if (a.permission && !permissionCovered(root.grant.permissions, a.permission)) return { ok: false, code: "beyond-operator", reason: `${a.permission} exceeds the operator root's permissions` };
+  if (row) {
+    const clamp = liveClamp(index, row, a.nowMs);
+    if (!clamp.ok) return clamp;
+  }
+  return { ok: true, index, principalId: principal.principalId, grant: live.grant, root: root.grant, ...(row ? { row } : {}) };
+}
+
+/** The session of a run, from the run's own start input (set by the turn that began it). */
+export async function sessionOfRun(service: { getRun(caller: never, request: { runId: string }): Promise<{ input: unknown }> }, tenant: string, runId: string | undefined): Promise<string | undefined> {
+  if (!runId) return undefined;
+  try {
+    const run = await service.getRun({ actor: { id: "system", kind: "system" }, tenant } as never, { runId });
+    const value = (run.input as { sessionId?: unknown } | null)?.sessionId;
+    return typeof value === "string" && value ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
