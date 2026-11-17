@@ -157,6 +157,11 @@ export function makeScrubber(secrets: readonly { readonly name: string; readonly
     const bytes = Buffer.from(value, "utf8");
     const b64 = bytes.toString("base64");
     const variants = new Set([value, b64, b64.replace(/=+$/, ""), bytes.toString("base64url"), encodeURIComponent(value), bytes.toString("hex"), bytes.toString("hex").toUpperCase()]);
+    // UTF-16 (LE and BE): the raw code units, and their base64 and hex forms.
+    for (const wide of [Buffer.from(value, "utf16le"), Buffer.from(value, "utf16le").swap16()]) {
+      const wb64 = wide.toString("base64");
+      for (const form of [wide.toString("latin1"), wb64, wb64.replace(/=+$/, ""), wide.toString("base64url"), wide.toString("hex"), wide.toString("hex").toUpperCase()]) variants.add(form);
+    }
     for (const needle of variants) if (needle) patterns.push({ needle, mark });
   }
   // Longest first, so an encoding that contains a shorter variant is replaced whole.
@@ -193,6 +198,8 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   for (const secret of request.secrets) {
     const value = await deps.resolveSecret(secret.key).catch(() => undefined);
     if (value === undefined || value === "") return refuse("missing-secret", `secret key ${secret.key} (for ${secret.env}) is not in the secret store`);
+    // A value this short cannot be scrubbed safely from what the server sends back: it is never delivered (fail closed).
+    if (Buffer.byteLength(value, "utf8") < MIN_SCRUB_BYTES) return refuse("secret-too-short", `the secret for ${secret.env} (key ${secret.key}) is shorter than ${MIN_SCRUB_BYTES} bytes and cannot be scrubbed from a server's output; it is not delivered`);
     env[secret.env] = value;
     resolved.push(value);
     resolvedNamed.push({ name: secret.env, value });
@@ -273,19 +280,23 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   };
 
   const groupAlive = (): boolean => { try { process.kill(-pid, 0); return true; } catch { return false; } };
+  const holders = async (): Promise<number[]> => (await procfs.pidsWithSpawnId(spawnId)).filter((p) => p !== process.pid);
+  /** Alive means: the group answers a probe OR any process still carries the spawn's marker (a descendant that left the group). */
+  const anythingAlive = async (): Promise<boolean> => groupAlive() || (await holders()).length > 0;
+  const signalAll = async (sig: NodeJS.Signals): Promise<void> => { killGroup(sig); for (const h of await holders()) { try { process.kill(h, sig); } catch { /* gone */ } } };
   const waitGroupGone = async (ms: number): Promise<boolean> => {
     const until = Date.now() + ms;
-    while (groupAlive() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
-    return !groupAlive();
+    while ((await anythingAlive()) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
+    return !(await anythingAlive());
   };
   const exited: Promise<ExitInfo> = (async () => {
     const exitCode = await proc.exited;
     // Whatever is left in the leader's group is ended as a group: TERM, KILL after the grace period; the slot is
     // released only once nothing of the group is alive (section 6.1).
     let survivors = false;
-    if (groupAlive()) {
-      killGroup("SIGTERM");
-      if (!(await waitGroupGone(grace))) { killGroup("SIGKILL"); survivors = !(await waitGroupGone(killAfter + 1000)); }
+    if (await anythingAlive()) {
+      await signalAll("SIGTERM");
+      if (!(await waitGroupGone(grace))) { await signalAll("SIGKILL"); survivors = !(await waitGroupGone(killAfter + 1000)); }
     }
     const outcome = stopping ? "stopped" : exitCode === 0 ? "exited" : "crashed";
     const info: ExitInfo = { outcome, exitCode, ...(stopReason ? { stopReason } : {}) };
@@ -360,21 +371,25 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
         found.delete(process.pid);
         return found;
       };
-      const first = await targets();
-      if (first.size > 0) {
-        const group = row.pgid ?? row.pid;
-        for (const pid of first) signal(pid, "SIGTERM");
-        if (typeof group === "number" && group > 1) signal(-group, "SIGTERM");
+      // "Gone" needs proof: the recorded group answers no probe AND no process carries the spawn's marker.
+      const group = row.pgid ?? undefined; // only a RECORDED group id is probed: a bare pid may have been reused
+      const groupLive = (): boolean => { if (typeof group !== "number" || group <= 1) return false; try { process.kill(-group, 0); return true; } catch { return false; } };
+      const anyAlive = async (): Promise<boolean> => (await targets()).size > 0 || groupLive();
+      const endAll = async (sig: NodeJS.Signals): Promise<void> => {
+        for (const pid of await targets()) signal(pid, sig);
+        if (typeof group === "number" && group > 1) signal(-group, sig);
+      };
+      if (await anyAlive()) {
+        await endAll("SIGTERM");
         const until = Date.now() + grace;
-        let left = first;
-        while (left.size > 0 && Date.now() < until) { await new Promise((resolve) => setTimeout(resolve, 25)); left = new Set((await targets())); }
-        if (left.size > 0) {
-          for (const pid of left) signal(pid, "SIGKILL");
-          if (typeof group === "number" && group > 1) signal(-group, "SIGKILL");
-          await new Promise((resolve) => setTimeout(resolve, 50));
-          survivors = (await targets()).size > 0;
+        while ((await anyAlive()) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 25));
+        if (await anyAlive()) {
+          await endAll("SIGKILL");
+          const hard = Date.now() + 1000;
+          while ((await anyAlive()) && Date.now() < hard) await new Promise((resolve) => setTimeout(resolve, 25));
         }
-        outcome = survivors ? "reconciled-survivors" : row.status === "confirmed" ? "reconciled-killed" : "reconciled-unknown";
+        survivors = await anyAlive();
+        outcome = survivors ? "reconcile-incomplete" : row.status === "confirmed" ? "reconciled-killed" : "reconciled-unknown";
       } else if (row.status === "confirmed") outcome = "reconciled-gone";
     }
     await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), exitCode: null } }]);

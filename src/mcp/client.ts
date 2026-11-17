@@ -86,7 +86,8 @@ export class ChannelTransport implements Transport {
   onmessage?: (message: JSONRPCMessage) => void;
   readonly #buffer = new ReadBuffer({ maxBufferSize: MCP_LIMITS.maxLineBytes });
   #closed = false;
-  constructor(private readonly channel: StdioChannel) {}
+  /** `filter` sees every message BEFORE the SDK does: nothing server-supplied reaches the SDK unsanitized. */
+  constructor(private readonly channel: StdioChannel, private readonly filter?: (message: JSONRPCMessage) => JSONRPCMessage) {}
 
   async start(): Promise<void> {
     this.channel.onData((chunk) => {
@@ -100,7 +101,7 @@ export class ChannelTransport implements Transport {
             void this.send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "server-initiated requests are not supported" } } as JSONRPCMessage).catch(() => {});
             continue;
           }
-          this.onmessage?.(message);
+          this.onmessage?.(this.filter ? this.filter(message) : message);
         }
       } catch (error) {
         this.onerror?.(error instanceof Error ? error : new Error(String(error)));
@@ -124,6 +125,13 @@ export class ChannelTransport implements Transport {
     await this.channel.close();
     this.onclose?.();
   }
+}
+
+/** Before a client exists to sanitize them, output schemas are dropped outright. */
+function stripOutputSchemas(message: JSONRPCMessage): JSONRPCMessage {
+  const result = (message as { result?: { tools?: unknown } }).result;
+  if (!result || !Array.isArray(result.tools)) return message;
+  return { ...message, result: { ...result, tools: result.tools.map((t: Record<string, unknown>) => { const { outputSchema: _dropped, ...rest } = t; return rest; }) } } as JSONRPCMessage;
 }
 
 export interface McpRecord { readonly type: string; readonly payload: Record<string, unknown> }
@@ -169,16 +177,44 @@ export class McpClient {
   }
   /** Records never carry raw MCP-originated text: every payload is scrubbed, messages byte-bounded. */
   readonly #rec = (event: McpRecord): Promise<void> => this.options.record({ type: event.type, payload: this.#clean(event.payload) });
+  /** The SDK validates `structuredContent` against a tool's outputSchema with a backtracking regex engine: so the
+   *  schema is sanitized exactly like an input schema BEFORE the SDK sees it (stripped keywords recorded, an
+   *  oversize/over-deep schema dropped with a recorded refusal). */
+  #sanitizeOutputSchemas(message: JSONRPCMessage): JSONRPCMessage {
+    const result = (message as { result?: { tools?: unknown } }).result;
+    if (!result || !Array.isArray(result.tools)) return message;
+    const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
+    const tools = result.tools.map((raw: Record<string, unknown>) => {
+      if (raw.outputSchema === undefined) return raw;
+      const { outputSchema, ...rest } = raw;
+      const name = this.#scrub(String(raw.name ?? ""));
+      const text = JSON.stringify(outputSchema ?? {});
+      const cleaned = this.#clean(JSON.parse(text)) as { $async?: unknown };
+      const refuse = (reason: string): Record<string, unknown> => {
+        void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "refused", reasonCode: "schema-refused", tool: name, reason: `outputSchema: ${reason}` } }).catch(() => {});
+        return rest;
+      };
+      if (utf8Bytes(text) > MCP_LIMITS.maxSchemaBytes) return refuse("schema exceeds the byte bound");
+      if (cleaned.$async) return refuse("asynchronous schemas are not accepted");
+      const safe = sanitizeSchema(cleaned);
+      if (!safe.ok) return refuse(safe.reason);
+      if (safe.stripped.length > 0) void this.#rec({ type: "authority.decision.recorded", payload: { ...base, decisionId: randomUUID(), outcome: "allowed", reasonCode: "schema-sanitized", tool: name, reason: "outputSchema keywords that run a backtracking regex engine were stripped", stripped: safe.stripped } }).catch(() => {});
+      return { ...rest, outputSchema: safe.schema };
+    });
+    return { ...message, result: { ...result, tools } } as JSONRPCMessage;
+  }
   #message(error: unknown): string {
     return boundBytes(this.#scrub(error instanceof Error ? error.message : String(error)), MAX_MESSAGE_BYTES);
   }
 
   static async connect(channel: StdioChannel, options: McpClientOptions): Promise<McpClient> {
     if (!isServerId(options.serverId)) throw new Error(`invalid MCP server id ${options.serverId}`);
-    const transport = new ChannelTransport(channel);
+    const holder: { client?: McpClient } = {};
+    const transport = new ChannelTransport(channel, (message) => (holder.client ? holder.client.#sanitizeOutputSchemas(message) : stripOutputSchemas(message)));
     // No capabilities declared: sampling, roots and elicitation are refused by construction.
     const sdk = new Client({ name: "cognate-workbench", version: "1" }, { capabilities: {} });
     const client = new McpClient(sdk, transport, options);
+    holder.client = client;
     transport.onclose = () => { client.#closed = true; };
     await sdk.connect(transport, { timeout: options.connectTimeoutMs ?? 15_000 });
     await client.refreshTools();
