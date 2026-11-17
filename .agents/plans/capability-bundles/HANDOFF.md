@@ -151,3 +151,30 @@ Accepted residual risk (documented on the PR):
 ## T3 residual: uncontained-local process tracking
 
 Boot reconciliation ends a spawn's whole process group, derived from every process still carrying the spawn's `COGNATE_SPAWN_ID` marker (governed children are group leaders), plus any recorded pgid proven ours. Residual: under the uncontained-local posture, a hostile child that starts its own session AND clears the marker can escape tracking. That is inherent to uncontained execution; the containment posture is the boundary, not process tracking. Anything that cannot be verified dead keeps its slot reserved as `reconcile-incomplete`.
+
+## T3 invariants and the class fixes behind them (review-r4)
+
+Review rounds kept finding sibling instances, so the safety properties are now stated as invariants and tested with generated input
+(`test/J-CAP-t3-properties.test.ts`, fast-check; `FC_RUNS` runs per property, 200 in CI, 2,000 run locally with FC_RUNS=2000).
+A generated adversarial MCP server sends random bytes, split chunks, no newline, nested JSON, huge messages, forged errors, delays
+and early exits.
+
+- **I1** no record, returned message or exclusion listing contains any 16-byte substring of server-originated bytes.
+- **I2** every call ends in exactly one finished record within its deadline + epsilon, and nothing throws.
+- **I3** buffered bytes per connection stay at or under the cap (transport counter `peakBufferedBytes`).
+- **I4** pending state is empty after every call.
+- **I5** the slot is released iff nothing of the spawn survives (spawn path, `proc` seam).
+
+Class fixes: (1) `src/mcp/typedRecord.ts` gives records a closed field type (codes, numbers, booleans, `Sha256`, minted ids,
+`Trusted` text) so a server string cannot be recorded (compile error; guarded by a `@ts-expect-error` in the property test);
+(2) `src/mcp/ingress.ts` is the one boundary for server bytes: stream cap, depth limit before parse, strict envelope; oversize,
+too-deep or malformed input closes the connection and fails every pending call (`attributed:false`); (3) facts come only from our
+own per-call state (ingress verdict, our deadline timer, channel state), and every call writes exactly one finished record through a
+path that cannot throw; (4) fail closed: a slot is released only on positive proof that nothing survives.
+
+Review process: ask a reviewer to break a named invariant. A fix is accepted when the invariant's property test would have caught
+the finding (red first), not only a single example. Counterexamples ever found stay in the test as fixed examples.
+
+Follow-up (not done): the residual in "uncontained-local process tracking" above is closed by containment, not tracking. A cgroup (v2)
+per spawn would let the sweep read `cgroup.procs` (positive proof of emptiness, no marker or pgid heuristics) and kill the whole
+cgroup; it needs a delegated cgroup subtree, so it belongs with the contained-posture work, not this tranche.
