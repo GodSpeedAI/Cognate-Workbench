@@ -421,8 +421,11 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
         survivors = await anyAlive();
         outcome = survivors ? "reconcile-incomplete" : known ? "reconciled-killed" : "reconciled-unknown";
       } else if (known) outcome = "reconciled-gone";
+      // A recorded group that is ALIVE but not provably ours is neither signalled nor released: the slot stays reserved
+      // and every later boot re-checks it, until the group has no live member at all.
+      if (groupUnverified) { survivors = true; outcome = "reconcile-incomplete"; }
     }
-    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true } : {}), exitCode: null } }]);
+    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true, reason: "group-unverified" } : {}), exitCode: null } }]);
     // A slot is released only when nothing of the spawn survives; survivors keep it reserved (and are reported).
     if (row.slotId && !survivors) await deps.slots.release(row.slotId, 0).catch(() => {});
     results.push({ spawnId: row.spawnId, outcome, ...(row.slotId ? { slotId: row.slotId } : {}) });

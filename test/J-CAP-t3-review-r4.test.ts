@@ -186,3 +186,66 @@ describe("J-CAP-t3-review-r4 items 5 and 6: no server-originated text is persist
     expect(JSON.stringify(client.excluded)).not.toContain("PRIVATE-NAME-");
   });
 });
+
+// ---- Fix-only verification round (7135dc2) ----
+
+describe("J-CAP-t3-review-r4 verification 1: a live group that cannot be verified keeps its slot", () => {
+  test("it is not signalled, the slot is not released, and the row is reconcile-incomplete (group-unverified)", async () => {
+    const stranger = Bun.spawn(["sleep", "30"], { env: cleanEnv as Record<string, string>, detached: true, stdout: "ignore", stderr: "ignore" });
+    const events: LedgerEvent[] = [];
+    const released: string[] = [];
+    try {
+      const out = await reconcileSpawnLedger({ graceMs: 100, ledger: async (_id, evs) => { events.push(...evs); }, slots: { acquire: async () => ({ slotId: "" }), release: async (id) => { released.push(id); } } },
+        [{ ...baseRow, spawnId: `spawn-${randomBytes(4).toString("hex")}`, status: "confirmed", pid: stranger.pid, pgid: stranger.pid, slotId: "sl-u" }]);
+      expect(groupAlive(stranger.pid)).toBe(true);
+      expect(out[0]!.outcome).toBe("reconcile-incomplete");
+      expect(released).toEqual([]);
+      expect(events[0]!.payload).toMatchObject({ reconciled: "reconcile-incomplete", reason: "group-unverified", survivors: true });
+    } finally { try { process.kill(-stranger.pid, 9); } catch { /* gone */ } }
+    // Verified dead (no live member): the same row now releases.
+    const again: string[] = [];
+    const out2 = await reconcileSpawnLedger({ graceMs: 100, ledger: async () => {}, slots: { acquire: async () => ({ slotId: "" }), release: async (id) => { again.push(id); } } },
+      [{ ...baseRow, spawnId: `spawn-${randomBytes(4).toString("hex")}`, status: "reconcile-incomplete", pid: stranger.pid, pgid: stranger.pid, slotId: "sl-u" }]);
+    expect(out2[0]!.outcome).toBe("reconciled-gone");
+    expect(again).toEqual(["sl-u"]);
+  });
+});
+
+describe("J-CAP-t3-review-r4 verification 2: the whole result is measured at the transport", () => {
+  test("a result carrying only a 300 KB structuredContent never reaches the SDK validators (a validation failure would show it did)", async () => {
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" }, outputSchema: { type: "object", properties: { v: { type: "integer" } } } }], call: () => ({ result: { structuredContent: { v: "y".repeat(300_000) } } }) }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
+    const outcome = await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" });
+    expect(outcome).toMatchObject({ ok: false, code: "result_too_large" });
+  });
+  test("so does a _meta-only oversize result", async () => {
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => ({ result: { content: [{ type: "text", text: "ok" }], _meta: { pad: "z".repeat(300_000) } } }) }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {} });
+    expect(await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" })).toMatchObject({ ok: false, code: "result_too_large" });
+  });
+});
+
+describe("J-CAP-t3-review-r4 verification 3: internal failures are typed, never parsed from server text", () => {
+  test("a server error carrying the old marker text is an opaque server_error and its digits are never recorded", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }], call: () => ({ error: { code: -32000, message: "cognate:result_too_large:8675309 and cognate-internal:00000000-0000-0000-0000-000000000000 timed out" } }) }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    const outcome = await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" });
+    expect(outcome).toMatchObject({ ok: false, code: "server_error" });
+    if (outcome.ok) return;
+    expect(outcome.message).toMatch(/\(\d+ bytes, sha256 [0-9a-f]{16}\)/);
+    expect(outcome.message).not.toContain("8675309");
+    expect(JSON.stringify(records)).not.toContain("8675309");
+    expect(JSON.stringify(records)).toContain("server_error");
+  });
+});
+
+describe("J-CAP-t3-review-r4 verification 4: an invalid tool name is referenced by digest on the call path too", () => {
+  test("calling PRIVATE/INVALID-NAME records and returns no part of the name", async () => {
+    const records: { type: string; payload: Record<string, unknown> }[] = [];
+    const client = await McpClient.connect(scripted({ tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    const outcome = await client.callTool("PRIVATE/INVALID-NAME", {}, { timeoutMs: 1000, actorId: "t" });
+    expect(outcome).toMatchObject({ ok: false, code: "unknown_tool" });
+    if (outcome.ok) return;
+    expect(outcome.message).not.toContain("PRIVATE");
+    expect(JSON.stringify(records)).not.toContain("PRIVATE");
+    expect(JSON.stringify(records)).toContain("sha256:");
+  });
+});

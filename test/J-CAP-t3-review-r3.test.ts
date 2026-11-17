@@ -141,7 +141,7 @@ describe("J-CAP-t3-review-r3 thread: a recorded group id is signalled only when 
       const out = await reconcileSpawnLedger({ graceMs: 100, ledger: async (_id, evs) => { events.push(...evs); }, slots: { acquire: async () => ({ slotId: "" }), release: async () => {} } },
         [{ ...baseRow, spawnId: `spawn-${randomBytes(4).toString("hex")}`, status: "confirmed", pid: stranger.pid, pgid: stranger.pid, slotId: "sl-x" }]);
       expect(groupAlive(stranger.pid)).toBe(true);
-      expect(out[0]!.outcome).toBe("reconciled-gone");
+      expect(out[0]!.outcome).toBe("reconcile-incomplete"); // r4: alive but unverified keeps the slot
       expect(events[0]!.payload).toMatchObject({ groupUnverified: true });
     } finally { try { process.kill(-stranger.pid, 9); } catch { /* gone */ } }
   });

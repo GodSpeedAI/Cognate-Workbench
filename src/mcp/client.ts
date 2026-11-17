@@ -206,6 +206,8 @@ export class McpClient {
   #tools = new Map<string, { def: McpToolDef; validate: ValidateFunction }>();
   #excluded: { name: string; reason: string }[] = [];
   #closed = false;
+  /** Internal failure tokens issued by this client (token -> payload); only a lookup recognises one. */
+  readonly #internal = new Map<string, number>();
   readonly #ajv = new Ajv({ strict: false });
 
   private constructor(private readonly sdk: Client, private readonly transport: ChannelTransport, private readonly options: McpClientOptions) {}
@@ -236,11 +238,17 @@ export class McpClient {
    *  schema is sanitized exactly like an input schema BEFORE the SDK sees it (stripped keywords recorded, an
    *  oversize/over-deep schema dropped with a recorded refusal). */
   #sanitizeOutputSchemas(message: JSONRPCMessage): JSONRPCMessage {
-    const result = (message as { result?: { tools?: unknown; content?: unknown } }).result;
-    // A tool result larger than the bound never reaches the SDK's validators: it becomes an error response.
-    if (result && "content" in result) {
+    const result = (message as { result?: { tools?: unknown } }).result;
+    // The WHOLE serialized result (content, structuredContent, _meta, anything) is measured here, before the SDK sees it:
+    // an oversize result never reaches its validators. The refusal is a typed internal error: its token is issued here and
+    // can only be recognised by a lookup, never by parsing text the server could forge.
+    if (result && !Array.isArray(result.tools)) {
       const bytes = utf8Bytes(JSON.stringify(result));
-      if (bytes > MCP_LIMITS.maxResultBytes) return { jsonrpc: "2.0", id: (message as { id: number }).id, error: { code: -32000, message: `cognate:result_too_large:${bytes}` } } as JSONRPCMessage;
+      if (bytes > MCP_LIMITS.maxResultBytes) {
+        const token = randomUUID();
+        this.#internal.set(token, bytes);
+        return { jsonrpc: "2.0", id: (message as { id: number }).id, error: { code: -32000, message: `cognate-internal:${token}` } } as JSONRPCMessage;
+      }
     }
     if (!result || !Array.isArray(result.tools)) return message;
     const base = { point: "mcp-client", capability: this.options.capabilityId, operation: "tools.list", serverId: this.options.serverId, version: this.options.version };
@@ -345,14 +353,14 @@ export class McpClient {
   async callTool(name: string, args: Record<string, unknown>, call: { timeoutMs: number; signal?: AbortSignal; callId?: string; actorId: string }): Promise<McpCallOutcome> {
     const deadlineAt = Date.now() + call.timeoutMs; // the caller's deadline counts from entry, not from the send
     const callId = call.callId ?? randomUUID();
-    const base = { capabilityId: this.options.capabilityId, version: this.options.version, serverId: this.options.serverId, ...(this.options.sessionId ? { sessionId: this.options.sessionId } : {}), callId, tool: name, actorId: call.actorId };
+    const base = { capabilityId: this.options.capabilityId, version: this.options.version, serverId: this.options.serverId, ...(this.options.sessionId ? { sessionId: this.options.sessionId } : {}), callId, tool: this.#toolRef(name), actorId: call.actorId };
     const refuse = async (code: string, message: string): Promise<McpCallOutcome> => {
       await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "refused", code } }).catch(() => {});
       return { ok: false, code, message: this.#final(message) };
     };
     if (this.#closed) return refuse("server_not_running", `MCP server ${this.options.serverId} is not running`);
     const entry = this.#tools.get(name);
-    if (!entry) return refuse("unknown_tool", `MCP server ${this.options.serverId} lists no tool ${name}`);
+    if (!entry) return refuse("unknown_tool", `MCP server ${this.options.serverId} lists no tool ${this.#toolRef(name)}`);
     const argText = JSON.stringify(args ?? {});
     const argBytes = utf8Bytes(argText);
     if (argBytes > MCP_LIMITS.maxArgumentBytes) return refuse("arguments_too_large", `arguments are ${argBytes} bytes; the bound is ${MCP_LIMITS.maxArgumentBytes}`);
@@ -381,11 +389,13 @@ export class McpClient {
     } catch (error) {
       // Server-originated text is never carried onward: the caller gets a code, the byte count and a digest.
       const raw = error instanceof Error ? error.message : String(error);
-      const oversize = /cognate:result_too_large:(\d+)/.exec(raw);
-      if (oversize) outcome = { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${oversize[1]} bytes; the bound is ${MCP_LIMITS.maxResultBytes}`) };
+      const token = /cognate-internal:([0-9a-f-]{36})/.exec(raw)?.[1];
+      const oversize = token ? this.#internal.get(token) : undefined;
+      if (token && oversize !== undefined) { this.#internal.delete(token); outcome = { ok: false, code: "result_too_large", message: this.#final(`the tool result is ${oversize} bytes; the bound is ${MCP_LIMITS.maxResultBytes}`) }; }
       else {
-        const code = /timed out|timeout/i.test(raw) ? "deadline_exceeded" : this.#closed ? "server_not_running" : "tool_error";
-        outcome = { ok: false, code, message: this.#final(describeOpaque(code === "tool_error" ? "the server reported an error" : code === "deadline_exceeded" ? "the call timed out" : "the server is not running", raw)) };
+        // Classified from OUR state (the clock, the channel), never from error text the server could write.
+        const code = this.#closed ? "server_not_running" : Date.now() >= deadlineAt - 25 || call.signal?.aborted ? "deadline_exceeded" : "server_error";
+        outcome = { ok: false, code, message: this.#final(describeOpaque(code === "server_error" ? "the server reported an error" : code === "deadline_exceeded" ? "the call timed out" : "the server is not running", raw)) };
       }
     }
     await this.#rec({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "finished", outcome: outcome.ok ? "ok" : outcome.code, ...(outcome.ok ? { resultBytes: outcome.bytes } : {}) } }).catch(() => {});

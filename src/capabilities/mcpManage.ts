@@ -346,7 +346,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     serversFor: (capabilityId, version, sessionId) => [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.version === version).map((e) => ({ serverId: e.serverId, state: e.state })),
     async call(capabilityId, version, sessionId, toolRef, args, call) {
       const m = /^mcp\.([a-z0-9][a-z0-9-]{0,31})\.(.+)$/.exec(toolRef);
-      if (!m) return { ok: false, code: "unknown_tool", message: `${toolRef} is not an mcp.<serverId>.<tool> id`, retryable: false };
+      if (!m) return { ok: false, code: "unknown_tool", message: describeOpaque("the tool reference is not an mcp.<serverId>.<tool> id", toolRef), retryable: false };
       // Snapshot, synchronously: the server this call belongs to, and its in-flight count.
       const entry = running.get(serverKey(capabilityId, sessionId, m[1]!));
       if (!entry || entry.version !== version || !entry.accepting || !entry.client) return { ok: false, code: "server_not_running", message: `MCP server ${m[1]} of ${capabilityId} is not accepting calls`, retryable: true };
