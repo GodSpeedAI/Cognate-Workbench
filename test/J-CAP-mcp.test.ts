@@ -9,10 +9,10 @@ import { readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { localExecutionWorld, createExecutionWorldRegistry } from "@godspeedai/cognate-execution";
-import { acquireLongLeaseSlot, releaseLongLeaseSlot, ContainmentQuotaError } from "../src/capabilities/aggregateContainment.ts";
+import { acquireLongLeaseSlot, releaseAllLongLeaseSlots, releaseLongLeaseSlot, ContainmentQuotaError } from "../src/capabilities/aggregateContainment.ts";
 import { decideContainment, reconcileSpawnLedger, spawnGoverned, worldMatrix, type LedgerEvent, type PostureRecord, type SpawnDeps, type SpawnRequest } from "../src/capabilities/execSpawn.ts";
 import { createMcpSupervisor } from "../src/capabilities/mcpManage.ts";
-import { MCP_LIMITS, utf8Bytes } from "../src/mcp/client.ts";
+import { MCP_LIMITS, McpClient, utf8Bytes } from "../src/mcp/client.ts";
 import { authorizeCapabilityOp } from "../src/workbench/authoritySelection.ts";
 import { AuthorityIndex } from "../src/workbench/authorityIndex.ts";
 import { bootApp, enableCapabilityRuntime, registerBundle, SYSTEM, waitUntil, withTempHome, allEvents, wbRows } from "./wb-helpers.ts";
@@ -196,33 +196,139 @@ describe("J-CAP-mcp: record-before-spawn, secrets, slots, sweep (CUJ 3)", () => 
     });
   });
 
-  test("boot sweep: confirmed spawns are killed by pid under the version-directory signature; unconfirmed intents reconcile to a recorded outcome", async () => {
+  test("boot sweep: confirmed spawns are killed by pid under the version-directory signature (command line or cwd); unconfirmed intents reconcile to a recorded outcome", async () => {
     const signature = `/tmp/sweep-sig-${process.pid}-${Date.now()}`;
-    const orphan = Bun.spawn(["sleep", "60", signature], { detached: true, stdout: "ignore", stderr: "ignore" });
+    await mkdir(signature, { recursive: true });
+    // `sh -c 'sleep 60' <signature>` names the directory on its command line; a RELATIVE command (`sleep`) run with cwd = the directory does not.
+    const byCmdline = Bun.spawn(["sh", "-c", "sleep 60", signature], { detached: true, stdout: "ignore", stderr: "ignore" });
+    const byCwd = Bun.spawn(["sleep", "60"], { cwd: signature, detached: true, stdout: "ignore", stderr: "ignore" });
     const bystander = Bun.spawn(["sleep", "60"], { detached: true, stdout: "ignore", stderr: "ignore" });
+    await waitUntil("fixtures are running", async () => (await Bun.file(`/proc/${byCmdline.pid}/cmdline`).text()).includes(signature) && (await Bun.file(`/proc/${byCwd.pid}/cmdline`).text()).startsWith("sleep") ? true : undefined);
     const events: { id: string; event: LedgerEvent }[] = [];
     const released: string[] = [];
-    const base = { capabilityId: CAP, version: "v", serverId: "stub", worldId: "local", worldKind: "local", bundleDir: signature, argv: ["sleep"] };
+    const base = { capabilityId: CAP, version: "v", serverId: "stub", worldId: "local", worldKind: "local", bundleDir: signature };
     try {
       const outcome = await reconcileSpawnLedger(
         { ledger: async (id, evs) => { for (const event of evs) events.push({ id, event }); }, slots: { acquire: async () => ({ slotId: "" }), release: async (id) => { released.push(id); } } },
         [
-          { ...base, spawnId: "c1", status: "confirmed", pid: orphan.pid, slotId: "sl-c1" },
-          { ...base, spawnId: "i1", status: "intended", slotId: "sl-i1" },
-          { ...base, spawnId: "b1", status: "confirmed", pid: bystander.pid, bundleDir: "/some/other/dir", slotId: "sl-b1" }, // pid reused by another program: never killed
-          { ...base, spawnId: "done", status: "exited" },
+          { ...base, argv: ["sh"], spawnId: "c1", status: "confirmed", pid: byCmdline.pid, slotId: "sl-c1" },
+          { ...base, argv: ["sleep"], spawnId: "c2", status: "confirmed", pid: byCwd.pid, slotId: "sl-c2" },
+          { ...base, argv: ["sleep"], spawnId: "i1", status: "intended", slotId: "sl-i1" },
+          { ...base, argv: ["sleep"], spawnId: "b1", status: "confirmed", pid: bystander.pid, bundleDir: "/some/other/dir", slotId: "sl-b1" }, // pid reused by another program: never killed
+          { ...base, argv: ["sleep"], spawnId: "done", status: "exited" },
         ],
       );
-      expect(outcome.map((o) => [o.spawnId, o.outcome])).toEqual([["c1", "reconciled-killed"], ["i1", "reconciled-unknown"], ["b1", "reconciled-gone"]]);
-      await orphan.exited;
+      expect(outcome.map((o) => [o.spawnId, o.outcome])).toEqual([["c1", "reconciled-killed"], ["c2", "reconciled-killed"], ["i1", "reconciled-unknown"], ["b1", "reconciled-gone"]]);
+      await byCmdline.exited;
+      await byCwd.exited;
       expect(alive(bystander.pid)).toBe(true);
-      expect(events.map((e) => e.id)).toEqual(["c1", "i1", "b1"]);
+      expect(events.map((e) => e.id)).toEqual(["c1", "c2", "i1", "b1"]);
       expect(events.every((e) => e.event.type === "capability.mcp.exited")).toBe(true);
-      expect(released).toEqual(["sl-c1", "sl-i1", "sl-b1"]);
+      expect(released).toEqual(["sl-c1", "sl-c2", "sl-i1", "sl-b1"]);
     } finally {
       bystander.kill(9);
-      orphan.kill(9);
+      byCmdline.kill(9);
+      byCwd.kill(9);
     }
+  });
+
+  test("long-lease slots orphaned by a crash (no intent record, or a failed release) are freed at boot", async () => {
+    await withTempHome(async (home) => {
+      const { app } = await bootApp(home);
+      try {
+        const service = app.runtime.service;
+        await acquireLongLeaseSlot(service, SYSTEM, { worldId: "w1", cap: 1 });
+        await expect(acquireLongLeaseSlot(service, SYSTEM, { worldId: "w1", cap: 1 })).rejects.toBeInstanceOf(ContainmentQuotaError);
+        expect(await releaseAllLongLeaseSlots(service, SYSTEM)).toBe(1);
+        await acquireLongLeaseSlot(service, SYSTEM, { worldId: "w1", cap: 1 });
+      } finally {
+        await app.stop();
+      }
+    });
+  });
+
+  test("a child that prints a secret longer than the retained tail never leaves any of it in a record", async () => {
+    const SECRET = `s-${randomUUID()}${"k".repeat(5000)}`;
+    const events: LedgerEvent[] = [];
+    const result = await spawnGoverned(deps({ ledger: events, secrets: { big: SECRET } }), request({ argv: ["sh", "-c", 'printf %s "$BIG_SECRET" >&2; exit 3'], cwd: "/", secrets: [{ env: "BIG_SECRET", key: "big" }] }));
+    expect(result.ok).toBe(true);
+    if (result.ok) await result.handle.exited;
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain("kkkkkkkkkkkkkkkk"); // no fragment of the secret body survives
+    expect(events.at(-1)!.payload.outcome).toBe("crashed");
+  });
+
+  test("boot gate: no spawn before the reconciliation, and a failed reconciliation keeps spawning disabled; a shut-down supervisor admits none", async () => {
+    const refused: string[] = [];
+    const make = (readRows: () => Promise<{ key: string; value: unknown }[]>) => createMcpSupervisor({
+      tenant: "local", bootGate: true, getRecorder: () => ({ commitBatch: async () => ({}) }) as never, getIndex: () => ({ ready: Promise.resolve() }) as never, isEnabled: async () => true,
+      readRows, recordDecision: async (e) => { refused.push(String(e.payload.reasonCode)); }, registry: () => ({}) as never, resolveSecret: async () => undefined,
+      slots: { acquire: async () => ({ slotId: "" }), release: async () => {} }, getPosture: () => undefined, localHostSpawnAllowed: () => false,
+    });
+    const start = (supervisor: ReturnType<typeof make>) => {
+      const handlers = new Map<string, (input: unknown, ctx: unknown) => Promise<unknown>>();
+      supervisor.component().activate({ provide: (c: { id: string }, h: never) => handlers.set(c.id, h), effects: { register() {} } } as never);
+      return handlers.get("capability.mcp.start")!({ capabilityId: CAP, serverId: "stub" }, { actor: { id: "operator", kind: "user" } });
+    };
+    const failing = make(async () => { throw new Error("projection unavailable"); });
+    let settled = false;
+    const early = start(failing).catch((e: Error) => { settled = true; return e; });
+    await sleep(100);
+    expect(settled).toBe(false); // waits at the gate
+    await expect(failing.reconcileBoot()).rejects.toThrow(/projection unavailable/);
+    expect(String(await early)).toMatch(/did not finish/);
+    expect(refused).toContain("reconcile-failed");
+
+    const open = make(async () => []);
+    await open.reconcileBoot();
+    await open.shutdown();
+    await expect(start(open)).rejects.toThrow(/shutting down/);
+    expect(refused).toContain("shutting-down");
+  });
+});
+
+describe("J-CAP-mcp: the client treats the server as untrusted (tools/list pages, async schemas, deadlines)", () => {
+  /** An in-memory MCP server over a StdioChannel: scripted tools/list pages and a call counter. */
+  function fakeServer(pages: Record<string, unknown>[]) {
+    let onData: (chunk: Buffer) => void = () => {};
+    const received: string[] = [];
+    const reply = (id: unknown, result: unknown) => queueMicrotask(() => onData(Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`)));
+    const channel = {
+      write(data: string) {
+        for (const line of data.split("\n").filter(Boolean)) {
+          const m = JSON.parse(line) as { id?: number; method?: string; params?: { cursor?: string; protocolVersion?: string } };
+          received.push(m.method ?? "");
+          if (m.method === "initialize") reply(m.id, { protocolVersion: m.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "fake", version: "1" } });
+          else if (m.method === "tools/list") reply(m.id, pages[m.params?.cursor ? Number(m.params.cursor) : 0]);
+          else if (m.method === "tools/call") reply(m.id, { content: [{ type: "text", text: "ok" }] });
+        }
+      },
+      onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() {},
+    };
+    return { channel, received };
+  }
+  const tool = (name: string, schema: Record<string, unknown> = { type: "object" }) => ({ name, description: name, inputSchema: schema });
+
+  test("tools/list is followed across nextCursor pages", async () => {
+    const { channel } = fakeServer([{ tools: [tool("a")], nextCursor: "1" }, { tools: [tool("b")], nextCursor: "2" }, { tools: [tool("c")] }]);
+    const client = await McpClient.connect(channel, { capabilityId: CAP, version: "v", serverId: "fake", record: async () => {} });
+    expect(client.tools().map((t) => t.name)).toEqual(["a", "b", "c"]);
+  });
+
+  test("an $async schema is excluded, so a validator Promise can never pass invalid arguments", async () => {
+    const { channel } = fakeServer([{ tools: [tool("sync", { type: "object", properties: { n: { type: "integer" } } }), tool("lazy", { $async: true, type: "object", properties: { n: { type: "integer" } } })] }]);
+    const client = await McpClient.connect(channel, { capabilityId: CAP, version: "v", serverId: "fake", record: async () => {} });
+    expect(client.tools().map((t) => t.name)).toEqual(["sync"]);
+    expect(client.excluded).toEqual([{ name: "lazy", reason: "asynchronous input schemas are not accepted" }]);
+    expect(await client.callTool("sync", { n: "x" }, { timeoutMs: 1000, actorId: "t" })).toMatchObject({ ok: false, code: "schema_invalid" });
+  });
+
+  test("the deadline counts from call entry: a slow invocation record leaves no time, and nothing is sent", async () => {
+    const { channel, received } = fakeServer([{ tools: [tool("t")] }]);
+    const client = await McpClient.connect(channel, { capabilityId: CAP, version: "v", serverId: "fake", record: async (e) => { if (e.payload.phase === "started") await sleep(250); } });
+    const outcome = await client.callTool("t", {}, { timeoutMs: 100, actorId: "t" });
+    expect(outcome).toMatchObject({ ok: false, code: "deadline_exceeded" });
+    expect(received).not.toContain("tools/call");
   });
 });
 

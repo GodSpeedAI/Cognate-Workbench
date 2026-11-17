@@ -58,6 +58,8 @@ export interface McpSupervisorOptions {
   readonly probes?: SpawnDeps["probes"];
   readonly graceMs?: number;
   readonly killMs?: number;
+  /** True in the server: no spawn is admitted until `reconcileBoot` has finished successfully. */
+  readonly bootGate?: boolean;
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
 }
 
@@ -100,6 +102,17 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
   const mutex = options.mutex ?? createRuntimeMutex();
   const running = new Map<string, Running>();
   const graceMs = options.graceMs ?? 3000;
+  // Boot gate: the boot sweep may kill by signature, so a spawn must never overlap it; a failed sweep keeps spawning disabled.
+  let openGate: (ok: boolean) => void = () => {};
+  const gate: Promise<boolean> = options.bootGate ? new Promise<boolean>((resolve) => { openGate = resolve; }) : Promise.resolve(true);
+  let shuttingDown = false;
+  const pendingStarts = new Set<Promise<unknown>>();
+  const tracked = <T,>(promise: Promise<T>): Promise<T> => {
+    pendingStarts.add(promise);
+    const done = (): void => { pendingStarts.delete(promise); };
+    promise.then(done, done);
+    return promise;
+  };
 
   const record = async (type: string, payload: Record<string, unknown>, stream: string): Promise<void> => {
     let lastError: unknown;
@@ -134,7 +147,13 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
   // ---- stop ---------------------------------------------------------------------------------
   const initiateStop = (entry: Running, reason: string, forceEmergency = false): void => {
     entry.accepting = false;
-    if (entry.starting) { entry.cancelled = reason; entry.state = "stopping"; return; }
+    if (entry.starting) {
+      entry.cancelled = reason;
+      entry.state = "stopping";
+      // The process may already exist (the handshake is pending): an emergency kills it now.
+      if (forceEmergency || entry.decl.stop === "emergency") entry.handle?.stop(reason, "emergency");
+      return;
+    }
     const mode = forceEmergency ? "emergency" : entry.decl.stop ?? "graceful";
     if (mode === "emergency" || entry.inFlight === 0) {
       entry.state = "stopping";
@@ -195,6 +214,8 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       await decision(capabilityId, "mcp.start", ctx.actor, "refused", code, reason, { serverId, worldId, ...extra }).catch(() => {});
       return { ok: false as const, code, reason };
     };
+    if (shuttingDown) return refuse("shutting-down", "the runtime is shutting down; no new servers are started");
+    if (!(await gate)) return refuse("reconcile-failed", "the boot reconciliation of the spawn ledger did not finish; spawning stays disabled");
     const first = check("mcp.start", await prepare(), ctx, capabilityId, sessionId);
     if (!first.ok) return refuse(first.code, first.reason);
     if (!isServerId(serverId)) return refuse("invalid-server-id", `invalid MCP server id ${serverId}`);
@@ -246,6 +267,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     });
     // The governing row is re-read AFTER the process exists: a suspension that landed meanwhile wins.
     const post = check("mcp.start", await prepare(), ctx, capabilityId, sessionId);
+    if (shuttingDown && !entry.cancelled) entry.cancelled = "shutdown";
     if (!post.ok || entry.cancelled) {
       spawned.handle.stop("authority-lapsed-during-start", "emergency");
       await spawned.handle.exited;
@@ -309,7 +331,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
       };
 
       provide("capability.mcp.start", (input: { capabilityId: string; serverId: string; worldId?: string; sessionId?: string }, ctx) => mutex.run(async () => {
-        const result = await startServer(ctx, { capabilityId: String(input.capabilityId ?? ""), serverId: String(input.serverId ?? ""), worldId: String(input.worldId ?? "local"), sessionId: slotOf(input) });
+        const result = await tracked(startServer(ctx, { capabilityId: String(input.capabilityId ?? ""), serverId: String(input.serverId ?? ""), worldId: String(input.worldId ?? "local"), sessionId: slotOf(input) }));
         if (!result.ok) throw new Error(`capability.mcp.start: ${result.reason}`);
         return { capabilityId: input.capabilityId, serverId: input.serverId, state: result.state, pid: result.pid, tools: result.tools };
       }));
@@ -360,6 +382,9 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
         const after = last.index.activations.get(last.index.activationKey(capabilityId, "user", sessionId));
         const respawned: { serverId: string; ok: boolean; code?: string }[] = [];
         if (after?.state === "active") {
+          // A graceful stop may still be draining: its terminal record must exist before the ledger decides what to respawn.
+          const draining = [...running.values()].filter((e) => e.capabilityId === capabilityId && e.sessionId === sessionId && e.state !== "running" && e.state !== "starting");
+          await Promise.all(draining.map((e) => e.handle?.exited));
           // Resume re-spawns from the durable declaration: the servers the suspension stopped, with
           // the world re-resolved and secrets re-resolved (fail-closed; each failure is recorded).
           const latest = new Map<string, { serverId: string; worldId: string; intendedAt: string; stopReason: string | null }>();
@@ -372,7 +397,7 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
           }
           for (const s of latest.values()) {
             if (!s.stopReason?.startsWith("suspended:")) continue;
-            const res = await startServer(ctx, { capabilityId, serverId: s.serverId, worldId: s.worldId, sessionId });
+            const res = await tracked(startServer(ctx, { capabilityId, serverId: s.serverId, worldId: s.worldId, sessionId }));
             respawned.push({ serverId: s.serverId, ok: res.ok, ...(res.ok ? {} : { code: res.code }) });
           }
         }
@@ -385,11 +410,25 @@ export function createMcpSupervisor(options: McpSupervisorOptions): McpSuperviso
     host, component, watch,
     status: () => [...running.values()].map((e) => ({ capabilityId: e.capabilityId, ...(e.sessionId ? { sessionId: e.sessionId } : {}), serverId: e.serverId, version: e.version, state: e.state, ...(e.handle ? { pid: e.handle.pid } : {}) })),
     async reconcileBoot() {
-      const { reconcileSpawnLedger } = await import("./execSpawn.ts");
-      const rows = (await options.readRows()).filter((r) => r.key.startsWith("spawn/")).map((r) => r.value as never);
-      return reconcileSpawnLedger({ ledger, slots: options.slots }, rows);
+      try {
+        const { reconcileSpawnLedger } = await import("./execSpawn.ts");
+        const rows = (await options.readRows()).filter((r) => r.key.startsWith("spawn/")).map((r) => r.value as never);
+        const outcomes = await mutex.run(() => reconcileSpawnLedger({ ledger, slots: options.slots }, rows));
+        // Every ledger row is terminal now and nothing has spawned in this process: any long-lease slot still
+        // reserved is orphaned (a spawn that never reached its intent, or a failed release) and is freed.
+        await options.slots.releaseAll?.();
+        openGate(true);
+        return outcomes;
+      } catch (error) {
+        openGate(false);
+        throw error;
+      }
     },
     async shutdown() {
+      shuttingDown = true;
+      for (const e of [...running.values()]) initiateStop(e, "shutdown", true);
+      // A start whose process exists but whose confirmation is pending sees `shuttingDown`/`cancelled` and kills it.
+      await Promise.allSettled([...pendingStarts]);
       const all = [...running.values()];
       for (const e of all) { e.accepting = false; e.handle?.stop("shutdown", "emergency"); }
       await Promise.all(all.map((e) => e.handle?.exited));

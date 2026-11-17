@@ -100,6 +100,28 @@ describe("J-CAP-suspend: operator yank (CUJ 5)", () => {
     });
   }, 120000);
 
+  test("resume while a graceful stop is still draining waits for the terminal record, then re-spawns", async () => {
+    await withTempHome(async (home) => {
+      const booted = await boot(home);
+      const { app, client } = booted;
+      try {
+        const { pid } = await installAndStart(booted, home, CAP);
+        const inflight = invoke(client, CAP, "mcp.stub.slow", { ms: 300 });
+        await sleep(100);
+        await client.invoke("capability.bundle.suspend", { capabilityId: CAP, reason: "operator-yank" });
+        const resumed = (await client.invoke("capability.bundle.resume", { capabilityId: CAP, clearedReason: "operator-yank" })) as { state: string; respawned: { serverId: string; ok: boolean }[] };
+        expect(resumed).toMatchObject({ state: "active", respawned: [{ serverId: "stub", ok: true }] });
+        expect((await inflight).ok).toBe(true);
+        await waitUntil("old process gone", async () => !alive(pid));
+        const next = await invoke(client, CAP, "mcp.stub.pid", {});
+        expect(Number(next.result!.content![0]!.text)).not.toBe(pid);
+        await client.invoke("capability.mcp.stop", { capabilityId: CAP, serverId: "stub" });
+      } finally {
+        await app.stop();
+      }
+    });
+  }, 120000);
+
   test("emergency payload: the stop is a kill in the commit's turn and the in-flight call is cut at once", async () => {
     await withTempHome(async (home) => {
       const booted = await boot(home);

@@ -18,7 +18,7 @@
 //    stdin/stdout streams), so a server whose MCP stream must live over a provider cannot be spawned
 //    through it: those worlds refuse with `stream-port-unavailable` (recorded) once the matrix passes.
 import type { ExecutionWorldProvider, ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, readlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { StdioChannel } from "../mcp/client.ts";
 
@@ -111,7 +111,7 @@ export interface SpawnDeps {
   readonly ledger: (spawnId: string, events: readonly LedgerEvent[]) => Promise<void>;
   /** Decision record for a refusal (point "spawn"). */
   readonly recordRefusal: (request: SpawnRequest, code: string, reason: string, extra?: Record<string, unknown>) => Promise<void>;
-  readonly slots: { acquire(worldId: string): Promise<{ slotId: string }>; release(slotId: string, wallMs: number): Promise<void> };
+  readonly slots: { acquire(worldId: string): Promise<{ slotId: string }>; release(slotId: string, wallMs: number): Promise<void>; /** Boot: free every long-lease slot still reserved after the ledger sweep. */ releaseAll?(): Promise<unknown> };
   /** The app's execution posture permits host-process spawns on the `local` world. */
   readonly localHostSpawnAllowed: () => boolean;
   /** The LAST step before the intent commit: the authorization (authorizeCapabilityOp). */
@@ -205,12 +205,15 @@ export async function spawnGoverned(deps: SpawnDeps, request: SpawnRequest): Pro
   const stdin = proc.stdin as unknown as { write(data: string): unknown; flush?(): unknown; end(): unknown };
   const dataListeners: ((chunk: Buffer) => void)[] = [];
   const closeListeners: (() => void)[] = [];
+  // Redaction happens on a retained window that is wider than any secret (never on a slice that could
+  // cut one in half), then the record keeps only the redacted tail.
+  const window = Math.max(8192, 2 * Math.max(0, ...resolved.map((v) => v.length)) + 1024);
   let stderrTail = "";
   const pump = async (stream: ReadableStream<Uint8Array>, sink: (chunk: Buffer) => void): Promise<void> => {
     try { for await (const chunk of stream) sink(Buffer.from(chunk)); } catch { /* closed */ }
   };
   void pump(proc.stdout as ReadableStream<Uint8Array>, (chunk) => { for (const l of dataListeners) l(chunk); });
-  void pump(proc.stderr as ReadableStream<Uint8Array>, (chunk) => { stderrTail = (stderrTail + chunk.toString("utf8")).slice(-2048); });
+  void pump(proc.stderr as ReadableStream<Uint8Array>, (chunk) => { stderrTail = (stderrTail + chunk.toString("utf8")).slice(-window); });
 
   let stopping = false;
   let stopReason: string | undefined;
@@ -270,14 +273,21 @@ export interface LedgerRow {
  *  recorded outcome. `confirmed`: kill by recorded pid after checking the process still carries the
  *  version-directory signature; `intended`: best-effort signature kill scoped to the version
  *  directory path (never a bare cmdline match); then record. The caller runs this before any spawn. */
-export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slots">, rows: readonly LedgerRow[], proc: { readonly readCmdline: (pid: number) => Promise<string | undefined>; readonly listPids: () => Promise<number[]> } = procfs): Promise<{ spawnId: string; outcome: string }[]> {
+export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slots">, rows: readonly LedgerRow[], proc: { readonly readCmdline: (pid: number) => Promise<string | undefined>; readonly readCwd: (pid: number) => Promise<string | undefined>; readonly listPids: () => Promise<number[]> } = procfs): Promise<{ spawnId: string; outcome: string }[]> {
   const results: { spawnId: string; outcome: string }[] = [];
   for (const row of rows) {
     if (row.status !== "intended" && row.status !== "confirmed") continue;
     const signature = row.bundleDir ?? "";
+    // Identity: the process runs under the version directory (its cwd, or its command line names it)
+    // AND its program is the declared one. A relative command (`bun server.mjs` with cwd = the
+    // version directory) is identified by its cwd.
+    const program = (row.argv?.[0] ?? "").split("/").pop() ?? "";
     const matches = async (pid: number): Promise<boolean> => {
+      if (!signature) return false;
       const cmdline = await proc.readCmdline(pid);
-      return Boolean(signature) && cmdline !== undefined && cmdline.includes(signature) && (row.argv ?? []).every((arg) => !arg || cmdline.includes(arg));
+      if (cmdline === undefined) return false;
+      const underDir = cmdline.includes(signature) || (await proc.readCwd(pid)) === signature;
+      return underDir && (!program || cmdline.includes(program));
     };
     let outcome = "reconciled-unknown";
     if (row.worldKind === "local") {
@@ -298,6 +308,9 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
 const procfs = {
   async readCmdline(pid: number): Promise<string | undefined> {
     try { return (await readFile(`/proc/${pid}/cmdline`, "utf8")).replaceAll("\0", " "); } catch { return undefined; }
+  },
+  async readCwd(pid: number): Promise<string | undefined> {
+    try { return await readlink(`/proc/${pid}/cwd`); } catch { return undefined; }
   },
   async listPids(): Promise<number[]> {
     try { return (await readdir("/proc")).filter((n) => /^\d+$/.test(n)).map(Number); } catch { return []; }

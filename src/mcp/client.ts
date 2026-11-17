@@ -136,7 +136,18 @@ export class McpClient {
 
   /** Live tools/list, validated as untrusted data. */
   async refreshTools(): Promise<readonly McpToolDef[]> {
-    const listed = await this.sdk.listTools(undefined, { timeout: 15_000 });
+    // Follow nextCursor (the MCP pagination contract), bounded by pages and by the tool bound.
+    const collected: Awaited<ReturnType<Client["listTools"]>>["tools"] = [];
+    let cursor: string | undefined;
+    let truncatedByPages = false;
+    for (let page = 0; page < 8; page++) {
+      const listed = await this.sdk.listTools(cursor ? { cursor } : undefined, { timeout: 15_000 });
+      collected.push(...listed.tools);
+      cursor = listed.nextCursor;
+      if (!cursor || collected.length > MCP_LIMITS.maxTools) break;
+      if (page === 7) truncatedByPages = true;
+    }
+    const listed = { tools: collected };
     const tools = new Map<string, { def: McpToolDef; validate: ValidateFunction }>();
     const excluded: { name: string; reason: string }[] = [];
     for (const raw of listed.tools.slice(0, MCP_LIMITS.maxTools)) {
@@ -147,6 +158,8 @@ export class McpClient {
       const schemaText = JSON.stringify(raw.inputSchema ?? {});
       if (utf8Bytes(schemaText) > MCP_LIMITS.maxSchemaBytes) { excluded.push({ name, reason: "input schema exceeds the byte bound" }); continue; }
       if (tools.has(name)) { excluded.push({ name, reason: "duplicate tool name" }); continue; }
+      // An `$async` schema would make `validate` return a Promise (truthy): never accept one.
+      if ((JSON.parse(schemaText) as { $async?: unknown }).$async) { excluded.push({ name, reason: "asynchronous input schemas are not accepted" }); continue; }
       try {
         const validate = this.#ajv.compile(JSON.parse(schemaText) as object);
         tools.set(name, { def: { id: `mcp.${this.options.serverId}.${name}`, name, description, inputSchema: JSON.parse(schemaText) as Record<string, unknown> }, validate });
@@ -154,6 +167,7 @@ export class McpClient {
         excluded.push({ name, reason: `input schema does not compile: ${error instanceof Error ? error.message : String(error)}` });
       }
     }
+    if (truncatedByPages || cursor) excluded.push({ name: "*", reason: "further tools pages were not read (page or tool bound reached)" });
     if (listed.tools.length > MCP_LIMITS.maxTools) excluded.push({ name: "*", reason: `${listed.tools.length - MCP_LIMITS.maxTools} tools beyond the ${MCP_LIMITS.maxTools}-tool bound` });
     this.#tools = tools;
     this.#excluded = excluded;
@@ -163,6 +177,7 @@ export class McpClient {
   tools(): readonly McpToolDef[] { return [...this.#tools.values()].map((t) => t.def); }
 
   async callTool(name: string, args: Record<string, unknown>, call: { timeoutMs: number; signal?: AbortSignal; callId?: string; actorId: string }): Promise<McpCallOutcome> {
+    const deadlineAt = Date.now() + call.timeoutMs; // the caller's deadline counts from entry, not from the send
     const callId = call.callId ?? randomUUID();
     const base = { capabilityId: this.options.capabilityId, version: this.options.version, serverId: this.options.serverId, ...(this.options.sessionId ? { sessionId: this.options.sessionId } : {}), callId, tool: name, actorId: call.actorId };
     const refuse = async (code: string, message: string): Promise<McpCallOutcome> => {
@@ -175,7 +190,9 @@ export class McpClient {
     const argText = JSON.stringify(args ?? {});
     const argBytes = utf8Bytes(argText);
     if (argBytes > MCP_LIMITS.maxArgumentBytes) return refuse("arguments_too_large", `arguments are ${argBytes} bytes; the bound is ${MCP_LIMITS.maxArgumentBytes}`);
-    if (!entry.validate(args ?? {})) return refuse("schema_invalid", `arguments for ${name} violate the server's schema: ${this.#ajv.errorsText(entry.validate.errors)}`);
+    const verdict = entry.validate(args ?? {}) as unknown;
+    if (verdict instanceof Promise) { void verdict.catch(() => {}); return refuse("schema_invalid", "the server's schema is asynchronous and cannot be enforced"); }
+    if (!verdict) return refuse("schema_invalid", `arguments for ${name} violate the server's schema: ${this.#ajv.errorsText(entry.validate.errors)}`);
     // Record BEFORE the call is sent: an unrecordable invocation is not made.
     try {
       await this.options.record({ type: "capability.mcp.tool_invoked", payload: { ...base, phase: "started", argumentsSha256: createHash("sha256").update(argText).digest("hex"), argumentBytes: argBytes } });
@@ -184,7 +201,9 @@ export class McpClient {
     }
     let outcome: McpCallOutcome;
     try {
-      const result = await this.sdk.callTool({ name, arguments: args ?? {} }, undefined, { timeout: call.timeoutMs, ...(call.signal ? { signal: call.signal } : {}) });
+      const remaining = deadlineAt - Date.now();
+      if (remaining <= 0) throw new Error("request timed out before it was sent (the invocation record consumed the deadline)");
+      const result = await this.sdk.callTool({ name, arguments: args ?? {} }, undefined, { timeout: remaining, ...(call.signal ? { signal: call.signal } : {}) });
       const bytes = utf8Bytes(JSON.stringify(result));
       outcome = bytes > MCP_LIMITS.maxResultBytes
         ? { ok: false, code: "result_too_large", message: `the tool result is ${bytes} bytes; the bound is ${MCP_LIMITS.maxResultBytes}` }

@@ -369,3 +369,20 @@ export async function acquireLongLeaseSlot(service: RuntimeService, caller: Call
 export async function releaseLongLeaseSlot(service: RuntimeService, caller: Caller, slotId: string, outcome: ContainmentOutcome, wallMs: number): Promise<void> {
   await releaseContainedSlot(service, caller, slotId, outcome, wallMs);
 }
+
+/** Boot hygiene for the long-lease class: no spawned process survives a restart's reconciliation
+ *  (the boot sweep kills or accounts for every ledger row first), so every long-lease slot still
+ *  reserved is orphaned - whether its spawn never reached an intent record or its release failed
+ *  after the terminal record. Valid under the single-committing-process invariant (section 1.5) and
+ *  only before this process spawns anything. */
+export async function releaseAllLongLeaseSlots(service: RuntimeService, caller: Caller): Promise<number> {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const { state, version } = await readState(service, caller);
+    const held = Object.values(state.executions).filter(e => e.status === "reserved" && e.longLease);
+    if (held.length === 0) return 0;
+    const nowIso = new Date().toISOString();
+    for (const e of held) state.executions[e.id] = { ...e, status: "completed", outcome: "reaped", endedAt: nowIso };
+    if (await writeState(service, caller, state, version, `containment-long-reap:${held.map(e => e.id).sort().join(",")}:${version}`)) return held.length;
+  }
+  throw new Error("Aggregate containment ledger is busy; retry long-lease reconciliation");
+}

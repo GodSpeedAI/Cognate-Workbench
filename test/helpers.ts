@@ -94,6 +94,8 @@ export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "
  *  after the retries are spent. */
 async function bootAppOnce(home: string, attempt: number, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks" | "executionPostureRecords" | "mcpSupervisorTimings">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   const sidecar = process.env.COGNATE_TEST_SIDECAR;
+  // A sidecar child takes only port and resource settings: fail fast rather than run against a silent default.
+  if (sidecar && ("executionPostureRecords" in extra || "mcpSupervisorTimings" in extra)) throw new Error("bootApp: executionPostureRecords and mcpSupervisorTimings cannot be forwarded to a sidecar boot");
   if (!sidecar) {
     let app: AppServer;
     try {
