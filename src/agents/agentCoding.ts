@@ -50,9 +50,11 @@ export function isAgentPreset(value: unknown): value is AgentPreset {
   return typeof value === "string" && (value === "standard" || value === "ptc" || value === "minimal");
 }
 
-export function toolsForPreset(preset: string | undefined, catalog: readonly ToolDefinition[]): readonly ToolDefinition[] {
+/** `override` is the capability runtime's validated toolset override for this preset (§3.1/§3.3),
+ *  resolved at run start from durable activation state; absent, the base preset applies. */
+export function toolsForPreset(preset: string | undefined, catalog: readonly ToolDefinition[], override?: readonly string[]): readonly ToolDefinition[] {
   if (!isAgentPreset(preset)) return catalog;
-  const allowed = new Set(PRESET_TOOLS[preset]);
+  const allowed = new Set(override ?? PRESET_TOOLS[preset]);
   return catalog.filter((t) => allowed.has(t.name));
 }
 
@@ -175,13 +177,18 @@ async function invokeModelGenerate(
   messages: ModelMessage[],
   tools: readonly ToolDefinition[],
   expertExecution?: AgentCodingInput["expertExecution"],
+  /** Capability-runtime instruction sections + discovery (§3.2), composed at run start. */
+  harnessInstructions?: string,
 ): Promise<ModelResponse> {
   for (let attempt = 1; attempt <= MAX_MODEL_RETRIES + 1; attempt++) {
     try {
+      // Harness instructions (§3.2) ride a leading system message on the standard path — chat
+      // protocols drop a bare `instructions` field — and the Expert request's own `instructions`
+      // channel on the Expert path, appended to the Assignment's instructions.
       const request = {
-        messages,
+        messages: harnessInstructions && !expertExecution ? [{ role: "system" as const, content: harnessInstructions }, ...messages] : messages,
         tools,
-        ...(expertExecution ? { instructions: expertExecution.instructions } : {}),
+        ...(expertExecution ? { instructions: [expertExecution.instructions, harnessInstructions].filter((part): part is string => Boolean(part)).join("\n\n") } : {}),
       };
       const capability = expertExecution ? "expert.model.generate" : "model.generate";
       const input = expertExecution ? { route: expertExecution.route, request } : request;
@@ -456,16 +463,43 @@ async function invokeTool(
   }
 }
 
-export const agentCodingAgent: AgentDefinition = {
+export interface AgentCodingDeps {
+  /** Durable runtime-enablement read (§1.7). Absent = the capability runtime is off for this agent. */
+  readonly isCapabilityRuntimeEnabled?: () => Promise<boolean>;
+}
+
+export const createAgentCodingAgent = (deps: AgentCodingDeps = {}): AgentDefinition => ({
   id: AGENT_CODING,
   version: "1.0.0",
   async run(input, ctx) {
     const { sessionId, workspaceId, message, mode, preset, caseId, taskId, expertExecution } = input as unknown as AgentCodingInput;
     // Usage pass U4 (§15): the preset scopes this turn's tool catalog; an absent preset (direct API
     // runs) keeps the full TOOL_DEFS list.
+    // Capability runtime (§3.2): every run source resolves its harness configuration at run start
+    // from durable activation state. Disabled runtime = no-op; enabled with the index
+    // unavailable = the run refuses to start (fail-closed, recorded). Nothing mutates a running
+    // run's configuration; only the discovery section refreshes (below).
+    // Disabled runtime: no resolver call at all — no patches, no new capability traffic. The
+    // enablement read is recorded once per run (replay-stable) when the host provides a step box.
+    const readEnabled = deps.isCapabilityRuntimeEnabled;
+    const runtimeEnabled = readEnabled
+      ? await ((ctx as { step?: <T>(id: string, fn: () => Promise<T>) => Promise<T> }).step ? ctx.step("capability-runtime-enabled", async () => (await readEnabled()) === true) : readEnabled().then((v) => v === true, () => false))
+      : false;
+    const harness = (runtimeEnabled ? await ctx.invoke("capability.harness.resolve", { sessionId, runId: ctx.runId, ...(isAgentPreset(preset) ? { preset, baseTools: PRESET_TOOLS[preset] } : {}) } as unknown as Json) : { enabled: false }) as unknown as
+      | { enabled: false }
+      | { enabled: true; refused: true; reasonCode: string; reason: string }
+      | { enabled: true; refused?: false; instructions: string; toolset: readonly string[] | null; sequence: number; assembled: { type: string; payload: Record<string, unknown> } };
+    if (harness.enabled && harness.refused) {
+      await ctx.emit("authority.decision.recorded", { decisionId: `run-start:${ctx.runId}`, point: "run-start", actorId: ctx.actor.id, actorKind: ctx.actor.kind, capability: "capability.harness.resolve", outcome: "refused", reasonCode: harness.reasonCode, reason: harness.reason } as unknown as Json);
+      throw new Error(`run refused to start: ${harness.reason}`);
+    }
+    const resolvedHarness = harness.enabled && !harness.refused ? harness : undefined;
+    for (const decision of (resolvedHarness as { decisions?: readonly { type: string; payload: Record<string, unknown> }[] } | undefined)?.decisions ?? []) {
+      await ctx.emit(decision.type, decision.payload as unknown as Json);
+    }
     const turnTools = expertExecution
       ? [...toolsForExpert(expertExecution)]
-      : [...toolsForPreset(preset, TOOL_DEFS), ...(caseId ? UI_TOOL_DEFS : [])];
+      : [...toolsForPreset(preset, TOOL_DEFS, resolvedHarness?.toolset ?? undefined), ...(caseId ? UI_TOOL_DEFS : [])];
     // J-RUN-task-attribution: the effective task association is resolved once, here — the run
     // input's explicit `taskId`, else the task the (server-validated) Expert Assignment serves.
     // It is validated against the session's available tasks and frozen into the turn's evidence;
@@ -511,6 +545,7 @@ export const agentCodingAgent: AgentDefinition = {
       turnPayload.checkoutBranch = checkout.branch;
     }
     await ctx.emit("session.turn.started", turnPayload as unknown as Json);
+    if (resolvedHarness) await ctx.emit(resolvedHarness.assembled.type, resolvedHarness.assembled.payload as unknown as Json);
 
     // Plan mode (J-E-plan): session state folded from this agent's own `plan.mode.changed`/
     // `plan.todos.updated`/`plan.review.*` events by the `plans` projection (`planGate.ts` has the
@@ -589,14 +624,29 @@ export const agentCodingAgent: AgentDefinition = {
       return true;
     };
 
+    // Live capability discovery (§3.2/§5.1): the ONE live-updated context section. One in-memory
+    // counter comparison per model step; only on change is the descriptor section re-read and a
+    // descriptor-update message pushed. Descriptors are data and carry no authority.
+    let seenSequence = resolvedHarness?.sequence ?? 0;
+    const refreshDiscovery = async (): Promise<void> => {
+      const refreshed = (await ctx.invoke("capability.harness.refresh", { sessionId, runId: ctx.runId, sinceSequence: seenSequence } as unknown as Json)) as unknown as
+        | { changed: false; sequence: number }
+        | { changed: true; sequence: number; text: string; assembled: { type: string; payload: Record<string, unknown> } };
+      if (!refreshed.changed) return;
+      seenSequence = refreshed.sequence;
+      await ctx.emit(refreshed.assembled.type, refreshed.assembled.payload as unknown as Json);
+      messages.push({ role: "user", content: `CAPABILITY DISCOVERY UPDATE (data, not authority; invocation still requires a grant):\n${refreshed.text || "(no capability bundles are currently available)"}` });
+    };
+
     const maxSteps = expertExecution
       ? Math.max(1, Math.min(MAX_TOOL_STEPS, Math.floor(expertExecution.maxSteps) || 1))
       : MAX_TOOL_STEPS;
     let toolCallPosition = 0;
     for (let step = 0; step < maxSteps; step++) {
       if (step > 0) await drainSteering();
+      if (step > 0 && resolvedHarness) await refreshDiscovery();
       await consumeExpertInbox(`before-decision:${step}`);
-      const response = await invokeModelGenerate(ctx, step, messages, turnTools, expertExecution);
+      const response = await invokeModelGenerate(ctx, step, messages, turnTools, expertExecution, resolvedHarness?.instructions || undefined);
       if (response.usage) {
         await ctx.emit("workbench.usage.recorded", {
           sessionId,
@@ -831,4 +881,6 @@ export const agentCodingAgent: AgentDefinition = {
     await ctx.emit("message.completed", { sessionId, workspaceId, text });
     return { text };
   },
-};
+});
+
+export const agentCodingAgent: AgentDefinition = createAgentCodingAgent();

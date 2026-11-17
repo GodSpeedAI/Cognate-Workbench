@@ -8,13 +8,14 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { bootApp, withTempHome, waitUntil, wbRows } from "./wb-helpers.ts";
+import { bootApp, withTempHome, waitUntil, wbRows, enableCapabilityRuntime } from "./wb-helpers.ts";
 
 describe("J-CAP-create", () => {
   test("register → activate → invoke in-session (CUJ 1)", async () => {
     await withTempHome(async (home) => {
       const { app, client } = await bootApp(home);
       try {
+        await enableCapabilityRuntime(app, client);
         // Author: compose a small bundle (skills + composition guide) into a source directory.
         const source = join(home, "bundle-src", randomUUID().slice(0, 8));
         await mkdir(join(source, "skills"), { recursive: true });
@@ -56,12 +57,17 @@ describe("J-CAP-create", () => {
 
         // Invoke through the dispatcher: skill.load returns the document (the composition guide).
         const load = await client.invoke("tool.skill_load", { capabilityId: "capability.bundle.visual-design", skillId: "SKILL.md" }) as Record<string, unknown>;
-        console.error("[J-CAP-create] skill_load response:", JSON.stringify(load, null, 2));
+        expect(load.ok).toBe(true);
         expect(JSON.stringify(load)).toContain("Visual Design");
 
         // tools.list returns the manifest-declared tool entries.
         const list = await client.invoke("tool.capability_invoke", { capabilityId: "capability.bundle.visual-design", op: "tools.list" }) as { result?: { tools?: unknown[] } };
         expect(list.result?.tools).toBeDefined();
+
+        // A path outside the manifest is not a skill: the loader serves a closed vocabulary.
+        const traversal = await client.invoke("tool.skill_load", { capabilityId: "capability.bundle.visual-design", skillId: "../../../etc/passwd" }) as Record<string, unknown>;
+        expect(traversal.ok).toBe(false);
+        expect(traversal.code).toBe("not_found");
       } finally {
         await app.runtime.idle().catch(() => {});
         await app.stop();
@@ -92,6 +98,7 @@ describe("J-CAP-create", () => {
     await withTempHome(async (home) => {
       const { app, client } = await bootApp(home);
       try {
+        await enableCapabilityRuntime(app, client);
         // The P suite's run_code test already covers fold-race; here we assert the descriptor
         // appears in the assembled harness record (CUJ 1's discovery assertion, asserted from
         // the durable fold, not from model behaviour).

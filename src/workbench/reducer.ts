@@ -383,7 +383,18 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
     case "capability.bundle.registered": {
       const capabilityId = String(p.capabilityId ?? "");
       if (!capabilityId) return [];
-      return [{ key: `bundle/${capabilityId}`, value: j({ capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, registeredAt: recordedAt }) }];
+      const row = { capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, name: p.name ?? "", purpose: p.purpose ?? "", manifest: p.manifest ?? null, descriptorTruncated: p.descriptorTruncated === true, ...(p.sourceWorldId ? { sourceWorldId: p.sourceWorldId } : {}), registeredAt: recordedAt };
+      // `bundle/` names the LATEST registered version; `bundle-version/` keeps every version's
+      // manifest so readers resolve the ACTIVATED version, not merely the newest (hot reload).
+      // A registered version is immutable (R1-2): a repeat registration of the same identity
+      // never rewrites its row, so nothing a resolver reads can change under an activation.
+      const versionKey = row.versionHash ? `bundle-version/${capabilityId}/${row.versionHash}` : "";
+      const existing = versionKey ? (get(versionKey) as { [k: string]: unknown } | undefined) : undefined;
+      return [
+        // `registeredAt` is per REGISTRATION (CR-5): the uninstall key derives from it.
+        { key: `bundle/${capabilityId}`, value: j({ ...(existing ?? row), registeredAt: row.registeredAt }) },
+        ...(versionKey && !existing ? [{ key: versionKey, value: j(row) }] : []),
+      ];
     }
     case "capability.bundle.validated": {
       const capabilityId = String(p.capabilityId ?? "");
@@ -409,7 +420,7 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const retired = get(`binding-retired/${capabilityId}`) as { versions?: unknown } | undefined;
       const priorVersion = String(p.from ?? prev.version ?? "");
       return [
-        { key, value: j({ ...prev, version: p.to ?? prev.version, repointedAt: recordedAt }) },
+        { key, value: j({ ...prev, version: p.to ?? prev.version, ...(Array.isArray(p.ceiling) ? { ceiling: p.ceiling } : {}), ...(typeof p.clampProvenance === "string" ? { clampProvenance: p.clampProvenance } : {}), repointedAt: recordedAt }) },
         { key: `binding-retired/${capabilityId}`, value: j({ versions: [...((retired?.versions as readonly string[]) ?? []), priorVersion] }) },
       ];
     }

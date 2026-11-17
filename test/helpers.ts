@@ -7,7 +7,7 @@ import { createClient } from "@godspeedai/cognate-client";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { resolvePg0Url } from "@godspeedai/cognate-store-postgres";
-import { startServer, LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
+import { startServer, LOCAL_OPERATOR, type AppServer, type ServerOptions } from "../src/server.ts";
 import { postgresUrl, schemaFor, storeConfigFor } from "../src/store.ts";
 
 /** Every app name a store is opened under for a temp home (`src/server.ts` uses "harness"; the
@@ -84,25 +84,25 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
  * posture (`uncontained-local`, `devAuth`) are out of T2 scope by design: the packaged app runs
  * its default posture.
  */
-export async function bootApp(home: string): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
-  return await bootAppOnce(home, 0);
+export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+  return await bootAppOnce(home, 0, extra);
 }
 
 /** Shared pg0 instance start races are transient: under full-run parallelism, concurrent boots
  *  race the same instance start and the losers get "Instance already running" from the pg0
  *  binary — the instance is up moments later. Retry the boot; per-attempt failures surface
  *  after the retries are spent. */
-async function bootAppOnce(home: string, attempt: number): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+async function bootAppOnce(home: string, attempt: number, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   const sidecar = process.env.COGNATE_TEST_SIDECAR;
   if (!sidecar) {
     let app: AppServer;
     try {
-      app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
+      app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, ...extra });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (attempt < 8 && /pg0 could not start|Instance already running|ECONNREFUSED|too many clients/.test(message)) {
         await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
-        return bootAppOnce(home, attempt + 1);
+        return bootAppOnce(home, attempt + 1, extra);
       }
       throw error;
     }

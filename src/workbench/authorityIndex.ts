@@ -56,6 +56,11 @@ export class AuthorityIndex {
   }
 
   async #rebuild(rows: readonly { key: string; value: unknown }[]): Promise<void> {
+    // Idempotent (R3-1): one entry per grant id and one commit subscription, however often it runs.
+    this.#unlisten?.();
+    this.#unlisten = undefined;
+    this.grants.clear();
+    this.activations.clear();
     for (const row of rows) {
       if (row.key.startsWith("activation/")) {
         const v = row.value as ActivationRow;
@@ -64,7 +69,6 @@ export class AuthorityIndex {
       } else if (row.key.startsWith("grant/")) {
         const v = row.value as GrantRow;
         this.grants.set(this.grantKey(v.grantId), v);
-        this.grants.set(`principal:${v.principalId}:${v.grantId}`, v);
         this.#sequence += 1;
       }
     }
@@ -94,7 +98,7 @@ export class AuthorityIndex {
           if (row.capabilityId) this.activations.set(this.activationKey(row.capabilityId, row.level, row.sessionId), row);
         } else if (event.eventType === "capability.repointed") {
           const row = this.activations.get(this.activationKey(String(p.capabilityId ?? ""), String(p.level ?? "user"), typeof p.sessionId === "string" ? p.sessionId : undefined));
-          if (row && p.to) this.activations.set(this.activationKey(row.capabilityId, row.level, row.sessionId), { ...row, version: String(p.to) });
+          if (row && p.to) this.activations.set(this.activationKey(row.capabilityId, row.level, row.sessionId), { ...row, version: String(p.to), ...(Array.isArray(p.ceiling) ? { ceiling: p.ceiling as readonly string[] } : {}), ...(typeof p.clampProvenance === "string" ? { clampProvenance: p.clampProvenance } : {}) });
         } else if (event.eventType === "capability.suspended") {
           const row = this.activations.get(this.activationKey(String(p.capabilityId ?? ""), String(p.level ?? "user"), typeof p.sessionId === "string" ? p.sessionId : undefined));
           if (row) {
@@ -134,9 +138,12 @@ export class AuthorityIndex {
   }
 
   /** The invoking actor's grant (trusted, durable). */
-  grantFor(principalId: string): GrantRow | undefined {
+  grantFor(principalId: string, nowMs?: number): GrantRow | undefined {
+    // CR-7: with a clock, an expired grant is skipped in favour of a newer valid one.
     for (const grant of this.grants.values()) {
-      if (grant.principalId === principalId && grant.status === "active") return grant;
+      if (grant.principalId !== principalId || grant.status !== "active") continue;
+      if (nowMs !== undefined && grant.expiresAt && new Date(grant.expiresAt).getTime() <= nowMs) continue;
+      return grant;
     }
     return undefined;
   }

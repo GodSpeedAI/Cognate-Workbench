@@ -7,6 +7,8 @@
 // evidence marker is present in the fold AND the store is a supported
 // single-committing-process backend; unsupported modes fail closed (§1.5 deployment
 // invariant — never a silent revocation gap).
+import { authorizeCapabilityOp } from "../workbench/authoritySelection.ts";
+import { createRuntimeMutex } from "../workbench/runtimeMutex.ts";
 import type { Component, HandlerContext, SemanticRef, CapabilityContract } from "@godspeedai/cognate-kernel-api";
 import type { DurableStore } from "@godspeedai/cognate-events";
 import { randomUUID } from "node:crypto";
@@ -21,9 +23,11 @@ const GRANT_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 const PRINCIPAL_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 /** Structural v1 allowance sets (§1.3): what the level constants permit. A permission outside
  *  the set is refused at issue — the allowance family itself is deliberately not a record. */
-const KNOWN_PERMISSIONS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate", "*"]);
+const KNOWN_PERMISSIONS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate", "bundle.deactivate", "*"]);
 
 export interface AuthorityGrantsOptions {
+  /** The shared runtime mutex (activation, deactivation, uninstall, grant issue/revoke). */
+  readonly mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex;
   /** Lazy accessors: the component is constructed in the createRuntime options list, before
    *  the runtime (and its store/index rebuild) exists. Handlers only run post-boot. */
   readonly getStore: () => DurableStore;
@@ -33,8 +37,16 @@ export interface AuthorityGrantsOptions {
    *  workbench projection; the component stays decoupled from projection plumbing). */
   readonly isRemediationVerified: () => boolean | Promise<boolean>;
   /** §1.5 predicate input: the supported single-committing-process store kinds. */
-  readonly storeKind: "pg0" | "memory" | "external-postgres";
+  readonly storeKind: "pg0" | "memory" | "external-postgres" | "external-postgres-single-writer";
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
+}
+
+/** §1.5: an external PostgreSQL is a multi-writer store UNLESS the operator declares the deployment
+ *  single-committing-process (`COGNATE_CAPABILITY_SINGLE_WRITER=1`) — a fact the operator asserts
+ *  (one process on a dedicated database), never inferred. */
+export function classifyCapabilityStore(env: Readonly<Record<string, string | undefined>>): AuthorityGrantsOptions["storeKind"] {
+  if (!env.COGNATE_POSTGRES_URL) return "pg0";
+  return env.COGNATE_CAPABILITY_SINGLE_WRITER === "1" ? "external-postgres-single-writer" : "external-postgres";
 }
 
 const CONTRACT_IDS = ["authority.grant.issue", "authority.grant.revoke", "authority.grant.list", "capability.runtime.enable"] as const;
@@ -53,8 +65,17 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
       const provide = <I, O>(id: (typeof CONTRACT_IDS)[number], handler: (input: I, ctx: HandlerContext) => Promise<O>) =>
         fiber.provide(contracts.find((c) => c.id === id) as CapabilityContract, async (raw, ctx) => handler(raw as I, ctx));
 
+      // R4-2: grant issue and revoke share the runtime mutex with activation/deactivation/uninstall,
+      // and pass through `authorizeCapabilityOp` as the last step before their commit.
+      const mutex = options.mutex ?? createRuntimeMutex();
+      const lastStep = async (op: "grant.issue" | "grant.revoke", ctx: HandlerContext): Promise<void> => {
+        const auth = authorizeCapabilityOp(op, { enabled: true, deploymentOk: true, index: options.getIndex(), actor: ctx.actor, runId: ctx.runId, nowMs: Date.now() });
+        if (!auth.ok) throw new Error(`${op === "grant.issue" ? "authority.grant.issue" : "authority.grant.revoke"}: ${auth.reason}`);
+      };
+
       provide("authority.grant.issue", async (input: { grantId?: string; principalId: string; permissions: readonly string[]; expiresAt?: string }, ctx) => {
         await requireOperator(ctx, "authority.grant.issue", inRunEmit(ctx));
+        return mutex.run(async () => {
         const grantId = input.grantId ?? `grant-${randomUUID().slice(0, 12)}`;
         if (!GRANT_ID.test(grantId) || !PRINCIPAL_ID.test(input.principalId)) throw new Error("authority.grant.issue: grant and principal ids must be safe identifiers");
         if (!input.principalId.startsWith("wb-agent:") && input.principalId !== LOCAL_ROOT_ID) throw new Error("authority.grant.issue: principals are wb-agent:* derivations or the operator root");
@@ -63,14 +84,17 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
         for (const permission of permissions) {
           if (!KNOWN_PERMISSIONS.has(permission)) throw new Error(`authority.grant.issue: unknown permission ${permission}`);
         }
+        await lastStep("grant.issue", ctx);
         await recorder().commitBatch(grantId, [
           { type: "authority.grant.issued", payload: { grantId, principalId: input.principalId, permissions, ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}) } },
         ], `issue:${grantId}`);
         return { grantId, principalId: input.principalId, permissions };
+        });
       });
 
       provide("authority.grant.revoke", async (input: { grantId: string }, ctx) => {
         await requireOperator(ctx, "authority.grant.revoke", inRunEmit(ctx));
+        return mutex.run(async () => {
         await options.getIndex().ready;
         const grant = options.getIndex().grantFor(input.grantId);
         const byId = [...options.getIndex().grants.values()].find((g) => g.grantId === input.grantId);
@@ -84,8 +108,10 @@ export function authorityGrantsComponent(options: AuthorityGrantsOptions): Compo
             suspensions.push({ capabilityId: row.capabilityId, level: row.level, ...(row.sessionId ? { sessionId: row.sessionId } : {}) });
           }
         }
+        await lastStep("grant.revoke", ctx);
         await recorder().commitGrantRevocationBatch({ grantId: target.grantId, reason: "grant-revoked", suspensions });
         return { grantId: target.grantId, suspended: suspensions.length };
+        });
       });
 
       provide("authority.grant.list", async (_input, ctx) => {
@@ -124,8 +150,15 @@ export function seedOperatorRootGrant(recorder: LifecycleRecorder): Promise<unkn
 }
 
 /** Grant expiry sweep: called from the boot interval; expires grants whose wall clock passed
- *  `expiresAt`, producing the same CAS batch as revocation with reason `grant-expired`. */
-export async function sweepExpiredGrants(recorder: LifecycleRecorder, index: AuthorityIndex, now = new Date()): Promise<number> {
+ *  `expiresAt`, producing the same CAS batch as revocation with reason `grant-expired`.
+ *  It holds the shared runtime mutex like revocation does (review R4 verification): otherwise an
+ *  activation committing concurrently could clamp to a grant the sweep is expiring, and escape its
+ *  suspension. */
+export async function sweepExpiredGrants(recorder: LifecycleRecorder, index: AuthorityIndex, now = new Date(), mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex): Promise<number> {
+  return mutex ? mutex.run(() => sweepExpiredGrantsLocked(recorder, index, now)) : sweepExpiredGrantsLocked(recorder, index, now);
+}
+
+async function sweepExpiredGrantsLocked(recorder: LifecycleRecorder, index: AuthorityIndex, now: Date): Promise<number> {
   let expired = 0;
   for (const grant of index.grants.values()) {
     if (grant.status !== "active" || !grant.expiresAt) continue;

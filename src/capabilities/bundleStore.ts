@@ -31,8 +31,22 @@ export interface MaterializedVersion {
 
 export class BundleLimitError extends Error {}
 
-export function versionHashFor(manifest: readonly string[]): string {
-  return createHash("sha256").update(manifest.join("\n")).digest("hex").slice(0, 16);
+export function versionHashFor(payload: readonly string[], manifest?: unknown): string {
+  const hash = createHash("sha256").update(payload.join("\n"));
+  // The identity covers the WHOLE declared manifest (patches, overrides, requirements, ...), not
+  // only the payload files: a changed declaration is a different version (review R1-2).
+  if (manifest !== undefined) hash.update(`\n--manifest--\n${canonicalJson(manifest)}`);
+  return hash.digest("hex").slice(0, 16);
+}
+
+/** Key-order-independent JSON (the projection store may reorder keys); undefined fields drop. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v === undefined ? null : v)).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 /** Walks `sourceDir` (bounded), enforces the ceilings, returns the sorted manifest lines. */
@@ -77,9 +91,9 @@ export function versionDir(home: string, capabilityId: string, versionHash: stri
 
 /** Materializes the payload: copies the source tree into the immutable version directory and
  *  returns its identity. Registration is the only writer (§4.2.3). */
-export async function materializeVersion(home: string, capabilityId: string, sourceDir: string): Promise<MaterializedVersion> {
+export async function materializeVersion(home: string, capabilityId: string, sourceDir: string, declared?: unknown): Promise<MaterializedVersion> {
   const scanned = await scanBundle(sourceDir);
-  const versionHash = versionHashFor(scanned.manifest);
+  const versionHash = versionHashFor(scanned.manifest, declared);
   const dir = versionDir(home, capabilityId, versionHash);
   await mkdir(dir, { recursive: true });
   // force:false + no errorOnExist: re-materializing identical bytes (crash-retry) is a no-op;

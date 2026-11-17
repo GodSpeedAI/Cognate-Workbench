@@ -22,14 +22,16 @@ import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
 import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
+import { createRuntimeMutex } from "./workbench/runtimeMutex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
-import { authorityGrantsComponent, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
+import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
-import { capabilityRuntimeComponent } from "./capabilities/capabilityRuntime.ts";
+import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
+import { runStartResolverComponent } from "./agents/runStartResolver.ts";
 import { SchedulesService, schedulesComponent } from "./schedules/service.ts";
 import { ScheduleEvaluator } from "./schedules/evaluator.ts";
 import { SCHEDULES_THREAD } from "./schedules/types.ts";
-import { agentExpert } from "./agents/agentExpert.ts";
+import { createAgentExpert } from "./agents/agentExpert.ts";
 import { expertsComponent, ExpertsService } from "./experts/service.ts";
 import { ExpertCompletionBridge } from "./experts/bridge.ts";
 import { reconcileBilling, runInvocationInspector } from "./experts/billing.ts";
@@ -50,7 +52,7 @@ import { realityTraceFromEnv, type RealityTraceSettings } from "./settlement/rea
 import { sweSeedFromEnv, type SweSeedSettings } from "./settlement/sweSeed.ts";
 import { expertGovernedService } from "./experts/governance.ts";
 import { agentConfigAgent, AGENT_CONFIG } from "./agents/agentConfig.ts";
-import { agentCodingAgent } from "./agents/agentCoding.ts";
+import { createAgentCodingAgent } from "./agents/agentCoding.ts";
 import { agentHarnessAgent } from "./agents/agentHarness.ts";
 import { harnessComponent } from "./capabilities/harness.ts";
 import { terminalComponent } from "./capabilities/terminal.ts";
@@ -183,6 +185,8 @@ export interface ServerOptions {
   readonly runOwnership?: "single-process" | "multi-process";
   /** Test hook: extra lower-trust mediators placed under Sentinel in `risk.assess`. */
   readonly extraMediators?: readonly MediatorSpec[];
+  /** Test seam (capability runtime T2): fault/observation points inside the dispatcher. Never set in production. */
+  readonly capabilityRuntimeHooks?: CapabilityRuntimeHooks;
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -319,6 +323,9 @@ const GRANTED_CAPABILITIES = [
   "capability.bundle.uninstall",
   "tool.capability_invoke",
   "tool.skill_load",
+  // T2: the run-start resolver's read-only faces (data and records, never authority).
+  "capability.harness.resolve",
+  "capability.harness.refresh",
 ];
 
 function buildPolicy(): Policy {
@@ -676,11 +683,40 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let pollApprovals: (() => Promise<number>) | undefined;
   let capabilityRuntimeIndex!: AuthorityIndex;
   let capabilityRuntimeRecorder!: LifecycleRecorder;
-  const capabilityStoreKind: "pg0" | "memory" | "external-postgres" = process.env.COGNATE_POSTGRES_URL ? "external-postgres" : "pg0";
+  const capabilityStoreKind = classifyCapabilityStore(process.env);
+  // R4: ONE mutex for activation, deactivation, uninstall and grant issue/revoke (valid under §1.5).
+  const capabilityMutex = createRuntimeMutex();
+  // CR-4: versions with a live handler entry (mounted or draining) are never pruned; the runtime fills it.
+  const capabilityVersionRegistry: { liveVersions: (capabilityId: string) => ReadonlySet<string> } = { liveVersions: () => new Set() };
+  // R3-3: the §1.5 deployment invariant is re-evaluated at EVERY enablement check, not only when
+  // the marker was written: an external PostgreSQL without the operator's single-writer
+  // declaration disables the runtime now, whatever the marker says.
+  const capabilityDeploymentOk = (): boolean => classifyCapabilityStore(process.env) !== "external-postgres";
+  let deploymentRefusalRecorded = false;
   const isRemediationVerified = async (): Promise<boolean> => {
     const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
     return rows.some((r) => r.key === "runtime/remediation");
   };
+  // §1.7: the durable enablement marker, read fold-first. Absent or unreadable = disabled.
+  const isCapabilityRuntimeEnabled = async (): Promise<boolean> => {
+    try {
+      const rows = (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows;
+      return rows.some((r) => r.key === "runtime/enablement");
+    } catch {
+      return false;
+    }
+  };
+  const capabilityAwareCoding = createAgentCodingAgent({
+    isCapabilityRuntimeEnabled: async () => {
+      if (!(await isCapabilityRuntimeEnabled())) return false;
+      if (capabilityDeploymentOk()) return true;
+      if (!deploymentRefusalRecorded) {
+        deploymentRefusalRecorded = true;
+        await capabilityRuntimeRecorder?.commitBatch("decisions:runtime", [{ type: "authority.decision.recorded", payload: { decisionId: `deployment-invariant:${Date.now()}`, point: "enablement", actorId: "system", actorKind: "system", capability: "runtime", outcome: "refused", reasonCode: "deployment-invariant", reason: "capability runtime disabled: external PostgreSQL without an operator-declared single-writer deployment (§1.5)" } }]).catch(() => {});
+      }
+      return false;
+    },
+  });
   const runtime: Runtime = await createRuntime({
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
@@ -701,7 +737,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, agentCodingAgent, agentHarnessAgent, agentCognitiveAgent, agentExpert],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding)],
     components: [
       terminalComponent({
         getService,
@@ -773,6 +809,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         catalogSemanticRef: t11["plugin.install"],
       }),
       authorityGrantsComponent({
+        mutex: capabilityMutex,
         getStore: () => runtime.store,
         getIndex: () => capabilityRuntimeIndex,
         tenant: LOCAL_OPERATOR.tenant,
@@ -781,24 +818,44 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityBundlesComponent({
+        mutex: capabilityMutex,
         getService,
-        lifecycleRecorder: capabilityRuntimeRecorder,
-        authorityIndex: capabilityRuntimeIndex,
+        lifecycleRecorder: () => capabilityRuntimeRecorder,
+        authorityIndex: () => capabilityRuntimeIndex,
         home,
         tenant: LOCAL_OPERATOR.tenant,
+        getRegistry: () => executionWorlds,
+        // §4.2.3 GC reference rule: any version an activation row names is never pruned.
+        referencedVersions: (capabilityId) => new Set([...capabilityRuntimeIndex.activations.values()].filter((row) => row.capabilityId === capabilityId && row.state !== "retired").map((row) => row.version).concat([...capabilityVersionRegistry.liveVersions(capabilityId)])),
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityRuntimeComponent({
+        mutex: capabilityMutex,
+        versionRegistry: capabilityVersionRegistry,
         getKernel: () => runtime.kernel,
         getService,
         getRootScope: () => (runtime.kernel as unknown as { root: import("@godspeedai/cognate-kernel-api").Scope }).root,
         tenant: LOCAL_OPERATOR.tenant,
         getRecorder: () => capabilityRuntimeRecorder,
         getIndex: () => capabilityRuntimeIndex,
+        isEnabled: isCapabilityRuntimeEnabled,
+        deploymentOk: capabilityDeploymentOk,
+        // Decision records ride their own stream per capability so an audit append never races
+        // the capability's lifecycle CAS (activate/repoint) on the same stream.
         recordDecision: async (event) => {
-          await capabilityRuntimeRecorder.commitBatch(String((event.payload as Record<string, unknown>).capabilityId ?? "runtime"), [event as { type: string; payload: Record<string, unknown> }]);
+          await capabilityRuntimeRecorder.commitBatch(`decisions:${String((event.payload as Record<string, unknown>).capability ?? "runtime")}`, [event as { type: string; payload: Record<string, unknown> }]);
         },
         activeSet: [],
+        ...(options.capabilityRuntimeHooks ? { hooks: options.capabilityRuntimeHooks } : {}),
+        semanticRefs: capabilityRuntimeRefs,
+      }),
+      runStartResolverComponent({
+        isEnabled: isCapabilityRuntimeEnabled,
+        deploymentOk: capabilityDeploymentOk,
+        getService: () => governedService,
+        tenant: LOCAL_OPERATOR.tenant,
+        getIndex: () => capabilityRuntimeIndex,
+        readRows: async () => (await governedService.readProjection(SYSTEM_CALLER, { name: "workbench" })).rows,
         semanticRefs: capabilityRuntimeRefs,
       }),
     ],
@@ -856,7 +913,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       }
     }
   })();
-  const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex).catch(() => {}); }, 60_000);
+  const grantExpirySweep = setInterval(() => { void sweepExpiredGrants(capabilityRuntimeRecorder, capabilityRuntimeIndex, new Date(), capabilityMutex).catch(() => {}); }, 60_000);
   grantExpirySweep.unref?.();
 
   finishExpertsBoot(experts);

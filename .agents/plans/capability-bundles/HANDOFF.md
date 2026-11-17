@@ -54,15 +54,24 @@
 - `capability.bundle.register` + activate/deactivate in GRANTED_CAPABILITIES
 - `test/J-CAP-create.test.ts` (3 tests): register → activate → invoke in-session, over-ceiling refusal, in-session discovery
 
+### Tranche T2 remainder — committed (`feat/capability-runtime-t2`)
+- `src/capabilities/capabilityRuntime.ts` (reworked): version-keyed handler table; the §1.4 decision implemented once in `decide` (enablement marker ∧ not the system caller ∧ index available ∧ selected row active, reasons ∅ ∧ ceiling ∧ actor grant, unexpired ∧ clamp grant intact); every refusal AND bundle-path allow recorded (`authority.decision.recorded`, on a per-capability `decisions:` stream so audit appends never race lifecycle CAS); in-flight counter taken in the same synchronous section as the decision; deadline timers cleared; hot reload = mount v2 → integrity + conflict re-check + CAS pre-state → `capability.repointed` → old handle drained then disposed; failures: `capability.activation_failed` (first activation) / `capability.repoint_failed` (replacement), v1 untouched; load-time integrity failure → `capability.integrity_failed` + `integrity` suspension
+- `src/workbench/harnessPatches.ts`: closed section vocabulary (conventions/workflow/tooling/style), explicit refusal of non-surfaces, toolset-override validation (dispatcher ids kept, no `run_code` outside ptc), §3.3 composition (persistent then session order, `replace` last-wins), exclusive per-preset toolset ownership via `detectConflicts`, `capability.harness.patched`
+- `src/agents/runStartResolver.ts`: run-start resolution as the read-only capabilities `capability.harness.resolve` / `.refresh` (the loop emits the returned `capability.harness.assembled` records — a resolver that recorded would deadlock behind its own serial run); hashes + delta by reference, full text once per changed section; fail-closed on index unavailability; live descriptor refresh keyed on the index sequence; wired into `agentCoding.ts` (system message for standard runs, `instructions` for Expert runs, `toolsForPreset` override seam, step-boundary refresh)
+- `src/capabilities/skillLoader.ts`: descriptors with pinned budgets (400 / 4,000 tokens, visible truncation recorded at registration), closed-vocabulary `skill.load` (manifest-declared skills only), hash verification on every load
+- `src/workbench/bundleSources.ts`: provider-backed directory source (stat-bounded reads through the world filesystem port into a staging dir, then the identical hash/materialize pipeline), `BundleBackedPluginSource` bridge; `capability.bundle.register` accepts `executionWorldId`
+- Registration now records the validated manifest (`bundle-version/<cap>/<hash>` rows keep every version's manifest), records `capability.validation_failed` on every refusal, and requires `harness.modify` for harness-declaring bundles
+- Dispatcher principal rule: a user-kind actor inside a run is the operator's client identity carried into agent work, not the operator; it resolves to `wb-agent:coding` and needs its own grant (fail-closed by default)
+- Test seams: `ServerOptions.capabilityRuntimeHooks` (never set in production) and `bootApp(home, extra)`
+- Suites: `test/J-CAP-reload.test.ts` (CUJ 2/13, 5 tests), `test/J-CAP-source.test.ts` (CUJ 8, ssh/wsl/local parameterized, 7 tests), `test/J-CAP-refusal.test.ts` (CUJ 4 bundle-path matrix + enablement gate, 2 tests), `test/J-CAP-harness.test.ts` (CUJ 11 + refusals + resolver units, 7 tests); `test/J-CAP-create.test.ts` now enables the runtime first
+
 ## What remains (in dependency order)
 
-### T2 remainder
-1. **Run-start resolver** (`src/agents/runStartResolver.ts`): named instruction sections, toolset-override application, descriptor assembly at run start, `capability.harness.assembled` by hash + delta, live descriptor refresh reading the index sequence, fail-closed on index unavailability
-2. **`src/workbench/harnessPatches.ts`**: instruction-patch/toolset-override record types, validation, per-surface overlap regime, `capability.harness.patched`
-3. **`src/capabilities/skillLoader.ts`**: descriptor registry; `tool.skill.load` serving from version directories with hash verification; entry-document flags
-4. **`src/workbench/bundleSources.ts`**: directory source over provider-backed semantics (SSH/WSL identical)
-5. **J-CAP suites**: j_cap_reload (+rollback), j_cap_source, j_cap_refusal, j_cap_harness
-6. **Chunked verify at the T2 boundary**
+### T2 leftovers (deliberately not in this tranche slice)
+- `test/workbench-call-sites.test.ts` (design item 43, the grep-pinned call-site inventory)
+- Boot remount of the active set (`activeSet` is still `[]` in `server.ts`; folds into the T4 restart journey)
+- Activation/creation beyond an agent's grant refuses and records (D2's "park on the approval machinery" is not built)
+- Session-bound activation routing: the dispatcher now derives the session from the run's own start input (never from tool input) and fails closed (a session-scoped suspension refuses any agent-shaped call whose session is unknown). Still open: subagent child runs do not carry their parent's session, so they resolve as session-unknown; `capability.bundle.activate`/`deactivate` still take an explicit `sessionId` target. Capability-declarable 300 s deadlines remain open
 
 ### T3 — executables
 1. **`src/mcp/client.ts`**: MCP protocol client — official TypeScript SDK with custom Transport adapter over execution-world provider streams; invocation-record emission
@@ -83,13 +92,50 @@
 3. `AGENTS.md` capability-runtime enablement gate note
 4. Enablement: write `workbench.capability_runtime.enabled` after the full chunked gate passes
 
+### Review round 1 (`test/J-CAP-review-r1.test.ts`)
+- R1-1 session from run context, fail-closed suspension; R1-2 version identity = payload + whole manifest (`versionHashFor(payload, manifest)`, `verifyBundleIntegrity(dir, hash, manifest)`; reducer never rewrites a registered version row); R1-3 activation ceiling = requirements ∩ agent grant ∩ operator root (refuses `beyond-operator` / `no-root-grant`); R1-4 grant and clamp expiry checked at decision time against the injected `now`; R1-5 descriptor marker tokens reserved inside the 400-token budget
+
+### Review round 2 and CI (`test/J-CAP-review-r2.test.ts`)
+- A1 decision: the §1.5 store invariant is unchanged. `classifyCapabilityStore` treats an external PostgreSQL (`COGNATE_POSTGRES_URL`) as multi-writer unless the OPERATOR declares `COGNATE_CAPABILITY_SINGLE_WRITER=1` (kind `external-postgres-single-writer`). CI shards each own one PostgreSQL service and one test process, so `verify.yml` declares it; no test-only bypass exists in src.
+- A2: `createAgentCodingAgent({ isCapabilityRuntimeEnabled })`; with the runtime disabled (or no probe) the loop makes no `capability.harness.resolve` call at all. The enablement read is boxed in `ctx.step`.
+- B1-B3 share `src/workbench/authoritySelection.ts` (principal mapping, live grants, governing-row selection, live clamp/root) between the dispatcher and the resolver. B2: the resolver derives the run's principal from the call actor and applies patches only if principal grant ∩ live root cover `harness.modify`; refusals return as `decisions` the loop emits. B4: activation re-checks gate + authorize immediately before the commit and again after it (suspends on lapse); grants live on other streams, so this narrows rather than eliminates the window. B5: skill load scans, then reads the entry once and hashes those bytes against the verified digest. B6: the aggregate budget measures the joined text.
+
+### Review round 3 (`test/J-CAP-review-r3.test.ts`) — one authorization function
+- `authorizeCapabilityOp` (`src/workbench/authoritySelection.ts`) is the single decision point: enablement, the §1.5 deployment invariant (re-evaluated per call via `deploymentOk`), principal, live actor grant ∩ live root grant (expiry/revocation), governing row and session suspension (session from `sessionOfRun`, never input). Entry points: invoke, skill.load, activate, deactivate (new `bundle.deactivate` permission), harness resolve/refresh/apply. A registry test pins the handler set and that each routes through it. Refusals are recorded by the entry point that receives them; a disabled runtime or failed deployment invariant at resolve/refresh is a recorded-at-dispatcher/no-op, not a run refusal.
+- Index rebuild is idempotent (one entry per grant id, one commit subscription). Activation/deactivation are serialized by a per-runtime mutex (valid under the single-writer invariant); conflicts and grants are re-read inside the critical section before the commit, closing the B4 window except the commit's own await (post-commit verify remains). `estimateTokens` is a never-under-counting bound (ASCII 4 chars/token, other characters their UTF-8 byte length).
+
+### Review round 4 (`test/J-CAP-review-r4.test.ts`)
+- One shared runtime mutex (`src/workbench/runtimeMutex.ts`, wired in `server.ts`) serializes activation, deactivation, uninstall and grant issue/revoke (valid under §1.5). Each op calls `authorizeCapabilityOp` as the last step before its commit (operator-only lifecycle acts via the `uninstall`/`grant.issue`/`grant.revoke` ops, which carry no enablement/root-liveness precondition so revoking the root grant cannot lock the operator out). Activation also re-checks the bundle is still installed with that version present. A grant revoke raised during a mount queues behind it and then suspends the activation.
+- Handler table keyed by (capability, scope, version); deactivating a scope removes only its handlers. `estimateTokens` = UTF-8 byte length (provable upper bound; verified against gpt-tokenizer). Registration refusals (operator guard, schema) are recorded. Fixed latent wiring bug: the bundles component captured the authority index and recorder before they existed, so uninstall always threw; both are now lazy.
+
 ## Verification state
-- Chunked approach is the authoritative gate (3 sequential `bun test` runs, ~68 files each)
-- Chunk 1 (T1 boundary): 205 pass / 0 fail
-- Chunk 2 (T2 boundary): 288 pass / 11 skip / 3 flakes (pass isolated — documented host-concurrency class)
-- Chunk 3 (T1/T2 boundary): 1,120 pass / 0 fail
-- Consolidated: 1,619+ pass / 0 fail (all 202 files, 10+ new suites included)
-- The full single-process `just verify` has 189-380 documented host-concurrency flakes (pg0 saturation) — chunked is authoritative
+- CI is the authoritative gate since PR #37: four timing-balanced test shards, each with its own
+  PostgreSQL service. The local chunked run (3 sequential `bun test` runs) is a fallback; on the
+  8 GB development host it stalled during the T2 remainder, so CI decides.
+- T2 remainder, local (2026-11-17): J-CAP-refusal 4/0, J-CAP-reload 5/0, J-CAP-harness 7/0,
+  J-CAP-source 6/0, J-CAP-create 3/0, J-CAP-prerequisite 6/0 (pass/fail); typecheck clean.
+- Red evidence against main's src (same tests): J-CAP-refusal 1 pass / 3 fail (the principal-mapping
+  and enablement invariants); J-CAP-reload, J-CAP-harness and J-CAP-source fail to load (the modules
+  they exercise do not exist on main); J-CAP-create passes on main (its change only enables the
+  runtime first, which the new gate requires).
+- Earlier tranches: chunk 1 (T1) 205/0; chunk 2 (T2 dispatcher) 288 pass, 11 skip, 3 flakes passing
+  in isolation; chunk 3 1,120/0. The single-process `just verify` has documented host-concurrency
+  flakes (pg0 saturation).
+
+## Blind review of the T2 remainder (PR #38)
+Codex (GPT Sol 6.1, read-only) reviewed the tranche in four full rounds plus a fix verification:
+5, 6, 8 and 5 findings, every one reproduced and fixed with a red-then-green test
+(`test/J-CAP-review-r1..r4.test.ts`). Round 3 drove the structural fix: one decision point,
+`authorizeCapabilityOp`, for every entry point (pinned by a registry test), and one runtime mutex
+for activation, deactivation, uninstall, grant issue/revoke and the grant expiry sweep.
+
+Accepted residual risk (documented on the PR):
+- The lifecycle recorder awaits a stream read inside its CAS append, so "no await between the final
+  authorization and the append" holds only up to that read. Every path that can revoke or expire a
+  grant (the revoke handler and the expiry sweep) holds the same mutex, so no revocation can
+  interleave there under the §1.5 single-writer invariant. What remains is a grant whose expiry
+  instant passes during that read: the mutating op may commit, but every later invocation
+  re-checks expiry and refuses, and deactivation only reduces authority.
 
 ## Key infrastructure notes
 - pg0 shared instance: max_connections saturates under peak parallel load; the verify recipe pre-starts it; bootApp retries the transient signature

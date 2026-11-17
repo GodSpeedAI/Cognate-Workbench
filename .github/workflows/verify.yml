@@ -56,6 +56,8 @@ jobs:
           --health-retries 20
     env:
       COGNATE_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      # Each shard owns its PostgreSQL service and one test process: the operator-declared single-writer deployment fact (§1.5).
+      COGNATE_CAPABILITY_SINGLE_WRITER: '1'
       CI: 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
