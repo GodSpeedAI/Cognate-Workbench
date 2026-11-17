@@ -341,6 +341,8 @@ export interface ProcView {
   listPids(): Promise<number[]>;
   /** Every live process whose environment carries this spawn's id (the leader AND its descendants, even after the leader died). */
   pidsWithSpawnId(spawnId: string): Promise<number[]>;
+  /** The process-group id of a live process (undefined when it is gone or unreadable). Without it a group cannot be proven ours. */
+  readPgid?(pid: number): Promise<number | undefined>;
 }
 
 /** Boot-sweep reconciliation (section 6.3): every intent without a terminal record reconciles to a
@@ -367,21 +369,38 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
     };
     let outcome = "reconciled-unknown";
     let survivors = false;
+    let groupUnverified = false;
     if (row.worldKind === "local") {
+      // A row that was confirmed, or that earlier left survivors, has a recorded process identity to verify.
+      const known = row.status !== "intended";
       const targets = async (): Promise<Set<number>> => {
         const found = new Set(await proc.pidsWithSpawnId(row.spawnId));
-        if (row.status === "confirmed" && typeof row.pid === "number" && (await matches(row.pid))) found.add(row.pid);
-        else if (row.status === "intended" && signature) for (const pid of await proc.listPids()) if (pid !== process.pid && (await matches(pid))) found.add(pid);
+        if (known && typeof row.pid === "number" && (await matches(row.pid))) found.add(row.pid);
+        else if (!known && signature) for (const pid of await proc.listPids()) if (pid !== process.pid && (await matches(pid))) found.add(pid);
         found.delete(process.pid);
         return found;
       };
-      // "Gone" needs proof: the recorded group answers no probe AND no process carries the spawn's marker.
-      const group = row.pgid ?? undefined; // only a RECORDED group id is probed: a bare pid may have been reused
-      const groupLive = (): boolean => { if (typeof group !== "number" || group <= 1) return false; try { process.kill(-group, 0); return true; } catch { return false; } };
+      // A recorded group id is signalled only if a live member of that group carries the spawn's marker or the
+      // bundle signature: after a restart the number may belong to an unrelated group, which is never touched.
+      const group = row.pgid ?? undefined;
+      const groupLiveRaw = (): boolean => { if (typeof group !== "number" || group <= 1) return false; try { process.kill(-group, 0); return true; } catch { return false; } };
+      const groupOwned = async (): Promise<boolean> => {
+        if (!groupLiveRaw()) return false;
+        const marked = new Set(await proc.pidsWithSpawnId(row.spawnId));
+        if (!proc.readPgid) return marked.size > 0;
+        for (const pid of await proc.listPids()) {
+          if (pid === process.pid || (await proc.readPgid(pid)) !== group) continue;
+          if (marked.has(pid) || (await matches(pid))) return true;
+        }
+        return false;
+      };
+      const owned = await groupOwned();
+      if (groupLiveRaw() && !owned) groupUnverified = true;
+      const groupLive = (): boolean => owned && groupLiveRaw();
       const anyAlive = async (): Promise<boolean> => (await targets()).size > 0 || groupLive();
       const endAll = async (sig: NodeJS.Signals): Promise<void> => {
         for (const pid of await targets()) signal(pid, sig);
-        if (typeof group === "number" && group > 1) signal(-group, sig);
+        if (owned && typeof group === "number" && group > 1) signal(-group, sig);
       };
       if (await anyAlive()) {
         await endAll("SIGTERM");
@@ -393,10 +412,10 @@ export async function reconcileSpawnLedger(deps: Pick<SpawnDeps, "ledger" | "slo
           while ((await anyAlive()) && Date.now() < hard) await new Promise((resolve) => setTimeout(resolve, 25));
         }
         survivors = await anyAlive();
-        outcome = survivors ? "reconcile-incomplete" : row.status === "confirmed" ? "reconciled-killed" : "reconciled-unknown";
-      } else if (row.status === "confirmed") outcome = "reconciled-gone";
+        outcome = survivors ? "reconcile-incomplete" : known ? "reconciled-killed" : "reconciled-unknown";
+      } else if (known) outcome = "reconciled-gone";
     }
-    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), exitCode: null } }]);
+    await deps.ledger(row.spawnId, [{ type: "capability.mcp.exited", payload: { spawnId: row.spawnId, capabilityId: row.capabilityId, version: row.version, serverId: row.serverId, ...(row.sessionId ? { sessionId: row.sessionId } : {}), worldId: row.worldId, outcome: outcome === "reconciled-gone" || outcome === "reconciled-killed" ? "reconciled" : "reconciled-unknown", reconciled: outcome, ...(survivors ? { survivors: true } : {}), ...(groupUnverified ? { groupUnverified: true } : {}), exitCode: null } }]);
     // A slot is released only when nothing of the spawn survives; survivors keep it reserved (and are reported).
     if (row.slotId && !survivors) await deps.slots.release(row.slotId, 0).catch(() => {});
     results.push({ spawnId: row.spawnId, outcome, ...(row.slotId ? { slotId: row.slotId } : {}) });
@@ -418,6 +437,14 @@ const procfs: ProcView = {
       try { if ((await readFile(`/proc/${pid}/environ`, "utf8")).includes(marker)) found.push(pid); } catch { /* not ours or gone */ }
     }
     return found;
+  },
+  async readPgid(pid: number): Promise<number | undefined> {
+    try {
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" "); // state ppid pgrp ...
+      const pgrp = Number(fields[2]);
+      return Number.isInteger(pgrp) ? pgrp : undefined;
+    } catch { return undefined; }
   },
   async listPids(): Promise<number[]> {
     try { return (await readdir("/proc")).filter((n) => /^\d+$/.test(n)).map(Number); } catch { return []; }

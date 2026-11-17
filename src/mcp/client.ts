@@ -43,45 +43,69 @@ export const utf8Bytes = (value: string): number => Buffer.byteLength(value, "ut
 /** Cut a string to a UTF-8 byte bound on a character boundary. */
 export function boundBytes(value: string, max: number): string {
   if (utf8Bytes(value) <= max) return value;
-  let out = value.slice(0, max);
-  while (utf8Bytes(out) > max) out = out.slice(0, -1);
-  return `${out}...`;
+  // The marker is part of the bound, and the cut falls between code points.
+  const marker = max >= 3 ? "..." : "";
+  const budget = max - marker.length;
+  let used = 0;
+  let end = 0;
+  for (const ch of value) {
+    const size = utf8Bytes(ch);
+    if (used + size > budget) break;
+    used += size;
+    end += ch.length;
+  }
+  return `${value.slice(0, end)}${marker}`;
 }
 const MAX_MESSAGE_BYTES = 512;
 
 /** Untrusted schema sanitization (section 11, input and output schemas alike): the server validates its own input, so keywords that run a
  *  backtracking regex engine on the event loop (`pattern`, `patternProperties`, every `format`) are stripped,
  *  and depth and node count are bounded. Returns what was stripped, or a refusal reason. */
-const SCHEMA_STRIP = new Set(["pattern", "patternProperties", "format"]);
 const SCHEMA_MAX_DEPTH = 16;
 const SCHEMA_MAX_NODES = 512;
+/** Keywords whose value is ONE schema, an array of schemas, or a map name -> schema. Everything else (enum, const,
+ *  required, default, examples, unknown keywords) is data and is never rewritten. */
+const SCHEMA_ONE = new Set(["items", "additionalItems", "additionalProperties", "contains", "not", "if", "then", "else", "propertyNames", "unevaluatedItems", "unevaluatedProperties", "contentSchema"]);
+const SCHEMA_LIST = new Set(["allOf", "anyOf", "oneOf", "prefixItems", "items"]);
+const SCHEMA_MAP = new Set(["properties", "dependentSchemas", "dependencies"]);
 export function sanitizeSchema(schema: unknown): { ok: true; schema: Record<string, unknown>; stripped: string[] } | { ok: false; reason: string } {
   const stripped = new Set<string>();
   let nodes = 0;
   let problem: string | undefined;
-  const walk = (value: unknown, depth: number): unknown => {
-    if (problem) return value;
-    if (depth > SCHEMA_MAX_DEPTH) { problem = `schema nests deeper than ${SCHEMA_MAX_DEPTH} levels`; return value; }
-    if (Array.isArray(value)) return value.map((v) => walk(v, depth + 1));
-    if (value && typeof value === "object") {
-      if (++nodes > SCHEMA_MAX_NODES) { problem = `schema has more than ${SCHEMA_MAX_NODES} nodes`; return value; }
-      const out: Record<string, unknown> = {};
-      for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
-        // A property NAMED "pattern" lives under `properties` and is data, not a keyword.
-        if (SCHEMA_STRIP.has(key) && typeof v !== "object") { stripped.add(key); continue; }
-        if (key === "patternProperties") { stripped.add(key); continue; }
-        // References are never followed: a chain of definitions that each cite their predecessor twice expands
-        // exponentially under validation. `$defs`/`definitions` are dropped; every `$ref` becomes `{}` (accept anything).
-        if ((key === "$defs" || key === "definitions") && v && typeof v === "object") { stripped.add(key); continue; }
-        out[key] = walk(v, depth + 1);
-      }
-      if (typeof out.$ref === "string") { stripped.add("$ref"); return {}; }
-      for (const k of ["$dynamicRef", "$recursiveRef"]) if (k in out) { stripped.add(k); return {}; }
-      return out;
-    }
+  const bound = (depth: number): boolean => {
+    if (problem) return false;
+    if (depth > SCHEMA_MAX_DEPTH) { problem = `schema nests deeper than ${SCHEMA_MAX_DEPTH} levels`; return false; }
+    if (++nodes > SCHEMA_MAX_NODES) { problem = `schema has more than ${SCHEMA_MAX_NODES} nodes`; return false; }
+    return true;
+  };
+  /** Literal data (enum, const, required, ...): bounded like the rest, never rewritten. */
+  const data = (value: unknown, depth: number): unknown => {
+    if (!bound(depth)) return value;
+    if (Array.isArray(value)) for (const v of value) data(v, depth + 1);
+    else if (value && typeof value === "object") for (const v of Object.values(value as Record<string, unknown>)) data(v, depth + 1);
     return value;
   };
-  const result = walk(schema, 0);
+  const schemaAt = (value: unknown, depth: number): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return data(value, depth);
+    if (!bound(depth)) return value;
+    const node = value as Record<string, unknown>;
+    // References are never followed: a chain of definitions that each cite their predecessor twice expands
+    // exponentially under validation. A reference becomes `{}` (accept anything); `$defs`/`definitions` are dropped.
+    for (const k of ["$ref", "$dynamicRef", "$recursiveRef"]) if (typeof node[k] === "string") { stripped.add(k); return {}; }
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(node)) {
+      if (key === "pattern" || key === "format") { if (typeof v !== "object") { stripped.add(key); continue; } }
+      if (key === "patternProperties" || key === "$defs" || key === "definitions") { stripped.add(key); continue; }
+      if (SCHEMA_MAP.has(key) && v && typeof v === "object" && !Array.isArray(v)) {
+        bound(depth + 1);
+        out[key] = Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, sub]) => [name, schemaAt(sub, depth + 2)]));
+      } else if (SCHEMA_LIST.has(key) && Array.isArray(v)) out[key] = v.map((sub) => schemaAt(sub, depth + 1));
+      else if (SCHEMA_ONE.has(key)) out[key] = schemaAt(v, depth + 1);
+      else out[key] = data(v, depth + 1);
+    }
+    return out;
+  };
+  const result = schemaAt(schema, 0);
   return problem ? { ok: false, reason: problem } : { ok: true, schema: result as Record<string, unknown>, stripped: [...stripped] };
 }
 
@@ -298,7 +322,9 @@ export class McpClient {
     const argText = JSON.stringify(args ?? {});
     const argBytes = utf8Bytes(argText);
     if (argBytes > MCP_LIMITS.maxArgumentBytes) return refuse("arguments_too_large", `arguments are ${argBytes} bytes; the bound is ${MCP_LIMITS.maxArgumentBytes}`);
-    const verdict = entry.validate(args ?? {}) as unknown;
+    // One snapshot: what is validated, hashed, recorded and sent is exactly this value, whatever the caller does to `args` afterwards.
+    const snapshot = JSON.parse(argText) as Record<string, unknown>;
+    const verdict = entry.validate(snapshot) as unknown;
     if (verdict instanceof Promise) { void verdict.catch(() => {}); return refuse("schema_invalid", "the server's schema is asynchronous and cannot be enforced"); }
     if (!verdict) return refuse("schema_invalid", `arguments for ${name} violate the server's schema: ${this.#ajv.errorsText(entry.validate.errors)}`);
     // Record BEFORE the call is sent: an unrecordable invocation is not made.
@@ -311,11 +337,13 @@ export class McpClient {
     try {
       const remaining = deadlineAt - Date.now();
       if (remaining <= 0) throw new Error("request timed out before it was sent (the invocation record consumed the deadline)");
-      const result = await this.sdk.callTool({ name, arguments: args ?? {} }, undefined, { timeout: remaining, ...(call.signal ? { signal: call.signal } : {}) });
-      const bytes = utf8Bytes(JSON.stringify(result));
+      const result = await this.sdk.callTool({ name, arguments: snapshot }, undefined, { timeout: remaining, ...(call.signal ? { signal: call.signal } : {}) });
+      // Scrub first: redaction can expand a result, and the bound applies to what is actually returned.
+      const cleaned = this.#clean(result);
+      const bytes = utf8Bytes(JSON.stringify(cleaned));
       outcome = bytes > MCP_LIMITS.maxResultBytes
-        ? { ok: false, code: "result_too_large", message: `the tool result is ${bytes} bytes; the bound is ${MCP_LIMITS.maxResultBytes}` }
-        : { ok: true, result: this.#clean(result), bytes };
+        ? { ok: false, code: "result_too_large", message: `the tool result is ${bytes} bytes after redaction; the bound is ${MCP_LIMITS.maxResultBytes}` }
+        : { ok: true, result: cleaned, bytes };
     } catch (error) {
       const message = this.#message(error);
       outcome = { ok: false, code: /timed out|timeout/i.test(message) ? "deadline_exceeded" : this.#closed ? "server_not_running" : "tool_error", message };

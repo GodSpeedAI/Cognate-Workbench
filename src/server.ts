@@ -933,7 +933,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // Capability-bundles tranche T1: the runtime exists — build the index over the store and the
   // recorder over the same store, then rebuild the index from the workbench fold (boot-time read)
   // and seed the operator root grant (idempotent).
-  capabilityRuntimeIndex = new AuthorityIndex(runtime.store, LOCAL_OPERATOR.tenant);
+  capabilityRuntimeIndex = new AuthorityIndex(runtime.store, LOCAL_OPERATOR.tenant, { awaitInitialRebuild: true });
   capabilityRuntimeRecorder = new LifecycleRecorder(runtime.store, LOCAL_OPERATOR.tenant);
   // Fire-and-forget: boot must not carry the extra awaited reads (full-suite parallelism tips
   // per-test timeouts); handlers await `index.ready`, so readiness is deterministic, and the
@@ -950,6 +950,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         const message = error instanceof Error ? error.message : String(error);
         if (attempt >= 5 || !/pg0 could not start|Instance already running/.test(message)) {
           console.error("[cap-runtime boot] index rebuild/seed failed:", message);
+          capabilityRuntimeIndex.fail(error);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));

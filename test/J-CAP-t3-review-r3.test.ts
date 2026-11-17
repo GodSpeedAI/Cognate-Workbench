@@ -4,9 +4,10 @@ import { describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
 import { createExecutionWorldRegistry, localExecutionWorld } from "@godspeedai/cognate-execution";
 import Ajv from "ajv";
-import { spawnGoverned, type LedgerEvent, type ProcView } from "../src/capabilities/execSpawn.ts";
+import { reconcileSpawnLedger, spawnGoverned, type LedgerEvent, type ProcView } from "../src/capabilities/execSpawn.ts";
 import { createMcpSupervisor } from "../src/capabilities/mcpManage.ts";
-import { McpClient, sanitizeSchema } from "../src/mcp/client.ts";
+import { McpClient, boundBytes, sanitizeSchema, utf8Bytes } from "../src/mcp/client.ts";
+import { reduceWorkbench } from "../src/workbench/reducer.ts";
 import { AuthorityIndex } from "../src/workbench/authorityIndex.ts";
 import { createRuntimeMutex } from "../src/workbench/runtimeMutex.ts";
 import { LOCAL_POSTURE } from "./mcp-helpers.ts";
@@ -122,5 +123,135 @@ describe("J-CAP-t3-review-r3 finding 3: server stderr content is never recorded"
     expect(exited.payload.stderrBytes).toBe(Buffer.from(secret, "utf16le").toString("base64").length + secret.length);
     expect(typeof exited.payload.stderrSha256).toBe("string");
     void createHash;
+  });
+});
+
+// ---- Round 2 of review threads (CodeRabbit on PR #39) ----
+
+const groupAlive = (pgid: number): boolean => { try { process.kill(-pgid, 0); return true; } catch { return false; } };
+const { COGNATE_SPAWN_ID: _drop, ...cleanEnv } = process.env;
+void _drop;
+
+describe("J-CAP-t3-review-r3 thread: a recorded group id is signalled only when a live member proves it ours", () => {
+  test("an unrelated group that now holds the recorded id is never signalled, and the sweep records that", async () => {
+    const stranger = Bun.spawn(["sleep", "30"], { env: cleanEnv as Record<string, string>, detached: true, stdout: "ignore", stderr: "ignore" });
+    const events: LedgerEvent[] = [];
+    try {
+      const out = await reconcileSpawnLedger({ graceMs: 100, ledger: async (_id, evs) => { events.push(...evs); }, slots: { acquire: async () => ({ slotId: "" }), release: async () => {} } },
+        [{ ...baseRow, spawnId: `spawn-${randomBytes(4).toString("hex")}`, status: "confirmed", pid: stranger.pid, pgid: stranger.pid, slotId: "sl-x" }]);
+      expect(groupAlive(stranger.pid)).toBe(true);
+      expect(out[0]!.outcome).toBe("reconciled-gone");
+      expect(events[0]!.payload).toMatchObject({ groupUnverified: true });
+    } finally { try { process.kill(-stranger.pid, 9); } catch { /* gone */ } }
+  });
+});
+
+describe("J-CAP-t3-review-r3 thread: survivors are re-targeted until verified gone", () => {
+  const fold = (payload: Record<string, unknown>) => reduceWorkbench("capability.mcp.exited", payload, "2026-01-01T00:00:00Z", "e1", () => ({ ...baseRow, spawnId: "spawn-1", status: "confirmed" }) as never);
+  test("an exit record that reports survivors folds to the one explicit status, whatever its outcome", () => {
+    const [write] = fold({ spawnId: "spawn-1", outcome: "crashed", survivors: true, exitCode: 1 });
+    expect(write!.value).toMatchObject({ status: "reconcile-incomplete" });
+  });
+  test("a reconcile-incomplete row is swept again at the next boot and its slot freed once nothing survives", async () => {
+    const spawnId = `spawn-${randomBytes(4).toString("hex")}`;
+    const child = Bun.spawn(["sleep", "30"], { env: { ...cleanEnv, COGNATE_SPAWN_ID: spawnId } as Record<string, string>, detached: true, stdout: "ignore", stderr: "ignore" });
+    const released: string[] = [];
+    try {
+      const out = await reconcileSpawnLedger({ graceMs: 300, ledger: async () => {}, slots: { acquire: async () => ({ slotId: "" }), release: async (id) => { released.push(id); } } },
+        [{ ...baseRow, spawnId, status: "reconcile-incomplete", pid: child.pid, pgid: child.pid, slotId: "sl-again" }]);
+      expect(out[0]!.outcome).toBe("reconciled-killed");
+      expect(released).toEqual(["sl-again"]);
+      expect(groupAlive(child.pid)).toBe(false);
+    } finally { try { process.kill(-child.pid, 9); } catch { /* gone */ } }
+  });
+});
+
+describe("J-CAP-t3-review-r3 thread: reconciliation waits for the real index initialisation", () => {
+  test("`ready` is pending from construction until the first rebuild completes, and rejects on a fatal failure", async () => {
+    const store = { onCommitted: () => () => {} } as never;
+    const index = new AuthorityIndex(store, "local", { awaitInitialRebuild: true });
+    let settled = false;
+    void index.ready.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    await index.rebuild([]);
+    await index.ready;
+    expect(settled).toBe(true);
+    const failing = new AuthorityIndex(store, "local", { awaitInitialRebuild: true });
+    failing.fail(new Error("fatal"));
+    await expect(failing.ready).rejects.toThrow("fatal");
+  });
+});
+
+describe("J-CAP-t3-review-r3 thread: a truncated message stays within its byte bound", () => {
+  test("ASCII and multibyte input, with the marker counted", () => {
+    for (const text of ["a".repeat(513), "é".repeat(400), "😀".repeat(200), "日本語".repeat(100)]) {
+      const out = boundBytes(text, 512);
+      expect(utf8Bytes(out)).toBeLessThanOrEqual(512);
+      expect(out.endsWith("...")).toBe(true);
+      expect(out).not.toContain("\uFFFD");
+      expect([...out].every((ch) => ch.codePointAt(0)! < 0xd800 || ch.codePointAt(0)! > 0xdfff)).toBe(true);
+    }
+    expect(boundBytes("short", 512)).toBe("short");
+  });
+});
+
+describe("J-CAP-t3-review-r3 thread: the sanitizer walks schema positions, not property names or data", () => {
+  test("properties named like keywords, and enum/const/required data, survive; keywords in schema positions are still stripped", () => {
+    const schema = {
+      type: "object", additionalProperties: false, required: ["patternProperties", "pattern"],
+      properties: { patternProperties: { type: "string" }, pattern: { type: "string", pattern: "^(a+)+$" }, $ref: { type: "string" }, definitions: { type: "string" }, kind: { enum: ["format", "pattern", "$ref"], const: "pattern" } },
+    };
+    const safe = sanitizeSchema(schema);
+    expect(safe.ok).toBe(true);
+    if (!safe.ok) return;
+    const props = safe.schema.properties as Record<string, Record<string, unknown>>;
+    expect(Object.keys(props)).toEqual(["patternProperties", "pattern", "$ref", "definitions", "kind"]);
+    expect(props.pattern).toEqual({ type: "string" });
+    expect(props.kind).toEqual({ enum: ["format", "pattern", "$ref"], const: "pattern" });
+    expect(safe.schema.required).toEqual(["patternProperties", "pattern"]);
+    expect(safe.stripped).toEqual(["pattern"]);
+    const validate = new Ajv({ strict: false }).compile(safe.schema);
+    expect(validate({ patternProperties: "x", pattern: "y" })).toBe(true);
+  });
+});
+
+describe("J-CAP-t3-review-r3 thread: the call sends exactly what was validated and recorded", () => {
+  function recorder() {
+    let onData: (chunk: Buffer) => void = () => {};
+    const sent: unknown[] = [];
+    let resultText = "ok";
+    const reply = (id: unknown, result: unknown) => queueMicrotask(() => onData(Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`)));
+    const channel = {
+      onData(l: (chunk: Buffer) => void) { onData = l; }, onClose() {}, async close() {},
+      write(data: string) {
+        for (const line of data.split("\n").filter(Boolean)) {
+          const m = JSON.parse(line) as { id?: number; method?: string; params?: { protocolVersion?: string; arguments?: unknown } };
+          if (m.method === "initialize") reply(m.id, { protocolVersion: m.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "f", version: "1" } });
+          else if (m.method === "tools/list") reply(m.id, { tools: [{ name: "t", description: "d", inputSchema: { type: "object" } }] });
+          else if (m.method === "tools/call") { sent.push(m.params?.arguments); reply(m.id, { content: [{ type: "text", text: resultText }] }); }
+        }
+      },
+    };
+    return { channel, sent, setResult: (t: string) => { resultText = t; } };
+  }
+
+  test("mutating the arguments while the started record is written does not change what the server receives", async () => {
+    const { channel, sent } = recorder();
+    const args: Record<string, unknown> = { a: "validated" };
+    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { if (e.payload.phase === "started") args.a = "mutated"; } });
+    await client.callTool("t", args, { timeoutMs: 5000, actorId: "t" });
+    expect(sent).toEqual([{ a: "validated" }]);
+  });
+
+  test("the size bound applies to the scrubbed result: redaction that expands it past the bound is refused with the scrubbed size", async () => {
+    const { channel, setResult } = recorder();
+    setResult("tok12345".repeat(20_000)); // 160 KB raw, 320 KB once each token becomes the 16-byte mark
+    const client = await McpClient.connect(channel as never, { capabilityId: CAP, version: "v", serverId: "f", record: async () => {}, scrub: (t) => t.replaceAll("tok12345", "[REDACTED:TOK]") });
+    const outcome = await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.code).toBe("result_too_large");
+    expect(outcome.message).toMatch(/2[6-9]\d\d\d\d bytes after redaction/);
   });
 });

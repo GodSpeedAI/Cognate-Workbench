@@ -2,7 +2,9 @@
 // runs had already reproduced). Each test failed against aa2979c and guards its fix.
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createExecutionWorldRegistry, localExecutionWorld } from "@godspeedai/cognate-execution";
 import { makeScrubber, reconcileSpawnLedger, spawnGoverned, type LedgerEvent, type ProcView } from "../src/capabilities/execSpawn.ts";
 import { McpClient } from "../src/mcp/client.ts";
@@ -25,7 +27,9 @@ const baseRow = { capabilityId: CAP, version: "v", serverId: "stub", worldId: "l
 describe("J-CAP-t3-review-r2 finding 1: a slot is released only when the group and every marker holder are dead", () => {
   test("the leader exited first and the descendant (which dropped the marker) remains in the group: the sweep ends the group before it releases", async () => {
     const spawnId = `spawn-${randomUUID()}`;
-    const leader = Bun.spawn(["sh", "-c", "env -i /bin/sleep 30 & echo $!; exit 0"], { env: { ...process.env, COGNATE_SPAWN_ID: spawnId }, detached: true, stdout: "pipe", stderr: "ignore" });
+    // The descendant dropped the marker but still runs under the bundle directory (the signature that proves the group is ours).
+    const bundleDir = await mkdtemp(join(tmpdir(), "t3r2-bundle-"));
+    const leader = Bun.spawn(["sh", "-c", "env -i sh -c 'sleep 30; :' & echo $!; exit 0"], { cwd: bundleDir, env: { ...process.env, COGNATE_SPAWN_ID: spawnId }, detached: true, stdout: "pipe", stderr: "ignore" });
     const first = await leader.stdout.getReader().read();
     const orphan = Number(new TextDecoder().decode(first.value).trim().split("\n")[0]);
     await leader.exited;
@@ -35,7 +39,7 @@ describe("J-CAP-t3-review-r2 finding 1: a slot is released only when the group a
     const released: string[] = [];
     let aliveAtRelease: boolean | undefined;
     try {
-      const outcome = await reconcileSpawnLedger({ graceMs: 300, ledger: async () => {}, slots: slotsOf(released, () => { aliveAtRelease = groupAlive(pgid); }) }, [{ ...baseRow, spawnId, status: "confirmed", pid: leader.pid, pgid, slotId: "sl-1" }]);
+      const outcome = await reconcileSpawnLedger({ graceMs: 300, ledger: async () => {}, slots: slotsOf(released, () => { aliveAtRelease = groupAlive(pgid); }) }, [{ ...baseRow, bundleDir, spawnId, status: "confirmed", pid: leader.pid, pgid, slotId: "sl-1" }]);
       expect(outcome[0]!.outcome).not.toBe("reconciled-gone");
       expect(groupAlive(pgid)).toBe(false);
       expect(released).toEqual(["sl-1"]);
@@ -101,12 +105,26 @@ describe("J-CAP-t3-review-r2 finding 2: the output schema is sanitized like the 
   test("`^(a+)+$` in an outputSchema never blocks the event loop and the call still completes", async () => {
     const records: { type: string; payload: Record<string, unknown> }[] = [];
     const client = await McpClient.connect(server(bad, { a: `${"a".repeat(28)}!` }) as never, { capabilityId: CAP, version: "v", serverId: "f", record: async (e) => { records.push(e); } });
+    // A timer probe that cannot pass vacuously: it is armed before the call, and after the call we wait for it to fire
+    // at least once, so a validator that blocked the loop shows up as a large gap (and as a long wall time).
     let worstGap = 0;
+    let fired = 0;
     let last = performance.now();
-    const ticker = setInterval(() => { const now = performance.now(); worstGap = Math.max(worstGap, now - last); last = now; }, 1);
-    const outcome = await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" });
-    clearInterval(ticker);
+    const ticker = setInterval(() => { const now = performance.now(); worstGap = Math.max(worstGap, now - last); last = now; fired += 1; }, 1);
+    let outcome: Awaited<ReturnType<typeof client.callTool>>;
+    let elapsed: number;
+    try {
+      const started = performance.now();
+      outcome = await client.callTool("t", {}, { timeoutMs: 5000, actorId: "t" });
+      elapsed = performance.now() - started;
+      const firedBefore = fired;
+      await sleep(20);
+      expect(fired).toBeGreaterThan(firedBefore);
+    } finally {
+      clearInterval(ticker);
+    }
     expect(outcome.ok).toBe(true);
+    expect(elapsed).toBeLessThan(50);
     expect(worstGap).toBeLessThan(50);
     expect(JSON.stringify(records)).toContain("outputSchema");
   });
