@@ -79,7 +79,7 @@ describe("J-CAP-reload", () => {
         expect(row.version).toBe(v2.version);
         const retired = await waitForRow<{ versions: string[] }>(app, `binding-retired/${CAP}`);
         expect(retired.versions).toContain(v1.version);
-        expect(await verifyBundleIntegrity(v1.dir, v1.version)).toBe(true);
+        expect(await verifyBundleIntegrity(v1.dir, v1.version, (await waitForRow<{ manifest: unknown }>(app, `bundle-version/${CAP}/${v1.version}`)).manifest)).toBe(true);
         expect((await readdir(join(home, "bundles", CAP))).sort()).toEqual([v1.version, v2.version].sort());
       } finally {
         await app.runtime.idle().catch(() => {});
@@ -112,7 +112,7 @@ describe("J-CAP-reload", () => {
           expect(after.ok).toBe(true);
           expect(after.version).toBe(v1.version);
           expect(after.result?.content).toContain("v1");
-          expect(await verifyBundleIntegrity(v1.dir, v1.version)).toBe(true);
+          expect(await verifyBundleIntegrity(v1.dir, v1.version, (await waitForRow<{ manifest: unknown }>(app, `bundle-version/${CAP}/${v1.version}`)).manifest)).toBe(true);
         } finally {
           await app.runtime.idle().catch(() => {});
           await app.stop();

@@ -51,14 +51,20 @@ export function buildDescriptor(capabilityId: string, version: string, manifest:
   const tools = (manifest.tools ?? []).slice(0, DESCRIPTOR_BUDGETS.maxToolLines).map((t) => `  tool ${t.id} — ${t.description}`);
   let truncated = manifest.skills.length > DESCRIPTOR_BUDGETS.maxSkillLines || (manifest.tools ?? []).length > DESCRIPTOR_BUDGETS.maxToolLines;
   const lines = [head, ...skills, ...tools];
-  while (estimateTokens(lines.join("\n")) > DESCRIPTOR_BUDGETS.perCapabilityTokens && lines.length > 1) {
+  // The marker's own tokens are reserved inside the budget: the output never exceeds the limit.
+  const fits = (): boolean => estimateTokens((truncated ? [...lines, TRUNCATION_MARKER] : lines).join("\n")) <= DESCRIPTOR_BUDGETS.perCapabilityTokens;
+  while (!fits() && lines.length > 1) {
     lines.pop();
     truncated = true;
   }
-  if (estimateTokens(lines.join("\n")) > DESCRIPTOR_BUDGETS.perCapabilityTokens) {
+  if (!fits()) {
     // Even the head line is over budget: cut the purpose text itself.
-    lines[0] = lines[0]!.slice(0, DESCRIPTOR_BUDGETS.perCapabilityTokens * 4 - TRUNCATION_MARKER.length - 8);
     truncated = true;
+    let keep = lines[0]!.length;
+    while (!fits() && keep > 0) {
+      keep = Math.max(0, keep - Math.max(1, Math.ceil((estimateTokens([lines[0]!, TRUNCATION_MARKER].join("\n")) - DESCRIPTOR_BUDGETS.perCapabilityTokens) * 4)));
+      lines[0] = lines[0]!.slice(0, keep);
+    }
   }
   if (truncated) lines.push(TRUNCATION_MARKER);
   const text = lines.join("\n");
@@ -119,10 +125,10 @@ export type SkillLoadResult =
   | { readonly ok: false; readonly code: "not_found" | "integrity" | "bad_request"; readonly message: string; readonly retryable: false };
 
 /** Verifies the version directory against its recorded hash (§4.4). Never reads the source. */
-export async function verifyBundleIntegrity(dir: string, versionHash: string): Promise<boolean> {
+export async function verifyBundleIntegrity(dir: string, versionHash: string, manifest?: unknown): Promise<boolean> {
   try {
     const scanned = await scanBundle(dir);
-    return versionHashFor(scanned.manifest) === versionHash;
+    return versionHashFor(scanned.manifest, manifest) === versionHash;
   } catch {
     return false;
   }
@@ -134,7 +140,7 @@ export async function loadSkill(bundle: LoadableBundle, requested: unknown): Pro
   // Closed vocabulary: a manifest skill by name or by its declared entry path — nothing else.
   const skill = bundle.manifest.skills.find((s) => s.name === id || s.entry === id);
   if (!skill) return { ok: false, code: "not_found", message: `skill ${id} is not declared by ${bundle.capabilityId}@${bundle.versionHash}`, retryable: false };
-  if (!(await verifyBundleIntegrity(bundle.dir, bundle.versionHash))) {
+  if (!(await verifyBundleIntegrity(bundle.dir, bundle.versionHash, bundle.manifest))) {
     return { ok: false, code: "integrity", message: `${bundle.capabilityId}@${bundle.versionHash}: version directory failed its integrity check — load refused`, retryable: false };
   }
   try {

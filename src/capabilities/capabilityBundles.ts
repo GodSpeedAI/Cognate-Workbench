@@ -153,13 +153,14 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
           for (const skill of manifest.skills) {
             if (skill.entry.startsWith("/") || skill.entry.split("/").includes("..") || !present.has(skill.entry)) await refuse(`skill ${skill.name} declares entry ${skill.entry}, which is not a file inside the bundle`);
           }
-          const materialized = await materializeVersion(options.home, capabilityId, sourceDir);
-          const versionHash = versionHashFor(materialized.manifest);
+          const stored = JSON.parse(JSON.stringify({ name: manifest.name, purpose: manifest.purpose, skills: manifest.skills, tools: manifest.tools ?? [], requirements: manifest.requirements ?? [], conflicts: manifest.conflicts ?? [], complements: manifest.complements ?? [], owns: manifest.owns ?? [], harness })) as Record<string, unknown>;
+          // The version identity covers payload AND the whole validated manifest (R1-2).
+          const materialized = await materializeVersion(options.home, capabilityId, sourceDir, stored);
+          const versionHash = versionHashFor(materialized.manifest, stored);
           // §5.1: descriptors truncate visibly at registration, and the truncation is recorded.
           const descriptor = buildDescriptor(capabilityId, versionHash, manifest);
           const pruned = await pruneVersions(options.home, capabilityId, versionHash, options.referencedVersions?.(capabilityId) ?? new Set());
           const recordedAt = new Date().toISOString();
-          const stored = { name: manifest.name, purpose: manifest.purpose, skills: manifest.skills, tools: manifest.tools ?? [], requirements: manifest.requirements ?? [], conflicts: manifest.conflicts ?? [], complements: manifest.complements ?? [], owns: manifest.owns ?? [], harness };
           await record([
             { type: "capability.bundle.registered", payload: { capabilityId, name: manifest.name, purpose: manifest.purpose, version: versionHash, versionHash, dir: materialized.dir, files: materialized.files, totalBytes: materialized.totalBytes, origin: staged ? `world:${staged.worldKind}` : "directory", ...(staged ? { sourceWorldId: staged.worldId } : {}), createdBy: ctx.actor.id, skills: manifest.skills.length, tools: (manifest.tools ?? []).length, manifest: stored, descriptorTruncated: descriptor.truncated, recordedAt } },
             ...(pruned.length > 0 ? [{ type: "workbench.bundles.pruned", payload: { capabilityId, versions: pruned } }] : []),

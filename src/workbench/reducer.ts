@@ -386,9 +386,13 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const row = { capabilityId, version: p.version ?? "", origin: p.origin ?? "", createdBy: p.createdBy ?? "", versionHash: p.versionHash ?? "", dir: p.dir ?? "", files: p.files ?? 0, name: p.name ?? "", purpose: p.purpose ?? "", manifest: p.manifest ?? null, descriptorTruncated: p.descriptorTruncated === true, ...(p.sourceWorldId ? { sourceWorldId: p.sourceWorldId } : {}), registeredAt: recordedAt };
       // `bundle/` names the LATEST registered version; `bundle-version/` keeps every version's
       // manifest so readers resolve the ACTIVATED version, not merely the newest (hot reload).
+      // A registered version is immutable (R1-2): a repeat registration of the same identity
+      // never rewrites its row, so nothing a resolver reads can change under an activation.
+      const versionKey = row.versionHash ? `bundle-version/${capabilityId}/${row.versionHash}` : "";
+      const existing = versionKey ? (get(versionKey) as { [k: string]: unknown } | undefined) : undefined;
       return [
-        { key: `bundle/${capabilityId}`, value: j(row) },
-        ...(row.versionHash ? [{ key: `bundle-version/${capabilityId}/${row.versionHash}`, value: j(row) }] : []),
+        { key: `bundle/${capabilityId}`, value: j(existing ?? row) },
+        ...(versionKey && !existing ? [{ key: versionKey, value: j(row) }] : []),
       ];
     }
     case "capability.bundle.validated": {

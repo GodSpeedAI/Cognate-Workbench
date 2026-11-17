@@ -91,6 +91,8 @@ export interface CapabilityRuntimeOptions {
   /** Boot-rebuilt rows the dispatcher mounts from (fold-first/mount-second, §4.2.8). */
   readonly activeSet: readonly { capabilityId: string; version: string; dir: string }[];
   readonly hooks?: CapabilityRuntimeHooks;
+  /** The injected clock: every expiry decision compares against it (default: wall clock). */
+  readonly now?: () => Date;
 }
 
 type Actor = { id: string; kind: string };
@@ -102,6 +104,8 @@ const DEFAULT_REQUIREMENTS: readonly string[] = ["capability.invoke", "skill.loa
 const keyOf = (capabilityId: string, version: string): string => `${capabilityId}@${version}`;
 
 export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): Component {
+  const nowMs = (): number => (options.now ?? (() => new Date()))().getTime();
+  const expired = (expiresAt: string | undefined): boolean => expiresAt !== undefined && new Date(expiresAt).getTime() <= nowMs();
   const contracts: CapabilityContract[] = [
     { id: "tool.capability_invoke", version: "1.0.0", semanticRef: options.semanticRefs?.["tool.capability_invoke"] },
     { id: "tool.skill_load", version: "1.0.0", semanticRef: options.semanticRefs?.["tool.skill_load"] },
@@ -265,6 +269,16 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         { ok: true; row: ActivationRow; entry: HandlerEntry; grantId: string } | Failure => {
         const principal = principalOf(args.actor, args.runId);
         if (!principal.ok) return principal;
+        // R1-1: the session comes from the run context, never tool input. An agent-shaped call
+        // whose session is unknown cannot dodge a session-scoped suspension: any suspended
+        // session-scoped row of this capability refuses it (fail closed; a suspension wins).
+        if (!args.sessionId && (args.actor.kind !== "user" || args.runId)) {
+          for (const candidate of index.activations.values()) {
+            if (candidate.capabilityId === args.capabilityId && candidate.level === "user" && candidate.sessionId && (candidate.state === "suspended" || candidate.suspensionReasons.length > 0)) {
+              return { ok: false, code: "suspended", reason: `activation of ${args.capabilityId} is suspended for session ${candidate.sessionId} and this call carries no session — refusing (fail closed)` };
+            }
+          }
+        }
         const row = index.selectActivation(args.capabilityId, "user", args.sessionId);
         if (!row) return { ok: false, code: "no-activation", reason: `capability ${args.capabilityId} has no activation` };
         if (row.state !== "active" || row.suspensionReasons.length > 0) {
@@ -274,11 +288,11 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         if (!permissionCovered(row.ceiling, args.permission)) return { ok: false, code: "beyond-ceiling", reason: `${args.permission} exceeds the activation ceiling of ${args.capabilityId}` };
         const grant = index.grantFor(principal.principalId);
         if (!grant) return { ok: false, code: "no-grant", reason: `principal ${principal.principalId} holds no active grant` };
-        if (grant.expiresAt && new Date(grant.expiresAt).getTime() <= Date.now()) return { ok: false, code: "grant-expired", reason: `grant ${grant.grantId} has expired` };
+        if (expired(grant.expiresAt)) return { ok: false, code: "grant-expired", reason: `grant ${grant.grantId} has expired` };
         if (!permissionCovered(grant.permissions, args.permission)) return { ok: false, code: "beyond-grant", reason: `${args.permission} exceeds the grant of ${principal.principalId}` };
         if (row.clampProvenance !== "operator") {
           const clamp = [...index.grants.values()].find((g) => g.grantId === row.clampProvenance);
-          if (!clamp || clamp.status !== "active") return { ok: false, code: "clamp-revoked", reason: `the clamp grant ${row.clampProvenance} of ${args.capabilityId} is no longer active` };
+          if (!clamp || clamp.status !== "active" || expired(clamp.expiresAt)) return { ok: false, code: "clamp-revoked", reason: `the clamp grant ${row.clampProvenance} of ${args.capabilityId} is no longer active` };
         }
         // The index names the governing version; its handle must be mounted (§4.3 reverse orphan:
         // committed-active but unmounted refuses as `unmounted`, distinct from `suspended`).
@@ -312,21 +326,35 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         await commit(entry.capabilityId, events, `integrity:${entry.capabilityId}:${entry.version}`).catch(() => {});
       };
 
+      /** R1-1: the run's session, read from the run's own start input (set by the turn that began
+       *  it), never from the call's arguments. Unresolvable => undefined (callers fail closed). */
+      const sessionOf = async (ctx: Ctx): Promise<string | undefined> => {
+        if (!ctx.runId) return undefined;
+        try {
+          const run = await options.getService().getRun({ actor: { id: "system", kind: "system" }, tenant: options.tenant }, { runId: ctx.runId });
+          const value = (run.input as { sessionId?: unknown } | null)?.sessionId;
+          return typeof value === "string" && value ? value : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+
       const invokeFlow = async (
-        input: { capabilityId?: string; sessionId?: string },
+        input: { capabilityId?: string },
         ctx: Ctx,
         permission: string,
         operation: string | undefined,
         run: DispatcherInterpreterInput,
       ): Promise<Record<string, unknown>> => {
         const capabilityId = String(input.capabilityId ?? "");
+        const sessionId = await sessionOf(ctx);
         const g = await gate();
         if (!g.ok) {
           await recordDecision(capabilityId, operation, ctx.actor, "refused", g.code, g.reason);
           return { ok: false, code: g.code === "runtime-disabled" || g.code === "index-unavailable" ? "unavailable" : "refused", message: g.reason, retryable: false, reasonCode: g.code, decidingPoint: "dispatcher" };
         }
         // ---- synchronous critical section: decision, snapshot, counter (no await inside) ----
-        const decision = decide(g.index, { capabilityId, permission, actor: ctx.actor, runId: ctx.runId, sessionId: input.sessionId });
+        const decision = decide(g.index, { capabilityId, permission, actor: ctx.actor, runId: ctx.runId, sessionId });
         if (!decision.ok) {
           await recordDecision(capabilityId, operation, ctx.actor, "refused", decision.code, decision.reason);
           return { ok: false, code: decision.code === "unmounted" ? "unavailable" : "refused", message: decision.reason, retryable: decision.code === "unmounted", reasonCode: decision.code, decidingPoint: "dispatcher" };
@@ -347,7 +375,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         }
       };
 
-      provide("tool.capability_invoke", async (input: { capabilityId: string; op?: string; tool?: string; arguments?: Record<string, unknown>; sessionId?: string }, ctx) => {
+      provide("tool.capability_invoke", async (input: { capabilityId: string; op?: string; tool?: string; arguments?: Record<string, unknown> }, ctx) => {
         const op = (input.op ?? "tool.invoke") as DispatcherInterpreterInput["op"];
         if (op !== "tools.list" && op !== "tool.invoke" && op !== "skill.load") {
           const reason = `unknown dispatcher operation ${String(op)} (closed vocabulary: tools.list, tool.invoke, skill.load)`;
@@ -357,7 +385,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         return invokeFlow(input, ctx, op === "skill.load" ? "skill.load" : "capability.invoke", input.tool, { op, tool: input.tool, arguments: input.arguments, skillId: input.tool });
       });
 
-      provide("tool.skill_load", async (input: { capabilityId: string; skillId: string; sessionId?: string }, ctx) =>
+      provide("tool.skill_load", async (input: { capabilityId: string; skillId: string }, ctx) =>
         invokeFlow(input, ctx, "skill.load", input.skillId, { op: "skill.load", skillId: input.skillId }));
 
       // ---- activation, replacement, deactivation (§4.2.4/§4.2.6) --------------------------------
@@ -393,11 +421,19 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         if (!principal.ok) return principal;
         const grant = index.grantFor(principal.principalId);
         if (!grant) return { ok: false, code: "no-grant", reason: `principal ${principal.principalId} holds no active grant` };
-        if (grant.expiresAt && new Date(grant.expiresAt).getTime() <= Date.now()) return { ok: false, code: "grant-expired", reason: `grant ${grant.grantId} has expired` };
+        if (expired(grant.expiresAt)) return { ok: false, code: "grant-expired", reason: `grant ${grant.grantId} has expired` };
         // A request beyond the grant would park on the approval machinery (§1.2); this release
         // refuses and records it — the fail-closed stand-in, never a silent grant.
         if (!permissionCovered(grant.permissions, "bundle.activate")) return { ok: false, code: "beyond-grant", reason: `activation requires bundle.activate in the grant of ${principal.principalId}` };
-        const ceiling = requirements.filter((r) => permissionCovered(grant.permissions, r));
+        // §1.3 (R1-3): the ceiling is requirements ∩ actor grant ∩ operator-root permissions. No
+        // live root grant means no operator authority to intersect with — fail closed.
+        const root = index.grantFor(LOCAL_ROOT_ID);
+        if (!root) return { ok: false, code: "no-root-grant", reason: "the operator root holds no active grant — activation refused (fail closed)" };
+        if (expired(root.expiresAt)) return { ok: false, code: "grant-expired", reason: `operator root grant ${root.grantId} has expired` };
+        const ceiling = requirements.filter((r) => permissionCovered(grant.permissions, r) && permissionCovered(root.permissions, r));
+        const clipped = requirements.filter((r) => permissionCovered(grant.permissions, r) && !permissionCovered(root.permissions, r));
+        if (clipped.length > 0) return { ok: false, code: "beyond-operator", reason: `the operator root's permissions do not cover ${clipped.join(", ")}, which the bundle requires` };
+        if (ceiling.length === 0) return { ok: false, code: "beyond-operator", reason: "the intersection of the bundle's requirements, the actor's grant and the operator root's permissions is empty" };
         if (hasHarness(harness) && !ceiling.includes("harness.modify")) return { ok: false, code: "harness-not-covered", reason: "the bundle declares harness surfaces but the actor's grant does not cover harness.modify" };
         return { ok: true, ceiling, clampProvenance: principal.principalId === LOCAL_ROOT_ID ? "operator" : grant.grantId };
       };
@@ -436,7 +472,7 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
         if (conflicts.length > 0) return refuse("conflict", `co-activation refused: ${conflicts.map((c) => `${c.surface} (${c.capabilities.join(" vs ")})`).join("; ")}`, failType, bundle.versionHash);
 
         // §4.4: the directory must match its recorded hash before it is mounted.
-        if (!(await verifyBundleIntegrity(bundle.dir, bundle.versionHash))) return refuse("integrity", `version ${bundle.versionHash} of ${capabilityId} failed its integrity check`, failType, bundle.versionHash);
+        if (!(await verifyBundleIntegrity(bundle.dir, bundle.versionHash, bundle.manifest))) return refuse("integrity", `version ${bundle.versionHash} of ${capabilityId} failed its integrity check`, failType, bundle.versionHash);
 
         let entry: HandlerEntry;
         try {

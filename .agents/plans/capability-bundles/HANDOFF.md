@@ -71,7 +71,7 @@
 - `test/workbench-call-sites.test.ts` (design item 43, the grep-pinned call-site inventory)
 - Boot remount of the active set (`activeSet` is still `[]` in `server.ts`; folds into the T4 restart journey)
 - Activation/creation beyond an agent's grant refuses and records (D2's "park on the approval machinery" is not built)
-- Session-bound activation routing through the loop (the dispatcher accepts `sessionId`; the loop does not yet pass it); capability-declarable 300 s deadlines
+- Session-bound activation routing: the dispatcher now derives the session from the run's own start input (never from tool input) and fails closed (a session-scoped suspension refuses any agent-shaped call whose session is unknown). Still open: subagent child runs do not carry their parent's session, so they resolve as session-unknown; `capability.bundle.activate`/`deactivate` still take an explicit `sessionId` target. Capability-declarable 300 s deadlines remain open
 
 ### T3 — executables
 1. **`src/mcp/client.ts`**: MCP protocol client — official TypeScript SDK with custom Transport adapter over execution-world provider streams; invocation-record emission
@@ -91,6 +91,9 @@
 2. `CURRENT_STATUS.md` + `.agents/CURRENT_STATUS.jsonl` milestone revisions
 3. `AGENTS.md` capability-runtime enablement gate note
 4. Enablement: write `workbench.capability_runtime.enabled` after the full chunked gate passes
+
+### Review round 1 (`test/J-CAP-review-r1.test.ts`)
+- R1-1 session from run context, fail-closed suspension; R1-2 version identity = payload + whole manifest (`versionHashFor(payload, manifest)`, `verifyBundleIntegrity(dir, hash, manifest)`; reducer never rewrites a registered version row); R1-3 activation ceiling = requirements ∩ agent grant ∩ operator root (refuses `beyond-operator` / `no-root-grant`); R1-4 grant and clamp expiry checked at decision time against the injected `now`; R1-5 descriptor marker tokens reserved inside the 400-token budget
 
 ## Verification state
 - CI is the authoritative gate since PR #37: four timing-balanced test shards, each with its own
