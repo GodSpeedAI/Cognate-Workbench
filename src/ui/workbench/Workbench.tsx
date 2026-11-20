@@ -16,6 +16,7 @@ import type { CapabilityState, ContractField, EvidenceEntry, EvidenceKind, NodeS
 import AutomationPanel from "./AutomationPanel.tsx";
 import { AuthorityPlane } from "./AuthorityPlane.tsx";
 import { CapabilityList, type CapabilityRecord as CapListRow } from "./CapabilityList.tsx";
+import { BundleDetails, type BundleRecord, type BundleActivation } from "./BundleDetails.tsx";
 import { ContractBar } from "./ContractBar.tsx";
 import { ContractEditor } from "./ContractEditor.tsx";
 import { DoneLadder } from "./DoneLadder.tsx";
@@ -517,6 +518,8 @@ function WorkflowsTab({ workspaceId, act, onFocus }: { workspaceId: string; act:
 function CapabilitiesTab({ act }: { act: Act }) {
   const caps = useWbRows<CapRow>("capability/");
   const bindings = useWbRows<BindingRecord>("binding/");
+  const bundles = useWbRows<BundleRecord>("bundle/");
+  const activations = useWbRows<BundleActivation>("activation/");
   const rows: CapListRow[] = useMemo(
     () =>
       caps.map((c) => ({
@@ -531,13 +534,16 @@ function CapabilitiesTab({ act }: { act: Act }) {
     [caps, bindings],
   );
   return (
-    <CapabilityList
-      capabilities={rows}
-      conflicts={conflicts}
-      canGrant
-      onAdvance={(capabilityId, implementationId, to) => void act.call("skill.lifecycle.advance", { capabilityId, implementationId, to }, `Advanced to ${to.toLowerCase().replace(/_/g, " ")}.`)}
-      onSeed={() => void act.call("workbench.seed", {}, "Starter catalog and workflows loaded.")}
-    />
+    <>
+      <BundleDetails bundles={bundles.map((r) => r.value)} activations={activations.map((r) => r.value)} />
+      <CapabilityList
+        capabilities={rows}
+        conflicts={conflicts}
+        canGrant
+        onAdvance={(capabilityId, implementationId, to) => void act.call("skill.lifecycle.advance", { capabilityId, implementationId, to }, `Advanced to ${to.toLowerCase().replace(/_/g, " ")}.`)}
+        onSeed={() => void act.call("workbench.seed", {}, "Starter catalog and workflows loaded.")}
+      />
+    </>
   );
 }
 

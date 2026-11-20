@@ -1,3 +1,13 @@
+# Current status — revision 44
+
+The Workbench capabilities tab shows registered bundles, their latest versions, and their recorded activations. It displays the version used for each activation and any recorded suspension reason or ceiling.
+
+The route regression detected missing bundle details on the older branch. The current branch passed 11 focused capability detail and safe-mode tests and type checking. Hosted verification passed all seven jobs for the preceding safe-boot checkpoint `05d50c8`.
+
+Live fragment presentation, effective grants, attributable actions, and safe-mode controls need trusted production data. T4b covers rebuilding active handlers from durable state.
+
+---
+
 # Current status — revision 43
 
 The server reads the durable safe-mode state on boot before the capability dispatcher mounts any bundle. The dispatcher refuses a mount when safe mode is active or the boot read is unavailable.
