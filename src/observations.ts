@@ -29,6 +29,11 @@ const OBSERVED_EVENT_TYPES = new Set([
   "tool.call.started", "tool.call.completed", "tool.call.failed", "message.completed", "run.failed",
   // Cognitive-navigation evidence that affects settlement rides the same outbox (no second evidence system).
   "verification.observed", "world.baseline.frozen", "world.candidate.frozen", "world.candidate.rejected", "world.settled",
+  // Governed settlement (readiness P03) is evidence too: SEA-Forge's settlement records and the
+  // RealityTrace evidence they rest on must reach RealityTrace, not stay invisible. This adds one SXR
+  // ingest subprocess per settled operation (the same cost the module doc names for every observed
+  // event). `workbench.proof.declared` is the pre-run expectation, not a settlement record, so it stays out.
+  "workbench.settlement.recorded", "workbench.settlement.evidence",
   "sentinel.finding", "experiment.round.completed", "method.recommended", "method.accepted",
   // A user turn (`session.turn.started`) and a model request (`run.invocation` of a model capability).
   "session.turn.started", "run.invocation",

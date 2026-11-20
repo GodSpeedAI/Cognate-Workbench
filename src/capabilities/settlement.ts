@@ -16,6 +16,7 @@ import { operatorOnly } from "../workbench/operatorGuard.ts";
 import type { Json, StoredEvent } from "@godspeedai/cognate-events";
 import { AGENT_CONFIG } from "../agents/agentConfig.ts";
 import { PROOF_DECLARED, SETTLEMENT_EVIDENCE, SETTLEMENT_RECORDED, workspaceRoot } from "../settlement/orchestrator.ts";
+import { settlementProvenance } from "../settlement/provenance.ts";
 import { ENV_PROOF_SOURCE, exportSweSeedProof, normaliseSha256, type SweSeedSettings } from "../settlement/sweSeed.ts";
 
 export const PROOF_DECLARE = "workspace.proof.declare";
@@ -153,7 +154,9 @@ export function settlementComponent(options: {
         for (const e of events.filter((x) => x.eventType === SETTLEMENT_RECORDED)) latest.set(String((e.payload as Record<string, unknown>).operationId), e.payload as Record<string, unknown>);
         return {
           active: options.active,
-          operations: [...latest.values()] as Json,
+          // Provenance is normalized from the payload: an operation that never declared a scope reads as
+          // local/null, so a historical record is never promoted to governed by omission (#117).
+          operations: [...latest.values()].map((p) => ({ ...p, ...settlementProvenance(p) })) as Json,
           evidence: events.filter((x) => x.eventType === SETTLEMENT_EVIDENCE).map((x) => x.payload) as Json,
         };
       });
