@@ -2,6 +2,7 @@
 // written through typed commands and reconstructed from state.changed events.
 import type { ModelConfig } from "../components/providerRegistry.ts";
 import type { ModelMessage } from "@godspeedai/cognate-capabilities";
+import type { CaseContext } from "@godspeedai/cognate-runtime-api";
 import type { ExpertModelBudget } from "./economics.ts";
 
 export const EXPERTS_THREAD = "experts:registry";
@@ -65,6 +66,16 @@ export interface ExpertExecution {
    * validated `team.converse`/`expert.converse` command, inherited by delegated children). The
    * run freezes it into its evidence and attributes activity/usage — it grants no acceptance. */
   taskId?: string | null;
+  /** J-HANDOFF-case-context: the validated CEP context this Assignment's run addresses, frozen at
+   * assignment so it is stable for the run's life and forwarded into `startRun`. Absent keeps the
+   * run case-free, exactly as before. */
+  caseContext?: CaseContext;
+  /** J-HANDOFF-case-context: the caller's attribution claim, recorded verbatim in the run's
+   * evidence. It is never a refusal — the session actor remains the real attribution. */
+  assertedBy?: string;
+  /** J-HANDOFF-case-context: `verified` only when a real world-registry check ran; otherwise the
+   * caller's context is `asserted`. Workbench runs no registry check, so it records `asserted`. */
+  worldCorroboration?: "verified" | "asserted";
 }
 export interface Assignment {
   id: string; expertId: string; conversationId: string; teamId: string | null; parentId: string | null;
