@@ -21,7 +21,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindEscalationCapabilities, ESCALATION_CAPABILITY_ANCHORS, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { createRuntimeMutex } from "./workbench/runtimeMutex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
@@ -91,6 +91,7 @@ import { EXECUTION_CAPABILITY_IDS, createExecutionWorldRegistry, executionWorlds
 import { executionWorldsManageComponent, restoreExecutionWorlds } from "./capabilities/executionWorlds.ts";
 import { executionWorldsProjection } from "./projections/executionWorlds.ts";
 import { cognitiveComponent } from "./capabilities/cognitive.ts";
+import { escalateComponent } from "./capabilities/escalate.ts";
 import { agentCognitiveAgent } from "./agents/agentCognitive.ts";
 import type { MediatorSpec } from "./cognitive/mediation.ts";
 import { workspaceSelectComponent } from "./capabilities/workspaceSelect.ts";
@@ -223,6 +224,10 @@ export interface ServerOptions {
   /** Host environment used to detect harness CLIs and to build their minimal child environment
    *  (default process.env / os.homedir()). Tests point it at fake binaries on a temp PATH. */
   readonly harnessHost?: HarnessHostEnv;
+  /** Optional Gauntlet escalation (`case.escalate`). The `binary` test seam points the escalation
+   *  spawn at a controlled fixture; production resolves `COGNATE_GAUNTLET_BIN` then PATH. Nothing
+   *  about Gauntlet runs or is required at boot, so ordinary work is unaffected when it is absent. */
+  readonly gauntlet?: { readonly binary?: string };
 }
 
 export interface AppServer {
@@ -255,6 +260,9 @@ const GRANTED_CAPABILITIES = [
   "execution.world.probe", "execution.wsl.list", "execution.world.connect", "execution.world.check", "execution.world.disconnect",
   "workspace.contained.select", "execution.containment.inspect",
   "case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard", "verification.run", "case.derive", "affordance.field", "world.settle", "risk.assess", "case.observe", "ui.focus.publish", "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review", "method.accept", "method.active",
+  // Optional Gauntlet escalation is operator-only (the handler also enforces it); the granted id is
+  // kept with its anchor table so it cannot drift out of the entry list.
+  ...Object.keys(ESCALATION_CAPABILITY_ANCHORS),
   "tool.read",
   "tool.edit",
   "tool.bash",
@@ -355,7 +363,7 @@ function buildPolicy(): Policy {
     "identity.session.issue", "identity.session.revoke", "identity.inspect",
     "task.review.decide", "authority.elevate",
     "workspace.proof.declare", "workspace.proof.declare_contract", "settlement.status",
-    "world.settle", "method.accept",
+    "world.settle", "method.accept", "case.escalate",
     "execution.world.connect", "execution.world.disconnect",
     "onboarding.dismiss", "model.configure", "provider.delete", "secret.put",
     "session.setArchived", "session.rename", "session.setPinned",
@@ -557,6 +565,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
 
   const domain = await loadDomain();
   const cognitiveRefs = bindCognitiveCapabilities(domain);
+  const escalationRefs = bindEscalationCapabilities(domain);
   const bindings = bindTranche5(domain);
   const toolBindings = bindTranche7(domain);
   const planBindings = bindTranche9(domain);
@@ -825,6 +834,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       executionWorldsManageComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, secrets, semanticRefs: { ...worldBindings, wslList: gapRefs["execution.wsl.list"] }, containmentConfig }),
       containedWorkspaceComponent({ executionPosture, getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, getKnownWorkspaceIds: () => knownWorkspaceIds, config: containmentConfig, protectedHome: home, protectedSecrets: [join(dirname(home), "secrets")], semanticRefs: worldBindings }),
       cognitiveComponent({ getService, systemCaller: SYSTEM_CALLER, registry: executionWorlds, extraMediators: options.extraMediators ?? [], semanticRefs: cognitiveRefs }),
+      escalateComponent({ getService, systemCaller: SYSTEM_CALLER, executionPosture, home, ...(options.gauntlet?.binary ? { binary: options.gauntlet.binary } : {}), semanticRef: escalationRefs["case.escalate"] }),
       secretPutComponent(secrets, bindings.secretPut.semanticRef),
       identityAdminComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, semanticRefs: t8.identity }),
       connectHorizonComponent({ getService, systemCaller: SYSTEM_CALLER, operatorTenant: LOCAL_OPERATOR.tenant, operatorActorId: LOCAL_OPERATOR.actor.id, secretsDir: join(dirname(home), "secrets"), semanticRef: t8.identity.connectHorizon }),
