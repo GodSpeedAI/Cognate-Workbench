@@ -1,3 +1,11 @@
+# Current status — revision 47
+
+The optional Gauntlet escalation was dropped under #108/#122’s scope guard. Ordinary Case work remains available, and `case.escalate` has no provider. Historical escalation event names remain recognized.
+
+The standalone Case journey passed against an isolated local pg0 instance; type checking and 73 standalone smoke tests passed. Full `just verify` remains pending.
+
+---
+
 # Current status — revision 46
 
 Bundle details show recent decisions from the existing tenant-scoped projection. Each displayed row supplies the exact bundle ID, actor, action, outcome, and time. A session appears when its decision supplies one.

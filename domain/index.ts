@@ -74,27 +74,6 @@ export function bindCognitiveCapabilities(domain: Domain): Readonly<Record<strin
 }
 
 /**
- * Optional Gauntlet escalation (`case.escalate`), anchored on the same `Case` concept the rest of
- * the case family uses. It is kept in its own table rather than added to
- * `COGNITIVE_CAPABILITY_ANCHORS` so the cognitive component's contract count stays 21: escalation is
- * a separate, optional component that must not become part of the core cognitive surface, and it is
- * published by `src/capabilities/escalate.ts`, not by the cognitive component.
- */
-export const ESCALATION_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
-  "case.escalate": "Case",
-};
-
-export function bindEscalationCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
-  const bindings = Object.entries(ESCALATION_CAPABILITY_ANCHORS).map(([id, entity]) => ({
-    semanticId: domain.semanticId(entity),
-    capability: { id, version: "1.0.0" },
-  }));
-  const contracts = bindCapabilities(domain.projection, bindings);
-  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} escalation contracts, got ${contracts.length}`);
-  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
-}
-
-/**
  * Explicit capability bindings for this tranche (T5). Only capabilities this app actually publishes
  * are bound — no speculative bindings (idm-to-cognate.md traceability rule #1, handoff.md "What
  * downstream agents should NOT do").

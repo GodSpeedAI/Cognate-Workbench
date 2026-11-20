@@ -204,9 +204,7 @@ export const WORKBENCH_EVENTS = [
   "workbench.proof.declared",
   "workbench.settlement.evidence",
   "workbench.settlement.recorded",
-  // Optional Gauntlet escalation (`case.escalate`): the recorded spawn intent and Gauntlet's own
-  // disposition. These are deliberately NOT settlement events — an escalation produces no
-  // `world.settled`, no `workbench.settlement.recorded` and no SEA-Forge receipt.
+  // Retain legacy event names so previously recorded escalation history remains readable.
   "workbench.escalation.intended",
   "workbench.escalation.recorded",
   // J-CHECKOUT (PandaCode worktree affordance): the governed Task-to-checkout association.
