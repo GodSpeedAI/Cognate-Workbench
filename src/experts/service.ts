@@ -361,7 +361,7 @@ export class ExpertsService {
     if (capability === "expert.converse" || capability === "team.converse") {
       handoffContext = caseContextFrom(input.caseContext);
       if (input.assertedBy !== undefined) {
-        if (typeof input.assertedBy !== "string" || input.assertedBy.length === 0 || input.assertedBy.length > 500) throw new Error("assertedBy must be a non-empty string of at most 500 characters");
+        if (typeof input.assertedBy !== "string" || input.assertedBy.length > 500) throw new Error("assertedBy must be a string of at most 500 characters");
         handoffAssertedBy = input.assertedBy;
       }
       if (input.worldCorroboration !== undefined && input.worldCorroboration !== "verified" && input.worldCorroboration !== "asserted") throw new Error("worldCorroboration must be verified or asserted");
