@@ -3,6 +3,7 @@
 import React from "react";
 import { FragmentSlot, type RegisteredFragment } from "../FragmentSlot.tsx";
 import type { SafeModeController, SafeModeRead } from "../../workbench/safeMode.ts";
+import type { AuthorityDecisionRecord } from "../../workbench/types.ts";
 
 export interface BundleActivation {
   readonly capabilityId: string;
@@ -14,6 +15,13 @@ export interface BundleActivation {
   readonly ceiling?: readonly string[];
 }
 
+export type AttributableAction = Pick<AuthorityDecisionRecord, "actorId" | "actorKind" | "outcome"> & {
+  readonly id: string;
+  readonly operation: string;
+  readonly recordedAt: string;
+  readonly sessionId?: string;
+};
+
 export interface CapabilityDetailProps {
   readonly capabilityId: string;
   readonly name?: string;
@@ -21,7 +29,7 @@ export interface CapabilityDetailProps {
   readonly origin: string;
   readonly creatingActor: string;
   readonly grants?: readonly string[];
-  readonly actions?: readonly string[];
+  readonly actions?: readonly AttributableAction[];
   readonly activations?: readonly BundleActivation[];
   readonly fragments?: readonly RegisteredFragment[];
   readonly read?: SafeModeRead;
@@ -49,8 +57,14 @@ export const CapabilityDetail: React.FC<CapabilityDetailProps> = ({ capabilityId
       <dt>Origin</dt><dd>{origin || "Unknown"}</dd>
       <dt>Created by</dt><dd>{creatingActor || "Unknown"}</dd>
       {grants && <><dt>Effective grants</dt><dd>{grants.length ? grants.join(", ") : "none"}</dd></>}
-      {actions && <><dt>Actions</dt><dd>{actions.length ? actions.join(", ") : "none"}</dd></>}
     </dl>
+    {actions && actions.length > 0 && <section aria-label="Recent attributable actions">
+      <h3>Recent attributable actions</h3>
+      <ul>{actions.map((action) => <li key={action.id}>
+        <span>{action.operation} — {action.actorId} ({action.actorKind}) — {action.outcome} — {action.recordedAt}</span>
+        {action.sessionId && <span> — session {action.sessionId}</span>}
+      </li>)}</ul>
+    </section>}
     {activations && <section><h3>Activations</h3>{activations.length === 0 ? <p>No activation recorded</p> : <ul>{activations.map((a) => <li key={`${a.level}/${a.sessionId ?? ""}`}>
       <span>{a.level}{a.sessionId ? `, session ${a.sessionId}` : ""}: {a.state || "unknown"}</span>
       <dl>

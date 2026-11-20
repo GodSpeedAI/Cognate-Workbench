@@ -521,6 +521,7 @@ function CapabilitiesTab({ act }: { act: Act }) {
   const bindings = useWbRows<BindingRecord>("binding/");
   const bundles = useWbRows<BundleRecord>("bundle/");
   const activations = useWbRows<BundleActivation>("activation/");
+  const decisions = useWbRows<unknown>("decision/");
   const safeModeEvent = useWbRow<{ attempts?: number; lastAttemptAt?: string; clearedAt?: string }>("runtime/safemode");
   const safeModeRevision = JSON.stringify([safeModeEvent?.attempts, safeModeEvent?.lastAttemptAt, safeModeEvent?.clearedAt]);
   const [safeMode, setSafeMode] = useState<{ safe: boolean; reason: string; canClear: boolean }>();
@@ -550,7 +551,7 @@ function CapabilitiesTab({ act }: { act: Act }) {
             if (current) setSafeMode(current);
           }
         })} />}
-      <BundleDetails bundles={bundles.map((r) => r.value)} activations={activations.map((r) => r.value)} />
+      <BundleDetails bundles={bundles.map((r) => r.value)} activations={activations.map((r) => r.value)} decisions={decisions} />
       <CapabilityList
         capabilities={rows}
         conflicts={conflicts}

@@ -37,6 +37,18 @@ test("Workbench capabilities tab reads the live bundle and activation rows", asy
   ] as const) {
     for (const row of reduceWorkbench(event, payload, "2026-01-01T00:00:00Z", event, (key) => state.get(key))) state.set(row.key, row.value);
   }
+  const decisions = [
+    ...Array.from({ length: 11 }, (_, i) => ({ decisionId: `d${i}`, capability: "capability.bundle.demo", operation: `operation-${i}`, actorId: "actor-1", actorKind: "agent", outcome: "allowed", reason: "private reason", ...(i === 10 ? { sessionId: "session-1" } : {}) })),
+    { decisionId: "other", capability: "capability.bundle.demo-extra", operation: "other-operation", actorId: "actor-2", actorKind: "agent", outcome: "refused" },
+    { decisionId: "missing", capability: "capability.bundle.demo", actorId: "actor-3", actorKind: "agent", outcome: "refused" },
+    { decisionId: "missing-actor", capability: "capability.bundle.demo", operation: "unattributed", actorKind: "agent", outcome: "allowed" },
+    { decisionId: "missing-outcome", capability: "capability.bundle.demo", operation: "undecided", actorId: "actor-4", actorKind: "agent" },
+    { decisionId: "bad-outcome", capability: "capability.bundle.demo", operation: "invalid-outcome", actorId: "actor-5", actorKind: "agent", outcome: "stale" },
+  ];
+  for (const [i, payload] of decisions.entries()) {
+    const time = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
+    for (const row of reduceWorkbench("authority.decision.recorded", payload, time, payload.decisionId, (key) => state.get(key))) state.set(row.key, row.value);
+  }
   expect(state.has("activation/capability.bundle.demo/user")).toBe(true);
   const rows = [...state].map(([key, value]) => ({ key, value }));
   const client = { projection: () => ({ get: () => rows, subscribe: () => () => {} }), invoke: async () => ({}) } as unknown as import("@godspeedai/cognate-client").CognateClient;
@@ -47,6 +59,22 @@ test("Workbench capabilities tab reads the live bundle and activation rows", asy
     expect(ui.getByText("latest")).toBeTruthy();
     expect(ui.getByText("active-version")).toBeTruthy();
     expect(ui.getByText("skill.load")).toBeTruthy();
+    const recent = ui.getByRole("region", { name: "Recent attributable actions" });
+    expect(recent.textContent).toContain("operation-10");
+    expect(recent.textContent).toContain("actor-1");
+    expect(recent.textContent).toContain("agent");
+    expect(recent.textContent).toContain("allowed");
+    expect(recent.textContent).toContain("session-1");
+    expect(recent.textContent).not.toContain("operation-0");
+    expect(recent.textContent).not.toContain("other-operation");
+    expect(recent.textContent).not.toContain("actor-3");
+    expect(recent.textContent).not.toContain("unattributed");
+    expect(recent.textContent).not.toContain("undecided");
+    expect(recent.textContent).not.toContain("invalid-outcome");
+    expect(recent.querySelectorAll("li")[0]?.textContent).toContain("operation-10");
+    expect(recent.querySelectorAll("li")[1]?.textContent).not.toContain("session");
+    expect(recent.textContent).not.toContain("private reason");
+    expect(recent.querySelectorAll("li")).toHaveLength(10);
     expect(ui.queryByText("Effective grants")).toBeNull();
   } finally { await act(async () => { cleanup(); }); await releaseDom(); }
 });

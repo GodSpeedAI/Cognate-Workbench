@@ -1,3 +1,13 @@
+# Current status — revision 46
+
+Bundle details show recent decisions from the existing tenant-scoped projection. Each displayed row supplies the exact bundle ID, actor, action, outcome, and time. A session appears when its decision supplies one.
+
+The existing route failed the focused regression before the change. Type checking and all 16 focused tests passed after the wiring. The hosted safe-mode run failed in its existing browser-preview test. That exact test passed locally. Hosted verification for the combined checkpoint is pending.
+
+Live fragment descriptors and effective authority still need trusted inputs.
+
+---
+
 # Current status — revision 45
 
 The Capabilities tab reads safe mode from the server and shows Clear to the authenticated operator. Existing policy denies other callers. The Workbench service records a refused direct clear through the existing safe-mode fault recorder.
