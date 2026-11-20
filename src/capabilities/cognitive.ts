@@ -33,6 +33,7 @@ import type { Surface } from "../cognitive/surface.ts";
 import { judgeRound, searchEligibility, foldSearch, type ExperimentRound } from "../cognitive/experiment.ts";
 import { acceptMethod, recommendFromRounds } from "../cognitive/method.ts";
 import { contextOf, createFocusStore, parseRef, surfaceFor, type FocusContext, type SemanticOp } from "../cognitive/focus.ts";
+import { LOCAL_SETTLEMENT } from "../settlement/provenance.ts";
 
 const IGNORED = new Set([".git", "node_modules"]);
 
@@ -296,7 +297,7 @@ export function cognitiveComponent(options: CognitiveOptions): Component {
           settlementReachable: projection.candidateWorldHash === i.candidateHash && projection.settlementReachable,
         });
         if (!decision.ok) throw new Error(`world.settle refused: ${decision.reason}`);
-        await record(WORLD_EVENTS.settled, { worldHash: i.candidateHash, parentWorldHash: lineage.worlds.get(i.candidateHash)?.parentWorldHash ?? null, caseId: i.caseId, evidenceRefs: projection.evidencePositions.map(String), authority: { actorId: ctx.actor.id, kind: ctx.actor.kind } });
+        await record(WORLD_EVENTS.settled, { worldHash: i.candidateHash, parentWorldHash: lineage.worlds.get(i.candidateHash)?.parentWorldHash ?? null, caseId: i.caseId, evidenceRefs: projection.evidencePositions.map(String), authority: { actorId: ctx.actor.id, kind: ctx.actor.kind }, ...LOCAL_SETTLEMENT });
         return { settled: i.candidateHash };
       }));
 

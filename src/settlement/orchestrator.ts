@@ -8,6 +8,10 @@
 //      RealityTrace's ledger (when configured) and settles: settled, rejected or unsettled.
 // Workbench never decides the outcome. Every step is recorded, and a restart resumes from the record:
 // RealityTrace's evidence is reused, SEA-Forge dedupes the packet and replays a final settlement.
+//
+// Every record is governed by payload (#117): `settlementScope:"governed"` plus `receiptRef` (SEA-Forge's
+// ledger entry when it returns one), so a reader distinguishes it from a local Candidate Promotion
+// (`world.settle`, `settlementScope:"local"`) without consulting the event type alone.
 import { evidencePacketEnvelope } from "@godspeedai/cognate-realitytrace";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { SeaForgeAuthority } from "@godspeedai/cognate-runtime-bun";
@@ -16,6 +20,7 @@ import type { ContainmentConfig } from "../capabilities/containedWorkspace.ts";
 import type { ExternalAuthority } from "../capabilities/governance.ts";
 import { containedVerifierLauncher } from "./launcher.ts";
 import { RealityTraceCli, type DeclaredProof, type RealityTraceSettings } from "./realitytrace.ts";
+import { governedSettlement } from "./provenance.ts";
 import type { ProofSourceMode } from "./sweSeed.ts";
 
 /** Agent capabilities whose effects settlement must account for. */
@@ -95,7 +100,7 @@ export function createSettlementOrchestrator(options: SettlementOptions) {
     const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
     let base: Record<string, Json> = { runId, workspaceId, ...(sessionId ? { sessionId } : {}) };
     const recordAll = async (status: SettlementStatus, final: boolean, extra: Record<string, Json>) =>
-      options.record(open.map((op) => ({ type: SETTLEMENT_RECORDED, payload: { ...base, operationId: op.operationId, capability: op.capability, status, final, ...extra } as Json })), `settlement:${runId}`);
+      options.record(open.map((op) => ({ type: SETTLEMENT_RECORDED, payload: { ...base, operationId: op.operationId, capability: op.capability, status, final, ...governedSettlement(null), ...extra } as Json })), `settlement:${runId}`);
 
     // The expectation: the proof declared for this workspace before the run started. Declaring one later
     // cannot reach back.
@@ -152,15 +157,15 @@ export function createSettlementOrchestrator(options: SettlementOptions) {
       });
       const receipt = await seaForge.submitEvidence(packet);
       if (!receipt.ok) {
-        results.push({ type: SETTLEMENT_RECORDED, payload: { ...base, operationId: op.operationId, capability: op.capability, status: "refused", final: false, ...facts, reason: `${receipt.errorClass}: ${receipt.error}`.slice(0, 600) } });
+        results.push({ type: SETTLEMENT_RECORDED, payload: { ...base, operationId: op.operationId, capability: op.capability, status: "refused", final: false, ...facts, ...governedSettlement(null), reason: `${receipt.errorClass}: ${receipt.error}`.slice(0, 600) } });
         continue;
       }
       const settled = await seaForge.settle(op.operationId, op.worldRef);
       results.push({
         type: SETTLEMENT_RECORDED,
         payload: settled.ok
-          ? { ...base, operationId: op.operationId, capability: op.capability, status: settled.status, final: settled.final, ...facts, ledgerEntry: settled.ledgerEntry }
-          : { ...base, operationId: op.operationId, capability: op.capability, status: "refused", final: false, ...facts, reason: `${settled.errorClass}: ${settled.error}`.slice(0, 600) },
+          ? { ...base, operationId: op.operationId, capability: op.capability, status: settled.status, final: settled.final, ...facts, ...governedSettlement(settled.ledgerEntry), ledgerEntry: settled.ledgerEntry }
+          : { ...base, operationId: op.operationId, capability: op.capability, status: "refused", final: false, ...facts, ...governedSettlement(null), reason: `${settled.errorClass}: ${settled.error}`.slice(0, 600) },
       });
     }
     await options.record(results, `settlement:${runId}`);
