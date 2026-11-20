@@ -124,10 +124,14 @@ export class SafeModeController {
   }
   /** A core violation escalates immediately (the durable fault event makes it survive restart). */
   escalateCoreViolation(): void { this.current = mint(true, "core-violation", this.current.setHash); }
+  async recordUnauthorizedClear(actorId: string, detail: string): Promise<void> {
+    await this.faults.record({ fragmentKey: `clear:${actorId}`, capabilityId: SAFE_SCOPE, faultClass: "unauthorized-clear", detail });
+  }
+
   /** Operator-only. A non-operator is refused and the refusal is recorded. */
   async clear(actor: { readonly role: string; readonly id?: string }): Promise<{ ok: boolean }> {
     if (actor.role !== "operator") {
-      await this.faults.record({ fragmentKey: `clear:${actor.id ?? "unknown"}`, capabilityId: SAFE_SCOPE, faultClass: "unauthorized-clear", detail: `role ${actor.role.slice(0, 40)}` });
+      await this.recordUnauthorizedClear(actor.id ?? "unknown", `role ${actor.role.slice(0, 40)}`);
       return { ok: false };
     }
     await this.recorder.commitBatch(SAFE_SCOPE, [{ type: "workbench.safemode.cleared", payload: { actor: actor.id ?? "operator" } }]);

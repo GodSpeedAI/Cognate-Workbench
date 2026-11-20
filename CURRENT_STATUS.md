@@ -1,3 +1,13 @@
+# Current status — revision 45
+
+The Capabilities tab reads safe mode from the server and shows Clear to the authenticated operator. Existing policy denies other callers. The Workbench service records a refused direct clear through the existing safe-mode fault recorder.
+
+Type checking and all 16 focused tests passed. The live server regression reproduced the missing audit event before the fix. Chromium used a server-issued operator session to clear a durable safe-mode fault after restart and confirmed one clear record.
+
+Live fragment descriptors, effective grants, and attributable actions still need trusted production input. The full hosted gate is pending for this checkpoint.
+
+---
+
 # Current status — revision 44
 
 The Workbench capabilities tab shows registered bundles, their latest versions, and their recorded activations. It displays the version used for each activation and any recorded suspension reason or ceiling.

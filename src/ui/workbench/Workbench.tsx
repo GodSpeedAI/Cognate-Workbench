@@ -17,6 +17,7 @@ import AutomationPanel from "./AutomationPanel.tsx";
 import { AuthorityPlane } from "./AuthorityPlane.tsx";
 import { CapabilityList, type CapabilityRecord as CapListRow } from "./CapabilityList.tsx";
 import { BundleDetails, type BundleRecord, type BundleActivation } from "./BundleDetails.tsx";
+import { SafeModeBanner } from "./CapabilityDetail.tsx";
 import { ContractBar } from "./ContractBar.tsx";
 import { ContractEditor } from "./ContractEditor.tsx";
 import { DoneLadder } from "./DoneLadder.tsx";
@@ -520,6 +521,14 @@ function CapabilitiesTab({ act }: { act: Act }) {
   const bindings = useWbRows<BindingRecord>("binding/");
   const bundles = useWbRows<BundleRecord>("bundle/");
   const activations = useWbRows<BundleActivation>("activation/");
+  const safeModeEvent = useWbRow<{ attempts?: number; lastAttemptAt?: string; clearedAt?: string }>("runtime/safemode");
+  const safeModeRevision = JSON.stringify([safeModeEvent?.attempts, safeModeEvent?.lastAttemptAt, safeModeEvent?.clearedAt]);
+  const [safeMode, setSafeMode] = useState<{ safe: boolean; reason: string; canClear: boolean }>();
+  useEffect(() => {
+    let active = true;
+    void act.call<{ safe: boolean; reason: string; canClear: boolean }>("workbench.safemode.status", {}).then((value) => { if (active && value) setSafeMode(value); });
+    return () => { active = false; };
+  }, [act, safeModeRevision]);
   const rows: CapListRow[] = useMemo(
     () =>
       caps.map((c) => ({
@@ -535,6 +544,12 @@ function CapabilitiesTab({ act }: { act: Act }) {
   );
   return (
     <>
+      {safeMode?.safe && <SafeModeBanner reason={safeMode.reason} canClear={safeMode.canClear} onClear={() => void act.call("workbench.safemode.clear", {}).then(async (result) => {
+          if (result) {
+            const current = await act.call<{ safe: boolean; reason: string; canClear: boolean }>("workbench.safemode.status", {});
+            if (current) setSafeMode(current);
+          }
+        })} />}
       <BundleDetails bundles={bundles.map((r) => r.value)} activations={activations.map((r) => r.value)} />
       <CapabilityList
         capabilities={rows}

@@ -67,3 +67,50 @@ test("trusted fragment and safe-mode inputs still render through the shared insp
   expect(blocked).toContain("Safe mode: extensions are suspended");
   expect(blocked).not.toContain("Live panel");
 });
+
+test("safe-mode banner offers the authenticated clear action even without bundles", async () => {
+  const { registerDom, releaseDom } = await import("./dom-env.ts");
+  registerDom();
+  const { render, fireEvent, cleanup, act, waitFor } = await import("@testing-library/react/pure");
+  const { CognateProvider } = await import("@godspeedai/cognate-react");
+  const { WorkbenchView } = await import("../src/ui/workbench/Workbench.tsx");
+  let safe = true;
+  const calls: string[] = [];
+  const rows: { key: string; value: unknown }[] = [];
+  const client = { projection: () => ({ get: () => rows, subscribe: () => () => {} }), invoke: async (name: string) => {
+    calls.push(name);
+    if (name === "workbench.safemode.clear") { safe = false; return { ok: true }; }
+    if (name === "workbench.safemode.status") return { safe, reason: safe ? "core-violation" : "none", canClear: true };
+    return {};
+  } } as unknown as import("@godspeedai/cognate-client").CognateClient;
+  try {
+    const ui = render(<CognateProvider client={client}><WorkbenchView workspaceId="w" workspaceLabel="Workspace" onWorkOnTask={() => {}} onFocus={() => {}} /></CognateProvider>);
+    await act(async () => { fireEvent.click(ui.getByRole("tab", { name: "Capabilities" })); });
+    const button = await ui.findByRole("button", { name: "Clear safe mode" });
+    await act(async () => { fireEvent.click(button); });
+    await waitFor(() => expect(ui.queryByRole("button", { name: "Clear safe mode" })).toBeNull());
+    expect(calls).toContain("workbench.safemode.clear");
+  } finally { await act(async () => { cleanup(); }); await releaseDom(); }
+});
+
+
+test("safe-mode status for a non-operator displays the warning without a clear button", async () => {
+  const { registerDom, releaseDom } = await import("./dom-env.ts");
+  registerDom();
+  const { render, fireEvent, cleanup, act } = await import("@testing-library/react/pure");
+  const { CognateProvider } = await import("@godspeedai/cognate-react");
+  const { WorkbenchView } = await import("../src/ui/workbench/Workbench.tsx");
+  const calls: string[] = [];
+  const rows: { key: string; value: unknown }[] = [];
+  const client = { projection: () => ({ get: () => rows, subscribe: () => () => {} }), invoke: async (name: string) => {
+    calls.push(name);
+    return name === "workbench.safemode.status" ? { safe: true, reason: "core-violation", canClear: false } : {};
+  } } as unknown as import("@godspeedai/cognate-client").CognateClient;
+  try {
+    const ui = render(<CognateProvider client={client}><WorkbenchView workspaceId="w" workspaceLabel="Workspace" onWorkOnTask={() => {}} onFocus={() => {}} /></CognateProvider>);
+    await act(async () => { fireEvent.click(ui.getByRole("tab", { name: "Capabilities" })); });
+    expect((await ui.findByRole("alert")).textContent).toContain("Safe mode");
+    expect(ui.queryByRole("button", { name: "Clear safe mode" })).toBeNull();
+    expect(calls).not.toContain("workbench.safemode.clear");
+  } finally { await act(async () => { cleanup(); }); await releaseDom(); }
+});

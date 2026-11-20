@@ -698,6 +698,8 @@ export const CAPABILITY_RUNTIME_ANCHORS: Readonly<Record<string, string>> = {
   "capability.bundle.activate": "CapabilityBundle",
   "capability.bundle.deactivate": "CapabilityBundle",
   "capability.bundle.uninstall": "CapabilityBundle",
+  "workbench.safemode.status": "CapabilityBundle",
+  "workbench.safemode.clear": "CapabilityBundle",
   "tool.capability_invoke": "CapabilityBundle",
   "tool.skill_load": "CapabilityBundle",
   "capability.harness.resolve": "CapabilityBundle",

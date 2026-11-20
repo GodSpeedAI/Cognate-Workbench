@@ -30,13 +30,17 @@ export interface CapabilityDetailProps {
   readonly onClear?: () => void;
 }
 
+export const SafeModeBanner: React.FC<{ reason: string; canClear?: boolean; onClear?: () => void }> = ({ reason, canClear, onClear }) => (
+  <div className="wb-safe-banner" role="alert">
+    Safe mode: extensions are suspended ({reason}).
+    {canClear && onClear && <button type="button" className="wb-btn" onClick={onClear}>Clear safe mode</button>}
+  </div>
+);
+
 export const CapabilityDetail: React.FC<CapabilityDetailProps> = ({ capabilityId, name, version, origin, creatingActor, grants, actions, activations, fragments, read, safeMode, isOperator, onClear }) => (
   <div className="wb-capability-detail wb-root">
     {read?.safe && (
-      <div className="wb-safe-banner" role="alert">
-        Safe mode: extensions are suspended ({read.reason}).
-        {isOperator && onClear && <button className="wb-btn" onClick={onClear}>Clear safe mode</button>}
-      </div>
+      <SafeModeBanner reason={read.reason} {...(isOperator !== undefined ? { canClear: isOperator } : {})} {...(onClear ? { onClear } : {})} />
     )}
     <h2>{name || capabilityId}</h2>
     {name && <p>{capabilityId}</p>}
