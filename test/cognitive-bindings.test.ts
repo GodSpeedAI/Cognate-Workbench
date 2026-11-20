@@ -11,13 +11,13 @@ const caller = { actor: { id: "operator", kind: "user" as const }, tenant: "loca
 
 const CAPABILITY_IDS = [
   "case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard",
-  "verification.run", "case.derive", "world.settle", "risk.assess", "case.observe", "ui.focus.publish",
+  "verification.run", "case.derive", "affordance.field", "world.settle", "risk.assess", "case.observe", "ui.focus.publish",
   "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review",
   "method.accept", "method.active",
 ];
 
 describe("cognitive semantic bindings", () => {
-  test("binds all 20 published contracts to declared IDM concepts", async () => {
+  test("binds all 21 published contracts to declared IDM concepts", async () => {
     const domain = await loadDomain();
     const refs = bindCognitiveCapabilities(domain);
     expect(Object.keys(COGNITIVE_CAPABILITY_ANCHORS).sort()).toEqual([...CAPABILITY_IDS].sort());
@@ -32,7 +32,7 @@ describe("cognitive semantic bindings", () => {
       registry: {} as never,
       semanticRefs: refs,
     });
-    expect(component.provides).toHaveLength(20);
+    expect(component.provides).toHaveLength(21);
     expect(component.provides?.map((contract) => contract.id).sort()).toEqual([...CAPABILITY_IDS].sort());
     for (const contract of component.provides ?? []) {
       expect(contract.semanticRef).toEqual(refs[contract.id]);

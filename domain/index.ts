@@ -42,6 +42,7 @@ export const COGNITIVE_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "world.discard": "WorldSnapshot",
   "verification.run": "Verification",
   "case.derive": "Case",
+  "affordance.field": "Case",
   "world.settle": "WorldSnapshot",
   "risk.assess": "RiskAssessment",
   "case.observe": "Case",
@@ -66,7 +67,7 @@ export function cognitiveCapabilityBindings(domain: Domain): readonly Capability
 export function bindCognitiveCapabilities(domain: Domain): Readonly<Record<string, SemanticRef>> {
   const bindings = cognitiveCapabilityBindings(domain);
   const contracts = bindCapabilities(domain.projection, bindings);
-  if (contracts.length !== 20) throw new Error(`domain: expected 20 cognitive contracts, got ${contracts.length}`);
+  if (contracts.length !== 21) throw new Error(`domain: expected 21 cognitive contracts, got ${contracts.length}`);
   const unbound = contracts.find((contract) => !contract.semanticRef);
   if (unbound) throw new Error(`domain: cognitive capability ${unbound.id} has no SemanticRef`);
   return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef!])) as Readonly<Record<string, SemanticRef>>;

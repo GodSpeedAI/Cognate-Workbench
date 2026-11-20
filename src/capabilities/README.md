@@ -33,9 +33,9 @@ returning a Cognate `Component`; many also export their input/result types and c
 - [ambiguousStep.ts:ambiguousStepComponent] — mounts `run.invocation.reconcile`
   (`AMBIGUOUS_INVOCATION_CAPABILITY`), the operator's resolution of an `ambiguous-invocation`
   continuation.
-- [cognitive.ts:cognitiveComponent] — mounts 20 cognitive capabilities in one component
+- [cognitive.ts:cognitiveComponent] — mounts 21 cognitive capabilities in one component
   (`case.open`, `criterion.freeze`, `world.freeze`, `world.fork`, `world.attach`, `world.discard`,
-  `verification.run`, `case.derive`, `world.settle`, `risk.assess`, `case.observe`, `ui.focus.publish`,
+  `verification.run`, `case.derive`, `affordance.field`, `world.settle`, `risk.assess`, `case.observe`, `ui.focus.publish`,
   `ui.context`, `ui.request`, `ui.pending`, `experiment.round`, `experiment.status`, `method.review`,
   `method.accept`, `method.active`); requires `filesystem.resolve`/`filesystem.readText`/
   `filesystem.list`/`process.exec`.
