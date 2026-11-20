@@ -27,6 +27,7 @@ import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
 import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
+import { readBootExclusion, type SafeModeRead } from "./workbench/safeMode.ts";
 import { createMcpSupervisor, reconcileAfterIndex, type McpSupervisor } from "./capabilities/mcpManage.ts";
 import { acquireLongLeaseSlot, releaseAllLongLeaseSlots, releaseLongLeaseSlot } from "./capabilities/aggregateContainment.ts";
 import type { PostureRecord } from "./capabilities/execSpawn.ts";
@@ -696,6 +697,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let pollApprovals: (() => Promise<number>) | undefined;
   let capabilityRuntimeIndex!: AuthorityIndex;
   let capabilityRuntimeRecorder!: LifecycleRecorder;
+  let capabilityBootExclusion: SafeModeRead | undefined;
   const capabilityStoreKind = classifyCapabilityStore(process.env);
   // R4: ONE mutex for activation, deactivation, uninstall and grant issue/revoke (valid under §1.5).
   const capabilityMutex = createRuntimeMutex();
@@ -887,6 +889,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
           await capabilityRuntimeRecorder.commitBatch(`decisions:${String((event.payload as Record<string, unknown>).capability ?? "runtime")}`, [event as { type: string; payload: Record<string, unknown> }]);
         },
         activeSet: [],
+        getBootExclusion: () => capabilityBootExclusion,
         getMcpHost: () => mcpSupervisor.host,
         ...(options.capabilityRuntimeHooks ? { hooks: options.capabilityRuntimeHooks } : {}),
         semanticRefs: capabilityRuntimeRefs,
@@ -924,6 +927,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ],
     system: SYSTEM_CALLER.actor,
   });
+  // T4a: read committed exclusions before the server can accept a bundle mount.
+  capabilityBootExclusion = await readBootExclusion(runtime.store, []);
   const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
   serviceRef.current = governedService;
   pollApprovals = () => runtime.pollApprovals();

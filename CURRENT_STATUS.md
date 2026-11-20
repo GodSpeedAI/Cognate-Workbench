@@ -1,3 +1,13 @@
+# Current status — revision 43
+
+The server reads the durable safe-mode state on boot before the capability dispatcher mounts any bundle. The dispatcher refuses a mount when safe mode is active or the boot read is unavailable.
+
+The restart regression failed at `bbe6c73` because activation succeeded after the grant was present. The new gate passed the same regression and all six safe-mode tests. `just typecheck` passed. Normal activation passed. The combined activation suite had two timeouts, and both cases passed on individual reruns.
+
+Full `just verify` is pending. T4a still needs live presentation and safe-mode controls. T4b covers rebuilding active handlers from durable state.
+
+---
+
 # Current status — revision 42
 
 The **desktop-native-completion** mission's D and F tracks are closed, and Milestone C is
