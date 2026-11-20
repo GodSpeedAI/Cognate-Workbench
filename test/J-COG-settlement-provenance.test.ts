@@ -78,7 +78,7 @@ describe("J-COG-settlement-provenance", () => {
     expect(settlementProvenance({ settlementScope: "governed", receiptRef: "ledger-9" })).toEqual({ settlementScope: "governed", receiptRef: "ledger-9" });
   });
 
-  test("a governed settlement carries SEA-Forge's status/finality and a non-null receipt, preserved on replay", async () => {
+  test("a governed settlement carries SEA-Forge's status/finality and a receipt; a refused attempt stays governed without one; replay is stable", async () => {
     const LEDGER = "ledger-entry-117";
     const WORLD_REF = `world:workbench@sha256:${"a".repeat(64)}`;
     const runId = "run-117";
@@ -100,17 +100,20 @@ describe("J-COG-settlement-provenance", () => {
           const request = JSON.parse(buffered.slice(0, newline)) as { verb: string; operation_id?: string; envelope?: { envelope_id?: string } };
           seen.push(request.verb);
           const response = request.verb === "authority_evidence"
-            ? { ok: true, operation_id: "op-117", envelope_id: request.envelope?.envelope_id ?? "env", items: 1, ledger_entry: "ledger-evidence" }
-            : request.verb === "authority_settle"
-              ? { ok: true, status: "settled", final: true, replayed: false, ledger_entry: LEDGER, envelope: {
-                  envelope_kind: "settlement_packet",
-                  scope: { world_ref: WORLD_REF },
-                  extensions: {
-                    "cep.profile": { profile_id: "godspeed.settlement_packet", profile_version: "1.0.0" },
-                    "godspeed.settlement_packet": { operation_id: request.operation_id, overall_status: "settled" },
-                  },
-                } }
-              : { ok: false, error_class: "unknown_verb", error: request.verb };
+            ? { ok: true, operation_id: request.operation_id ?? "op-117", envelope_id: request.envelope?.envelope_id ?? "env", items: 1, ledger_entry: "ledger-evidence" }
+            : request.verb === "authority_settle" && request.operation_id === "op-118"
+              // The second operation's settle is refused: a genuine governed attempt SEA-Forge does not receipt.
+              ? { ok: false, error_class: "unreachable", error: "sea-forge unreachable" }
+              : request.verb === "authority_settle"
+                ? { ok: true, status: "settled", final: true, replayed: false, ledger_entry: LEDGER, envelope: {
+                    envelope_kind: "settlement_packet",
+                    scope: { world_ref: WORLD_REF },
+                    extensions: {
+                      "cep.profile": { profile_id: "godspeed.settlement_packet", profile_version: "1.0.0" },
+                      "godspeed.settlement_packet": { operation_id: request.operation_id, overall_status: "settled" },
+                    },
+                  } }
+                : { ok: false, error_class: "unknown_verb", error: request.verb };
           s.write(`${JSON.stringify(response)}\n`);
         },
         close(s) { buffers.delete(s); },
@@ -123,6 +126,7 @@ describe("J-COG-settlement-provenance", () => {
       ev(position++, "workbench.proof.declared", { workspaceId: "ws-117", argv: ["true"], cwd: "." }),
       ev(position++, "run.started", { input: { workspaceId: "ws-117" } }, { agent: "agent.coding" }),
       ev(position++, "run.invocation", {}, { ok: true, capability: "tool.edit", decision: { authority: { operationId: "op-117", decisionEnvelopeId: "env-117", worldRef: WORLD_REF } } }),
+      ev(position++, "run.invocation", {}, { ok: true, capability: "tool.bash", decision: { authority: { operationId: "op-118", decisionEnvelopeId: "env-118", worldRef: WORLD_REF } } }),
       ev(position++, "run.completed", {}),
       ev(position++, "workbench.settlement.evidence", { runId, workspaceId: "ws-117", exitCode: 0, targetDigest: `sha256:${"b".repeat(64)}`, evidenceId: "ev-117", row: { evidence: { evidence_id: "ev-117" }, position: { ledger_id: "led-1", append_ordinal: 0 } }, question: {} }),
     ];
@@ -154,23 +158,32 @@ describe("J-COG-settlement-provenance", () => {
 
     try {
       await orchestrator.settleRun(runId);
-      expect(seen).toEqual(["authority_evidence", "authority_settle"]);
+      // One governed attempt per operation, in order: evidence then settle.
+      expect(seen).toEqual(["authority_evidence", "authority_settle", "authority_evidence", "authority_settle"]);
 
       const records = recorded.filter((e) => e.type === SETTLEMENT_RECORDED);
-      expect(records).toHaveLength(1);
-      const payload = records[0]!.payload as Record<string, unknown>;
-      expect(payload).toMatchObject({ runId, operationId: "op-117", status: "settled", final: true, settlementScope: "governed", receiptRef: LEDGER });
-      // Producer, subject, issuer, disposition and finality all survive in the record.
-      expect(payload.runId).toBe(runId);          // producer
-      expect(payload.operationId).toBe("op-117"); // subject
-      expect(payload.receiptRef).toBe(LEDGER);    // issuer's ledger reference
-      expect(payload.status).toBe("settled");     // disposition
-      expect(payload.final).toBe(true);           // finality
+      expect(records).toHaveLength(2);
+      const settledPayload = records.find((e) => (e.payload as Record<string, unknown>).operationId === "op-117")!.payload as Record<string, unknown>;
+      const refusedPayload = records.find((e) => (e.payload as Record<string, unknown>).operationId === "op-118")!.payload as Record<string, unknown>;
 
-      // Replay: the operation is already final, so nothing new is recorded and the standing is unchanged.
+      // A genuine receipt: SEA-Forge's status/finality and its ledger entry as a non-null receiptRef.
+      expect(settledPayload).toMatchObject({ runId, operationId: "op-117", status: "settled", final: true, settlementScope: "governed", receiptRef: LEDGER });
+      // A governed attempt without a receipt: still governed, receiptRef:null — never a fabricated receipt.
+      expect(refusedPayload).toMatchObject({ runId, operationId: "op-118", status: "refused", final: false, settlementScope: "governed", receiptRef: null });
+      // Producer, subject, issuer, disposition and finality all survive in the record.
+      expect(settledPayload.runId).toBe(runId);          // producer
+      expect(settledPayload.operationId).toBe("op-117"); // subject
+      expect(settledPayload.receiptRef).toBe(LEDGER);    // issuer's ledger reference
+      expect(settledPayload.status).toBe("settled");     // disposition
+      expect(settledPayload.final).toBe(true);           // finality
+
+      // Replay: the final operation is not re-settled, while the non-final attempt is retried as a new
+      // governed attempt (never a silent success). The final record's standing is unchanged.
       await orchestrator.settleRun(runId);
-      expect(recorded.filter((e) => e.type === SETTLEMENT_RECORDED)).toHaveLength(1);
-      expect(settlementProvenance(payload)).toEqual({ settlementScope: "governed", receiptRef: LEDGER });
+      const after = recorded.filter((e) => e.type === SETTLEMENT_RECORDED);
+      expect(after.filter((e) => (e.payload as Record<string, unknown>).operationId === "op-117")).toHaveLength(1);
+      expect(after.filter((e) => (e.payload as Record<string, unknown>).operationId === "op-118")).toHaveLength(2);
+      expect(settlementProvenance(settledPayload)).toEqual({ settlementScope: "governed", receiptRef: LEDGER });
     } finally {
       server.stop(true);
       await rm(socketPath, { force: true });
