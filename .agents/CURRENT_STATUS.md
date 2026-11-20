@@ -1,5 +1,19 @@
 # Current status
 
+**Status revision:** 44
+
+**Stage:** Owner-approved GodSpeed vocabulary consolidation
+
+**Summary:** Reconciled the owning glossary against the review patch and authoritative sources. The owner approved the conceptual distinctions. Runtime, frozen specifications, and identifiers retain their existing contracts.
+
+- Cross-checked glossary targets, source links and the eleven semantic scenarios.
+
+## Active work carried forward
+
+desktop-native-completion-D-and-F-tracks
+
+The desktop-native-completion mission's defect and feature tracks are closed, on top of the recovered session's B-tranche. Recovery: the prior session stalled in model-stream timeouts at 2026-11-06 23:42 with its whole B5 change set uncommitted; the tree was verified against the mission's recorded evidence and landed (3ed0337 + evidence 37d2c5d). D track: the dispositions ledger's global gate landed first (MenuSelect value announcement + full engine-independent keyboard contract, pinned by test/ui-menu-select.test.tsx, d5ec3fd), then all 42 native selects converted across nine ledger batches S1-S9 (commits 133876b..5b894b9, one commit per batch with its E2E delta) and the standing native-select guard (test/native-select-guard.test.ts). All 17 open A2 D-rows dispositioned: 14 fixed across five commits (e3907ff, d187434, 6f2dee0, a6c9e6b, 102cdbb), 3 recorded as already landed (D-16 b0bbd87, D-34 fb14932, D-13's stray theme icon d918589); DEBT.md reconciled. F track: both BUILD rows landed model-first — F1 session Pin (3596abc: J-SESSION-pin journey validated in the SEA model, session.setPinned capability anchored on Session, sessions-projection fold with turn-rebuild carry, sort-independent pinned-first ordering, row-menu entry, journey test) and F2 durable remote diagnostics (b9c7d9b: J-REMOTE-diagnostics journey validated with a new RemoteControl entity, bounded workbench.remote.state/.error family folded into the workbench projection's remote/control row, RemoteHost.record recorder injection covering transitions and pairing refusals but never polls or secrets, durable rendering in the Remote dialog, journey test). Milestone C recorded (d105c65): per-platform menu conventions verified with no divergences found (macOS Edit/Window roles ship by construction), WSLg real-window rows recorded, xdotool-dependent interaction rows explicitly BLOCKED for this environment. OQ1 resolved by the owner (ed8f583): the title cue stays the canonical approval-waiting surface; the notification plugin is not shipped. Milestone E1 dispatched with owner authorization: the branch pushed to origin after a history rewrite removed 895MB of accidentally-committed dist-package artifacts (regenerable packaging output, now gitignored), PR #28 marked ready, and the five-platform tauri matrix launched on tag v0.1.0-rc1.
+
 Revision 39, 2026-11-04. Branch `feat/desktop-terminal-browser` (stacked draft PR #28 on PR #27 `feat/ui-production-readiness`). Latest work: desktop-terminal-browser T10–T12-core (commits `4d12704`, `d2119a2`).
 
 Plan: `.agents/plans/desktop-terminal-browser/plan.md`. Verification log (incl. the flake matrix): `.agents/plans/desktop-terminal-browser/verification.md`.
