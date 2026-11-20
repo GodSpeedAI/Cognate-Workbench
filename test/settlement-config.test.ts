@@ -3,12 +3,26 @@ import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { validateProof, validateProofContract } from "../src/capabilities/settlement.ts";
+import { settlementComponent, validateProof, validateProofContract } from "../src/capabilities/settlement.ts";
 import { exportSweSeedProof, sweSeedFromEnv } from "../src/settlement/sweSeed.ts";
 import { realityTraceFromEnv } from "../src/settlement/realitytrace.ts";
 import { LOCAL_OPERATOR, startServer } from "../src/server.ts";
 
 describe("RealityTrace settlement configuration", () => {
+  test("status preserves missing legacy provenance without classifying it", async () => {
+    const legacy = { runId: "legacy-run", operationId: "legacy-operation", status: "settled", final: true };
+    const modern = { runId: "legacy-run", operationId: "new-operation", status: "settled", final: true, settlementScope: "governed", receiptRef: "ledger-1" };
+    const service = { events: async function* () {
+      yield { eventType: "workbench.settlement.recorded", payload: legacy };
+      yield { eventType: "workbench.settlement.recorded", payload: modern };
+    } };
+    const component = settlementComponent({ getService: () => service as never, systemCaller: LOCAL_OPERATOR, getKnownWorkspaceIds: () => new Set(), active: false });
+    const handlers = new Map<string, (input: unknown, context: unknown) => Promise<unknown>>();
+    component.activate!({ provide: (contract: { id: string }, handler: (input: unknown, context: unknown) => Promise<unknown>) => handlers.set(contract.id, handler) } as never);
+    const result = await handlers.get("settlement.status")!({ runId: legacy.runId }, { actor: { kind: "user", id: "operator" } });
+    expect(result).toEqual({ active: false, operations: [legacy, modern], evidence: [] });
+  });
+
   test("unset means off; a partial or relative configuration is refused", () => {
     expect(realityTraceFromEnv({})).toBeUndefined();
     expect(() => realityTraceFromEnv({ COGNATE_REALITYTRACE_BIN: "/usr/bin/realitytrace" })).toThrow(/together/);
