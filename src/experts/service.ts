@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { StoredEvent } from "@godspeedai/cognate-events";
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
+import { caseContextIssues, type CaseContext } from "@godspeedai/cognate-runtime-api";
 import type { ModelConfig } from "../components/providerRegistry.ts";
 import type { ModelMessage } from "@godspeedai/cognate-capabilities";
 import { EXPERT_CAPABILITY_ANCHORS } from "../../domain/index.ts";
@@ -54,6 +55,25 @@ function route(raw: unknown): ModelConfig | null {
   if (!["http:","https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTP model URL without embedded credentials or query parameters");
   if (!["openai-compatible","openai-completions","openai-responses","anthropic-messages"].includes(String(r.protocol))) throw new Error("Unsupported model protocol");
   return {providerId:text(r.providerId,"providerId",200),model:text(r.model,"model",300),baseURL:url.toString().replace(/\/$/,""),protocol:r.protocol as ModelConfig["protocol"]};
+}
+/** J-HANDOFF-case-context: the published `CaseContext` shape, validated at the mutation boundary with
+ * the vendored `caseContextIssues` so a malformed context is refused before any state is written. */
+function caseContextFrom(raw: unknown): CaseContext | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("caseContext must be an object");
+  const r = raw as Record<string, unknown>;
+  const context: CaseContext = {
+    worldRef: text(r.worldRef,"worldRef",300), semanticRef: text(r.semanticRef,"semanticRef",300),
+    caseId: text(r.caseId,"caseId",300), planItemId: text(r.planItemId,"planItemId",300), role: text(r.role,"role",200),
+    kind: (r.kind === "evaluated" || r.kind === "exploratory" ? r.kind : r.kind) as CaseContext["kind"],
+    ...(r.episodeRef !== undefined ? {episodeRef: text(r.episodeRef,"episodeRef",300)} : {}),
+    ...(r.assignmentId !== undefined ? {assignmentId: text(r.assignmentId,"assignmentId",300)} : {}),
+    ...(r.expectationRefs !== undefined ? {expectationRefs: strings(r.expectationRefs,"expectationRefs",false)} : {}),
+    ...(r.executorProvenance !== undefined ? {executorProvenance: r.executorProvenance as CaseContext["executorProvenance"]} : {}),
+  };
+  const issues = caseContextIssues(context);
+  if (issues.length) throw new Error(`invalid caseContext: ${issues.join("; ")}`);
+  return context;
 }
 
 export class ExpertsService {
@@ -178,7 +198,7 @@ export class ExpertsService {
     }
     return [...selected,...recent];
   }
-  makeAssignment(state: ExpertState, input: {id:string; e:Expert; conversation:Conversation; purpose:string; acceptance:string[]; model:ModelConfig; parent?:Assignment; mode:string; authorityTools:ExpertTool[]; taskId?:string | null; reviews?:string | null}): Assignment {
+  makeAssignment(state: ExpertState, input: {id:string; e:Expert; conversation:Conversation; purpose:string; acceptance:string[]; model:ModelConfig; parent?:Assignment; mode:string; authorityTools:ExpertTool[]; taskId?:string | null; reviews?:string | null; caseContext?:CaseContext; assertedBy?:string; worldCorroboration?:"verified" | "asserted"}): Assignment {
     if (state.assignments[input.id]) throw new Error("Assignment identity already exists");
     const {e,conversation,parent} = input;
     const t = conversation.teamId ? team(state,conversation.teamId,true) : undefined;
@@ -210,6 +230,8 @@ export class ExpertsService {
       route:structuredClone(input.model),tools:allowed,maxSteps:e.definition.maxSteps,context:this.context(state,e,conversation,reviewed),
       ...(e.definition.budget ? {budget:structuredClone(e.definition.budget)}:{}),
       ...(taskId ? {taskId} : {}),
+      ...(input.caseContext ? {caseContext:structuredClone(input.caseContext),worldCorroboration:input.worldCorroboration ?? "asserted"} : {}),
+      ...(input.assertedBy !== undefined ? {assertedBy:input.assertedBy} : {}),
     };
     const a: Assignment = {id:input.id,expertId:e.id,conversationId:conversation.id,teamId:t?.id ?? null,parentId:parent?.id ?? null,parentAttempt:parent?.attempt ?? null,
       purpose:input.purpose,acceptance:input.acceptance,depth,attempt:1,status:"queued",workspaceId:conversation.workspaceId,mode:input.mode,
@@ -330,7 +352,20 @@ export class ExpertsService {
     // any Assignment serves it — validated before the mutation so a refused id leaves no partial
     // state. Delegated children inherit the validated id through `makeAssignment`'s parent line.
     let namedTaskId: string | null = null;
+    // J-HANDOFF-case-context: an optional CEP context and its asserted provenance are validated
+    // before the mutation too. A malformed context (including the published evaluated-without-
+    // episodeRef rule) is refused with a typed message; `assertedBy` is a claim and never a refusal.
+    let handoffContext: CaseContext | undefined;
+    let handoffAssertedBy: string | undefined;
+    let handoffCorroboration: "verified" | "asserted" | undefined;
     if (capability === "expert.converse" || capability === "team.converse") {
+      handoffContext = caseContextFrom(input.caseContext);
+      if (input.assertedBy !== undefined) {
+        if (typeof input.assertedBy !== "string" || input.assertedBy.length > 500) throw new Error("assertedBy must be a string of at most 500 characters");
+        handoffAssertedBy = input.assertedBy;
+      }
+      if (input.worldCorroboration !== undefined && input.worldCorroboration !== "verified" && input.worldCorroboration !== "asserted") throw new Error("worldCorroboration must be verified or asserted");
+      if (handoffContext) handoffCorroboration = (input.worldCorroboration as "verified" | "asserted" | undefined) ?? "asserted";
       if (input.taskId !== undefined && input.taskId !== null && String(input.taskId).trim() !== "") {
         namedTaskId = text(input.taskId,"taskId",200);
         const workspaceId = text(input.workspaceId,"workspaceId",200);
@@ -419,7 +454,7 @@ export class ExpertsService {
           if (!c) {c={id:`conversation:${id}`,scope,teamId:t?.id ?? null,expertId:scope==="team" ? null:e.id,workspaceId,title:text(input.message,"message",20000).slice(0,80),messageIds:[],assignmentIds:[],createdAt:new Date().toISOString()};state.conversations[c.id]=c;}
           c.updatedAt=new Date().toISOString();
           const purpose=text(input.message,"message");
-          const a=this.makeAssignment(state,{id,e,conversation:c,purpose,acceptance:["Answer the human's objective with attributable evidence and disclose unresolved conditions"],model:selectedRoute!,mode:input.mode === "workspace-write" ? "workspace-write" : "read-only",authorityTools:t?.tools ?? [...EXPERT_TOOLS],...(namedTaskId?{taskId:namedTaskId}:{}),...(input.reviews!==undefined&&input.reviews!==null?{reviews:text(input.reviews,"reviews",200)}:{})});
+          const a=this.makeAssignment(state,{id,e,conversation:c,purpose,acceptance:["Answer the human's objective with attributable evidence and disclose unresolved conditions"],model:selectedRoute!,mode:input.mode === "workspace-write" ? "workspace-write" : "read-only",authorityTools:t?.tools ?? [...EXPERT_TOOLS],...(namedTaskId?{taskId:namedTaskId}:{}),...(handoffContext?{caseContext:handoffContext}:{}),...(handoffAssertedBy!==undefined?{assertedBy:handoffAssertedBy}:{}),...(handoffCorroboration?{worldCorroboration:handoffCorroboration}:{}),...(input.reviews!==undefined&&input.reviews!==null?{reviews:text(input.reviews,"reviews",200)}:{})});
           const messageId=`message:${id}`;
           state.messages[messageId]={id:messageId,conversationId:c.id,assignmentId:a.id,sender:{kind:"human",id:ctx.actor.id},recipientId:e.id,text:purpose,correlationId:`expert:${a.id}:1`,causationId:ctx.causationId ?? null,delivery:"queued",replyTo:null};c.messageIds.push(messageId);
           return {conversationId:c.id,assignmentId:a.id};

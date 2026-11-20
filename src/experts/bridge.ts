@@ -45,7 +45,7 @@ export class ExpertCompletionBridge {
         // to the operator or the shared system caller. Narrowing is lineage-derived (the child's
         // own assignment bounds); the principal creates no new identity authority (§1.7).
         const runCaller={actor:{id:`wb-agent:${a.expertId}`,kind:"agent" as const},tenant:this.tenant};
-        const run=await service.startRun(runCaller,{agent:EXPERT_AGENT,input:{assignmentId:a.id,attempt:a.attempt},idempotencyKey:`expert-run:${a.id}:${a.attempt}`,correlationId:`expert:${a.id}:${a.attempt}`});
+        const run=await service.startRun(runCaller,{agent:EXPERT_AGENT,input:{assignmentId:a.id,attempt:a.attempt},idempotencyKey:`expert-run:${a.id}:${a.attempt}`,correlationId:`expert:${a.id}:${a.attempt}`,...(a.execution.caseContext ? {caseContext:a.execution.caseContext} : {})});
         startedThisPass.set(groupKey,(startedThisPass.get(groupKey) ?? 0)+1);
         await this.experts.mutate(this.tenant,`bind:${a.id}:${a.attempt}`,{runId:run.runId},s=>{
           const current=s.assignments[a.id]!;
