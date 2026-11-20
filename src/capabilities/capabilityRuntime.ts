@@ -98,6 +98,8 @@ export interface CapabilityRuntimeOptions {
   /** Record path for enforcement decisions (§8: point A refusals always; bundle-path allows). */
   readonly recordDecision: (event: { readonly type: string; readonly payload: Json }) => Promise<void>;
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
+  /** Startup exclusion; a missing or unavailable read refuses mounts. */
+  readonly getBootExclusion?: () => import("../workbench/safeMode.ts").SafeModeRead | undefined;
   /** Boot-rebuilt rows the dispatcher mounts from (fold-first/mount-second, §4.2.8). */
   readonly activeSet: readonly { capabilityId: string; version: string; dir: string }[];
   readonly hooks?: CapabilityRuntimeHooks;
@@ -169,6 +171,8 @@ export function capabilityRuntimeComponent(options: CapabilityRuntimeOptions): C
   }
 
   const mountInterpreter = async (bundle: LoadableBundle, sessionId?: string): Promise<HandlerEntry> => {
+    const exclusion = options.getBootExclusion?.();
+    if (!exclusion || exclusion.safe) throw new Error("safe mode excludes bundle mounts");
     const version = bundle.versionHash;
     const key = keyOf(bundle.capabilityId, version, sessionId);
     const scopeId = `cap-runtime:${bundle.capabilityId}:${sessionId ?? "persistent"}:${version}`;

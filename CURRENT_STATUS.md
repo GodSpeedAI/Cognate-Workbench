@@ -1,3 +1,43 @@
+# Current status — revision 46
+
+Bundle details show recent decisions from the existing tenant-scoped projection. Each displayed row supplies the exact bundle ID, actor, action, outcome, and time. A session appears when its decision supplies one.
+
+The existing route failed the focused regression before the change. Type checking and all 16 focused tests passed after the wiring. The hosted safe-mode run failed in its existing browser-preview test. That exact test passed locally. Hosted verification for the combined checkpoint is pending.
+
+Live fragment descriptors and effective authority still need trusted inputs.
+
+---
+
+# Current status — revision 45
+
+The Capabilities tab reads safe mode from the server and shows Clear to the authenticated operator. Existing policy denies other callers. The Workbench service records a refused direct clear through the existing safe-mode fault recorder.
+
+Type checking and all 16 focused tests passed. The live server regression reproduced the missing audit event before the fix. Chromium used a server-issued operator session to clear a durable safe-mode fault after restart and confirmed one clear record.
+
+Live fragment descriptors, effective grants, and attributable actions still need trusted production input. The full hosted gate is pending for this checkpoint.
+
+---
+
+# Current status — revision 44
+
+The Workbench capabilities tab shows registered bundles, their latest versions, and their recorded activations. It displays the version used for each activation and any recorded suspension reason or ceiling.
+
+The route regression detected missing bundle details on the older branch. The current branch passed 11 focused capability detail and safe-mode tests and type checking. Hosted verification passed all seven jobs for the preceding safe-boot checkpoint `05d50c8`.
+
+Live fragment presentation, effective grants, attributable actions, and safe-mode controls need trusted production data. T4b covers rebuilding active handlers from durable state.
+
+---
+
+# Current status — revision 43
+
+The server reads the durable safe-mode state on boot before the capability dispatcher mounts any bundle. The dispatcher refuses a mount when safe mode is active or the boot read is unavailable.
+
+The restart regression failed at `bbe6c73` because activation succeeded after the grant was present. The new gate passed the same regression and all six safe-mode tests. `just typecheck` passed. Normal activation passed. The combined activation suite had two timeouts, and both cases passed on individual reruns.
+
+Full `just verify` is pending. T4a still needs live presentation and safe-mode controls. T4b covers rebuilding active handlers from durable state.
+
+---
+
 # Current status — revision 42
 
 The **desktop-native-completion** mission's D and F tracks are closed, and Milestone C is

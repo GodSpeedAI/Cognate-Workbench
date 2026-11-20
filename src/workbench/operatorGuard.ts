@@ -12,6 +12,10 @@ export interface OperatorGuardContext {
   readonly runId?: string;
 }
 
+export function isDirectOperator(ctx: OperatorGuardContext): boolean {
+  return ctx.actor.kind === "user" && !ctx.runId;
+}
+
 export function operatorOnlyRefusal(what: string, ctx: OperatorGuardContext): string {
   return `${what} is a human decision: only a direct operator may do this, not ${ctx.actor.kind} "${ctx.actor.id}"${ctx.runId ? ` inside run ${ctx.runId}` : ""}`;
 }
@@ -27,7 +31,7 @@ export interface OperatorRefusalContext {
  *  (§1.6.iii): same predicate as `requireOperator`, preserving each site's asserted message
  *  text via `message`, and recording the durable refusal when a channel exists (in-run). */
 export async function operatorOnly(ctx: OperatorRefusalContext, capability: string, message?: string): Promise<void> {
-  if (ctx.actor.kind === "user" && !ctx.runId) return;
+  if (isDirectOperator(ctx)) return;
   const reason = message ?? `${capability}: only a direct human operator may ${capability}`;
   try {
     await ctx.emit?.("authority.decision.recorded", {
@@ -51,7 +55,7 @@ export async function operatorOnly(ctx: OperatorRefusalContext, capability: stri
  *  durable refusal (`authority.decision.recorded`) when a recorder is wired; a recording
  *  failure never masks the refusal itself. */
 export async function requireOperator(ctx: OperatorGuardContext, what: string, record?: (event: { readonly type: string; readonly payload: unknown }) => Promise<void> | void): Promise<void> {
-  if (ctx.actor.kind === "user" && !ctx.runId) return;
+  if (isDirectOperator(ctx)) return;
   const reason = operatorOnlyRefusal(what, ctx);
   try {
     await record?.({

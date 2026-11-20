@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { defaultHome, packaged, resourcePath } from "./resources.ts";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
-import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
+import { ServiceError, type Caller, type RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRuntime } from "@godspeedai/cognate-runtime-bun";
 import { storeConfigFor } from "./store.ts";
 import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
@@ -27,6 +27,7 @@ import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
 import { authorityGrantsComponent, classifyCapabilityStore, seedOperatorRootGrant, sweepExpiredGrants } from "./capabilities/authorityGrants.ts";
 import { capabilityBundlesComponent } from "./capabilities/capabilityBundles.ts";
 import { capabilityRuntimeComponent, type CapabilityRuntimeHooks } from "./capabilities/capabilityRuntime.ts";
+import { readBootExclusion, SafeModeController } from "./workbench/safeMode.ts";
 import { createMcpSupervisor, reconcileAfterIndex, type McpSupervisor } from "./capabilities/mcpManage.ts";
 import { acquireLongLeaseSlot, releaseAllLongLeaseSlots, releaseLongLeaseSlot } from "./capabilities/aggregateContainment.ts";
 import type { PostureRecord } from "./capabilities/execSpawn.ts";
@@ -329,6 +330,8 @@ const GRANTED_CAPABILITIES = [
   "capability.bundle.activate",
   "capability.bundle.deactivate",
   "capability.bundle.uninstall",
+  "workbench.safemode.status",
+  "workbench.safemode.clear",
   "tool.capability_invoke",
   "tool.skill_load",
   // T2: the run-start resolver's read-only faces (data and records, never authority).
@@ -360,6 +363,7 @@ function buildPolicy(): Policy {
     "git.checkout.attach", "git.checkout.merge", "git.checkout.remove", "git.checkout.recreate",
     "session.harness.bind",
     "authority.grant.issue", "authority.grant.revoke", "authority.grant.list", "capability.runtime.enable",
+    "workbench.safemode.clear",
   ]);
   return rulePolicy(
     "deepseek-harness-app",
@@ -696,6 +700,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   let pollApprovals: (() => Promise<number>) | undefined;
   let capabilityRuntimeIndex!: AuthorityIndex;
   let capabilityRuntimeRecorder!: LifecycleRecorder;
+  let safeModeController: SafeModeController | undefined;
   const capabilityStoreKind = classifyCapabilityStore(process.env);
   // R4: ONE mutex for activation, deactivation, uninstall and grant issue/revoke (valid under §1.5).
   const capabilityMutex = createRuntimeMutex();
@@ -859,6 +864,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
         semanticRefs: capabilityRuntimeRefs,
       }),
       capabilityBundlesComponent({
+        safeMode: () => { if (!safeModeController) throw new Error("safe mode is not initialized"); return safeModeController; },
         mutex: capabilityMutex,
         getService,
         lifecycleRecorder: () => capabilityRuntimeRecorder,
@@ -887,6 +893,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
           await capabilityRuntimeRecorder.commitBatch(`decisions:${String((event.payload as Record<string, unknown>).capability ?? "runtime")}`, [event as { type: string; payload: Record<string, unknown> }]);
         },
         activeSet: [],
+        getBootExclusion: () => safeModeController?.read(),
         getMcpHost: () => mcpSupervisor.host,
         ...(options.capabilityRuntimeHooks ? { hooks: options.capabilityRuntimeHooks } : {}),
         semanticRefs: capabilityRuntimeRefs,
@@ -924,7 +931,23 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     ],
     system: SYSTEM_CALLER.actor,
   });
-  const governedService = expertGovernedService(runtime.service,SYSTEM_CALLER);
+  // T4a: read committed exclusions before the server can accept a bundle mount.
+  const safeMode = new SafeModeController(runtime.store, LOCAL_OPERATOR.tenant, await readBootExclusion(runtime.store, []), []);
+  safeModeController = safeMode;
+  const expertService = expertGovernedService(runtime.service, SYSTEM_CALLER);
+  const governedService: RuntimeService = {
+    ...expertService,
+    async invoke(caller, request) {
+      try {
+        return await expertService.invoke(caller, request);
+      } catch (error) {
+        if (request.capability === "workbench.safemode.clear" && error instanceof ServiceError && error.code === "permission_denied") {
+          await safeMode.recordUnauthorizedClear(caller.actor.id, `actor kind ${caller.actor.kind}`);
+        }
+        throw error;
+      }
+    },
+  };
   serviceRef.current = governedService;
   pollApprovals = () => runtime.pollApprovals();
   finishServiceBoot(governedService);

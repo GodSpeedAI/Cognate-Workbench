@@ -11,7 +11,7 @@ import type { Json } from "@godspeedai/cognate-events";
 import type { RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { randomUUID } from "node:crypto";
 import Ajv from "ajv";
-import { requireOperator } from "../workbench/operatorGuard.ts";
+import { isDirectOperator, requireOperator } from "../workbench/operatorGuard.ts";
 import { authorizeCapabilityOp } from "../workbench/authoritySelection.ts";
 import { createRuntimeMutex } from "../workbench/runtimeMutex.ts";
 import type { ExecutionWorldRegistry } from "@godspeedai/cognate-execution";
@@ -94,6 +94,7 @@ export interface CapabilityBundlesOptions {
   readonly semanticRefs?: Readonly<Record<string, SemanticRef | undefined>>;
   /** The shared runtime mutex: uninstall serializes with activation/deactivation/grant changes. */
   readonly mutex?: import("../workbench/runtimeMutex.ts").RuntimeMutex;
+  readonly safeMode?: () => import("../workbench/safeMode.ts").SafeModeController;
 }
 
 export function capabilityBundlesComponent(options: CapabilityBundlesOptions): Component {
@@ -102,6 +103,8 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
   const contracts: CapabilityContract[] = [
     { id: "capability.bundle.register", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.bundle.register"] },
     { id: "capability.bundle.uninstall", version: "1.0.0", semanticRef: options.semanticRefs?.["capability.bundle.uninstall"] },
+    { id: "workbench.safemode.status", version: "1.0.0", semanticRef: options.semanticRefs?.["workbench.safemode.status"] },
+    { id: "workbench.safemode.clear", version: "1.0.0", semanticRef: options.semanticRefs?.["workbench.safemode.clear"] },
   ];
   const localMutex = createRuntimeMutex();
   const systemCaller = { actor: { id: "system", kind: "system" as const }, tenant: options.tenant };
@@ -120,6 +123,24 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
     id: "capability-runtime:bundles",
     provides: contracts,
     activate(fiber) {
+      fiber.provide(contracts[2] as CapabilityContract, async (_raw: unknown, ctx: HandlerContext) => {
+        const controller = options.safeMode?.();
+        if (!controller) throw new Error("safe mode is unavailable");
+        const { safe, reason } = controller.read();
+        return { safe, reason, canClear: isDirectOperator(ctx) };
+      });
+      fiber.provide(contracts[3] as CapabilityContract, async (_raw: unknown, ctx: HandlerContext) => {
+        await requireOperator(ctx, "workbench.safemode.clear", async () => {
+          const controller = options.safeMode?.();
+          if (!controller) throw new Error("safe mode is unavailable");
+          await controller.recordUnauthorizedClear(ctx.actor.id, `actor kind ${ctx.actor.kind}`);
+        });
+        return (options.mutex ?? localMutex).run(async () => {
+          const controller = options.safeMode?.();
+          if (!controller) throw new Error("safe mode is unavailable");
+          return controller.clear({ role: "operator", id: ctx.actor.id });
+        });
+      });
 
 
       fiber.provide(contracts[0] as CapabilityContract, async (raw: unknown, ctx: HandlerContext) => {

@@ -259,6 +259,7 @@ export const WORKBENCH_EVENTS = [
   "capability.mcp.exited",
   "capability.mcp.tool_invoked",
   "workbench.safemode.boot_attempted",
+  "workbench.safemode.boot_ready",
   "workbench.safemode.cleared",
   "workbench.bundles.pruned",
   "session.activation",
