@@ -8,6 +8,7 @@
 //   world.fork / world.discard        a disposable execution world forked from a settled world
 //   verification.run                  run the frozen criterion's checks; the *process result* is the fact
 //   case.derive                       CaseProjection + Reality, folded from events
+//   affordance.field                  the Case's current/blocked moves, from the one resolver
 //   world.settle                      human-only promotion of a candidate to the settled world
 //   risk.assess                       mediation (Sentinel + RiskPreflight [+ extra mods]) for one operation
 import { createHash, randomUUID } from "node:crypto";
@@ -44,6 +45,16 @@ export const CASE_OPERATIONS: readonly PossibleOperation[] = [
   { id: "settle", label: "Settle candidate", purpose: "promote candidate to the settled world", advances: "settlement", requires: ["verification.passed"], authority: "human" },
 ];
 
+/**
+ * A move is *evaluated* when its eligibility can hold only under an intact Frozen Criterion: it
+ * requires the criterion itself, or a fact only a criterion-bound observation can establish
+ * (`verification.ran|passed|failed`). The set is a property of the bounded `CASE_OPERATIONS`
+ * catalogue, never of a caller-supplied list.
+ */
+function isEvaluatedMove(op: PossibleOperation): boolean {
+  return (op.requires ?? []).some((key) => key === "criterion.frozen" || key.startsWith("verification."));
+}
+
 export interface CognitiveOptions {
   readonly getService: () => RuntimeService;
   readonly systemCaller: Caller;
@@ -78,7 +89,7 @@ async function waitDone(service: RuntimeService, caller: Caller, runId: string):
 }
 
 export function cognitiveComponent(options: CognitiveOptions): Component {
-  const ids = ["case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard", "verification.run", "case.derive", "world.settle", "risk.assess", "case.observe", "ui.focus.publish", "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review", "method.accept", "method.active"];
+  const ids = ["case.open", "criterion.freeze", "world.freeze", "world.fork", "world.attach", "world.discard", "verification.run", "case.derive", "affordance.field", "world.settle", "risk.assess", "case.observe", "ui.focus.publish", "ui.context", "ui.request", "ui.pending", "experiment.round", "experiment.status", "method.review", "method.accept", "method.active"];
   const contract = (id: string) => ({
     id,
     version: "1.0.0",
@@ -228,6 +239,27 @@ export function cognitiveComponent(options: CognitiveOptions): Component {
           facts.push({ eventType: CASE_EVENTS.verification, payload: { caseId: i.caseId, checkId: check.id, passed, criterionHash: crit.criterionHash, candidateHash: hash, exitCode: r.exitCode, tail: (r.stdout + r.stderr).slice(-400) } });
         }
         return { observed: true, candidateHash: hash, healthy, facts: facts as unknown as Json };
+      }));
+
+      fiber.provide(contract("affordance.field"), withCtx(async (i: { caseId: string; operation?: string; availableCapabilities?: string[] }, ctx) => {
+        // Read-only: the Case's current/blocked moves, resolved by the one existing resolver
+        // (`resolveAffordances` via `deriveCase`) over the bounded `CASE_OPERATIONS` catalogue. The
+        // optional single `operation` names one catalogue move the caller wants evaluated; an
+        // evaluated move with no applicable Frozen Criterion is refused, never silently reported as
+        // reachable. There is no caller-supplied operation list and no second catalogue.
+        const evs = await events(callerOf(ctx));
+        if (!evs.some((e) => e.eventType === CASE_EVENTS.opened && e.payload.caseId === i.caseId)) throw new Error(`affordance.field: unknown case ${i.caseId}`);
+        const projection = deriveCase(i.caseId, evs, {
+          operations: CASE_OPERATIONS,
+          facts: { availableCapabilities: new Set(i.availableCapabilities ?? ["tool.edit", "tool.bash", "tool.read"]), recoveryAvailable: true, observerAvailable: true },
+        });
+        if (i.operation) {
+          const op = CASE_OPERATIONS.find((o) => o.id === i.operation);
+          if (!op) throw new Error(`affordance.field: unknown operation ${i.operation}`);
+          const criterionApplies = projection.settlementConditions.find((c) => c.id === "criterion")?.satisfied === true;
+          if (isEvaluatedMove(op) && !criterionApplies) throw new Error(`affordance.field refused: ${i.operation} is an evaluated move and no frozen criterion applies to case ${i.caseId}`);
+        }
+        return projection.field as unknown as Json;
       }));
 
       fiber.provide(contract("case.derive"), withCtx(async (i: { caseId: string; availableCapabilities?: string[] }, ctx) => {

@@ -1,7 +1,7 @@
 import { fingerprint as nativeFingerprint, type Json } from "@godspeedai/cognate-events";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { ServiceError } from "@godspeedai/cognate-runtime-api";
-import { EXPERTS_THREAD, EXPERT_TOOLS, emptyExpertState, type ExpertState, type Team, type ExpertTool } from "./types.ts";
+import { EXPERTS_THREAD, EXPERT_TOOLS, emptyExpertState, type Expert, type ExpertState, type Team, type ExpertTool } from "./types.ts";
 import { isExpertStateManifest, prepareExpertManifest, prepareExpertManifestUpdate, privateConversationIds, restoreExpertManifest, restoreExpertSectionEntries, stateSections, type ExpertStateManifest } from "./persistence.ts";
 
 export type ExpertRootRead =
@@ -57,22 +57,47 @@ const PROFILES = [
 export function seedExperts(state: ExpertState): void {
   // Seed once, including deliberate user removals/archives. No restart overwrites customization.
   if (state.receipts["seed:v1"]) return;
-  for (const [id, name, instructions] of PROFILES) {
-    state.experts[id] ??= {
-      id, name, lifecycle: "active",
-      definition: {id:`definition:${id}`,specialization:name,instructions,route:null,
-        tools: id === "product-manager" ? ["read","team_delegate","team_message","expert_memory_read","expert_memory_write","expert_return"]
-          : id === "builder" ? ["read","edit","bash","expert_memory_read","expert_memory_write","expert_return"]
-          : ["read","bash","expert_memory_read","expert_memory_write","expert_return"],
-        contextBudget:16000,maxSteps:12},
-    };
-  }
-  state.teams["cognate-team"] ??= {
+  for (const [id, name, instructions] of PROFILES) state.experts[id] ??= baselineExpert(id, name, instructions);
+  state.teams["cognate-team"] ??= baselineTeam();
+  state.receipts["seed:v1"] = {fingerprint:"seed:v1",result:{ok:true}};
+}
+
+function baselineExpert(id: string, name: string, instructions: string): Expert {
+  return {
+    id, name, lifecycle: "active",
+    definition: {id:`definition:${id}`,specialization:name,instructions,route:null,
+      tools: id === "product-manager" ? ["read","team_delegate","team_message","expert_memory_read","expert_memory_write","expert_return"]
+        : id === "builder" ? ["read","edit","bash","expert_memory_read","expert_memory_write","expert_return"]
+        : ["read","bash","expert_memory_read","expert_memory_write","expert_return"],
+      contextBudget:16000,maxSteps:12},
+  };
+}
+
+function baselineTeam(): Team {
+  return {
     id:"cognate-team",name:"Cognate Team",lifecycle:"active",tools:[...EXPERT_TOOLS],
     members:PROFILES.map(([expertId]) => ({expertId,role:expertId === "product-manager" ? "orchestrator" : "specialist",tools:[...EXPERT_TOOLS]})),
     limits:{maxDepth:2,maxAssignments:12,maxUnread:20,maxRounds:8,maxConcurrentRuns:2,admissionBatch:1},
   };
-  state.receipts["seed:v1"] = {fingerprint:"seed:v1",result:{ok:true}};
+}
+
+/** Operator recovery of the built-in profiles and the default Team (D-minimal-contracts D3, O5).
+ * Verbatim: an absent baseline id is created; with `includeArchived` a baseline id the operator
+ * archived is reactivated; an active baseline id and every custom id are never modified. The
+ * mutation boundary re-asserts the one-Orchestrator invariant after this returns. */
+export function restoreExperts(state: ExpertState, includeArchived: boolean): {created: string[]; reactivated: string[]; kept: string[]} {
+  const created: string[] = [];
+  const reactivated: string[] = [];
+  const kept: string[] = [];
+  for (const [id, name, instructions] of PROFILES) {
+    const existing = state.experts[id];
+    if (!existing) { state.experts[id] = baselineExpert(id, name, instructions); created.push(id); }
+    else if (includeArchived && existing.lifecycle === "archived") { existing.lifecycle = "active"; reactivated.push(id); }
+    else kept.push(id);
+  }
+  if (!state.teams["cognate-team"]) { state.teams["cognate-team"] = baselineTeam(); created.push("cognate-team"); }
+  else kept.push("cognate-team");
+  return {created,reactivated,kept};
 }
 
 export async function readExperts(service: RuntimeService, caller: Caller): Promise<{state: ExpertState; version: number}> {
