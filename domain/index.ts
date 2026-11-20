@@ -408,6 +408,7 @@ export const EXPERT_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "expert.tool.invoke": "ExpertEffectCommitment",
   "expert.effect.resolve": "ExpertEffectCommitment",
   "experts.seed": "ExpertDefinition",
+  "experts.restore": "ExpertDefinition",
 };
 
 export function expertCapabilityBindings(domain: Domain): readonly CapabilityBinding[] {

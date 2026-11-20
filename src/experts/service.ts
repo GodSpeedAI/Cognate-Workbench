@@ -10,7 +10,7 @@ import { EXPERT_CAPABILITY_ANCHORS } from "../../domain/index.ts";
 import { parseExpertBudget, type ExpertModelBudget } from "./economics.ts";
 import { decodeExpertCursor, encodeExpertCursor, EXPERT_PAGE_DEFAULT, pageExpertRows, selectConversationPage } from "./pagination.ts";
 import { EXPERT_AGENT, EXPERT_TOOLS, isUnfinished, type Assignment, type Conversation, type Expert, type ExpertExecution, type ExpertMemory, type ExpertMessage, type ExpertState, type ExpertTool, type Handoff, type Team } from "./types.ts";
-import { assertTeamInvariant, fingerprint, integer, json, mutateExperts, readExperts, readExpertsScope, readExpertRoot, seedExperts, text, tools } from "./state.ts";
+import { assertTeamInvariant, fingerprint, integer, json, mutateExperts, readExperts, readExpertsScope, readExpertRoot, restoreExperts, seedExperts, text, tools } from "./state.ts";
 import { readExpertRecords } from "./persistence.ts";
 
 type Command = Record<string, unknown>;
@@ -222,6 +222,8 @@ export class ExpertsService {
     let invoking: Assignment | undefined;
     if (internal) invoking = await this.invocation(ctx,input.assignmentId);
     else if (ctx.actor.kind !== "user" && capability !== "experts.seed") throw new Error("Only the human operator may manage identities, configuration, reviews and settlement");
+    // Recovery is a deliberate operator act, refused from inside a run even for a user-kind caller.
+    if (capability === "experts.restore" && (ctx.actor.kind !== "user" || !!ctx.runId)) throw new Error("Expert restoration is operator-only and refused from inside a run");
     if(invoking && capability.startsWith("expert.memory.") && !invoking.execution.tools.includes(capability === "expert.memory.read" ? "expert_memory_read":"expert_memory_write"))throw new Error("Expert memory capability is not authorized");
     if(invoking && capability === "team.handoff" && !invoking.execution.tools.includes("expert_return"))throw new Error("Expert return capability is not authorized");
     if (capability === "expert.context") {
@@ -343,6 +345,7 @@ export class ExpertsService {
       state.audit.push({id:requestId,capability,by:invoking?.expertId ?? ctx.actor.id,actorKind:invoking ? "expert":ctx.actor.kind,runId:ctx.runId ?? null,causationId:ctx.causationId ?? null});
       switch (capability) {
         case "experts.seed": seedExperts(state); return {ok:true};
+        case "experts.restore": return restoreExperts(state, input.includeArchived === true);
         case "expert.save": {
           const eId = input.expertId ? text(input.expertId,"expertId",200) : id;
           const previous = state.experts[eId];
