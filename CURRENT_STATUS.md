@@ -1,3 +1,11 @@
+# Current status — revision 48
+
+The isolated #110 safe-mode regression confirms that the operator can restore Experts while safe mode is active, an agent and an in-Run caller are refused, and safe mode remains active. The test passed with an isolated PostgreSQL instance; no production code changed.
+
+#110 remains open. If the default Team is absent while a baseline Expert is archived, restoring the Team verbatim as active conflicts with both the active-membership rule and the requirement not to reactivate archived Experts without explicit consent. A specification decision is still required for that state. Full `just verify` remains pending.
+
+---
+
 # Current status — revision 47
 
 The optional Gauntlet escalation was dropped under #108/#122’s scope guard. Ordinary Case work remains available, and `case.escalate` has no provider. Historical escalation event names remain recognized.
