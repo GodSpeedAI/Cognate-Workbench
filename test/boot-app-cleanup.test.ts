@@ -38,7 +38,7 @@ test("stopping a sidecar test app closes its client before port reuse", async ()
     await writeFile(sidecar, `#!/usr/bin/env bun
 Bun.serve({ port: Number(process.env.PORT), hostname: "127.0.0.1", fetch(request) {
   const path = new URL(request.url).pathname;
-  if (path === "/health") return new Response("ok");
+  if (path === "/health") return Response.json({ ok: true });
   if (path === "/app.js") return new Response('"wbs1.test-fixture"');
   return new Response("not found", { status: 404 });
 } });
