@@ -94,7 +94,7 @@ describe("RED journeys — UX evidence", () => {
         const dialog = page.getByRole("dialog", { name: "Add workspace" });
         const field = dialog.getByRole("combobox", { name: "Workspace directory path" });
         await field.fill(join(browseRoot, "pro"));
-        await dialog.getByRole("listbox", { name: "Suggested folders" }).getByRole("option", { name: /projects/i }).waitFor();
+        await dialog.getByRole("listbox", { name: "Suggested folders" }).getByRole("option").filter({ has: page.locator(".dir-suggest-name").filter({ hasText: /^projects$/ }) }).waitFor();
         await shot(page, "07-directory-suggestions");
         await field.press("ArrowDown");
         await field.press("Tab");
