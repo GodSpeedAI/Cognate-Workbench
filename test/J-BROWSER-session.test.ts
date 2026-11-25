@@ -186,16 +186,19 @@ describe("J-BROWSER-session", () => {
 
         // Second identity: the policy refuses the capability before any browser exists.
         let refused = "";
+        let foreignClient: ReturnType<typeof import("@godspeedai/cognate-client").createClient> | undefined;
         try {
           const transport = (await import("@godspeedai/cognate-protocol-connect-bun")).connectTransport(app.url);
           const service = (await import("@godspeedai/cognate-protocol-connect")).createRemoteRuntimeService(transport, () => "local:looker");
-          const foreignClient = (await import("@godspeedai/cognate-client")).createClient({
+          foreignClient = (await import("@godspeedai/cognate-client")).createClient({
             service,
             caller: { tenant: "local", actor: { id: "looker", kind: "user" } },
           });
           await foreignClient.invoke("browser.open", {} as never);
         } catch (error) {
           refused = (error as Error).message;
+        } finally {
+          await foreignClient?.close();
         }
         expect(refused.length).toBeGreaterThan(0);
         void view;

@@ -199,16 +199,19 @@ describe("J-TERMINAL-session", () => {
         // A second identity cannot open a terminal at all (the policy refuses non-operator
         // identities every capability, and the handler itself demands a human user).
         let refused = "";
+        let foreignClient: ReturnType<typeof import("@godspeedai/cognate-client").createClient> | undefined;
         try {
           const transport = (await import("@godspeedai/cognate-protocol-connect-bun")).connectTransport(app.url);
           const service = (await import("@godspeedai/cognate-protocol-connect")).createRemoteRuntimeService(transport, () => "local:inquisitor");
-          const foreignClient = (await import("@godspeedai/cognate-client")).createClient({
+          foreignClient = (await import("@godspeedai/cognate-client")).createClient({
             service,
             caller: { tenant: "local", actor: { id: "inquisitor", kind: "user" } },
           });
           await foreignClient.invoke("terminal.open", { workspaceId } as never);
         } catch (error) {
           refused = (error as Error).message;
+        } finally {
+          await foreignClient?.close();
         }
         expect(refused.length).toBeGreaterThan(0);
       } finally {

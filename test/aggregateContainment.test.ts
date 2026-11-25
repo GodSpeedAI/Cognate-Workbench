@@ -53,12 +53,13 @@ interface Fixture {
 async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<void> {
   const home = await mkdtemp(join(tmpdir(), "wb-containment-unit-"));
   let app: AppServer | undefined;
+  let client: ReturnType<typeof createClient> | undefined;
   try {
     app = await startServer({ executionPosture: "uncontained-local", port: 0, home, devAuth: true });
     const service = createRemoteRuntimeService(connectTransport(app.url), () => `local:${LOCAL_OPERATOR.actor.id}`);
-    const client = createClient({ service, caller: LOCAL_OPERATOR });
+    client = createClient({ service, caller: LOCAL_OPERATOR });
     const setQuotas = async (quotas: Record<string, number>) => {
-      await client.invoke("settings.changeContainment", { containment: quotas });
+      await client!.invoke("settings.changeContainment", { containment: quotas });
       // The settings.changed run folds asynchronously; wait for the durable row.
       for (let i = 0; i < 400; i++) {
         const rows = (await app!.runtime.service.readProjection(LOCAL_OPERATOR, { name: "settings" })).rows;
@@ -72,9 +73,9 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
       const thread = await app!.runtime.service.readSharedState(SYSTEM, { threadId: CONTAINMENT_THREAD });
       return JSON.parse(JSON.stringify(thread.state ?? emptyContainmentState())) as { executions: Record<string, { outcome?: string; status: string }> };
     };
-    await fn({ app, setQuotas, ledger, stop: async () => { await app?.stop(); app = undefined; } });
+    await fn({ app, setQuotas, ledger, stop: async () => { await client?.close(); client = undefined; await app?.stop(); app = undefined; } });
   } finally {
-    await app?.stop();
+    try { await client?.close(); } finally { await app?.stop(); }
     await rm(home, { recursive: true, force: true });
   }
 }
@@ -227,15 +228,19 @@ test("aggregate containment: a caller-supplied timeout cannot outlive the slot l
     // again afterwards, and a later quota re-arm re-enables admission.
     const service = createRemoteRuntimeService(connectTransport(app.url), () => `local:${LOCAL_OPERATOR.actor.id}`);
     const client = createClient({ service, caller: LOCAL_OPERATOR });
-    await client.invoke("settings.changeContainment", { containment: {} });
-    for (let i = 0; i < 400; i++) {
-      const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "settings" })).rows;
-      const current = rows.find(row => row.key === "current" || row.key.endsWith("/current"))?.value as { containment?: unknown } | undefined;
-      if (current?.containment !== undefined && Object.keys(current.containment as object).length === 0) break;
-      await new Promise((r) => setTimeout(r, 15));
+    try {
+      await client.invoke("settings.changeContainment", { containment: {} });
+      for (let i = 0; i < 400; i++) {
+        const rows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "settings" })).rows;
+        const current = rows.find(row => row.key === "current" || row.key.endsWith("/current"))?.value as { containment?: unknown } | undefined;
+        if (current?.containment !== undefined && Object.keys(current.containment as object).length === 0) break;
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      const cleared = await acquireContainedSlot(app.runtime.service, SYSTEM, { worldId: "w-clamp" });
+      expect(cleared.slotId).toBe(""); // no quotas configured: historical pass-through admission
+    } finally {
+      await client.close();
     }
-    const cleared = await acquireContainedSlot(app.runtime.service, SYSTEM, { worldId: "w-clamp" });
-    expect(cleared.slotId).toBe(""); // no quotas configured: historical pass-through admission
   });
 }, 60_000);
 
