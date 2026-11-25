@@ -51,7 +51,20 @@ export async function bootHarnessApp(home: string, host: FakeHost): Promise<{ re
     harnessHost: { env: { ...host.env, COGNATE_HARNESS_ENV_PASSTHROUGH: "FAKE_HARNESS_LOG" }, homeDir: host.env.HOME! },
   });
   const service = createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR));
-  return { app, client: createClient({ service, caller: LOCAL_OPERATOR }) };
+  const client = createClient({ service, caller: LOCAL_OPERATOR });
+  return {
+    app: {
+      ...app,
+      async stop() {
+        try {
+          await client.close();
+        } finally {
+          await app.stop();
+        }
+      },
+    },
+    client,
+  };
 }
 
 export type HarnessClient = Awaited<ReturnType<typeof bootHarnessApp>>["client"];

@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { chmod, writeFile } from "node:fs/promises";
+import { chmod, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bootApp, withTempHome } from "./helpers.ts";
+import { bootHarnessApp, makeFakeHost } from "./harness-helpers.ts";
 
-async function expectClientStopped(home: string) {
-  const { app, client } = await bootApp(home);
+async function expectClientStopped(home: string, boot = bootApp) {
+  const { app, client } = await boot(home);
   const port = Number(new URL(app.url).port);
   await app.stop();
   let requests = 0;
@@ -29,6 +30,17 @@ async function expectClientStopped(home: string) {
 test("stopping an in-process test app closes its client before port reuse", async () => {
   await withTempHome(async (home) => {
     await expectClientStopped(home);
+  });
+}, 20000);
+
+test("stopping a harness test app closes its client before port reuse", async () => {
+  await withTempHome(async (home) => {
+    const host = await makeFakeHost();
+    try {
+      await expectClientStopped(home, (path) => bootHarnessApp(path, host));
+    } finally {
+      await rm(host.dir, { recursive: true, force: true });
+    }
   });
 }, 20000);
 

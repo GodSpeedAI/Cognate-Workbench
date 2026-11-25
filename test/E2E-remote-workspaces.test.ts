@@ -151,7 +151,11 @@ describe("E2E remote workspaces", () => {
         expect(errors).toEqual([]);
       } finally {
         await browser.close();
-        await app.stop();
+        try {
+          await client.close();
+        } finally {
+          await app.stop();
+        }
         await fixture.close().catch(() => {});
         await aimock.stop();
       }
