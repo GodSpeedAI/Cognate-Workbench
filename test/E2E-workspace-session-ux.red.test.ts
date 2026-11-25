@@ -108,7 +108,7 @@ describe("E2E J-WS-directory-discovery — usable picker, not a raw full-path de
         const field = dialog.getByRole("combobox", { name: "Workspace directory path" });
         await field.fill(join(root, "pro"));
         const list = dialog.getByRole("listbox", { name: "Suggested folders" });
-        await list.getByRole("option", { name: /projects/i }).waitFor();
+        await list.getByRole("option").filter({ has: page.locator(".dir-suggest-name").filter({ hasText: /^projects$/ }) }).waitFor();
         await list.getByRole("option", { name: /prototypes/i }).waitFor();
         await field.press("ArrowDown");
         await field.press("Tab");
