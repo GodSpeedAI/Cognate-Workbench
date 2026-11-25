@@ -85,7 +85,20 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
  * its default posture.
  */
 export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks" | "executionPostureRecords" | "mcpSupervisorTimings">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
-  return await bootAppOnce(home, 0, extra);
+  const { app, client } = await bootAppOnce(home, 0, extra);
+  return {
+    app: {
+      ...app,
+      async stop() {
+        try {
+          await client.close();
+        } finally {
+          await app.stop();
+        }
+      },
+    },
+    client,
+  };
 }
 
 /** Shared pg0 instance start races are transient: under full-run parallelism, concurrent boots
