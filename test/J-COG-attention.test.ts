@@ -79,7 +79,7 @@ describe("J-COG-attention", () => {
         // a mutating follow-up is not available through the attention path: settlement stays a human capability
         await expect(client.invoke("ui.request", { op: "focus", ref: "css:#row-5" })).rejects.toThrow();
       } finally {
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
         await aimock.stop();
       }
     });

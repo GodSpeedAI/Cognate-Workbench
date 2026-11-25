@@ -70,6 +70,7 @@ describe("J-COG-cleanup", () => {
         expect(await readdir(join(fork.root, "generated"))).toHaveLength(3); // nothing executed yet
 
         // -- restart while the continuation is open ----------------------------------------------
+        await client.close();
         await app.stop();
         app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, ...mods });
         client = clientFor(app);
@@ -115,6 +116,7 @@ describe("J-COG-cleanup", () => {
         await client.invoke("world.settle", { caseId: "C1", candidateHash: c2.worldHash });
 
         // -- restart: lineage, Case, Reality reconstruct from events ------------------------------
+        await client.close();
         await app.stop();
         app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home, ...mods });
         client = clientFor(app);
@@ -135,7 +137,7 @@ describe("J-COG-cleanup", () => {
         expect(derived.case.currentState).toBe("settled");
         await client.invoke("world.discard", { sandboxId: fork.sandboxId, root: fork.root }).catch(() => undefined);
       } finally {
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
         await aimock.stop();
       }
     });

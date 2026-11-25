@@ -74,6 +74,7 @@ describe("J-COG-search", () => {
         expect((await events(app)).filter((e) => e.eventType === "method.recommended")).toHaveLength(1);
 
         // restart: rounds, lineage and the unchanged active method reconstruct from events
+        await client.close();
         await app.stop();
         app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
         client = clientFor(app);
@@ -89,7 +90,7 @@ describe("J-COG-search", () => {
         const status2 = (await client.invoke("experiment.status", { caseId: "S1", maxRounds: 9 })) as { criterionHash: string };
         expect(status2.criterionHash).toBe(criterionHash);
       } finally {
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
       }
     });
   }, 120_000);

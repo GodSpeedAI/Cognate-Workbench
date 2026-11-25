@@ -53,7 +53,7 @@ describe("J-COG-settlement-provenance", () => {
         expect(settled!.payload.settlementScope).not.toBe("governed");
         expect(settled!.payload.receiptRef).toBeNull();
       } finally {
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
       }
     });
   }, 60_000);
