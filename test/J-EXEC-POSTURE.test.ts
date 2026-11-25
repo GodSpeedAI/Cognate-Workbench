@@ -56,13 +56,14 @@ describe("J-EXEC-POSTURE", () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
       let app: AppServer | undefined;
+      let client: ReturnType<typeof createClient> | undefined;
       try {
         app = await startServer({ devAuth: true, port: 0, home });
         expect(app.executionPosture).toBe("contained");
         const health = (await (await fetch(`${app.url}/health`)).json()) as { execution: { posture: string; linuxContainmentConfigured: boolean } };
         expect(health.execution).toEqual({ posture: "contained", linuxContainmentConfigured: false });
 
-        const client = createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
+        client = createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
         await client.invoke("model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
         const workspaceDir = join(home, "ws-posture");
         await makeWorkspace(workspaceDir);
@@ -90,7 +91,11 @@ describe("J-EXEC-POSTURE", () => {
         // Independent check of the workspace: nothing on disk changed.
         expect(await readFile(join(workspaceDir, "src", "greet.ts"), "utf8")).toBe(before);
       } finally {
-        await app?.stop();
+        try {
+          await client?.close();
+        } finally {
+          await app?.stop();
+        }
         await aimock.stop();
         if (saved === undefined) delete process.env.COGNATE_EXECUTION_POSTURE;
         else process.env.COGNATE_EXECUTION_POSTURE = saved;

@@ -22,7 +22,11 @@ test("ordinary case work remains available without Gauntlet escalation", async (
       await expect(client.invoke("case.escalate", {})).rejects.toThrow(/no eligible provider for case\.escalate/i);
       expect(existsSync(join(home, "escalations"))).toBe(false);
     } finally {
-      await app.stop();
+      try {
+        await client.close();
+      } finally {
+        await app.stop();
+      }
     }
   });
 }, 120_000);

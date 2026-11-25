@@ -46,7 +46,11 @@ describe("J-SECRETS-storage", () => {
         const { createRemoteRuntimeService } = await import("@godspeedai/cognate-protocol-connect");
         const stranger = { actor: { id: "stranger", kind: "user" as const }, tenant: "local" };
         const client = createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(stranger)), caller: stranger });
-        await expect(client.invoke("secrets.backend.describe", {})).rejects.toThrow();
+        try {
+          await expect(client.invoke("secrets.backend.describe", {})).rejects.toThrow();
+        } finally {
+          await client.close();
+        }
       } finally {
         await app.stop();
       }
