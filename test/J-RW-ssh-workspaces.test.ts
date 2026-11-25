@@ -104,6 +104,7 @@ describe("J-RW-ssh-workspaces", () => {
         }
 
         // restart: the world is rebuilt from durable safe metadata + the secret store; reconnect is lazy
+        await client.close();
         await app.stop();
         for (let i = 0; i < 80 && fixture.stats.open > 0; i++) await Bun.sleep(25);
         expect(fixture.stats.open).toBe(0); // disposal closed the SSH connection
@@ -143,7 +144,7 @@ describe("J-RW-ssh-workspaces", () => {
         expect(await readFile(join(home, "secrets.json"), "utf8")).not.toContain(PASSWORD);
         await expect(client.invoke("process.exec", { worldId: world.worldId, argv: ["true"], cwd: "/" })).rejects.toThrow();
       } finally {
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
         await fixture.close().catch(() => {});
         await aimock.stop();
       }
@@ -166,7 +167,7 @@ describe("J-RW-ssh-workspaces", () => {
         expect(out.stdout.trim()).toBe(local);
         expect(fixture.stats.execs).toBe(before); // nothing leaked to the remote
         await expect(client.invoke("workspace.select", { path: "/definitely/not/here", worldId: "no-such-world" })).rejects.toThrow();
-      } finally { await app.stop(); await fixture.close(); }
+      } finally { try { await client.close(); } finally { await app.stop(); } await fixture.close(); }
     });
   }, 60_000);
 
@@ -198,7 +199,7 @@ describe("J-RW-ssh-workspaces", () => {
         expect(t.timedOut).toBe(true);
         await Bun.sleep(1500);
         expect((await Bun.$`pgrep -x sleep -a`.nothrow().text()).split("\n").filter((l) => l.endsWith(" 4902.4")).length).toBe(0);
-      } finally { await app.stop(); await fixture.close(); await aimock.stop(); }
+      } finally { try { await client.close(); } finally { await app.stop(); } await fixture.close(); await aimock.stop(); }
     });
   }, 90_000);
 
@@ -241,7 +242,7 @@ describe("J-RW-ssh-workspaces", () => {
         expect((await sel(roots.a, a.worldId)).workspaceId).toBe(wsA.workspaceId);
         // the same remote path in two worlds is two different workspaces
         expect((await sel(roots.a, b.worldId)).workspaceId).not.toBe(wsA.workspaceId);
-      } finally { await app.stop(); await hostA.close(); await hostB.close(); await aimock.stop(); }
+      } finally { try { await client.close(); } finally { await app.stop(); } await hostA.close(); await hostB.close(); await aimock.stop(); }
     });
   }, 90_000);
 });

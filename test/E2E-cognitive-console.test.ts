@@ -145,7 +145,7 @@ describe("E2E cognitive console", () => {
         expect(errors).toEqual([]);
       } finally {
         await browser.close();
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
         await aimock.stop();
       }
     });
@@ -192,7 +192,7 @@ describe("E2E cognitive console", () => {
         expect((await events(app)).filter((e) => e.eventType === "sentinel.finding")).toHaveLength(1);
       } finally {
         await browser.close();
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
         await aimock.stop();
       }
     });
@@ -236,7 +236,7 @@ describe("E2E cognitive console", () => {
         expect((await events(app)).some((e) => e.eventType === "world.settled")).toBe(false); // search never settles
       } finally {
         await browser.close();
-        await app.stop();
+        try { await client.close(); } finally { await app.stop(); }
         await aimock.stop();
       }
     });
