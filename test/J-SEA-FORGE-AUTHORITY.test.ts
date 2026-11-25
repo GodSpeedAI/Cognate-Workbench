@@ -69,6 +69,7 @@ liveTest("J-SEA-FORGE-AUTHORITY: an agent edit waits for SEA-Forge; only the ope
   const socket = join(tmpdir(), `wb-sf-${process.pid}-${randomUUID().slice(0, 8)}.sock`);
   let server: ReturnType<typeof Bun.spawn> | undefined;
   let app: AppServer | undefined;
+  let client: ReturnType<typeof clientFor> | undefined;
   const aimock = await bootAimock();
   try {
     // Workbench's interaction model is the governed world; DomainForge and SEA-Forge must agree on it.
@@ -98,7 +99,7 @@ liveTest("J-SEA-FORGE-AUTHORITY: an agent edit waits for SEA-Forge; only the ope
     })!;
     const containmentConfig = JSON.parse(await readFile(process.env.COGNATE_BWRAP_TEST_ATTESTATION!, "utf8")) as ContainmentConfig;
     app = await startServer({ devAuth: true, port: 0, home: join(root, "home"), containmentConfig, externalAuthority });
-    const client = clientFor(app);
+    client = clientFor(app);
     expect(await client.invoke("governance.status", {})).toMatchObject({ mode: "sea-forge", worldRef, operator: "operator" });
 
     await client.invoke("model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
@@ -106,9 +107,9 @@ liveTest("J-SEA-FORGE-AUTHORITY: an agent edit waits for SEA-Forge; only the ope
     const runEdit = async (dir: string) => {
       await mkdir(join(dir, "src"), { recursive: true });
       await writeFile(join(dir, "src/greet.ts"), "export const greet = () => \"Hello\";\n");
-      const { workspaceId } = await client.invoke("workspace.contained.select", { path: dir }) as { workspaceId: string };
+      const { workspaceId } = await client!.invoke("workspace.contained.select", { path: dir }) as { workspaceId: string };
       const sessionId = randomUUID();
-      const view = await client.startRun("agent.coding", { sessionId, workspaceId, message: "[[scenario:edit]] change the greeting" } as never,
+      const view = await client!.startRun("agent.coding", { sessionId, workspaceId, message: "[[scenario:edit]] change the greeting" } as never,
         { idempotencyKey: randomUUID(), correlationId: `session:${sessionId}` });
       const runId = view.runId;
       await until(() => app!.runtime.service.getRun(LOCAL_OPERATOR, { runId }).then((r) => r.status), (s) => s === "waiting", "run waits on SEA-Forge");
@@ -155,6 +156,7 @@ liveTest("J-SEA-FORGE-AUTHORITY: an agent edit waits for SEA-Forge; only the ope
     expect(await editEvents(r.sessionId, "tool.call.completed")).toBe(0);
     expect(await readFile(r.file, "utf8")).toContain("Hello");
   } finally {
+    await client?.close().catch(() => {});
     if (app) await app.stop();
     await aimock.stop();
     server?.kill();

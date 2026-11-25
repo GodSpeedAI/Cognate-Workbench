@@ -46,6 +46,8 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
   const workspace = join(fixtureRoot, "workspace");
   const mock = await bootAimock();
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let noConfigClient: ReturnType<typeof clientFor> | undefined;
+  let client: ReturnType<typeof clientFor> | undefined;
   let appWithoutConfig: AppServer | undefined;
   let appWithConfig: AppServer | undefined;
   const pageErrors: string[] = [];
@@ -58,7 +60,7 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
     browser = await chromium.launch();
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on("pageerror", (error) => pageErrors.push(error.message));
-    const noConfigClient = clientFor(appWithoutConfig);
+    noConfigClient = clientFor(appWithoutConfig);
     await noConfigClient.invoke("onboarding.dismiss", { step: "notice" });
     await noConfigClient.invoke("onboarding.dismiss", { step: "apikey" });
     await page.goto(appWithoutConfig.url);
@@ -71,13 +73,15 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
     expect(await dialog.getByLabel("Local · read-only to agents — commands and writes need a contained workspace").isChecked()).toBe(true);
     await dialog.screenshot({ path: join(screenshotDir, "no-config-desktop.png") });
     await dialog.getByRole("button", { name: "Close" }).click();
+    await noConfigClient.close();
+    noConfigClient = undefined;
     await stop(appWithoutConfig);
     appWithoutConfig = undefined;
 
     // Configure a mock model and select a real contained workspace only through the visible UI.
     const config = await containmentConfig();
     appWithConfig = await startServer({ devAuth: true, port: 0, home: join(fixtureRoot, "app-configured"), containmentConfig: config });
-    const client = clientFor(appWithConfig);
+    client = clientFor(appWithConfig);
     await client.invoke("onboarding.dismiss", { step: "notice" });
     await client.invoke("onboarding.dismiss", { step: "apikey" });
     await client.invoke("model.configure", {
@@ -148,6 +152,8 @@ integrationTest("Add Workspace explains unavailable containment, then opens and 
     expect(pageErrors).toEqual([]);
   } finally {
     await browser?.close();
+    await client?.close().catch(() => {});
+    await noConfigClient?.close().catch(() => {});
     await stop(appWithConfig);
     await stop(appWithoutConfig);
     await mock.stop();

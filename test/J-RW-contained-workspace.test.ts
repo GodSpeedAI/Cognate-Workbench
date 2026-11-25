@@ -69,12 +69,13 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
   await writeFile(join(workspace, "notes.txt"), "before\n");
 
   let app: AppServer | undefined;
+  let client: WorkbenchClient | undefined;
   let networkCanary: ReturnType<typeof Bun.serve> | undefined;
   let receivedHostLoopbackRequests = 0;
   try {
     const config = await verifiedContainmentConfig();
     app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
-    let client = clientFor(app);
+    client = clientFor(app);
 
     // A host listener is reachable only in the host namespace. The child must be unable to
     // contact it even though it knows the loopback address and port.
@@ -152,6 +153,8 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
     expect(persisted).not.toContain(config.executablePath);
     expect(persisted).not.toContain(process.execPath);
 
+    await client.close();
+    client = undefined;
     await stop(app);
     app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     client = clientFor(app);
@@ -162,6 +165,8 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
     }) as { exitCode: number; stdout: string };
     expect(afterRestart).toMatchObject({ exitCode: 0, stdout: "after\n" });
 
+    await client.close();
+    client = undefined;
     await stop(app);
     app = await startServer({ devAuth: true, port: 0, home });
     client = clientFor(app);
@@ -173,6 +178,7 @@ integrationTest("J-RW-contained-workspace: real bwrap isolates a selected worksp
     expect(await Bun.file(join(workspace, "must-not-fallback")).exists()).toBe(false);
   } finally {
     networkCanary?.stop(true);
+    await client?.close().catch(() => {});
     await stop(app);
     await rm(fixture, { recursive: true, force: true });
   }
@@ -262,6 +268,8 @@ integrationTest("J-RW-contained-workspace: lost configuration start acknowledgme
       "execution.world.connected", "workspace.added",
     ]);
 
+    await client.close();
+    client = undefined;
     await stop(app);
     app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
     client = clientFor(app);
@@ -307,6 +315,7 @@ integrationTest("J-RW-contained-workspace: a mismatched host binary digest fails
   await mkdir(home, { recursive: true });
   await mkdir(workspace, { recursive: true });
   let app: AppServer | undefined;
+  let client: WorkbenchClient | undefined;
   try {
     const validConfig = await verifiedContainmentConfig();
     app = await startServer({
@@ -321,13 +330,14 @@ integrationTest("J-RW-contained-workspace: a mismatched host binary digest fails
         },
       },
     });
-    const client = clientFor(app);
+    client = clientFor(app);
     await expect(client.invoke("workspace.contained.select", { path: workspace })).rejects.toThrow(/changed since operator verification/i);
     const worldRows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "execution-worlds" })).rows;
     const workspaceRows = (await app.runtime.service.readProjection(LOCAL_OPERATOR, { name: "workspaces" })).rows;
     expect(worldRows).toEqual([]);
     expect(workspaceRows).toEqual([]);
   } finally {
+    await client?.close().catch(() => {});
     await stop(app);
     await rm(fixture, { recursive: true, force: true });
   }
@@ -341,6 +351,7 @@ integrationTest("J-RW-contained-workspace: a launcher copied into the writable r
   await mkdir(home, { recursive: true });
   await mkdir(workspace, { recursive: true });
   let app: AppServer | undefined;
+  let client: WorkbenchClient | undefined;
   try {
     const hostConfig = await verifiedContainmentConfig();
     const originalMode = (await stat(hostConfig.executablePath)).mode;
@@ -351,7 +362,7 @@ integrationTest("J-RW-contained-workspace: a launcher copied into the writable r
 
     const config: ContainmentConfig = { ...hostConfig, executablePath: copiedLauncher };
     app = await startServer({ devAuth: true, port: 0, home, containmentConfig: config });
-    const client = clientFor(app);
+    client = clientFor(app);
     await expect(client.invoke("workspace.contained.select", { path: workspace }))
       .rejects.toThrow(/launcher must be outside the writable workspace/i);
 
@@ -370,6 +381,7 @@ integrationTest("J-RW-contained-workspace: a launcher copied into the writable r
       return input?.root === workspace;
     })).toBe(false);
   } finally {
+    await client?.close().catch(() => {});
     await stop(app);
     await rm(fixture, { recursive: true, force: true });
   }

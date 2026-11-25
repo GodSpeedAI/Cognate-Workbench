@@ -28,6 +28,7 @@ const liveTest = liveSettlementEnabled ? test : test.skip;
 liveTest("J-SW01-SETTLEMENT: SEA-Forge settles an agent's work on RealityTrace's evidence, never on Workbench's word", async () => {
   let cell: LiveCell | undefined;
   let app: AppServer | undefined;
+  let client: ReturnType<typeof createClient> | undefined;
   const aimock = await bootAimock();
   try {
     cell = await startLiveCell("wb-sw01");
@@ -35,7 +36,9 @@ liveTest("J-SW01-SETTLEMENT: SEA-Forge settles an agent's work on RealityTrace's
     const home = join(root, "home");
     const boot = async (settle: boolean) => {
       const a = await startServer({ devAuth: true, port: 0, home, containmentConfig, externalAuthority, realitytrace: settle ? realitytrace : null });
+      app = a;
       const c = createClient({ service: createRemoteRuntimeService(connectTransport(a.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
+      client = c;
       await c.invoke("model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
       return { a, c };
     };
@@ -100,16 +103,22 @@ liveTest("J-SW01-SETTLEMENT: SEA-Forge settles an agent's work on RealityTrace's
     expect(still).toMatchObject({ ok: true, status: "rejected", replayed: true });
 
     // 4. A run that ends while settlement is off is settled at the next boot, exactly once.
+    await booted.c.close();
+    client = undefined;
     await booted.a.stop();
     booted = await boot(false);
     app = booted.a;
     const offline = await approvedEdit("ws-offline", "grep -q Howdy src/greet.ts");
     expect((await statusOf(offline.runId)).operations).toHaveLength(0);
+    await booted.c.close();
+    client = undefined;
     await booted.a.stop();
     booted = await boot(true);
     app = booted.a;
     const later = await finalOf(offline.runId);
     expect(later.operations[0]).toMatchObject({ status: "settled", final: true });
+    await booted.c.close();
+    client = undefined;
     await booted.a.stop();
     booted = await boot(true);
     app = booted.a;
@@ -120,6 +129,7 @@ liveTest("J-SW01-SETTLEMENT: SEA-Forge settles an agent's work on RealityTrace's
     const evidenceRows = (cell.rtRun(["ledger", "export", "--repo", repoId]) as { record_kind: string }[]).filter((r) => r.record_kind === "evidence.created");
     expect(evidenceRows).toHaveLength(1);
   } finally {
+    await client?.close().catch(() => {});
     if (app) await app.stop().catch(() => {});
     await aimock.stop();
     await cell?.stop();

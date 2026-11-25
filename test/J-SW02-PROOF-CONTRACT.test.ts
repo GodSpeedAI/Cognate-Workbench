@@ -68,6 +68,7 @@ async function sweSeedVerdict(dir: string, specText: string): Promise<{ exit: nu
 liveTest("J-SW02-PROOF-CONTRACT: the declared proof comes from a SWE_SEED contract frozen by digest", async () => {
   let cell: LiveCell | undefined;
   let app: AppServer | undefined;
+  let client: ReturnType<typeof createClient> | undefined;
   const aimock = await bootAimock();
   try {
     cell = await startLiveCell("wb-sw02");
@@ -75,7 +76,9 @@ liveTest("J-SW02-PROOF-CONTRACT: the declared proof comes from a SWE_SEED contra
     const home = join(root, "home");
     const boot = async (mode: ProofSourceMode) => {
       const a = await startServer({ devAuth: true, port: 0, home, containmentConfig, externalAuthority, realitytrace, sweSeed: { bin: SWE!, mode } });
+      app = a;
       const c = createClient({ service: createRemoteRuntimeService(connectTransport(a.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
+      client = c;
       await c.invoke("model.configure", { providerId: "mock", baseURL: `http://127.0.0.1:${aimock.port}/v1`, protocol: "openai-compatible", model: "mock-model-1", apiKey: "" });
       return { a, c };
     };
@@ -150,11 +153,15 @@ liveTest("J-SW02-PROOF-CONTRACT: the declared proof comes from a SWE_SEED contra
     expect(await readFile(join(strict.dir, "eval.toml"), "utf8")).toContain('rule = "true"');
 
     // 4b. A proof typed while any source was allowed does not judge a run under swe_seed.
+    await booted.c.close();
+    client = undefined;
     await booted.a.stop();
     booted = await boot("any");
     app = booted.a;
     const typed = await workspace("ws-typed", "true");
     await booted.c.invoke("workspace.proof.declare", { workspaceId: typed.workspaceId, argv: ["/bin/sh", "-c", "true"] });
+    await booted.c.close();
+    client = undefined;
     await booted.a.stop();
     booted = await boot("swe_seed");
     app = booted.a;
@@ -167,6 +174,7 @@ liveTest("J-SW02-PROOF-CONTRACT: the declared proof comes from a SWE_SEED contra
     expect(await sweSeedVerdict(ok.dir, ok.specText)).toEqual({ exit: 0, greeting: "Pass" });
     expect(await sweSeedVerdict(strict.dir, strict.specText)).toEqual({ exit: 1, greeting: "Fail" });
   } finally {
+    await client?.close().catch(() => {});
     if (app) await app.stop().catch(() => {});
     await aimock.stop();
     await cell?.stop();

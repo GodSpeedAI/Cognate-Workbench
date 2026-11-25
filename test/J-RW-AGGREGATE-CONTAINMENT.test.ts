@@ -74,12 +74,13 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: the kernel CPU cap kills a burner a
   const home = await mkdtemp(join(tmpdir(), "wb-aggregate-cpu-"));
   const root = join(home, "work");
   let app: AppServer | undefined;
+  let client: WorkbenchClient | undefined;
   try {
     await mkdir(root, { recursive: true });
     app = await startServer({ port: 0, home, devAuth: true, containmentConfig: await verifiedContainmentConfig() });
-    const client = clientFor(app);
+    client = clientFor(app);
     const selected = await selectContained(client, root);
-    const exec = (argv: readonly string[], timeoutMs = 20_000) => client.invoke("process.exec", {
+    const exec = (argv: readonly string[], timeoutMs = 20_000) => client!.invoke("process.exec", {
       worldId: selected.executionWorldId, argv: [...argv], cwd: "/workspace", timeoutMs,
     });
 
@@ -107,6 +108,7 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: the kernel CPU cap kills a burner a
     expect(booked).toBe(2);
     expect(await liveCount(app)).toBe(0);
   } finally {
+    await client?.close().catch(() => {});
     await stop(app);
     await rm(home, { recursive: true, force: true });
   }
@@ -117,14 +119,16 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: the aggregate concurrency ceiling f
   const root = join(home, "work");
   let appA: AppServer | undefined;
   let appB: AppServer | undefined;
+  let clientA: WorkbenchClient | undefined;
+  let clientB: WorkbenchClient | undefined;
   try {
     await mkdir(root, { recursive: true });
     const config = await verifiedContainmentConfig();
     appA = await startServer({ port: 0, home, devAuth: true, containmentConfig: config });
-    const clientA = clientFor(appA);
+    clientA = clientFor(appA);
     const selected = await selectContained(clientA, root);
     await setQuotas(appA, clientA, { maxConcurrent: 2 });
-    const execA = (timeoutMs: number) => clientA.invoke("process.exec", {
+    const execA = (timeoutMs: number) => clientA!.invoke("process.exec", {
       worldId: selected.executionWorldId, argv: ["sh", "-c", "sleep 3"], cwd: "/workspace", timeoutMs,
     });
 
@@ -137,7 +141,7 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: the aggregate concurrency ceiling f
     // Process B boots on the SAME store, restores the same contained world, and its new work
     // is refused: the ceiling is aggregate across processes, from the durable ledger.
     appB = await startServer({ port: 0, home, devAuth: true, containmentConfig: config });
-    const clientB = clientFor(appB);
+    clientB = clientFor(appB);
     await expect(clientB.invoke("process.exec", {
       worldId: selected.executionWorldId, argv: ["sh", "-c", "printf b"], cwd: "/workspace", timeoutMs: 10_000,
     })).rejects.toThrow("Aggregate contained-execution ceiling exceeded");
@@ -150,6 +154,8 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: the aggregate concurrency ceiling f
     }) as { stdout: string };
     expect(admitted.stdout).toBe("b");
   } finally {
+    await clientA?.close().catch(() => {});
+    await clientB?.close().catch(() => {});
     await stop(appA);
     await stop(appB);
     await rm(home, { recursive: true, force: true });
@@ -160,11 +166,12 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: a provider-killed execution release
   const home = await mkdtemp(join(tmpdir(), "wb-aggregate-reap-"));
   const root = join(home, "work");
   let app: AppServer | undefined;
+  let client: WorkbenchClient | undefined;
   try {
     await mkdir(root, { recursive: true });
     await writeFile(join(root, "seed.txt"), "ok");
     app = await startServer({ port: 0, home, devAuth: true, containmentConfig: await verifiedContainmentConfig() });
-    const client = clientFor(app);
+    client = clientFor(app);
     const selected = await selectContained(client, root);
     await setQuotas(app, client, { maxConcurrent: 1 });
 
@@ -194,6 +201,7 @@ integrationTest("J-RW-AGGREGATE-CONTAINMENT: a provider-killed execution release
     const state = await ledgerOf(app);
     expect(Object.values(state.executions).some(e => e.outcome === "reaped")).toBe(true);
   } finally {
+    await client?.close().catch(() => {});
     await stop(app);
     await rm(home, { recursive: true, force: true });
   }
