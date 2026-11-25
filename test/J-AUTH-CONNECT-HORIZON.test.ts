@@ -11,24 +11,29 @@ import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
 
 const clientFor = (app: AppServer, token: string) => createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => token), caller: LOCAL_OPERATOR });
 
-async function withApp<T>(body: (app: AppServer, setupRoot: string) => Promise<T>): Promise<T> {
+async function withApp<T>(body: (app: AppServer, setupRoot: string, client: (token: string) => ReturnType<typeof clientFor>) => Promise<T>): Promise<T> {
   const setupRoot = await mkdtemp(join(tmpdir(), "wb-connect-horizon-"));
   // COGNATE_WORKBENCH_HOME is <setup root>/workbench; the key goes to <setup root>/secrets.
   const home = join(setupRoot, "workbench");
   await mkdir(home, { recursive: true });
   let app: AppServer | undefined;
+  const clients: ReturnType<typeof clientFor>[] = [];
   try {
     app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
-    return await body(app, setupRoot);
+    return await body(app, setupRoot, (token) => {
+      const client = clientFor(app!, token);
+      clients.push(client);
+      return client;
+    });
   } finally {
-    await app?.stop();
+    try { await Promise.all(clients.map((client) => client.close())); } finally { await app?.stop(); }
     await rm(setupRoot, { recursive: true, force: true });
   }
 }
 
 test("connect-horizon refuses more than 90 days", async () => {
-  await withApp(async (app, root) => {
-    const operator = clientFor(app, app.operatorSessionToken);
+  await withApp(async (app, root, client) => {
+    const operator = client(app.operatorSessionToken);
     await expect(operator.invoke("identity.connectHorizon", { ttlHours: 24 * 90 + 1 } as never)).rejects.toThrow("90 days");
     await expect(operator.invoke("identity.connectHorizon", { ttlHours: 0 } as never)).rejects.toThrow();
     await expect(operator.invoke("identity.connectHorizon", { token: "x" } as never)).rejects.toThrow("ttlHours only");
@@ -37,8 +42,8 @@ test("connect-horizon refuses more than 90 days", async () => {
 }, 60_000);
 
 test("connect-horizon writes the key with mode 0600", async () => {
-  await withApp(async (app, root) => {
-    const operator = clientFor(app, app.operatorSessionToken);
+  await withApp(async (app, root, client) => {
+    const operator = client(app.operatorSessionToken);
     const result = (await operator.invoke("identity.connectHorizon", { ttlHours: 24 })) as { sessionId: string; expiresAt: string };
     const keyPath = join(root, "secrets", "workbench.key");
     // Windows has no POSIX permission bits; existence is checked everywhere, the mode only on POSIX.
@@ -61,8 +66,8 @@ test("connect-horizon writes the key with mode 0600", async () => {
 }, 60_000);
 
 test("connect-horizon never returns the token to the browser", async () => {
-  await withApp(async (app, root) => {
-    const operator = clientFor(app, app.operatorSessionToken);
+  await withApp(async (app, root, client) => {
+    const operator = client(app.operatorSessionToken);
     const result = await operator.invoke("identity.connectHorizon", {});
     const token = (await readFile(join(root, "secrets", "workbench.key"), "utf8")).trim();
     expect(Object.keys(result as object).sort()).toEqual(["expiresAt", "sessionId"]);
@@ -70,7 +75,7 @@ test("connect-horizon never returns the token to the browser", async () => {
     expect(JSON.stringify(result)).not.toContain("wbs1.");
     // A Horizon key cannot connect Horizon again for someone else: only the operator's own boot session is a human operator act of this kind,
     // and a forged raw token is refused.
-    const forged = clientFor(app, `${LOCAL_OPERATOR.tenant}:${LOCAL_OPERATOR.actor.id}`);
+    const forged = client(`${LOCAL_OPERATOR.tenant}:${LOCAL_OPERATOR.actor.id}`);
     await expect(forged.invoke("identity.connectHorizon", {})).rejects.toThrow();
   });
 }, 60_000);

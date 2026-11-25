@@ -24,10 +24,12 @@ const tokenService = (app: AppServer, token: string): RuntimeService =>
 test("J-AUTH-TENANT-ISOLATION: a second tenant's session sees only its own partition on one shared store", async () => {
   const home = await mkdtemp(join(tmpdir(), "wb-auth-tenants-"));
   let app: AppServer | undefined;
+  let operator: WorkbenchClient | undefined;
+  let acmeClient: WorkbenchClient | undefined;
   try {
     app = await startServer({ executionPosture: "uncontained-local", port: 0, home });
     const operatorService = tokenService(app, app.operatorSessionToken);
-    const operator = createClient({ service: operatorService, caller: LOCAL_OPERATOR });
+    operator = createClient({ service: operatorService, caller: LOCAL_OPERATOR });
 
     // Durable local-tenant state to isolate against: one committed configuration run folds a
     // settings row under the local prefix, and its run/events belong to the local tenant.
@@ -46,7 +48,7 @@ test("J-AUTH-TENANT-ISOLATION: a second tenant's session sees only its own parti
     const acme = await operator.invoke("identity.session.issue", { tenant: "acme", actorId: "bob", label: "second tenant" }) as { token: string; tenant: string; sessionId: string };
     expect(acme.tenant).toBe("acme");
     const acmeService = tokenService(app, acme.token);
-    const acmeClient = createClient({ service: acmeService, caller: callerFor("acme", "bob") });
+    acmeClient = createClient({ service: acmeService, caller: callerFor("acme", "bob") });
 
     // Projections: the acme caller sees its own (empty) partition; the local row is invisible.
     const localSettings = await operatorService.readProjection(LOCAL_OPERATOR, { name: "settings" });
@@ -131,7 +133,7 @@ test("J-AUTH-TENANT-ISOLATION: a second tenant's session sees only its own parti
     const overview = await operator.invoke("identity.inspect", {}) as { identities: { tenant: string }[] };
     expect(overview.identities.some((i: { readonly tenant: string }) => i.tenant === "acme")).toBe(true);
   } finally {
-    await app?.stop();
+    try { await Promise.all([operator?.close(), acmeClient?.close()]); } finally { await app?.stop(); }
     await rm(home, { recursive: true, force: true });
   }
 }, 120_000);
