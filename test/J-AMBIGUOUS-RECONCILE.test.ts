@@ -35,7 +35,7 @@ interface Interrupted {
 
 // Boots the default posture, starts an expert run whose model call blocks, stops that process
 // mid-call and recovers on a second default-posture process over the same store.
-async function interruptedRun(home: string, serversOpened: AppServer[]): Promise<Interrupted> {
+async function interruptedRun(home: string, serversOpened: AppServer[], clientsOpened: ReturnType<typeof createClient>[]): Promise<Interrupted> {
   const workspace = join(home, "workspace");
   await mkdir(workspace, { recursive: true });
   let providerCalls = 0;
@@ -66,6 +66,7 @@ async function interruptedRun(home: string, serversOpened: AppServer[]): Promise
   };
   const serverA = await boot();
   const clientA = createClient({ service: createRemoteRuntimeService(connectTransport(serverA.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
+  clientsOpened.push(clientA);
   const { workspaceId } = await clientA.invoke("workspace.select", { path: workspace } as never) as { workspaceId: string };
   await clientA.invoke("experts.seed", {} as never);
   await clientA.invoke("expert.save", { expertId: "builder", name: "Builder", specialization: "Building", instructions: "Build carefully.", tools: ["read"], route } as never);
@@ -75,6 +76,8 @@ async function interruptedRun(home: string, serversOpened: AppServer[]): Promise
   expect(providerCalls).toBe(1);
   const runId = (await readExperts(serverA.runtime.service, SYSTEM)).state.assignments[converse.assignmentId]?.runId;
   expect(runId).toBeTruthy();
+  await clientA.close();
+  clientsOpened.splice(clientsOpened.indexOf(clientA), 1);
   await serverA.stop();
 
   const serverB = await boot();
@@ -91,7 +94,8 @@ async function interruptedRun(home: string, serversOpened: AppServer[]): Promise
   return { home, runId: runId!, continuationId: continuationId!, serviceB, serverB, providerCalls: () => providerCalls };
 }
 
-async function cleanup(home: string, servers: AppServer[]): Promise<void> {
+async function cleanup(home: string, servers: AppServer[], clients: ReturnType<typeof createClient>[]): Promise<void> {
+  for (const client of clients) await client.close();
   for (const server of servers) await server.stop().catch(() => {});
   // The schema lives where the servers put it: the same resolution `storeConfigFor` uses
   // (env URL, else the shared development pg0 instance) — not a hardcoded port, which used
@@ -123,8 +127,9 @@ async function waitForRunLeaving(service: RuntimeService, runId: string, from: s
 test("J-AMBIGUOUS-RECONCILE: an interrupted step under the default posture waits, is refused for agents and blank reasons, and reconciles once", async () => {
   const home = await mkdtemp(join(tmpdir(), "cognate-ambiguous-reconcile-"));
   const servers: AppServer[] = [];
+  const clients: ReturnType<typeof createClient>[] = [];
   try {
-    const run = await interruptedRun(home, servers);
+    const run = await interruptedRun(home, servers, clients);
     const { serviceB, runId, continuationId } = run;
 
     // Exactly one ambiguity, the effect ran once, the run is waiting on the operator.
@@ -162,15 +167,16 @@ test("J-AMBIGUOUS-RECONCILE: an interrupted step under the default posture waits
     // Reconciling the already-resolved continuation is refused.
     await expect(serviceB.invoke(LOCAL_OPERATOR, { capability: RECONCILE, input: { continuationId, outcome: "failed", reason: "second attempt" } })).rejects.toThrow();
   } finally {
-    await cleanup(home, servers);
+    await cleanup(home, servers, clients);
   }
 }, 150_000);
 
 test("J-AMBIGUOUS-RECONCILE: a failed operator observation is delivered as a failed step, never as a silent repeat of the interrupted effect", async () => {
   const home = await mkdtemp(join(tmpdir(), "cognate-ambiguous-failed-"));
   const servers: AppServer[] = [];
+  const clients: ReturnType<typeof createClient>[] = [];
   try {
-    const run = await interruptedRun(home, servers);
+    const run = await interruptedRun(home, servers, clients);
     const { serviceB, runId, continuationId } = run;
     expect(await countEvents(serviceB, runId, "run.invocation.ambiguous")).toBe(1);
 
@@ -185,6 +191,6 @@ test("J-AMBIGUOUS-RECONCILE: a failed operator observation is delivered as a fai
     expect(await countEvents(serviceB, runId, "run.invocation.ambiguous")).toBe(1);
     expect((await serviceB.listContinuations(LOCAL_OPERATOR, { runId })).find(item => item.id === continuationId)?.status).toBe("RESUMED");
   } finally {
-    await cleanup(home, servers);
+    await cleanup(home, servers, clients);
   }
 }, 150_000);

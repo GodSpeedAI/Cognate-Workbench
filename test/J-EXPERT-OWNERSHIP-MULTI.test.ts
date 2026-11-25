@@ -57,11 +57,12 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
   });
   let serverA: AppServer | undefined;
   let serverB: AppServer | undefined;
+  let clientA: ReturnType<typeof createClient> | undefined;
   try {
     // Process A boots, starts the assignment and enters the model effect (one provider call,
     // progress recorded under A's ownership generation).
     serverA = await boot();
-    const clientA = createClient({ service: createRemoteRuntimeService(connectTransport(serverA.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
+    clientA = createClient({ service: createRemoteRuntimeService(connectTransport(serverA.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
     const { workspaceId } = await clientA.invoke("workspace.select", { path: workspace } as never) as { workspaceId: string };
     await clientA.invoke("experts.seed", {} as never);
     await clientA.invoke("expert.save", {
@@ -78,6 +79,8 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
     // Process A dies mid-effect. Cooperative shutdown aborts its handler; the execution pass
     // releases the run lease and its billing reservation for the interrupted attempt is settled
     // conservatively before the store closes.
+    await clientA.close();
+    clientA = undefined;
     await serverA.stop();
     serverA = undefined;
 
@@ -149,6 +152,7 @@ test("J-EXPERT-PARALLEL: a crashed Workbench process's effect is reconciled, nev
     for await (const event of serviceB.events(LOCAL_OPERATOR, { runId: runId! })) if (event.eventType === "run.invocation" && event.metadata?.capability === "expert.model.generate") modelInvocations += 1;
     expect(modelInvocations).toBe(0);
   } finally {
+    await clientA?.close();
     await serverA?.stop().catch(() => {});
     await serverB?.stop().catch(() => {});
     const cleaner = await openPostgresStore({ url: await storeUrlForTest(), schema: schemaFor(home, "harness"), maxConnections: 2, pollMs: 0 });
