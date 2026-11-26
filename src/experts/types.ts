@@ -55,6 +55,15 @@ export interface Handoff {
   output: string; artifacts: string[]; evidence: string[]; uncertainties: string[];
   failures: string[]; followUp: string[];
   observedFailures?: string[];
+  /** J-RLM-CHILD-RUN: the recursive child runs this Assignment's run waited on, as observed on its run
+   * stream by the completion bridge; absent for work that delegated none. */
+  rlmChildren?: RlmChildOutcome[];
+}
+/** The terminal outcome of one recursive child run, as the parent observed it. */
+export interface RlmChildOutcome {
+  invocationId: string; runId: string; providerId: string;
+  status: "completed" | "failed" | "timedOut" | "cancelled";
+  resultRef?: string; evidence?: string[];
 }
 export interface ExpertExecution {
   expertId: string; assignmentId: string; conversationId: string; teamId?: string;
@@ -76,6 +85,10 @@ export interface ExpertExecution {
   /** J-HANDOFF-case-context: `verified` only when a real world-registry check ran; otherwise the
    * caller's context is `asserted`. Workbench runs no registry check, so it records `asserted`. */
   worldCorroboration?: "verified" | "asserted";
+  /** J-RLM-CHILD-RUN: the recursive-execution provider the operator selected, frozen with the rest of the
+   * snapshot (delegated children inherit it from their parent's snapshot, never from a model). Absent in
+   * snapshots written before this field, which behave as no recursive execution. */
+  rlm?: { providerId: string };
 }
 export interface Assignment {
   id: string; expertId: string; conversationId: string; teamId: string | null; parentId: string | null;

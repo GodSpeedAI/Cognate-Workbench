@@ -84,6 +84,10 @@ returning a Cognate `Component`; many also export their input/result types and c
 - [settlement.ts:settlementComponent] — mounts `workspace.proof.declare` (`PROOF_DECLARE`),
   `workspace.proof.declare_contract` (`PROOF_DECLARE_CONTRACT`), `workspace.proof.current`
   (`PROOF_CURRENT`), `settlement.status` (`SETTLEMENT_STATUS`).
+- [rlmGoverned.ts:governedRlmComponent] — wraps Cognate's `createRlmComponent` for `rlm.providers`,
+  `rlm.invoke`, `rlm.inspect`, `rlm.cancel`: derives parent lineage, grant, depth, reservation and
+  pinned context from the registered Expert Assignment, refuses before dispatch with typed `rlm-*`
+  codes, and enforces parent-scoped standing for inspect/cancel. Governed admission stays closed.
 - [subagentStart.ts:subagentStartComponent] — mounts `subagent.start`: fire-and-forget child run
   correlated `subagent:<parentRunId>:<id>`.
 - [taskCheckout.ts:taskCheckoutComponent] — mounts `git.branch.list`, `git.checkout.attach`,

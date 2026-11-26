@@ -89,6 +89,8 @@ export interface AgentCodingInput {
     /** J-TASK-expert-provenance: the Task the Assignment serves, already validated by the
      * mutation boundary (never trusted from raw run input). */
     readonly taskId?: string | null;
+    /** J-RLM-CHILD-RUN: the operator-selected recursive-execution provider, frozen in the snapshot. */
+    readonly rlm?: { readonly providerId: string };
   };
 }
 
@@ -367,6 +369,24 @@ export const EXPERT_TOOL_DEFS: ToolDefinition[] = [
   },
 ];
 
+/** J-RLM-CHILD-RUN: offered only when the Assignment's frozen snapshot selected a provider; it carries
+ *  no authority of its own (the host derives and checks parent, grant, depth, reservation and context). */
+export const RLM_TOOL_DEF: ToolDefinition = {
+  name: "rlm_delegate",
+  description: "Delegate a bounded investigation to a recursive child run and wait for its terminal outcome. The host derives your lineage, grant, depth and budget reservation; you may only narrow them.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      purpose: { type: "string" }, acceptance: { type: "array", items: { type: "string" } },
+      contextRefs: { type: "array", items: { type: "string", enum: ["assignment", "conversation"] } },
+      tools: { type: "array", items: { type: "string" } }, mode: { type: "string", enum: ["read-only", "workspace-write"] },
+      budget: { type: "object", properties: { limit: { type: "number" } }, required: ["limit"], additionalProperties: false },
+      key: { type: "string" },
+    },
+    required: ["purpose", "acceptance", "budget"], additionalProperties: false,
+  },
+};
+
 function toolsForExpert(execution: NonNullable<AgentCodingInput["expertExecution"]>): readonly ToolDefinition[] {
   const allowed = new Set(execution.tools);
   // Expert agents do not inherit the generic subagent escape hatch. Delegation is a governed
@@ -376,7 +396,8 @@ function toolsForExpert(execution: NonNullable<AgentCodingInput["expertExecution
   // Returning this assignment is intrinsic to every Expert run and has no authority outside that
   // run's registered assignment; expose the typed outcome even on older/custom profiles.
   const returnTool = EXPERT_TOOL_DEFS.find((tool) => tool.name === "expert_return");
-  return returnTool && !eligible.some((tool) => tool.name === returnTool.name) ? [...eligible, returnTool] : eligible;
+  const withReturn = returnTool && !eligible.some((tool) => tool.name === returnTool.name) ? [...eligible, returnTool] : eligible;
+  return execution.rlm ? [...withReturn, RLM_TOOL_DEF] : withReturn;
 }
 
 function summarizeArgs(args: Readonly<Record<string, unknown>>): Json {
@@ -777,6 +798,35 @@ export const createAgentCodingAgent = (deps: AgentCodingDeps = {}): AgentDefinit
               resultText = planRequestChangesToolResult(decision.feedback);
               await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
             }
+          }
+        } else if (expertExecution?.rlm && call.name === "rlm_delegate") {
+          // J-RLM-CHILD-RUN: a recursive child run through the normal Invoker. Only model-chosen narrowing
+          // fields are forwarded; the host derives principal, grant, depth, reservation and pinned context
+          // from the registered Assignment, so nothing the model adds can widen them. The branch WAITS for
+          // the linked child run to be terminal (the completion bridge resolves the wait) before the tool
+          // result — and so any handoff — is composed.
+          try {
+            const requestId = typeof args.key === "string" && args.key.length > 0 ? args.key : effectToolCallId;
+            const budgetLimit = (args.budget as { limit?: unknown } | undefined)?.limit;
+            const admitted = await ctx.invoke("rlm.invoke", {
+              requestId,
+              task: { purpose: args.purpose, acceptance: args.acceptance, ...(args.contextRefs !== undefined ? { contextRefs: args.contextRefs } : {}) },
+              ...(args.providerId !== undefined ? { providerId: args.providerId } : {}),
+              ...(args.tools !== undefined || args.mode !== undefined ? { authority: { ...(args.tools !== undefined ? { tools: args.tools } : {}), ...(args.mode !== undefined ? { mode: args.mode } : {}) } } : {}),
+              ...(budgetLimit !== undefined ? { budget: { limit: budgetLimit } } : {}),
+            } as unknown as Json) as unknown as { readonly invocationId: string; readonly runId: string; readonly providerId: string; readonly contextDigest: string };
+            await ctx.emit("rlm.child.started", { sessionId, toolCallId: call.id, invocationId: admitted.invocationId, childRunId: admitted.runId, providerId: admitted.providerId, contextDigest: admitted.contextDigest });
+            const outcome = await ctx.waitFor(`rlm-child:${admitted.invocationId}:${effectToolCallId}`, {
+              type: "rlm-child",
+              condition: { kind: "rlm_child", invocationId: admitted.invocationId, childRunId: admitted.runId },
+              payload: { invocationId: admitted.invocationId, childRunId: admitted.runId },
+            }) as unknown as { readonly invocationId: string; readonly runId: string; readonly status: string; readonly resultRef?: string; readonly evidence?: readonly string[] };
+            await ctx.emit("rlm.child.completed", { sessionId, toolCallId: call.id, invocationId: outcome.invocationId, runId: outcome.runId, providerId: admitted.providerId, status: outcome.status, ...(outcome.resultRef ? { resultRef: outcome.resultRef } : {}), evidence: [...(outcome.evidence ?? [])] } as unknown as Json);
+            resultText = JSON.stringify(outcome);
+            await ctx.emit("tool.call.completed", { sessionId, toolCallId: call.id, tool: call.name, result: outcome } as unknown as Json);
+          } catch (error) {
+            resultText = `Error: ${error instanceof Error ? error.message : String(error)}`;
+            await ctx.emit("tool.call.failed", { sessionId, toolCallId: call.id, tool: call.name, error: resultText });
           }
         } else if (expertExecution && ["team_delegate", "team_message", "expert_memory_read", "expert_memory_write", "expert_return"].includes(call.name)) {
           // Expert collaboration is available only through the separately authorized capabilities

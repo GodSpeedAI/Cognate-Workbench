@@ -2,7 +2,8 @@
 // not automatically resolved. Follow committed events, repair on boot, and resolve native waits.
 // Cognate's own durable run outbox remains the executor. This is not a second work scheduler.
 import type { RuntimeService } from "@godspeedai/cognate-runtime-api";
-import { EXPERT_AGENT, EXPERTS_THREAD, isUnfinished, type Assignment, type Handoff } from "./types.ts";
+import { RLM_AGENT_ID } from "@godspeedai/cognate-runtime-api";
+import { EXPERT_AGENT, EXPERTS_THREAD, isUnfinished, type Assignment, type Handoff, type RlmChildOutcome } from "./types.ts";
 import { ExpertsService } from "./service.ts";
 
 export class ExpertCompletionBridge {
@@ -64,9 +65,15 @@ export class ExpertCompletionBridge {
       if(!["completed","failed","cancelled"].includes(run.status))continue;
       const result=run.output as {output?:{text?:string};receipt?:string}|null;
       const observedFailures:string[]=[];
+      const rlmChildren:RlmChildOutcome[]=[];
       let terminalEventId:string|null=null;
       for await(const event of service.events(caller,{runId:run.runId})){
         if(["run.completed","run.failed","run.cancelled"].includes(event.eventType))terminalEventId=event.eventId;
+        // J-RLM-CHILD-RUN: the parent recorded each child's terminal outcome after its wait resolved.
+        if(event.eventType==="rlm.child.completed"){
+          const child=event.payload as unknown as RlmChildOutcome;
+          if(!rlmChildren.some(known=>known.invocationId===child.invocationId))rlmChildren.push(child);
+        }
         if(event.eventType==="tool.call.failed"){
           const failed=event.payload as {tool?:string;error?:string};observedFailures.push(`${failed.tool ?? "tool"}: ${failed.error ?? "failed"}`);
         }
@@ -81,6 +88,10 @@ export class ExpertCompletionBridge {
         const current=s.assignments[a.id]!;if(current.status==="cancelled" || current.attempt!==a.attempt)return {ok:true};
         const finalHandoff=current.handoff ?? handoff;
         finalHandoff.observedFailures=observedFailures;
+        if(rlmChildren.length){
+          finalHandoff.rlmChildren=rlmChildren;
+          for(const child of rlmChildren){const ref=`rlm-child:${child.runId}:${child.status}`;if(!finalHandoff.evidence.includes(ref))finalHandoff.evidence.push(ref);}
+        }
         if(result?.receipt && !finalHandoff.artifacts.includes(result.receipt))finalHandoff.artifacts.push(result.receipt);
         if(run.status!=="completed"){finalHandoff.disposition="failed";finalHandoff.failures.push(run.error ?? run.status);}
         current.handoff=finalHandoff;current.status=run.status==="completed" ? "reconciliation-required":run.status==="cancelled" ? "cancelled":"failed";
@@ -90,6 +101,7 @@ export class ExpertCompletionBridge {
       });
     }
     state=await this.experts.state(this.tenant);
+    await this.reconcileRlmChildren();
     const waits=await service.listContinuations(caller,{status:"OPEN"});
     for(const wait of waits){
       if(wait.type!=="expert-assignment")continue;
@@ -101,6 +113,26 @@ export class ExpertCompletionBridge {
       const result=a.handoff ?? {assignmentId:a.id,status:a.status,disposition:"failed",failures:["Assignment cancelled"],output:"Assignment cancelled"};
       await service.resolveContinuation(caller,{continuationId:wait.id,action:"resume",input:JSON.parse(JSON.stringify(result)),idempotencyKey:`expert-return:${a.id}:${a.attempt}`});
       await this.experts.mutate(this.tenant,`reconciled:${a.id}:${a.attempt}`,{parentId:parent.id},s=>{s.assignments[a.id]!.reconciled=true;return {ok:true};});
+    }
+  }
+  /** J-RLM-CHILD-RUN: resolve a parent's `rlm-child` wait once the linked child run is terminal. The wait's own
+   * condition is never trusted: the child must be an `agent.rlm` run correlated to exactly this parent. */
+  async reconcileRlmChildren():Promise<void>{
+    const service:RuntimeService=this.experts.service;
+    const caller=this.experts.caller(this.tenant);
+    for(const wait of await service.listContinuations(caller,{status:"OPEN"})){
+      if(wait.type!=="rlm-child" || this.controller.signal.aborted)continue;
+      const condition=wait.condition as {invocationId?:string;childRunId?:string}|null;
+      if(!condition?.childRunId || !condition.invocationId)continue;
+      const child=await service.getRun(caller,{runId:condition.childRunId});
+      if(child.agent!==RLM_AGENT_ID || child.correlationId!==`rlm:${wait.runId}:${condition.invocationId}`)continue;
+      if(!["completed","failed","cancelled"].includes(child.status))continue;
+      let outcome:Record<string,unknown>={};
+      for await(const event of service.events(caller,{runId:child.runId}))if(event.eventType==="rlm.outcome")outcome=event.payload as Record<string,unknown>;
+      const reported=child.status==="completed" ? (child.output as {status?:string}|null)?.status : child.status;
+      const status=(["completed","failed","timedOut","cancelled"].includes(String(reported)) ? reported : child.status==="completed" ? "completed":child.status) as RlmChildOutcome["status"];
+      const result:Record<string,unknown>={invocationId:condition.invocationId,runId:child.runId,status,evidence:Array.isArray(outcome.evidence)?outcome.evidence:[],...(typeof outcome.resultRef==="string"?{resultRef:outcome.resultRef}:{}),...(child.error?{error:child.error}:{})};
+      await service.resolveContinuation(caller,{continuationId:wait.id,action:"resume",input:JSON.parse(JSON.stringify(result)),idempotencyKey:`rlm-child:${wait.id}`});
     }
   }
   async start():Promise<void>{

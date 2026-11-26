@@ -10,7 +10,7 @@ import { defaultHome, packaged, resourcePath } from "./resources.ts";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import { ServiceError, type Caller, type RuntimeService } from "@godspeedai/cognate-runtime-api";
-import { createRuntime } from "@godspeedai/cognate-runtime-bun";
+import { createRlmAgent, createRlmComponent, createRlmRegistry, createRuntime, type RlmProviderRegistration } from "@godspeedai/cognate-runtime-bun";
 import { authorizeAssignmentAction } from "./assignments/assignmentBinding.ts";
 import { storeConfigFor } from "./store.ts";
 import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
@@ -21,7 +21,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindRlmCapabilities, RLM_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { createRuntimeMutex } from "./workbench/runtimeMutex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
@@ -100,6 +100,7 @@ import { workspacePathComponent } from "./capabilities/workspacePath.ts";
 import { toolCapabilitiesComponent } from "./capabilities/tools.ts";
 import { planStateComponent } from "./capabilities/planState.ts";
 import { subagentStartComponent } from "./capabilities/subagentStart.ts";
+import { governedRlmComponent } from "./capabilities/rlmGoverned.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
@@ -197,6 +198,10 @@ export interface ServerOptions {
   readonly executionPostureRecords?: readonly PostureRecord[];
   /** Supervisor timings for executable payloads (graceful drain, SIGTERM-to-SIGKILL). Defaults apply in production. */
   readonly mcpSupervisorTimings?: { readonly graceMs?: number; readonly killMs?: number };
+  /** J-RLM-CHILD-RUN: the recursive child-run providers this host registers. Trusted host configuration,
+   *  never a request; the default is empty, which leaves ordinary execution unchanged. No spawn port is
+   *  registered in this slice, so a provider that needs one, containment or egress is refused. */
+  readonly rlmProviders?: readonly RlmProviderRegistration[];
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -240,6 +245,10 @@ const GRANTED_CAPABILITIES = [
   RUNTIME_EXECUTION_INSPECT,
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
+  // J-RLM-CHILD-RUN: granted to the operator, system and agent principals; none is operator-only in
+  // the policy because the governed handlers enforce standing themselves and must refuse with a typed
+  // `rlm-*` code (a top-level or out-of-scope caller), which a policy denial would hide.
+  ...Object.keys(RLM_CAPABILITY_ANCHORS),
   ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
   ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
   ...Object.keys(SETTLEMENT_CAPABILITY_ANCHORS),
@@ -575,6 +584,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const gapRefs = bindConformanceGaps(domain);
   const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
+  const rlmRefs = bindRlmCapabilities(domain);
+  // J-RLM-CHILD-RUN: empty unless the host explicitly registers providers (ServerOptions only).
+  const rlmRegistry = createRlmRegistry();
+  for (const registration of options.rlmProviders ?? []) rlmRegistry.register(registration);
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const governanceRefs = bindGovernanceCapabilities(domain);
   const settlementRefs = bindSettlementCapabilities(domain);
@@ -786,7 +799,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding)],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), createRlmAgent({ registry: rlmRegistry })],
     components: [
       terminalComponent({
         getService,
@@ -816,6 +829,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
+      governedRlmComponent({
+        // Governed admission is closed: governance off, posture uncontained-local, no spawn port (Cognate defaults).
+        base: createRlmComponent({ registry: rlmRegistry, getService, semanticRef: rlmRefs["rlm.invoke"] }),
+        registry: rlmRegistry, getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant,
+      }),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
