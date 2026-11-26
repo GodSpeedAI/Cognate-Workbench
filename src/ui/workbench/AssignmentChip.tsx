@@ -6,7 +6,7 @@
 // action goes through the operator-only capabilities, so a refusal reaches the person verbatim.
 // Nothing here carries the assignment itself, and no action bypasses the capability layer. An
 // interrupted step is reconciled in the conversation (the run waits for the operator), not here.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCognate, useProjection } from "@godspeedai/cognate-react";
 import type { Json } from "@godspeedai/cognate-events";
 import { BranchIcon, ChevronDownIcon } from "../icons.tsx";
@@ -59,7 +59,7 @@ export interface AssignmentChipProps {
   /** The conversation's run state: a hand-off waits for an idle conversation; a change refreshes the assignment. */
   readonly state: "idle" | "running" | "waiting";
   /** The conversation starts following the handed-off run; its message is the approved Brief's instruction. */
-  readonly onHandedOff: (handed: { readonly runId: string; readonly instruction: string }) => void;
+  readonly onHandedOff: (handed: { readonly sessionId: string; readonly runId: string; readonly instruction: string }) => void;
 }
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -110,17 +110,24 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
 
   // The bound assignment's live lifecycle and spend: when it binds, on every conversation run-state
   // change (a settled run completes the assignment), and after each control below.
-  const viewAssignment = useCallback(async () => {
-    if (!binding) return;
-    try {
-      setView(await client.invoke("assignment.view", { runId: binding.runId }) as unknown as View);
-    } catch (reason) {
-      setError(errorText(reason));
-    }
-  }, [client, binding]);
+  // The component is keyed by session (App), so its state never outlives a session; the cleanup flag also drops
+  // a late response for a run this binding no longer names.
+  const boundRunId = binding?.runId;
+  const boundRunRef = useRef(boundRunId);
+  boundRunRef.current = boundRunId;
+  // It also re-reads whenever the binding row is re-served (the projection moves with the run's events).
   useEffect(() => {
-    void viewAssignment();
-  }, [viewAssignment, state]);
+    if (!boundRunId) return;
+    let live = true;
+    client.invoke("assignment.view", { runId: boundRunId }).then((value) => {
+      if (live) setView(value as unknown as View);
+    }, (reason: unknown) => {
+      if (live) setError(errorText(reason));
+    });
+    return () => {
+      live = false;
+    };
+  }, [client, binding, boundRunId, state]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,7 +151,7 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
   }, [open]);
 
   const onMenuKey = (e: React.KeyboardEvent) => {
-    const items = [...(wrapRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])];
+    const items = [...(wrapRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? [])];
     const i = items.indexOf(document.activeElement as HTMLElement);
     if (e.key === "ArrowDown") items[(i + 1) % items.length]?.focus();
     else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length]?.focus();
@@ -156,10 +163,12 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
   const control = async (capability: string, input: Json) => {
     setBusy(true);
     setError(undefined);
+    const runId = boundRunRef.current;
     try {
-      setView(await client.invoke(capability, input) as unknown as View);
+      const next = await client.invoke(capability, input) as unknown as View;
+      if (boundRunRef.current === runId) setView(next);
     } catch (reason) {
-      setError(errorText(reason));
+      if (boundRunRef.current === runId) setError(errorText(reason));
     } finally {
       setBusy(false);
     }
@@ -170,7 +179,7 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
     try {
       const handed = await client.invoke("session.caseAssignment.handoff", { sessionId, candidateId: candidate.id, mode, preset }) as unknown as { runId: string };
       setOpen(false);
-      onHandedOff({ runId: handed.runId, instruction: candidate.assignment.brief.instruction });
+      onHandedOff({ sessionId, runId: handed.runId, instruction: candidate.assignment.brief.instruction });
     } catch (reason) {
       setError(errorText(reason));
     } finally {

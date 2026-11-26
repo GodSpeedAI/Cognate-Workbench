@@ -5519,7 +5519,13 @@ function AppShell() {
   // WP-23 (J-CASE-ASSIGNMENT-handoff): a handed-off assignment opens this conversation's run
   // through the capability, so the conversation follows it like any sent turn; its message is the
   // approved Brief's instruction.
-  const handOffAssignment = useCallback(({ runId, instruction }: { readonly runId: string; readonly instruction: string }) => {
+  // The hand-off resolves later than the click: the operator may have opened another session meanwhile, so the
+  // conversation follows the run only while its originating session is still the active one. Otherwise the
+  // active session is left alone; the binding shows when the operator returns to the originating session.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const handOffAssignment = useCallback(({ sessionId, runId, instruction }: { readonly sessionId: string; readonly runId: string; readonly instruction: string }) => {
+    if (activeSessionIdRef.current !== sessionId) return;
     setTranscript((prev) => [...prev, { role: "user", content: instruction, at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }]);
     runStartedAtRef.current = Date.now();
     setActiveRunId(runId);
@@ -5529,7 +5535,7 @@ function AppShell() {
     <ComposerBar
       agentChip={<AgentChip harnesses={harnessList.harnesses} choice={agentChoice} locked={agentLocked} error={agentBindError} onChange={changeAgent} onOpenSettings={() => openSettings("agents")} />}
       agentNotice={<AgentNotice harnesses={harnessList.harnesses} choice={agentChoice} />}
-      {...(activeSessionId ? { assignmentChip: <AssignmentChip sessionId={activeSessionId} mode={accessModeOverrides[activeSessionId] ?? settings.permission} preset={presetOverrides[activeSessionId] ?? settings.preset} state={conversationState} onHandedOff={handOffAssignment} /> } : {})}
+      {...(activeSessionId ? { assignmentChip: <AssignmentChip key={activeSessionId} sessionId={activeSessionId} mode={effectiveAccessMode} preset={presetOverrides[activeSessionId] ?? settings.preset} state={conversationState} onHandedOff={handOffAssignment} /> } : {})}
       workspaceId={currentWorkspaceId}
       {...(activeSessionId ? { sessionId: activeSessionId } : {})}
       {...(activeTaskId ? { taskId: activeTaskId } : {})}
