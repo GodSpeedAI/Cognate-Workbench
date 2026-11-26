@@ -15,7 +15,7 @@ import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect
 import type { AssignmentView } from "@godspeedai/cognate-runtime-api";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
 import type { HandoffCandidate } from "../src/assignments/handoffSource.ts";
-import { approvedGateG3, approvedSlowGate, GATE_G3_ASSIGNMENT_ID, GATE_G3_INSTRUCTION, SLOW_GATE_ASSIGNMENT_ID, SLOW_GATE_INSTRUCTION, standInHandoffSource } from "./handoff-fixture.ts";
+import { approvedGateG3, approvedSlowGate, modelCallInFlight, GATE_G3_ASSIGNMENT_ID, GATE_G3_INSTRUCTION, SLOW_GATE_ASSIGNMENT_ID, SLOW_GATE_INSTRUCTION, standInHandoffSource } from "./handoff-fixture.ts";
 import { bootAimock, withTempHome } from "./helpers.ts";
 import { inv, seed, waitUntil } from "./wb-helpers.ts";
 
@@ -149,6 +149,10 @@ describe("E2E case assignment hand-off", () => {
         await menu().waitFor();
         await menu().getByRole("menuitem", { name: `Hand off ${SLOW_GATE_INSTRUCTION}` }).click();
         await waitLabel(LIVE_LABEL("started"));
+        // Barrier: the slow scenario's first model call streams for minutes, so once it has begun it is
+        // certain to be in flight whenever the controls below land, however slow the host is.
+        const liveRunId = (await bindingFor(app, SLOW_GATE_ASSIGNMENT_ID)).runId;
+        await modelCallInFlight(app, liveRunId);
         await chip.click();
         const live = menu();
         await controlThroughContention(live.getByRole("menuitem", { name: "Report 1 USD of money spent" }), () => live.getByText("money: 1 of 5 USD").waitFor());
