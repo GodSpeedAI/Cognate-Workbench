@@ -50,6 +50,22 @@ export async function bundle(entry: string): Promise<string> {
  * stylesheets, the .sea model, the pinned pg0 binary). Returns the pg0 pin recorded in the
  * manifest. Mirrors the checkout's paths so `resourcePath()` resolves the same in both modes.
  */
+/** The DomainForge native binding for `binding` (e.g. `linux-x64-gnu`). From 0.22.2 the npm package
+ *  ships each binding in a napi-rs platform package (`@godspeedai/domainforge-<binding>`); earlier
+ *  releases, and a binding built locally for a target the registry lacks (see
+ *  .github/workflows/package.yml), sit inside `@godspeedai/domainforge` itself. Its loader accepts
+ *  either, so this does too, and refuses when neither exists. */
+export function domainforgeBinding(repo: string, binding: string, caller: string): string {
+  const file = `domainforge-core.${binding}.node`;
+  const candidates = [
+    join(repo, "node_modules", "@godspeedai", `domainforge-${binding}`, file),
+    join(repo, "node_modules", "@godspeedai", "domainforge", file),
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error(`${caller}: missing DomainForge binding for ${binding} (looked in ${candidates.join(", ")}); build it first (see .github/workflows/package.yml)`);
+  return found;
+}
+
 export async function stageShareTree(repo: string, share: string, bunTarget: string): Promise<{ pg0Asset: string; pg0Digest: string }> {
   const platform = PLATFORMS[bunTarget];
   if (!platform) throw new Error(`package: unsupported target ${bunTarget}`);
@@ -155,12 +171,8 @@ async function main(bunTarget: string, tag: string) {
 
   // 4. Compiled executable.
   const exe = join(prefix, "bin", `cognate-workbench${platform.exeSuffix}`);
-  // The DomainForge npm package ships only the linux-x64 binding; other targets need it built first (see
-  // .github/workflows/package.yml). Without it the exe compiles but crashes at startup, so stop here.
-  const bindingFile = join(repo, "node_modules", "@godspeedai", "domainforge", `domainforge-core.${platform.binding}.node`);
-  if (!existsSync(bindingFile)) {
-    throw new Error(`package: missing DomainForge binding ${bindingFile}; build it for ${platform.binding} first (see .github/workflows/package.yml)`);
-  }
+  // Without the DomainForge binding the exe compiles but crashes at startup, so stop here.
+  domainforgeBinding(repo, platform.binding, "package");
   const compile = Bun.spawn([process.execPath, "build", "--compile", "--target", bunTarget, join(repo, "src/cli.ts"), "--outfile", exe], { cwd: repo, stdout: "inherit", stderr: "inherit" });
   if ((await compile.exited) !== 0) throw new Error(`package: bun build --compile failed for ${bunTarget}`);
 
