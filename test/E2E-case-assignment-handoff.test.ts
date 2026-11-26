@@ -92,6 +92,8 @@ describe("E2E case assignment hand-off", () => {
         expect(await chip.getAttribute("aria-label")).toBe("Assignment: None");
         await chip.click();
         await menu().waitFor();
+        // The candidates arrive asynchronously; the menu says so (aria-busy) until they do.
+        await page.locator('[role="menu"][aria-label="Assignment"][aria-busy="false"]').waitFor();
         const offered = await menu().getByRole("menuitem").allInnerTexts();
         expect(offered).toHaveLength(2);
         expect(offered[0]).toContain(GATE_G3_INSTRUCTION);

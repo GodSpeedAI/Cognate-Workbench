@@ -94,6 +94,8 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
   useEffect(() => {
     if (!open || binding) return;
     let live = true;
+    // A fresh read per open: an assignment withdrawn since the last open must not be offered.
+    setCandidates(undefined);
     void client
       .invoke("session.caseAssignment.candidates", {})
       .then((value) => {
@@ -198,7 +200,7 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
         <ChevronDownIcon aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" aria-label="Assignment" className="ctx-menu" onKeyDown={onMenuKey}>
+        <div role="menu" aria-label="Assignment" aria-busy={!binding && candidates === undefined && !error} className="ctx-menu" onKeyDown={onMenuKey}>
           {binding ? (
             <>
               {view && (
@@ -242,6 +244,7 @@ export function AssignmentChip({ sessionId, mode, preset, state, onHandedOff }: 
             </>
           ) : (
             <>
+              {candidates === undefined && !error && <p className="ctx-menu-empty" role="status">Loading case assignments…</p>}
               {candidates?.available === false && <p className="ctx-menu-empty">This host offers no case assignments to hand off.</p>}
               {candidates?.available && candidates.candidates.length === 0 && <p className="ctx-menu-empty">No case assignment is waiting to be handed off.</p>}
               {candidates?.candidates.map((candidate) => (
