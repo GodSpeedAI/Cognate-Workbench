@@ -1,21 +1,19 @@
-# Current status — revision 52
+# Current status — revision 53
 
-CognitiveOS #112 (Workbench half): the Workbench now consumes the published Cognate 0.11.0 `rlm.*` recursive child-run contract.
+SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for recursive child runs.
 
-**Behaviour.** The provider registry is host configuration (`ServerOptions.rlmProviders`, default empty); an empty registry changes nothing. An operator selects a provider on `expert.converse`/`team.converse`; it is frozen in the Assignment's execution snapshot (`execution.rlm`, absent in old snapshots = no recursive execution) and inherited by delegated children. The Expert tool `rlm_delegate` goes through `rlm.invoke`, wrapped by `src/capabilities/rlmGoverned.ts`, which derives parent run, Assignment, depth, grant, reservation and a pinned context digest from the registered Assignment. Authority must be a subset of the parent's tools and mode; depth uses the Team `maxDepth`; the reservation is the Expert's cost ceiling less its spend and earlier child reservations. The invocation id derives from parent run plus request id, so repeats reuse the same Child Run. Refusals (`rlm-*` codes) happen before dispatch and leave no Child Run.
+**Behaviour.** `src/capabilities/containedStdioPort.ts` implements Cognate's `StdioSpawnPort` and is built only from trusted host configuration, `ServerOptions.rlmContainedPort`. Absent (default) means Cognate's `unavailableSpawnPort()`, so ordinary execution and every current refusal are unchanged. With it, `rlmGoverned.providerRefusal` admits a no-network contained provider and still refuses open egress.
 
-The parent waits on an `rlm-child` continuation that the completion bridge resolves when the `agent.rlm` run is terminal; the handoff then carries `rlmChildren` (run id, status) and evidence. Independent review and human settlement are unchanged. `rlm.inspect`/`rlm.cancel` are parent-scoped: the parent run, or the operator acting through the parent principal.
+**Launch plan and digest.** `src/capabilities/containedLaunch.ts` resolves each spec into a canonical record: pinned executable and launcher (path, sha256), the full sandbox argv, read-only workspace, network `none` or one host unix socket, ceilings (wall, CPU, address space, nofile, nproc, output bytes), env allowlist. `launchPlanDigest(plan)` = `sha256:<hex of canonical JSON>`; ticket #116 binds an authority decision to it through the optional `authorize` hook. The plan is recomputed and compared just before spawn; drift refuses.
 
-**Unknown outcomes.** A provider view of `unknown` parks the child on `ambiguous:<id>` and the parent keeps waiting. `run.invocation.reconcile` resolves it; the handoff records the child as reconciled with an uncertainty, so it never reads as plain success.
+**Spawn and teardown.** `--unshare-all` (net, pid, user), `--die-with-parent`, `--new-session`, cleared env, read-only workspace and runtime roots, tmpfs `/tmp`, minimal `/dev`, caps dropped, `prlimit` ceilings, line streaming with bounded output, line length and stderr. `kill`, wall-clock, and ceilings kill the process group and pid namespace, then check the host `/proc` for survivors; teardown is idempotent and records the exit.
 
-**Review fixes (rev 52).** Reach is admitted only when the operator declared `portGovernance` with network `none`. Prior child reservations are read from typed bindings and an unreadable one refuses (`rlm-budget-unverifiable`). Children get no `workspace-write` and no `edit`/`bash`/`run_code`/`capability_invoke`. Cancelling the parent Assignment cancels open children through `rlm.cancel` and records it. Each `rlm-child` wait resolves in isolation; `completed` needs a recorded `rlm.outcome`. No tenant fallback; `rlm.providers` is operator-only; a reused request key with different parameters is refused. The Cognate invoke re-entry is a `test.failing` plus a DEBT entry (Cognate PR #94).
+**Refusals before spawn** (typed Cognate codes, never a fallback): missing or digest-mismatched launcher, unpatched launcher, user namespaces unavailable, unpinned or digest-mismatched executable, executable or launcher in a writable root, outbound network other than the host socket, unenforceable filesystem, subprocess or cap requests.
 
-**Governed admission is closed.** Providers that spawn, claim isolation, need containment or have network reach are refused. No spawn port is registered.
+**Verified.** `test/containedLaunch.test.ts` 13/13. `test/J-RLM-contained-port.test.ts` (COGNATE_BWRAP_TESTS=1) observes each control from outside with positive controls; evidence JSON under `.tmp/evidence/114/`. Typecheck clean.
 
-**Verified.** `test/J-RLM-child-run.test.ts`: red (0/6) then green (8/8 after reconcile and standing tests). Typecheck and DomainForge checks clean. Expert/Team gate suites pass except load-timing flakes that pass alone, and one E2E failure that is identical on base.
+**Limits.** No seccomp or disk quota; `subprocess:false` is refused; RLIMIT_AS fails allocations rather than terminating; the output cap is checked per chunk; bwrap path-exec after a hash check has a narrowed, not eliminated, swap window; `prlimit` comes from the read-only runtime roots. The metering proxy is #115, authority binding is #116. Cognate does not export its bwrap argv builder.
 
-**Limits.** Child spend is not debited from the parent ledger after reservation. In-run inspect/cancel is tested at the wrapper only (no Expert tool). Cognate re-runs the child body on resume, so a provider invoke can be re-entered for the same invocation; report upstream.
+**Next.** Review and merge; #115 and #116.
 
-**Next.** Review and merge; #114-#116 open governed admission.
-
-Plan: none. Spec: SEA-Forge #112. Full history is in `.agents/CURRENT_STATUS.jsonl`.
+Plan: none. Spec: SEA-Forge #114. Full history is in `.agents/CURRENT_STATUS.jsonl`.
