@@ -101,8 +101,8 @@ export class ExpertCompletionBridge {
       });
     }
     state=await this.experts.state(this.tenant);
-    await this.reconcileRlmChildren();
     const waits=await service.listContinuations(caller,{status:"OPEN"});
+    await this.reconcileRlmChildren(waits);
     for(const wait of waits){
       if(wait.type!=="expert-assignment")continue;
       const condition=wait.condition as {assignmentId?:string};
@@ -117,10 +117,10 @@ export class ExpertCompletionBridge {
   }
   /** J-RLM-CHILD-RUN: resolve a parent's `rlm-child` wait once the linked child run is terminal. The wait's own
    * condition is never trusted: the child must be an `agent.rlm` run correlated to exactly this parent. */
-  async reconcileRlmChildren():Promise<void>{
+  async reconcileRlmChildren(waits:readonly {id:string;type:string;runId:string;condition:unknown}[]):Promise<void>{
     const service:RuntimeService=this.experts.service;
     const caller=this.experts.caller(this.tenant);
-    for(const wait of await service.listContinuations(caller,{status:"OPEN"})){
+    for(const wait of waits){
       if(wait.type!=="rlm-child" || this.controller.signal.aborted)continue;
       const condition=wait.condition as {invocationId?:string;childRunId?:string}|null;
       if(!condition?.childRunId || !condition.invocationId)continue;
