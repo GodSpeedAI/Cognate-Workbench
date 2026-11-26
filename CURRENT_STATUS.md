@@ -1,17 +1,17 @@
-# Current status — revision 49
+# Current status — revision 50
 
-CognitiveOS #110 (`experts.restore`) now handles a missing default Team whose required built-in Expert is archived.
+CognitiveOS #112 (Workbench half): the Workbench now consumes the published Cognate 0.11.0 `rlm.*` recursive child-run contract.
 
-**Behaviour.** Without an explicit request, restore recreates every other built-in verbatim but skips the Team. It never creates a Team around an archived member. The report adds an optional `blocked` array, present only when non-empty:
+**Behaviour.** The provider registry is host configuration (`ServerOptions.rlmProviders`, default empty); an empty registry changes nothing. An operator selects a provider on `expert.converse`/`team.converse`; it is frozen in the Assignment's execution snapshot (`execution.rlm`, absent in old snapshots = no recursive execution) and inherited by delegated children. The Expert tool `rlm_delegate` goes through `rlm.invoke`, wrapped by `src/capabilities/rlmGoverned.ts`, which derives parent run, Assignment, depth, grant, reservation and a pinned context digest from the registered Assignment. Authority must be a subset of the parent's tools and mode; depth uses the Team `maxDepth`; the reservation is the Expert's cost ceiling less its spend and earlier child reservations. The invocation id derives from parent run plus request id, so repeats reuse the same Child Run. Refusals (`rlm-*` codes) happen before dispatch and leave no Child Run.
 
-`blocked: [{ teamId: "cognate-team", reason: "required-expert-archived", requires: { reactivate: ["builder"] }, message }]`
+The parent waits on an `rlm-child` continuation that the completion bridge resolves when the `agent.rlm` run is terminal; the handoff then carries `rlmChildren` (run id, status) and evidence. Independent review and human settlement are unchanged. `rlm.inspect`/`rlm.cancel` are parent-scoped: the parent run, or the operator acting through the parent principal.
 
-The message names the exact IDs and the request that satisfies it: `experts.restore` with `{"includeArchived": true}`. That is the existing explicit-reactivation input. With it, archived built-ins are reactivated first and the Team is created after, so no intermediate state breaks the Team or one-Team-Lead invariants. Failure persists nothing, because the mutation boundary revalidates every Team. Active and custom definitions and stable IDs are untouched. Agent and in-Run callers are still refused, including under safe mode.
+**Governed admission is closed.** Providers that spawn, claim isolation, need containment or have network reach are refused. No spawn port is registered.
 
-**Verified.** `test/J-EXPERTS-restore-blocked.test.ts` (5 tests) failed before the fix and passed after. It covers the state, capability and safe-mode paths and the caller refusals. `just typecheck` is clean. The Expert and Team suites passed on isolated pg0: 9, 24 and 53 tests, 0 failures. Existing restore suites are unchanged and pass.
+**Verified.** `test/J-RLM-child-run.test.ts`: red (0/6) then green (6/6). Typecheck and DomainForge checks clean. Expert/Team gate suites pass except load-timing flakes that pass alone, and one E2E failure that is identical on base.
 
-**Limits.** The interaction model has no restore journey, so no model change was made. Full `just verify` is pending on hosted CI.
+**Limits.** Child spend is not debited from the parent ledger after reservation. The parent's in-run inspect/cancel has no Expert tool.
 
-**Next.** Run the hosted gate, then review and merge the checkpoint branch.
+**Next.** Review and merge; #114-#116 open governed admission.
 
-Plan: none. Spec: SEA-Forge #108 and #110. Full history is in `.agents/CURRENT_STATUS.jsonl`.
+Plan: none. Spec: SEA-Forge #112. Full history is in `.agents/CURRENT_STATUS.jsonl`.
