@@ -14,6 +14,7 @@ import { connectTransport } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import type { AssignmentView } from "@godspeedai/cognate-runtime-api";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
+import type { HandoffCandidate } from "../src/assignments/handoffSource.ts";
 import { approvedGateG3, approvedSlowGate, GATE_G3_ASSIGNMENT_ID, GATE_G3_INSTRUCTION, SLOW_GATE_ASSIGNMENT_ID, SLOW_GATE_INSTRUCTION, standInHandoffSource } from "./handoff-fixture.ts";
 import { bootAimock, withTempHome } from "./helpers.ts";
 import { inv, seed, waitUntil } from "./wb-helpers.ts";
@@ -22,6 +23,12 @@ const SHOTS = join(import.meta.dir, "..", "screenshots", "workbench");
 const shot = (page: Page, name: string) => page.screenshot({ path: join(SHOTS, `${name}.png`) });
 const SETTLED_LABEL = "Assignment: case-0001 · item-03 · 1:1 (completed)";
 const LIVE_LABEL = (status: string) => `Assignment: case-0001 · item-03 · 1:2 (${status})`;
+/** A third approved assignment (same Brief as the first, so the same stub answers it), handed off while the operator changes session. */
+const SWITCHED_ASSIGNMENT_ID = "assign:case-0001:item-03:1:3";
+const switchedAssignment = (): HandoffCandidate => {
+  const base = approvedGateG3();
+  return { ...base, id: "candidate:gate-g3-switched", assignment: { ...base.assignment, assignment_id: SWITCHED_ASSIGNMENT_ID, k: 3 } };
+};
 
 /** The session binding the projection folded for one assignment id. */
 const bindingFor = (app: AppServer, assignmentId: string) =>
@@ -36,7 +43,7 @@ describe("E2E case assignment hand-off", () => {
     await mkdir(SHOTS, { recursive: true });
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const app = await startServer({ executionPosture: "uncontained-local", port: 0, home, handoffSource: standInHandoffSource([approvedGateG3(), approvedSlowGate()]) });
+      const app = await startServer({ executionPosture: "uncontained-local", port: 0, home, handoffSource: standInHandoffSource([approvedGateG3(), approvedSlowGate(), switchedAssignment()]) });
       // The production posture: this client and the browser both present the boot's server-issued session.
       const client = createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => app.operatorSessionToken), caller: LOCAL_OPERATOR });
       const browser = await chromium.launch();
@@ -64,11 +71,18 @@ describe("E2E case assignment hand-off", () => {
               throw new Error(`the control could not be pressed; it reads "${await chip.getAttribute("aria-label")}", menu "${(await menu().innerText().catch(() => "")).replace(/\s+/g, " ")}" (${String(reason).split("\n")[0]})`);
             });
             const alert = menu().locator('[role="alert"]');
-            await settled().catch(() => undefined);
-            if (!(await alert.isVisible().catch(() => false))) return;
+            // Exactly two outcomes end an attempt: the control's success shows, or its refusal does. When
+            // neither appears, both waits time out and the AggregateError fails the journey.
+            const outcome = await Promise.any([
+              settled().then(() => "settled" as const),
+              alert.waitFor({ state: "visible", timeout: 30_000 }).then(() => "refused" as const),
+            ]);
+            if (outcome === "settled") return;
             const text = await alert.innerText();
             if (!/too much contention/.test(text)) throw new Error(`the Assignment control refused: ${text}`);
             if (attempt >= 20) throw new Error(`the Assignment control kept refusing for contention: ${text}`);
+            // A person does not click again within a millisecond; pause so the run's own appends can interleave.
+            await page.waitForTimeout(150);
           }
         };
         /** Waits for the control to read `text`; a timeout reports what it does read and any alert on screen. */
@@ -95,13 +109,13 @@ describe("E2E case assignment hand-off", () => {
         // The candidates arrive asynchronously; the menu says so (aria-busy) until they do.
         await page.locator('[role="menu"][aria-label="Assignment"][aria-busy="false"]').waitFor();
         const offered = await menu().getByRole("menuitem").allInnerTexts();
-        expect(offered).toHaveLength(2);
+        expect(offered).toHaveLength(3);
         expect(offered[0]).toContain(GATE_G3_INSTRUCTION);
         expect(offered[0]).toContain("money 5 USD");
         await shot(page, "e2e-wp23-assignment-01-offer");
 
         // ---- Hand off: the run opens as a turn whose message is the approved Brief's instruction ----
-        await menu().getByRole("menuitem", { name: `Hand off ${GATE_G3_INSTRUCTION}` }).click();
+        await menu().getByRole("menuitem", { name: `Hand off ${GATE_G3_INSTRUCTION}` }).first().click();
         await page.locator(".message-user").filter({ hasText: GATE_G3_INSTRUCTION }).waitFor();
         await page.locator(".message-assistant").filter({ hasText: "Recorded the verifier's observation for gate G3" }).waitFor({ timeout: 30_000 });
         await waitLabel(SETTLED_LABEL);
@@ -164,6 +178,41 @@ describe("E2E case assignment hand-off", () => {
         expect(liveView.status).toBe("completed");
         expect(liveView.spend.find((s) => s.currency === "money")?.spent).toBe(1);
         expect(liveView.events.map((e) => e.event)).toEqual(["issued", "started", "interrupted", "resumed", "completed"]);
+        // ---- A hand-off that resolves after the operator changed session leaves the active session alone ----
+        // The request is held in the browser while the operator opens another new session; the run it opened
+        // is bound to the originating session, and must not be followed into this one.
+        await page.getByRole("button", { name: "New session", exact: true }).click();
+        await waitLabel("Assignment: None");
+        await chip.click();
+        await menu().waitFor();
+        let release: () => void = () => undefined;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        await page.route("**/*", async (route) => {
+          if (route.request().method() === "POST" && (route.request().postData() ?? "").includes("session.caseAssignment.handoff")) await held;
+          await route.fallback();
+        });
+        await menu().getByRole("menuitem", { name: `Hand off ${GATE_G3_INSTRUCTION}` }).nth(1).click();
+        const rowsBefore = await page.locator(".session-row").count();
+        await page.getByRole("button", { name: "New session", exact: true }).click();
+        // The operator is now in the new session: it is listed and selected while the hand-off is still held.
+        await waitUntil("the new session to be opened", async () => (await page.locator(".session-row").count()) > rowsBefore && (await page.locator('[role="treeitem"][aria-selected="true"]').count()) > 0);
+        await waitLabel("Assignment: None");
+        release();
+        const switched = await bindingFor(app, SWITCHED_ASSIGNMENT_ID);
+        await page.unroute("**/*");
+        await waitUntil("the switched hand-off's run to settle", async () => (await app.runtime.service.getRun(LOCAL_OPERATOR, { runId: switched.runId })).status === "completed", 30_000);
+        expect(await chip.getAttribute("aria-label")).toBe("Assignment: None");
+        expect(await page.locator(".message-user").count()).toBe(0);
+        expect(await page.locator(".message-assistant").count()).toBe(0);
+        // The binding is still there when the operator returns to the originating session.
+        const rowCount = await page.locator(".session-row").count();
+        let returned = false;
+        for (let i = 0; i < rowCount && !returned; i++) {
+          await page.locator(".session-row").nth(i).click();
+          returned = await page.waitForFunction(() => /1:3/.test(document.querySelector("button#wb-assignment")?.getAttribute("aria-label") ?? ""), undefined, { timeout: 2_000 }).then(() => true, () => false);
+        }
+        expect(returned, "the originating session shows its binding").toBe(true);
+        await waitLabel("Assignment: case-0001 · item-03 · 1:3 (completed)");
         expect(errors).toEqual([]);
       } finally {
         await browser.close();

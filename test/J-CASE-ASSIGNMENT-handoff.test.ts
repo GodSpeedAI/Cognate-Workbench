@@ -123,12 +123,28 @@ describe("J-CASE-ASSIGNMENT-handoff", () => {
         const spent = await amidStreaming(() => inv(client, "assignment.spend", spend));
         expect((spent as unknown as AssignmentView).spend.find((s) => s.currency === "money")?.spent).toBe(4);
         expect(await inv(client, "assignment.spend", spend)).toEqual(spent);
+        // The interrupt lands while the model call is streaming (as the browser journey's does), so the step's
+        // outcome is unknown and the resumed run waits for the operator rather than finishing by timing alone.
+        await waitUntil("the slow run's model call to start streaming", async () => {
+          for await (const event of app.runtime.service.events(LOCAL_OPERATOR, { runId: slowHanded.runId })) {
+            if (event.eventType === "run.invocation.progress") return true;
+          }
+          return undefined;
+        });
         const paused = (await amidStreaming(() => inv(client, "assignment.interrupt", { runId: slowHanded.runId, reason: "operator pause", token: "pause-once" }))) as unknown as AssignmentView;
         expect(paused.status).toBe("interrupted");
         const resumed = (await inv(client, "assignment.resume", { runId: slowHanded.runId, token: "resume-once" })) as unknown as AssignmentView;
         expect(resumed.status).toBe("resumed");
         expect(resumed.assignment.assignment_id).toBe(SLOW_GATE_ASSIGNMENT_ID);
-        const settled = await terminal(app, slowHanded.runId);
+        // Only the operator can record what the interrupted step did; a model call cannot be reconstructed, so the
+        // one honest outcome is `failed`, which lets the agent retry it (the same resolution the browser records).
+        const ambiguous = await waitUntil("the interrupted step to wait for reconciliation", async () =>
+          (await app.runtime.service.listContinuations(LOCAL_OPERATOR, { runId: slowHanded.runId })).find((c) => c.type === "ambiguous-invocation" && c.status === "OPEN"));
+        await expect(inv(client, "run.invocation.reconcile", { continuationId: ambiguous.id, outcome: "failed", reason: "The answer stopped mid-stream when the operator interrupted; no tool ran." })).resolves.toMatchObject({ runId: slowHanded.runId, outcome: "failed" });
+        const settled = await waitUntil(`run ${slowHanded.runId} to complete after reconciliation`, async () => {
+          const run = await app.runtime.service.getRun(LOCAL_OPERATOR, { runId: slowHanded.runId });
+          return run.status === "running" || run.status === "waiting" ? undefined : run;
+        }, 30_000);
         expect(settled.runId).toBe(slowHanded.runId);
         expect(settled.status).toBe("completed");
 
