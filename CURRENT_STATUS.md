@@ -1,17 +1,41 @@
-# Current status — revision 49
+# Current status
 
-CognitiveOS #110 (`experts.restore`) now handles a missing default Team whose required built-in Expert is archived.
+**Status revision:** 50
 
-**Behaviour.** Without an explicit request, restore recreates every other built-in verbatim but skips the Team. It never creates a Team around an archived member. The report adds an optional `blocked` array, present only when non-empty:
+**Stage:** CognitiveOS #108 integration: WP-23 hand-off integrated; #109/#110 qualified on hosted CI
 
-`blocked: [{ teamId: "cognate-team", reason: "required-expert-archived", requires: { reactivate: ["builder"] }, message }]`
+**Summary:** Integration branch carries the test-client lifecycle cleanup, the DomainForge platform-package binding resolver, the validated SSH host key helper, #110 (blocked default Team restore prerequisite) and now the WP-23 operator hand-off (PR #40, merged to main d02efd60). Hosted verify at 142f7d9 passed all four shards, tauri-linux and the aggregate; clean-install x64 and arm64 passed. Cognate pins stay at the published 0.11.0.
 
-The message names the exact IDs and the request that satisfies it: `experts.restore` with `{"includeArchived": true}`. That is the existing explicit-reactivation input. With it, archived built-ins are reactivated first and the Team is created after, so no intermediate state breaks the Team or one-Team-Lead invariants. Failure persists nothing, because the mutation boundary revalidates every Team. Active and custom definitions and stable IDs are untouched. Agent and in-Run callers are still refused, including under safe mode.
+**Verified:**
 
-**Verified.** `test/J-EXPERTS-restore-blocked.test.ts` (5 tests) failed before the fix and passed after. It covers the state, capability and safe-mode paths and the caller refusals. `just typecheck` is clean. The Expert and Team suites passed on isolated pg0: 9, 24 and 53 tests, 0 failures. Existing restore suites are unchanged and pass.
+- Red then green: test/J-EXPERTS-restore-blocked.test.ts, 5 tests (state, capability, safe mode, agent and in-Run refusal) failed before the fix and passed after.
+- just typecheck clean.
+- Expert and Team suites on isolated pg0: 9/9, 24/24 and 53/53 pass, 0 fail.
+- Active and custom definitions and stable IDs unchanged; existing restore report shape unchanged when nothing is blocked.
+- Hosted verify 45827926682 on 142f7d9: smoke 73; shard1 41 pass 1 skip; shard2 325; shard3 141 pass 9 skip; shard4 1376 pass 3 skip; 0 fail; tauri-linux and aggregate success
+- Hosted clean-install 45829573944 on 142f7d9: x64 and arm64 success
+- WP-23 merge: frozen install unchanged, 35 Cognate packages at 0.11.0, just typecheck clean
 
-**Limits.** The interaction model has no restore journey, so no model change was made. Full `just verify` is pending on hosted CI.
+**Limits:**
 
-**Next.** Run the hosted gate, then review and merge the checkpoint branch.
+- Report gains an optional blocked array: [{teamId, reason: required-expert-archived, requires: {reactivate: [ids]}, message}], present only when non-empty.
+- The interaction model has no restore journey, so no model change or domainforge run was needed.
+- Full just verify remains pending (hosted CI).
+- The 13 skips are opt-in suites (real bwrap contained workspace; live SEA plus RealityTrace settlement); not exercised on the hosted runner
+- WP-23 operator controls can be refused while the bound run streams until the Cognate control-stream fix (Cognate PR #93) is released and bumped
 
-Plan: none. Spec: SEA-Forge #108 and #110. Full history is in `.agents/CURRENT_STATUS.jsonl`.
+**Next:**
+
+- Run the full integrated gate on hosted CI.
+- Review and merge the checkpoint branch.
+
+**Evidence:**
+
+- test/J-EXPERTS-restore-blocked.test.ts
+- test/J-EXPERTS-restore.test.ts
+- test/J-EXPERTS-restore-safe-mode.test.ts
+- src/experts/state.ts
+
+**Spec:** SEA-Forge #108 and #110
+
+**Plan:** 

@@ -3,6 +3,7 @@ import type { ClipboardEvent, ReactNode } from "react";
 import type { Json } from "@godspeedai/cognate-events";
 import { useCognate, useContinuations, useProjection } from "@godspeedai/cognate-react";
 import { ComposerBar } from "./workbench/ComposerBar.tsx";
+import { AssignmentChip } from "./workbench/AssignmentChip.tsx";
 import { WorkbenchView, useBindableTasks } from "./workbench/Workbench.tsx";
 import { ExpertsTeamsPanel } from "./experts/ExpertsTeamsPanel.tsx";
 import { captureSnapshot, resolveAttention, withReferent, type FocusRef } from "../workbench/focus.ts";
@@ -5515,17 +5516,33 @@ function AppShell() {
     // template installs that listener only when the boot's shell kind is "chromium-app".
     (window as unknown as { __wbInFlight?: boolean }).__wbInFlight = !showHero && states.some((s) => s.kind !== "idle");
   }, [showHero, pendingApproval, planReviewContinuation, governanceContinuation, ambiguousContinuation, streaming.status]);
+  // WP-23 (J-CASE-ASSIGNMENT-handoff): a handed-off assignment opens this conversation's run
+  // through the capability, so the conversation follows it like any sent turn; its message is the
+  // approved Brief's instruction.
+  // The hand-off resolves later than the click: the operator may have opened another session meanwhile, so the
+  // conversation follows the run only while its originating session is still the active one. Otherwise the
+  // active session is left alone; the binding shows when the operator returns to the originating session.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const handOffAssignment = useCallback(({ sessionId, runId, instruction }: { readonly sessionId: string; readonly runId: string; readonly instruction: string }) => {
+    if (activeSessionIdRef.current !== sessionId) return;
+    setTranscript((prev) => [...prev, { role: "user", content: instruction, at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }]);
+    runStartedAtRef.current = Date.now();
+    setActiveRunId(runId);
+  }, []);
+  const conversationState = showHero ? "idle" : pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle";
   const contextBar = currentWorkspaceId ? (
     <ComposerBar
       agentChip={<AgentChip harnesses={harnessList.harnesses} choice={agentChoice} locked={agentLocked} error={agentBindError} onChange={changeAgent} onOpenSettings={() => openSettings("agents")} />}
       agentNotice={<AgentNotice harnesses={harnessList.harnesses} choice={agentChoice} />}
+      {...(activeSessionId ? { assignmentChip: <AssignmentChip key={activeSessionId} sessionId={activeSessionId} mode={effectiveAccessMode} preset={presetOverrides[activeSessionId] ?? settings.preset} state={conversationState} onHandedOff={handOffAssignment} /> } : {})}
       workspaceId={currentWorkspaceId}
       {...(activeSessionId ? { sessionId: activeSessionId } : {})}
       {...(activeTaskId ? { taskId: activeTaskId } : {})}
       onTaskChange={(taskId) => void bindTask(taskId ?? null)}
       bindError={taskBindError}
       onOpenWorkbench={() => setView("workbench")}
-      state={showHero ? "idle" : pendingApproval || planReviewContinuation || ambiguousContinuation || governanceContinuation ? "waiting" : streaming.status === "streaming" ? "running" : "idle"}
+      state={conversationState}
       steps={showHero ? 0 : toolEntries.length + 1}
       elapsedSeconds={showHero ? 0 : elapsedSeconds}
       approvalsPending={!showHero && pendingApproval ? 1 : 0}

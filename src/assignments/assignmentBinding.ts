@@ -6,17 +6,21 @@ import type { Json } from "@godspeedai/cognate-events";
 export const ASSIGNMENT_ACTIONS: ReadonlySet<string> = new Set(["assignment.interrupt", "assignment.resume", "assignment.spend"]);
 
 /**
- * Who may drive an assignment's lifecycle: the local operator (interrupt, resume, report spend) and the system
- * lineage (report spend only). An agent, including the run's own, can never resume, interrupt or re-budget itself.
+ * Who may drive an assignment's lifecycle: the local operator alone (interrupt, resume, report spend). The system
+ * lineage and an agent, including the run's own, can never resume, interrupt or re-budget an assignment.
  * Returns `undefined` for every other action so the caller's remaining rules apply.
  */
 export function authorizeAssignmentAction(request: { readonly action: string; readonly caller: Caller }): { readonly allow: boolean; readonly reason: string } | undefined {
   if (!ASSIGNMENT_ACTIONS.has(request.action)) return undefined;
   const { actor, tenant } = request.caller;
   if (tenant !== "local") return { allow: false, reason: "assignment controls belong to the local operator" };
-  if (actor.kind === "user" && actor.id === "operator") return { allow: true, reason: "operator controls the assignment" };
-  if (actor.kind === "system" && request.action === "assignment.spend") return { allow: true, reason: "system reports spend" };
+  if (isLocalOperator(request.caller)) return { allow: true, reason: "operator controls the assignment" };
   return { allow: false, reason: `${actor.kind} may not ${request.action}` };
+}
+
+/** The one local operator: the user actor `operator` in the local tenant. */
+export function isLocalOperator(caller: { readonly actor: { readonly id: string; readonly kind: string }; readonly tenant: string }): boolean {
+  return caller.tenant === "local" && caller.actor.kind === "user" && caller.actor.id === "operator";
 }
 
 export interface StartRunRequest {
