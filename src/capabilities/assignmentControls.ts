@@ -2,12 +2,14 @@
 // J-CASE-ASSIGNMENT-handoff): the operator's controls over the case assignment a run is bound to.
 //
 // Each acts as the invoking caller, so the runtime's own action policy decides who may drive an
-// assignment (`authorizeAssignmentAction`: the local operator, and the system lineage for spend
-// alone). The run's own agent can never interrupt, resume or re-budget its assignment, and this
-// module adds no identity of its own: nothing here calls the runtime as the system caller.
+// assignment (`authorizeAssignmentAction`: the local operator alone). The mutating controls are also
+// refused inside any run (`operatorOnly`): a human decision is never a step inside a run, whatever
+// principal the run carries. This module adds no identity of its own: nothing here calls the runtime
+// as the system caller.
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import { CURRENCIES, type AssignmentService, type Caller, type Currency } from "@godspeedai/cognate-runtime-api";
 import { assignmentControls } from "../assignments/assignmentBinding.ts";
+import { operatorOnly } from "../workbench/operatorGuard.ts";
 
 interface ControlInput {
   readonly runId?: unknown;
@@ -52,17 +54,20 @@ export function assignmentControlsComponent(options: {
       fiber.provide(contract("assignment.interrupt"), async (rawInput, ctx) => {
         const input = (rawInput ?? {}) as ControlInput;
         const capability = "assignment.interrupt";
+        await operatorOnly(ctx, capability);
         if (!text(input.reason)) throw new Error(`${capability}: a reason is required`);
         return await controls(ctx).interrupt(runId(capability, input), input.reason, token(capability, input));
       });
       fiber.provide(contract("assignment.resume"), async (rawInput, ctx) => {
         const input = (rawInput ?? {}) as ControlInput;
         const capability = "assignment.resume";
+        await operatorOnly(ctx, capability);
         return await controls(ctx).resume(runId(capability, input), token(capability, input));
       });
       fiber.provide(contract("assignment.spend"), async (rawInput, ctx) => {
         const input = (rawInput ?? {}) as ControlInput;
         const capability = "assignment.spend";
+        await operatorOnly(ctx, capability);
         if (!CURRENCIES.includes(input.currency as Currency)) throw new Error(`${capability}: currency must be one of ${CURRENCIES.join(", ")}`);
         const amount = input.amount;
         if (amount !== "unknown" && !(typeof amount === "number" && Number.isFinite(amount) && amount >= 0)) {

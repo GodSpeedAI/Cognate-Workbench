@@ -9,12 +9,12 @@
 // session, the run id and the assignment, and the `session-assignment-bindings` projection folds
 // it. Nothing else is recorded, so the binding is visible the moment the run starts.
 //
-// Both are human decisions (`operatorOnly`). With no hand-off source the host offers nothing: the
+// Both are human decisions of the local operator (`localOperatorOnly`). With no hand-off source the host offers nothing: the
 // candidates read reports the control unavailable and a hand-off is refused.
 import type { Component, HandlerContext, SemanticRef } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import type { Json } from "@godspeedai/cognate-events";
-import { startAssignedRun } from "../assignments/assignmentBinding.ts";
+import { isLocalOperator, startAssignedRun } from "../assignments/assignmentBinding.ts";
 import { handoffCandidateView, type HandoffCandidate, type HandoffSource } from "../assignments/handoffSource.ts";
 import { AGENT_CODING, type AgentCodingInput } from "../agents/agentCoding.ts";
 import { operatorOnly } from "../workbench/operatorGuard.ts";
@@ -27,6 +27,13 @@ export interface CaseAssignmentHandoffInput {
   /** The session's access mode and agent preset, as the composer would send them. */
   readonly mode?: string;
   readonly preset?: string;
+}
+
+/** A human decision by the one local operator, outside any run. Checked before any system-identity lookup, so a
+ *  refused caller learns nothing about which sessions exist. */
+async function localOperatorOnly(ctx: HandlerContext, capability: string): Promise<void> {
+  await operatorOnly(ctx, capability);
+  if (!isLocalOperator(ctx)) throw new Error(`${capability}: only the local operator may do this`);
 }
 
 const text = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
@@ -45,7 +52,8 @@ export function sessionCaseAssignmentComponent(options: {
     id: "session:case-assignment",
     provides: [candidatesContract, handoffContract],
     activate(fiber) {
-      fiber.provide(candidatesContract, async () => {
+      fiber.provide(candidatesContract, async (_rawInput, ctx) => {
+        await localOperatorOnly(ctx, candidatesContract.id);
         const source = options.handoffSource;
         if (!source) return { available: false, candidates: [] };
         const offered = await source.list();
@@ -53,7 +61,7 @@ export function sessionCaseAssignmentComponent(options: {
       });
 
       fiber.provide(handoffContract, async (rawInput, ctx) => {
-        await operatorOnly(ctx, handoffContract.id);
+        await localOperatorOnly(ctx, handoffContract.id);
         const input = (rawInput ?? {}) as CaseAssignmentHandoffInput & Record<string, unknown>;
         for (const member of ["assignment", "caseContext", "linkExpiresAt", "budget", "brief"]) {
           if (member in input) throw new Error(`session.caseAssignment.handoff: the request carries "${member}"; the approved assignment is resolved by the server, never supplied`);
