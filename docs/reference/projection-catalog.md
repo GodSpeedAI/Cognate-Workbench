@@ -159,6 +159,18 @@ merely *available* in every session of its workspace. Invalidating a binding wri
 so history and run provenance are never rewritten. Absence of a row means the session was never
 bound, which is also a valid "no task".
 
+### `session-assignment-bindings`
+
+**Folds:** `run.started` correlated `session:<id>` whose metadata carries `assignment.assignment_id`.
+**Key:** `${tenant}/${sessionId}`.
+**Shape:** `{ sessionId, assignmentId, runId }`.
+
+WP-23 (J-CASE-ASSIGNMENT-handoff). `session.caseAssignment.handoff` opens one run per case
+assignment id, bound to that assignment, and that run's own start is the binding; no second event
+is recorded. The fold reads only the correlation id, run id and metadata, never the payload (which
+holds the Brief and may be erased). A replayed start is a no-op. Absence of a row means the
+conversation was never handed an assignment.
+
 ### `plugins`
 
 **Folds:** `plugin.installed` and `plugin.uninstalled`.

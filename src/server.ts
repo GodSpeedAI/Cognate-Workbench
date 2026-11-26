@@ -11,6 +11,7 @@ import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRuntime } from "@godspeedai/cognate-runtime-bun";
+import { authorizeAssignmentAction } from "./assignments/assignmentBinding.ts";
 import { storeConfigFor } from "./store.ts";
 import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
 import type { ActionPolicy, Runtime } from "@godspeedai/cognate-runtime-bun";
@@ -20,7 +21,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindCaseAssignment, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { createRuntimeMutex } from "./workbench/runtimeMutex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
@@ -83,6 +84,10 @@ import { sessionCreateComponent } from "./capabilities/sessionCreate.ts";
 import { sessionTaskBindComponent } from "./capabilities/sessionTaskBind.ts";
 import { taskCheckoutComponent } from "./capabilities/taskCheckout.ts";
 import { sessionTaskBindingsProjection } from "./projections/sessionTaskBindings.ts";
+import { sessionAssignmentBindingsProjection } from "./projections/sessionAssignmentBindings.ts";
+import { sessionCaseAssignmentComponent } from "./capabilities/sessionCaseAssignment.ts";
+import { assignmentControlsComponent } from "./capabilities/assignmentControls.ts";
+import type { HandoffSource } from "./assignments/handoffSource.ts";
 import { taskCheckoutBindingsProjection } from "./projections/taskCheckoutBindings.ts";
 import { modelConfigureComponent } from "./capabilities/modelConfigure.ts";
 import { EXECUTION_CAPABILITY_IDS, createExecutionWorldRegistry, executionWorldsComponent, localExecutionWorld } from "@godspeedai/cognate-execution";
@@ -221,6 +226,11 @@ export interface ServerOptions {
   /** Host environment used to detect harness CLIs and to build their minimal child environment
    *  (default process.env / os.homedir()). Tests point it at fake binaries on a temp PATH. */
   readonly harnessHost?: HarnessHostEnv;
+  /** WP-23: where the host offers approved case assignments for Hand off (Horizon's case keeper
+   *  is the production source). `null` or absent means the host offers none: the Assignment
+   *  control is unavailable and a hand-off is refused. Trusted host configuration only — a
+   *  request can never supply the assignment. */
+  readonly handoffSource?: HandoffSource | null;
 }
 
 export interface AppServer {
@@ -282,6 +292,12 @@ const GRANTED_CAPABILITIES = [
   "session.setPinned",
   "session.create",
   "session.task.bind",
+  "session.caseAssignment.candidates",
+  "session.caseAssignment.handoff",
+  "assignment.view",
+  "assignment.interrupt",
+  "assignment.resume",
+  "assignment.spend",
   "agent.harness.list",
   "session.harness.bind",
   "session.harness.resolve",
@@ -355,6 +371,8 @@ function buildPolicy(): Policy {
     "execution.world.connect", "execution.world.disconnect",
     "onboarding.dismiss", "model.configure", "provider.delete", "secret.put",
     "session.setArchived", "session.rename", "session.setPinned",
+    "session.caseAssignment.candidates", "session.caseAssignment.handoff",
+    "assignment.view", "assignment.interrupt", "assignment.resume", "assignment.spend",
     "plugin.install", "plugin.uninstall", "config.file.apply",
     "workspace.rename", "workspace.delete",
     "git.checkout.attach", "git.checkout.merge", "git.checkout.remove", "git.checkout.recreate",
@@ -392,7 +410,7 @@ function buildPolicy(): Policy {
   );
 }
 
-function buildActionPolicy(): ActionPolicy {
+export function buildActionPolicy(): ActionPolicy {
   return {
     authorize: (request) => {
       // Capability-bundles tranche P (§1.1): expert runs start from the completion bridge — the
@@ -402,6 +420,8 @@ function buildActionPolicy(): ActionPolicy {
       // WHO may start the run at all.
       const expertBridgeCaller = (request.caller.actor.kind === "system" && request.caller.actor.id === SYSTEM_CALLER.actor.id)
         || (request.caller.actor.kind === "agent" && request.caller.actor.id.startsWith("wb-agent:") && request.caller.tenant === LOCAL_OPERATOR.tenant);
+      const assignmentRule = authorizeAssignmentAction(request);
+      if (assignmentRule) return assignmentRule;
       if (request.action === "run.start" && request.resource === EXPERT_AGENT && !expertBridgeCaller) return {allow:false,reason:"Expert runs start only from authorized durable Assignments"};
       if (request.action === "thread.state.update" && (request.resource === EXPERTS_THREAD || request.resource.startsWith("experts:partition:") || request.resource === SCHEDULES_THREAD) && (request.caller.actor.kind !== "system" || request.caller.actor.id !== SYSTEM_CALLER.actor.id)) return {allow:false,reason:"Experts and schedule state mutations require validated capabilities"};
       // T8: the identity/session ledger and the aggregate containment ledger are system-owned
@@ -560,6 +580,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const workbenchRefs = bindWorkbench(domain);
   const t11 = bindTranche11(domain);
   const pinRefs = bindSessionPin(domain);
+  const caseAssignmentRefs = bindCaseAssignment(domain);
   // Capability-bundles tranche T1 (§2.1): the commit-synchronous authority index, the
   // lifecycleRecorder, and the grant-administration component. The index rebuilds from the
   // workbench fold after boot and then tracks commits synchronously; the enablement predicate
@@ -838,6 +859,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       sessionArchiveComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.setArchived"], onArchived: (sessionId, archived) => (archived ? previewService.stopForOwner({ sessionId }) : Promise.resolve([])) }),
       sessionRenameComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["session.rename"] }),
       sessionPinComponent({ getService, systemCaller: SYSTEM_CALLER, semanticRef: pinRefs["session.setPinned"] }),
+      sessionCaseAssignmentComponent({ getService, systemCaller: SYSTEM_CALLER, handoffSource: options.handoffSource, candidatesRef: caseAssignmentRefs["session.caseAssignment.candidates"], handoffRef: caseAssignmentRefs["session.caseAssignment.handoff"] }),
+      assignmentControlsComponent({ getAssignments: () => runtime.assignments, refs: caseAssignmentRefs }),
       configPathComponent({ home, getService, systemCaller: SYSTEM_CALLER, semanticRef: t11["config.path"] }),
       secretsBackendDescribeComponent({ describe: () => secretsBackend, semanticRef: t11["secrets.backend.describe"] }),
       configFileComponent({ home, getService, systemCaller: SYSTEM_CALLER, readSemanticRef: t11["config.file.read"], applySemanticRef: t11["config.file.apply"] }),
@@ -912,6 +935,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       { projection: executionWorldsProjection, public: true },
       { projection: sessionsProjection, public: true },
       { projection: sessionTaskBindingsProjection, public: true },
+      { projection: sessionAssignmentBindingsProjection, public: true },
       { projection: sessionHarnessBindingsProjection, public: true },
       { projection: taskCheckoutBindingsProjection, public: true },
       { projection: plansProjection, public: true },
