@@ -1120,6 +1120,16 @@ settlement, variants). Capabilities are bound explicitly in `domain/index.ts` an
 - **Evidence class**: observed.
 - **Executable evidence**: `test/J-TEAM-admission.test.ts`.
 
+### J-RLM-CHILD-RUN (`j_rlm_child_run`)
+
+- **Actor/intention**: User or OperatorAgent. An operator selects a host-registered recursive-execution provider for an Expert or Team conversation and the Expert delegates a bounded investigation to a child run. Purpose: Let one Expert Assignment run a recursive child run through the normal Invoker with a principal and grant derived from the parent, then wait for its terminal outcome before composing a handoff that carries the child run id and outcome.
+- **Preconditions/affordance**: The host configured an RLM provider registry (default empty); the Assignment execution snapshot froze the selected provider; the parent Expert holds a verifiable per-attempt cost budget; the provider declares no spawned executable, no containment requirement and no network reach. Capabilities: `rlm.providers, rlm.invoke, rlm.inspect, rlm.cancel, expert.converse, team.converse, team.handoff`.
+- **Steps**: operator selects a provider on the conversation -> the Assignment execution snapshot freezes the selection -> the Expert requests a child run through the normal Invoker -> the host derives parent lineage, grant, depth, reservation and pinned context -> refusals leave no child run -> admission starts one child run correlated to the parent -> the completion bridge resolves the parent wait when the child run is terminal -> the parent composes its handoff with the child run id and outcome -> independent review and human settlement follow.
+- **Evidence/settlement**: An empty registry changes nothing and an unavailable or unselected provider is refused with a typed rlm refusal before any child run or spawn; the child principal is the parent's, its authority is a subset of the parent's frozen tools, its depth obeys the Team maximum depth, and its context is pinned by digest; a request without a parent run, outside the grant, over depth, or without a verifiable parent cost reservation is refused before dispatch; a repeated request resolves to the same invocation and child run; only the parent run principal or the operator may inspect or cancel an invocation and another run or agent is refused; the parent Assignment waits for the child to reach a terminal state, its handoff records the child run id and outcome, and independent review and human settlement remain required; a provider that spawns, needs containment or has network reach is refused as unavailable.
+- **Known variants**: old Assignment snapshots without a selection behave as no recursive execution; a duplicate request returns the same child run; an unknown provider outcome keeps the child run open until an operator reconciles it; operator inspect and cancel act through the parent principal; governed admission, containment, egress control and a real spawn port are established by later tickets.
+- **Evidence class**: observed.
+- **Executable evidence**: `test/J-RLM-child-run.test.ts`.
+
 ### J-AUTH-SESSION (`j_auth_session`)
 
 - **Actor/intention**: Operator. The operator replaces client-claimed identities with server-issued durable sessions. Purpose: Make the effective caller a durable, revocable server-side fact instead of a client-supplied string.

@@ -156,6 +156,11 @@ Entity "Assignment"
 
 Entity "ExpertRun"
 
+// J-RLM-CHILD-RUN: a recursive child run (Cognate rlm.* contract) delegated by one Expert
+// Assignment to a host-registered provider. Its principal and grant derive from the parent;
+// provider selection is frozen in the Assignment's execution snapshot; governed admission is closed.
+Entity "ChildRun"
+
 // Consequential Expert tool calls use Cognate commitments. A lost outcome remains unknown;
 // a restart never repeats an ambiguous shell/edit effect without human reconciliation.
 Entity "ExpertEffectCommitment"
@@ -282,6 +287,8 @@ Resource "AssignmentRecord" units
 Resource "ExpertRunReceipt" units
 
 Resource "HandoffRecord" units
+
+Resource "ChildRunDelegation" units
 
 Resource "ExpertMessageRecord" units
 
@@ -459,6 +466,8 @@ Flow "AssignmentRecord" from "Team" to "Assignment" quantity 1
 Flow "ExpertRunReceipt" from "Expert" to "ExpertRun" quantity 1
 
 Flow "HandoffRecord" from "ExpertRun" to "Handoff" quantity 1
+
+Flow "ChildRunDelegation" from "Assignment" to "ChildRun" quantity 1
 
 Flow "ExpertMessageRecord" from "Expert" to "ExpertMessage" quantity 1
 
@@ -1568,6 +1577,22 @@ Instance j_expert_parallel of "CanonicalJourney" {
     settlement: "execution.runtime.inspect reports the effective configured capacity and admission policy without claiming active-worker counts; two Experts on distinct workspaces demonstrably overlap when capacity permits, while same, aliased, or nested roots serialize; unresolved root identity blocks admission without effects; restart, mutation ownership, Team invariants, authorization, and each run's captured model route remain intact; under the verified multi-process configuration a killed process's in-flight effect is never blindly repeated by the recovering process — the recovery records the ambiguity and completes only from explicit reconciliation, and a stale owner's late run-scoped write is fenced at the store with nothing appended",
     steps: "operator inspects native execution capacity -> direct coding, Expert, Team, delegated, resumed, and recovered run entries pass through the same nativeExecutionSlots admission boundary -> runtime resolves execution-world and canonical root identities -> unresolved identity blocks admission before effects -> only runs with non-overlapping known roots may occupy distinct slots -> operator inspects run evidence and the configured capacity -> under multi-process operation a crashed owner's run is recovered by the surviving process, whose ambiguous prior-generation effect requires reconciliation and whose store fences the killed owner's late writes",
     variants: "default capacity one is serial; configured capacity accepts only 1, 2, 4, or 8; same-root, alias-root, and ancestor/descendant-root cases serialize; unresolved root identity blocks admission without effects until safely resolved; read-only work does not bypass human approval for protected effects; existing ParallelPlan recommendations remain advisory; Team-level maximum concurrency and batch delegation policy are established separately by J-TEAM-ADMISSION, not by this journey; single-process deployments keep the historical restart semantics — multi-process semantics apply only when the verified ownership configuration is enabled"
+}
+
+// Recursive child run (Cognate 0.11.0 rlm.* contract), Workbench consumer slice. Governed admission
+// stays closed here: no SEA authority and no containment claim; the later containment, egress and
+// spawn-port tickets open it.
+Instance j_rlm_child_run of "CanonicalJourney" {
+    actor: "User or OperatorAgent",
+    capabilities: "rlm.providers, rlm.invoke, rlm.inspect, rlm.cancel, expert.converse, team.converse, team.handoff",
+    evidence_class: "observed",
+    initiating_condition: "An operator selects a host-registered recursive-execution provider for an Expert or Team conversation and the Expert delegates a bounded investigation to a child run",
+    journey_id: "J-RLM-CHILD-RUN",
+    precondition: "The host configured an RLM provider registry (default empty); the Assignment execution snapshot froze the selected provider; the parent Expert holds a verifiable per-attempt cost budget; the provider declares no spawned executable, no containment requirement and no network reach",
+    purpose: "Let one Expert Assignment run a recursive child run through the normal Invoker with a principal and grant derived from the parent, then wait for its terminal outcome before composing a handoff that carries the child run id and outcome",
+    settlement: "An empty registry changes nothing and an unavailable or unselected provider is refused with a typed rlm refusal before any child run or spawn; the child principal is the parent's, its authority is a subset of the parent's frozen tools, its depth obeys the Team maximum depth, and its context is pinned by digest; a request without a parent run, outside the grant, over depth, or without a verifiable parent cost reservation is refused before dispatch; a repeated request resolves to the same invocation and child run; only the parent run principal or the operator may inspect or cancel an invocation and another run or agent is refused; the parent Assignment waits for the child to reach a terminal state, its handoff records the child run id and outcome, and independent review and human settlement remain required; a provider that spawns, needs containment or has network reach is refused as unavailable",
+    steps: "operator selects a provider on the conversation -> the Assignment execution snapshot freezes the selection -> the Expert requests a child run through the normal Invoker -> the host derives parent lineage, grant, depth, reservation and pinned context -> refusals leave no child run -> admission starts one child run correlated to the parent -> the completion bridge resolves the parent wait when the child run is terminal -> the parent composes its handoff with the child run id and outcome -> independent review and human settlement follow",
+    variants: "old Assignment snapshots without a selection behave as no recursive execution; a duplicate request returns the same child run; an unknown provider outcome keeps the child run open until an operator reconciles it; operator inspect and cancel act through the parent principal; governed admission, containment, egress control and a real spawn port are established by later tickets"
 }
 
 Instance j_expert_model_parallel of "CanonicalJourney" {
