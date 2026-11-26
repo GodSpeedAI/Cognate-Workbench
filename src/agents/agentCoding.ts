@@ -820,8 +820,8 @@ export const createAgentCodingAgent = (deps: AgentCodingDeps = {}): AgentDefinit
               type: "rlm-child",
               condition: { kind: "rlm_child", invocationId: admitted.invocationId, childRunId: admitted.runId },
               payload: { invocationId: admitted.invocationId, childRunId: admitted.runId },
-            }) as unknown as { readonly invocationId: string; readonly runId: string; readonly status: string; readonly resultRef?: string; readonly evidence?: readonly string[] };
-            await ctx.emit("rlm.child.completed", { sessionId, toolCallId: call.id, invocationId: outcome.invocationId, runId: outcome.runId, providerId: admitted.providerId, status: outcome.status, ...(outcome.resultRef ? { resultRef: outcome.resultRef } : {}), evidence: [...(outcome.evidence ?? [])] } as unknown as Json);
+            }) as unknown as { readonly invocationId: string; readonly runId: string; readonly status: string; readonly reconciled?: boolean; readonly resultRef?: string; readonly evidence?: readonly string[] };
+            await ctx.emit("rlm.child.completed", { sessionId, toolCallId: call.id, invocationId: outcome.invocationId, runId: outcome.runId, providerId: admitted.providerId, status: outcome.status, ...(outcome.reconciled ? { reconciled: true } : {}), ...(outcome.resultRef ? { resultRef: outcome.resultRef } : {}), evidence: [...(outcome.evidence ?? [])] } as unknown as Json);
             resultText = JSON.stringify(outcome);
             await ctx.emit("tool.call.completed", { sessionId, toolCallId: call.id, tool: call.name, result: outcome } as unknown as Json);
           } catch (error) {

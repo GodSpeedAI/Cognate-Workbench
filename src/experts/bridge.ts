@@ -90,7 +90,13 @@ export class ExpertCompletionBridge {
         finalHandoff.observedFailures=observedFailures;
         if(rlmChildren.length){
           finalHandoff.rlmChildren=rlmChildren;
-          for(const child of rlmChildren){const ref=`rlm-child:${child.runId}:${child.status}`;if(!finalHandoff.evidence.includes(ref))finalHandoff.evidence.push(ref);}
+          for(const child of rlmChildren){
+            const ref=`rlm-child:${child.runId}:${child.status}`;if(!finalHandoff.evidence.includes(ref))finalHandoff.evidence.push(ref);
+            // An operator-reconciled or unestablished child outcome is an uncertainty, so it can never read as plain success.
+            const note=child.status==="unknown" ? `Child run ${child.runId} outcome is unknown and unresolved`
+              : child.reconciled ? `Child run ${child.runId} outcome (${child.status}) was recorded by an operator after the provider's own view was unknown`:undefined;
+            if(note && !finalHandoff.uncertainties.includes(note))finalHandoff.uncertainties.push(note);
+          }
         }
         if(result?.receipt && !finalHandoff.artifacts.includes(result.receipt))finalHandoff.artifacts.push(result.receipt);
         if(run.status!=="completed"){finalHandoff.disposition="failed";finalHandoff.failures.push(run.error ?? run.status);}
@@ -130,8 +136,9 @@ export class ExpertCompletionBridge {
       let outcome:Record<string,unknown>={};
       for await(const event of service.events(caller,{runId:child.runId}))if(event.eventType==="rlm.outcome")outcome=event.payload as Record<string,unknown>;
       const reported=child.status==="completed" ? (child.output as {status?:string}|null)?.status : child.status;
-      const status=(["completed","failed","timedOut","cancelled"].includes(String(reported)) ? reported : child.status==="completed" ? "completed":child.status) as RlmChildOutcome["status"];
-      const result:Record<string,unknown>={invocationId:condition.invocationId,runId:child.runId,status,evidence:Array.isArray(outcome.evidence)?outcome.evidence:[],...(typeof outcome.resultRef==="string"?{resultRef:outcome.resultRef}:{}),...(child.error?{error:child.error}:{})};
+      // A completed run whose reported status is not a known terminal one is ambiguous, never success.
+      const status=(["completed","failed","timedOut","cancelled"].includes(String(reported)) ? reported : child.status==="completed" ? "unknown":child.status) as RlmChildOutcome["status"];
+      const result:Record<string,unknown>={invocationId:condition.invocationId,runId:child.runId,status,...(outcome.reconciled===true?{reconciled:true}:{}),evidence:Array.isArray(outcome.evidence)?outcome.evidence:[],...(typeof outcome.resultRef==="string"?{resultRef:outcome.resultRef}:{}),...(child.error?{error:child.error}:{})};
       await service.resolveContinuation(caller,{continuationId:wait.id,action:"resume",input:JSON.parse(JSON.stringify(result)),idempotencyKey:`rlm-child:${wait.id}`});
     }
   }

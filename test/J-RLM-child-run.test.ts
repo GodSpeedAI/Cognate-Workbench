@@ -8,6 +8,10 @@ import type { ModelResponse } from "@godspeedai/cognate-capabilities";
 import type { InvocationView, ProviderFacts, RlmInvokeRequest, RlmProvider } from "@godspeedai/cognate-runtime-api";
 import { RLM_AGENT_ID, RLM_CAPABILITIES, RLM_REFUSAL_CODES } from "@godspeedai/cognate-runtime-api";
 import type { RlmProviderRegistration } from "@godspeedai/cognate-runtime-bun";
+import type { Component, CapabilityContract, FiberContext } from "@godspeedai/cognate-kernel-api";
+import { createRlmRegistry } from "@godspeedai/cognate-runtime-bun";
+import { governedRlmComponent } from "../src/capabilities/rlmGoverned.ts";
+import type { ExpertsService } from "../src/experts/service.ts";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import type { Assignment } from "../src/experts/types.ts";
 import {
@@ -28,7 +32,7 @@ interface TestProvider extends RlmProvider {
   probes: number;
 }
 
-function testProvider(id: string, options: { gate?: Deferred; facts?: Partial<ProviderFacts>; fail?: boolean } = {}): TestProvider {
+function testProvider(id: string, options: { gate?: Deferred; facts?: Partial<ProviderFacts>; fail?: boolean; unknown?: boolean } = {}): TestProvider {
   const views = new Map<string, InvocationView>();
   const facts: ProviderFacts = {
     capabilities: { maxDepth: 2, contextDecomposition: true, providerInternalSubagents: false, streaming: false, isolation: "none", resultDelivery: "return", cancellation: "none", paymentMetering: "unreported" },
@@ -50,7 +54,7 @@ function testProvider(id: string, options: { gate?: Deferred; facts?: Partial<Pr
         await Promise.race([options.gate.promise, new Promise<void>((resolve) => ctx.signal.addEventListener("abort", () => resolve(), { once: true }))]);
       }
       if (ctx.signal.aborted) throw new Error("cancelled");
-      views.set(ctx.runId, view(options.fail ? "failed" : "completed"));
+      views.set(ctx.runId, view(options.unknown ? "unknown" : options.fail ? "failed" : "completed"));
       return { runId: ctx.runId };
     },
     async inspect(runId) { return views.get(runId) ?? view("failed"); },
@@ -370,4 +374,86 @@ describe("J-RLM-CHILD-RUN", () => {
       expect(await childRuns(t)).toHaveLength(0);
     }, { rlmProviders: [registration(det)] });
   }, 90_000);
+
+  test("unknown outcome: the child parks, the parent keeps waiting, operator reconciliation resolves it once, and an unconfirmed outcome is never plain success", async () => {
+    const provider = testProvider("amb", { unknown: true });
+    await withExpertApp(responderFor("pm-model"), async (t) => {
+      await configureDefaultRoutes(t);
+      await saveExpertBudget(t, "product-manager", "pm-model");
+      const service = t.app.runtime.service;
+      let expectedInvokes = 0;
+      for (const [name, outcome, status] of [["amb-ok", "succeeded", "completed"], ["amb-bad", "failed", "failed"]] as const) {
+        cases[name] = [{ id: `call-${name}`, args: base() }];
+        const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: `CASE:${name}`, requestId: `rlm-case-${name}`, rlmProvider: "amb" }) as { assignmentId: string };
+        expectedInvokes += 1;
+        const parent = await waitForAssignment(t, started.assignmentId, (a) => !!a.runId);
+        let wait: Awaited<ReturnType<typeof service.listContinuations>>[number] | undefined;
+        const deadline = Date.now() + 20_000;
+        while (!wait) {
+          wait = (await service.listContinuations(LOCAL_OPERATOR, { status: "OPEN" })).find((c) => c.type === "ambiguous-invocation");
+          if (!wait) { if (Date.now() > deadline) throw new Error("child never parked on an ambiguous invocation"); await Bun.sleep(25); }
+        }
+        // The parent keeps waiting: no handoff, and the child is parked, not terminal.
+        await Bun.sleep(400);
+        expect((await t.state()).assignments[parent.id]!.handoff).toBeNull();
+        const child = (await service.getRun(LOCAL_OPERATOR, { runId: wait.runId }));
+        expect(child.status).toBe("waiting");
+        const started0 = (await runEvents(t, parent.runId!)).find((e) => e.eventType === "rlm.child.started")!;
+        const inspected = await invoke(t, RLM_CAPABILITIES.inspect, { invocationId: String(started0.payload.invocationId), parentRunId: parent.runId }) as { status: string };
+        expect(inspected.status).toBe("unknown");
+        expect(new Set(provider.invokes.map((r) => r.invocationId)).size).toBe(expectedInvokes);
+
+        const reconciled = await invoke(t, "run.invocation.reconcile", { continuationId: wait.id, outcome, reason: `operator observed ${outcome}` }) as { outcome: string };
+        expect(reconciled.outcome).toBe(outcome);
+        const settled = await waitForAssignment(t, parent.id, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status));
+        const children = settled.handoff!.rlmChildren!;
+        expect(children).toHaveLength(1);
+        expect(children[0]).toMatchObject({ runId: child.runId, status });
+        if (outcome === "succeeded") {
+          // Reconciled, not confirmed by the provider: surfaced as an uncertainty, never plain success.
+          expect(children[0]!.reconciled).toBe(true);
+          expect(settled.handoff!.uncertainties.join("\n")).toContain("recorded by an operator");
+        }
+        // No second child run or invocation identity is created by the wait or the reconciliation. (Cognate 0.11.0
+        // re-executes the child agent body on resume, so the provider's `invoke` may be re-entered for the SAME
+        // invocation; that is pinned by the identity check here and reported upstream, not hidden.)
+        expect(await childRuns(t)).toHaveLength(expectedInvokes);
+        expect(new Set(provider.invokes.map((r) => r.invocationId)).size).toBe(expectedInvokes);
+        expect(provider.invokes.every((r) => r.runId === provider.invokes.find((q) => q.invocationId === r.invocationId)!.runId)).toBe(true);
+      }
+    }, { rlmProviders: [registration(provider)] });
+  }, 120_000);
+
+  test("parent-scoped standing at the wrapper: the parent run reaches its own invocation, a sibling run cannot, and the operator acts through the parent principal", async () => {
+    const seen: { id: string; actor: string; kind: string; input: Record<string, unknown> }[] = [];
+    const contracts: CapabilityContract[] = Object.values(RLM_CAPABILITIES).map((id) => ({ id, version: "1.0.0" }) as CapabilityContract);
+    const base: Component = {
+      id: "rlm", provides: contracts,
+      activate(fiber) { for (const c of contracts) fiber.provide(c, async (input, ctx) => { seen.push({ id: c.id, actor: ctx.actor.id, kind: ctx.actor.kind, input: input as Record<string, unknown> }); return { status: "cancelled" }; }); },
+    };
+    const handlers = new Map<string, (input: unknown, ctx: never) => Promise<unknown>>();
+    const experts = { caller: () => LOCAL_OPERATOR, service: { getRun: async (_c: unknown, r: { runId: string }) => { if (r.runId !== "run-parent") throw new Error("missing"); return { startedBy: "wb-agent:product-manager" }; } } } as unknown as ExpertsService;
+    await governedRlmComponent({ base, registry: createRlmRegistry(), getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant })
+      .activate({ provide: (c: CapabilityContract, h: never) => handlers.set(c.id, h) } as unknown as FiberContext);
+    const inRun = (runId: string, id = "wb-agent:product-manager") => ({ runId, actor: { id, kind: "agent" }, tenant: LOCAL_OPERATOR.tenant }) as never;
+    for (const capability of [RLM_CAPABILITIES.inspect, RLM_CAPABILITIES.cancel]) {
+      const handler = handlers.get(capability)!;
+      seen.length = 0;
+      // The parent run itself: its own invocation is reached, scoped to its own run id.
+      await handler({ invocationId: "inv-1", reason: "own child" }, inRun("run-parent"));
+      expect(seen).toEqual([expect.objectContaining({ id: capability, actor: "wb-agent:product-manager", input: expect.objectContaining({ parentRunId: "run-parent" }) })]);
+      // A sibling run, even of the same agent id, or an explicit foreign parent, is refused before Cognate sees it.
+      await expect(handler({ invocationId: "inv-1", parentRunId: "run-parent" }, inRun("run-sibling"))).rejects.toThrow("rlm-invocation-unknown");
+      await expect(handler({ invocationId: "inv-1", parentRunId: "run-parent" }, inRun("run-sibling", "wb-agent:builder"))).rejects.toThrow("rlm-invocation-unknown");
+      expect(seen).toHaveLength(1);
+      // Without naming a parent, a sibling is scoped to its OWN run (where Cognate finds no such invocation); it never reaches run-parent.
+      await handler({ invocationId: "inv-1" }, inRun("run-sibling"));
+      expect(seen.pop()).toMatchObject({ input: expect.objectContaining({ parentRunId: "run-sibling" }) });
+      // The operator acts through the parent run's principal; an agent outside any run is refused.
+      await handler({ invocationId: "inv-1", parentRunId: "run-parent", reason: "operator" }, { actor: LOCAL_OPERATOR.actor, tenant: LOCAL_OPERATOR.tenant } as never);
+      expect(seen[1]).toMatchObject({ actor: "wb-agent:product-manager", kind: "agent" });
+      await expect(handler({ invocationId: "inv-1", parentRunId: "run-parent" }, { actor: { id: "wb-agent:product-manager", kind: "agent" }, tenant: LOCAL_OPERATOR.tenant } as never)).rejects.toThrow("rlm-invocation-unknown");
+      expect(seen).toHaveLength(2);
+    }
+  });
 });

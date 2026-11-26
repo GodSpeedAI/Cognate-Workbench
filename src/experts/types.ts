@@ -62,7 +62,10 @@ export interface Handoff {
 /** The terminal outcome of one recursive child run, as the parent observed it. */
 export interface RlmChildOutcome {
   invocationId: string; runId: string; providerId: string;
-  status: "completed" | "failed" | "timedOut" | "cancelled";
+  /** `unknown` is never success: an outcome the host cannot establish stays ambiguous in the handoff. */
+  status: "completed" | "failed" | "timedOut" | "cancelled" | "unknown";
+  /** True when an operator recorded the outcome after the provider's own view was unknown. */
+  reconciled?: boolean;
   resultRef?: string; evidence?: string[];
 }
 export interface ExpertExecution {

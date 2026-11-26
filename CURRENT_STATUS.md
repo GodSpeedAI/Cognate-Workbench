@@ -1,4 +1,4 @@
-# Current status — revision 50
+# Current status — revision 51
 
 CognitiveOS #112 (Workbench half): the Workbench now consumes the published Cognate 0.11.0 `rlm.*` recursive child-run contract.
 
@@ -6,11 +6,13 @@ CognitiveOS #112 (Workbench half): the Workbench now consumes the published Cogn
 
 The parent waits on an `rlm-child` continuation that the completion bridge resolves when the `agent.rlm` run is terminal; the handoff then carries `rlmChildren` (run id, status) and evidence. Independent review and human settlement are unchanged. `rlm.inspect`/`rlm.cancel` are parent-scoped: the parent run, or the operator acting through the parent principal.
 
+**Unknown outcomes.** A provider view of `unknown` parks the child on `ambiguous:<id>` and the parent keeps waiting. `run.invocation.reconcile` resolves it; the handoff records the child as reconciled with an uncertainty, so it never reads as plain success.
+
 **Governed admission is closed.** Providers that spawn, claim isolation, need containment or have network reach are refused. No spawn port is registered.
 
-**Verified.** `test/J-RLM-child-run.test.ts`: red (0/6) then green (6/6). Typecheck and DomainForge checks clean. Expert/Team gate suites pass except load-timing flakes that pass alone, and one E2E failure that is identical on base.
+**Verified.** `test/J-RLM-child-run.test.ts`: red (0/6) then green (8/8 after reconcile and standing tests). Typecheck and DomainForge checks clean. Expert/Team gate suites pass except load-timing flakes that pass alone, and one E2E failure that is identical on base.
 
-**Limits.** Child spend is not debited from the parent ledger after reservation. The parent's in-run inspect/cancel has no Expert tool.
+**Limits.** Child spend is not debited from the parent ledger after reservation. In-run inspect/cancel is tested at the wrapper only (no Expert tool). Cognate re-runs the child body on resume, so a provider invoke can be re-entered for the same invocation; report upstream.
 
 **Next.** Review and merge; #114-#116 open governed admission.
 
