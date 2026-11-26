@@ -723,6 +723,10 @@ export const CAPABILITY_RUNTIME_ANCHORS: Readonly<Record<string, string>> = {
   "tool.skill_load": "CapabilityBundle",
   "capability.harness.resolve": "CapabilityBundle",
   "capability.harness.refresh": "CapabilityBundle",
+  "capability.mcp.start": "CapabilityBundle",
+  "capability.mcp.stop": "CapabilityBundle",
+  "capability.bundle.suspend": "CapabilityBundle",
+  "capability.bundle.resume": "CapabilityBundle",
 };
 
 export function bindCapabilityRuntime(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
