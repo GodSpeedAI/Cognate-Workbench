@@ -149,10 +149,10 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 ### Assignment controls refused under stream contention until the Cognate bump
 - Date: 2026-11-26
 - Location: src/capabilities/assignmentControls.ts; Cognate `packages/runtime-bun/src/assignment.ts` (`AssignmentService.append`).
-- Debt: Cognate retries a lost stream-version race five times with no pause, then refuses with "too much contention on run <id>". An operator Interrupt or Spend that lands while the bound run streams can be refused; the control shows the refusal and stays open. Cognate DEBT-033 fixes it with bounded backoff; this repo benefits only after a Cognate release and dependency bump.
-- Evidence: test/J-CASE-ASSIGNMENT-handoff.test.ts and test/E2E-case-assignment-handoff.test.ts retry only this refusal (documented in both).
+- Debt: an operator Interrupt or Spend that lands while the bound run streams can be refused with "too much contention on run <id>"; the control shows the refusal and stays open (fail closed, nothing lost). The cause is structural in Cognate: `AssignmentService.append` writes control events onto the run stream, which the executor writes with its own serialized version and halts on a conflict. Cognate's `fold.ts` (spec §29.1) forbids such foreign appends. Cognate #91 (DEBT-033, merged e33978a) adds bounded backoff, which only lowers the odds; the structural fix (branch `fix/assignment-controls-off-run-stream`) moves controls off the run stream.
+- Evidence: the browser journey failed about 5 of 16 local runs under load (contention persisted until the slow run ended); hosted CI passed it at 6a812e2 and 1a105bf. Both WP-23 tests retry only this refusal (documented in both).
 - Confidence: high
-- Closure: bump to the Cognate release containing DEBT-033, then remove the contention retries from both tests; size S.
+- Closure: release Cognate with the structural fix (publication needs owner authorization), bump this repo, then remove the contention retries from both tests; size S here.
 
 ### Reconciliation card blames a restart for an operator interrupt
 - Date: 2026-11-26
