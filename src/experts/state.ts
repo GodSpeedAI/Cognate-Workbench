@@ -81,11 +81,17 @@ function baselineTeam(): Team {
   };
 }
 
+/** A default Team restore skipped because a built-in Expert it requires is archived. */
+export interface RestoreBlocked { teamId: string; reason: "required-expert-archived"; requires: { reactivate: string[] }; message: string }
+
 /** Operator recovery of the built-in profiles and the default Team (D-minimal-contracts D3, O5).
  * Verbatim: an absent baseline id is created; with `includeArchived` a baseline id the operator
- * archived is reactivated; an active baseline id and every custom id are never modified. The
- * mutation boundary re-asserts the one-Orchestrator invariant after this returns. */
-export function restoreExperts(state: ExpertState, includeArchived: boolean): {created: string[]; reactivated: string[]; kept: string[]} {
+ * archived is reactivated; an active baseline id and every custom id are never modified.
+ * Experts are settled before the Team, so no intermediate state violates the Team invariants.
+ * A missing default Team is never built around an archived member: without `includeArchived` it
+ * is skipped and reported in `blocked` (present only when non-empty) with the exact request that
+ * would satisfy it. The mutation boundary re-asserts the Team invariants after this returns. */
+export function restoreExperts(state: ExpertState, includeArchived: boolean): {created: string[]; reactivated: string[]; kept: string[]; blocked?: RestoreBlocked[]} {
   const created: string[] = [];
   const reactivated: string[] = [];
   const kept: string[] = [];
@@ -95,9 +101,16 @@ export function restoreExperts(state: ExpertState, includeArchived: boolean): {c
     else if (includeArchived && existing.lifecycle === "archived") { existing.lifecycle = "active"; reactivated.push(id); }
     else kept.push(id);
   }
-  if (!state.teams["cognate-team"]) { state.teams["cognate-team"] = baselineTeam(); created.push("cognate-team"); }
-  else kept.push("cognate-team");
-  return {created,reactivated,kept};
+  const blocked: RestoreBlocked[] = [];
+  if (state.teams["cognate-team"]) kept.push("cognate-team");
+  else {
+    const team = baselineTeam();
+    const archived = team.members.map(m => m.expertId).filter(id => state.experts[id]?.lifecycle !== "active");
+    if (archived.length === 0) { state.teams["cognate-team"] = team; created.push("cognate-team"); }
+    else blocked.push({teamId:"cognate-team",reason:"required-expert-archived",requires:{reactivate:archived},
+      message:`Default Team cognate-team was not restored: required built-in Experts ${archived.join(", ")} are archived. Run experts.restore with {"includeArchived": true} to reactivate them and restore the Team.`});
+  }
+  return blocked.length ? {created,reactivated,kept,blocked} : {created,reactivated,kept};
 }
 
 export async function readExperts(service: RuntimeService, caller: Caller): Promise<{state: ExpertState; version: number}> {
