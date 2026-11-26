@@ -45,6 +45,8 @@ import { expertsProjection } from "./projections/experts.ts";
 import { expertsBillingProjection } from "./projections/expertsBilling.ts";
 import { providerRoutesProjection } from "./projections/providerRoutes.ts";
 import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
+import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
+import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
@@ -202,6 +204,9 @@ export interface ServerOptions {
    *  never a request; the default is empty, which leaves ordinary execution unchanged. No spawn port is
    *  registered in this slice, so a provider that needs one, containment or egress is refused. */
   readonly rlmProviders?: readonly RlmProviderRegistration[];
+  /** SEA-Forge #114: trusted host configuration for the contained bubblewrap `StdioSpawnPort`. Absent
+   *  (the default) keeps Cognate's `unavailableSpawnPort()`: providers that need a port stay refused. */
+  readonly rlmContainedPort?: ContainedStdioPortConfig;
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -591,6 +596,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // J-RLM-CHILD-RUN: empty unless the host explicitly registers providers (ServerOptions only).
   const rlmRegistry = createRlmRegistry();
   for (const registration of options.rlmProviders ?? []) rlmRegistry.register(registration);
+  const rlmSpawnPort = options.rlmContainedPort ? containedStdioSpawnPort(options.rlmContainedPort) : undefined;
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const governanceRefs = bindGovernanceCapabilities(domain);
   const settlementRefs = bindSettlementCapabilities(domain);
@@ -802,7 +808,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), createRlmAgent({ registry: rlmRegistry })],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) })],
     components: [
       terminalComponent({
         getService,
@@ -835,7 +841,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       governedRlmComponent({
         // Governed admission is closed: governance off, posture uncontained-local, no spawn port (Cognate defaults).
         base: createRlmComponent({ registry: rlmRegistry, getService, semanticRef: rlmRefs["rlm.invoke"] }),
-        registry: rlmRegistry, getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant, system: SYSTEM_CALLER.actor,
+        registry: rlmRegistry, containedPort: rlmSpawnPort !== undefined, getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant, system: SYSTEM_CALLER.actor,
       }),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
@@ -1439,6 +1445,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       await terminalService.dispose();
       await browserService.dispose();
       await harnessHost.shutdown();
+      await rlmSpawnPort?.dispose();
       eventsController.abort();
       await remote.close();
       await scheduleEvaluator.stop();

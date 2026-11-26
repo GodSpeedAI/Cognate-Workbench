@@ -42,9 +42,19 @@ const NOT_A_PARENT = /requires a registered Expert run|Untrusted or inactive Exp
 const refuse = (code: RlmRefusalCode, reason: string): RlmRefusedError => new RlmRefusedError(code, reason);
 
 /** Why this host cannot run a provider, from its probed facts and operator-declared port governance. */
-export function providerRefusal(entry: RlmProviderRegistration, facts: Awaited<ReturnType<RlmProviderRegistration["provider"]["probe"]>>): { code: RlmRefusalCode; reason: string } | undefined {
+export function providerRefusal(entry: RlmProviderRegistration, facts: Awaited<ReturnType<RlmProviderRegistration["provider"]["probe"]>>, containedPort = false): { code: RlmRefusalCode; reason: string } | undefined {
   if (entry.availability?.status === "unavailable") return { code: "rlm-provider-unavailable", reason: `provider ${entry.provider.id} is ${entry.availability.reason ?? "unavailable"}` };
   const governance = entry.portGovernance;
+  if (containedPort) {
+    // The host registered the contained bubblewrap port (#114): it provides containment and a spawn port,
+    // with no network except the one host socket. Reach it cannot meter or enforce is still refused here;
+    // the port itself refuses anything unenforceable again at spawn, before any process starts.
+    const reach = governance?.reach.network ?? "none";
+    if (reach !== "none" && !(reach === "host-mediated" && governance?.egress?.via === "unix-socket")) {
+      return { code: "rlm-egress-uncontrolled", reason: `provider declares ${reach} network reach; the contained port allows only none or one host unix socket` };
+    }
+    return undefined;
+  }
   if (facts.toolPolicy === "contained" || facts.capabilities.isolation !== "none" || governance?.world === "contained-streaming") {
     return { code: "rlm-containment-unavailable", reason: "this host makes no containment claim and registers no contained port; the provider needs one" };
   }
@@ -77,6 +87,8 @@ export interface GovernedRlmOptions {
   /** The host's `createRlmComponent(...)` — Cognate's contract implementation. */
   readonly base: Component;
   readonly registry: RlmRegistry;
+  /** True when the host registered the contained `StdioSpawnPort` (`ServerOptions.rlmContainedPort`). */
+  readonly containedPort?: boolean;
   readonly getExperts: () => ExpertsService;
   /** The one durable operator identity; the only non-run caller that may inspect or cancel. */
   readonly operator: Principal;
@@ -96,7 +108,7 @@ export function governedRlmComponent(options: GovernedRlmOptions): Component {
     const views = [];
     for (const view of output.providers) {
       const entry = options.registry.get(view.id);
-      const refusal = entry ? providerRefusal(entry, await entry.provider.probe()) : undefined;
+      const refusal = entry ? providerRefusal(entry, await entry.provider.probe(), options.containedPort === true) : undefined;
       views.push({ ...view, workbench: refusal ? { admitted: false, refusalCode: refusal.code, reason: refusal.reason } : { admitted: true } });
     }
     return { ...output, providers: views } as unknown as Json;
@@ -127,7 +139,7 @@ export function governedRlmComponent(options: GovernedRlmOptions): Component {
     // 2. The frozen provider is registered, available, and runnable on this host (no spawn, containment or egress).
     const entry = options.registry.get(selected);
     if (!entry) throw refuse("rlm-provider-unknown", `provider ${selected} is not registered`);
-    const refusal = providerRefusal(entry, await entry.provider.probe());
+    const refusal = providerRefusal(entry, await entry.provider.probe(), options.containedPort === true);
     if (refusal) throw refuse(refusal.code, refusal.reason);
 
     // 3. Authority: a subset of the parent's frozen grant and mode. Out-of-grant is refused, never narrowed.
