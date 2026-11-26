@@ -9,6 +9,7 @@ import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect
 import { resolvePg0Url } from "@godspeedai/cognate-store-postgres";
 import { startServer, LOCAL_OPERATOR, type AppServer, type ServerOptions } from "../src/server.ts";
 import { postgresUrl, schemaFor, storeConfigFor } from "../src/store.ts";
+import { utils as sshUtils } from "ssh2";
 
 /** Every app name a store is opened under for a temp home (`src/server.ts` uses "harness"; the
  *  migration tests use "migration"). Keep in sync with the `storeConfigFor`/`schemaFor` call sites. */
@@ -261,4 +262,16 @@ export async function aimockChatRequests(port: number): Promise<readonly {
   const res = await fetch(`http://127.0.0.1:${port}/__aimock/journal?path=/v1/chat/completions`);
   if (!res.ok) throw new Error(`aimock journal fetch failed: HTTP ${res.status}`);
   return (await res.json()) as never;
+}
+
+/** An ed25519 SSH host key that ssh2 can parse. Under Bun, ssh2's own ed25519 generation yields a
+ *  private key its parser rejects ("Malformed OpenSSH private key") about once in 300 draws (7 of
+ *  2000 measured), which made every SSH journey flake. Draw until one parses; never hand a fixture
+ *  an unvalidated key. */
+export function sshHostKeyPem(): string {
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const pem = sshUtils.generateKeyPairSync("ed25519").private;
+    if (!(sshUtils.parseKey(pem) instanceof Error)) return pem;
+  }
+  throw new Error("sshHostKeyPem: ssh2 produced no parseable ed25519 host key in 32 draws");
 }

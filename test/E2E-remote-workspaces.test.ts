@@ -12,7 +12,7 @@ import { createClient } from "@godspeedai/cognate-client";
 import { connectTransport, devToken } from "@godspeedai/cognate-protocol-connect-bun";
 import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect";
 import { LOCAL_OPERATOR, startServer } from "../src/server.ts";
-import { bootAimock, withTempHome } from "./helpers.ts";
+import { bootAimock, withTempHome, sshHostKeyPem } from "./helpers.ts";
 
 const PASSWORD = "e2e-Secret-pw-9981";
 
@@ -23,7 +23,7 @@ describe("E2E remote workspaces", () => {
   test("verify host -> trust -> connect -> folder -> agent over SSH; saved connection; unreachable banner", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
+      const fixture = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
       const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
       const browser = await chromium.launch();

@@ -16,7 +16,7 @@ import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
 import { schemaFor } from "../src/store.ts";
 import postgres from "postgres";
-import { bootAimock, storeUrlForTest, withTempHome } from "./helpers.ts";
+import { bootAimock, storeUrlForTest, withTempHome, sshHostKeyPem } from "./helpers.ts";
 
 const PASSWORD = "s3cret-pass-ZXCV-1234";
 const clientFor = (app: AppServer) => createClient({ service: createRemoteRuntimeService(connectTransport(app.url), () => devToken(LOCAL_OPERATOR)), caller: LOCAL_OPERATOR });
@@ -36,7 +36,7 @@ describe("J-RW-ssh-workspaces", () => {
   test("J-RW-select-world, J-RW-add-workspace, J-RW-read-remote, J-RW-edit-remote, J-RW-exec-remote, J-RW-conn-failure, J-RW-reconnect: probe -> pin -> connect -> workspace -> agent tools over SSH -> restart -> disconnect", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
+      const fixture = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
       let app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       let client: Client = clientFor(app);
       try {
@@ -153,7 +153,7 @@ describe("J-RW-ssh-workspaces", () => {
 
   test("J-RW-coexist (part): a local world keeps working beside a connected SSH world", async () => {
     await withTempHome(async (home) => {
-      const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
+      const fixture = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
       const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
@@ -174,7 +174,7 @@ describe("J-RW-ssh-workspaces", () => {
   test("J-RW-cancel-timeout: cancelling a run ends the remote command (no orphan); a timeout is reported", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const fixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
+      const fixture = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
       const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
@@ -206,8 +206,8 @@ describe("J-RW-ssh-workspaces", () => {
   test("J-RW-coexist, J-RW-switch: local and two different remote hosts in one process; the same tools, each reaching only its own world", async () => {
     await withTempHome(async (home) => {
       const aimock = await bootAimock();
-      const hostA = await startSshFixture({ users: { dev: { password: PASSWORD } } });
-      const hostB = await startSshFixture({ users: { dev: { password: PASSWORD } } });
+      const hostA = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
+      const hostB = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
       const app = await startServer({ executionPosture: "uncontained-local", devAuth: true, port: 0, home });
       const client = clientFor(app);
       try {
