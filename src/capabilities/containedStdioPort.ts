@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StdioSpawnPort, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import { createHash } from "node:crypto";
-import { buildLaunchPlan, launchPlanDigest, refuse, validateConfig, verifyLauncherPath, type ContainedStdioPortConfig, type LaunchMaterial, type LaunchPlan } from "./containedLaunch.ts";
+import { buildLaunchPlan, launchPlanDigest, refuse, validateConfig, verifyLauncherPath, type ContainedStdioPortConfig, type ExecutionProfile, type LaunchMaterial, type LaunchPlan } from "./containedLaunch.ts";
 
 const O_PATH = 0o10000000;
 const FINISHED_RETAINED = 64;
@@ -62,7 +62,9 @@ export interface ContainedInspection {
 
 export interface ContainedStdioSpawnPort extends StdioSpawnPort {
   /** Resolve a spec into the plan that spawn would run, without spawning. #116 binds an authority decision to this digest. */
-  plan(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly plan: LaunchPlan; readonly digest: string }>;
+  plan(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly plan: LaunchPlan; readonly digest: string; readonly executionProfile: ExecutionProfile; readonly executionProfileDigest: string }>;
+  /** The operator-approved profile for a spec, computed without launching anything (no run binding needed). */
+  executionProfile(spec: StdioSpawnSpec): Promise<{ readonly profile: ExecutionProfile; readonly digest: string }>;
   inspect(id: string): ContainedInspection;
   /** Resolves with the exit record once the sandbox is gone. */
   exited(id: string): Promise<ExitRecord>;
@@ -176,7 +178,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     } finally { handle.close(); }
   }
 
-  async function resolve(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ plan: LaunchPlan; material: LaunchMaterial; digest: string }> {
+  async function resolve(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ plan: LaunchPlan; material: LaunchMaterial; digest: string; profile: ExecutionProfile; profileDigest: string }> {
     const version = await launcherVersion();
     const built = await buildLaunchPlan({ config, spec, ctx, envKey, launcherVersion: version });
     return { ...built, digest: launchPlanDigest(built.plan) };
@@ -261,7 +263,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   async function spawn(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly id: string }> {
     const first = await resolve(spec, ctx);
     await preflight(first.material.probeArgv);
-    await config.authorize?.(first.plan, first.digest, ctx);
+    await config.authorize?.(first.plan, first.digest, ctx, first.profileDigest);
     const fds = openPinned(first.plan);
     const closeFds = (...extra: number[]) => { for (const fd of [fds.workspace, fds.egress, fds.executable, ...extra]) if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } } };
     const argFd = (() => { try { return argsFd(first.material); } catch (error) { closeFds(); throw error; } })();
@@ -270,6 +272,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     try {
       // Drift check immediately before spawn: re-resolve and re-hash everything; any change refuses.
       const again = await resolve(spec, ctx);
+      if (again.profileDigest !== first.profileDigest) throw refuse("rlm-containment-unavailable", `execution profile drifted before spawn (${first.profileDigest} -> ${again.profileDigest})`);
       if (again.digest !== first.digest) throw refuse("rlm-containment-unavailable", `launch plan drifted before spawn (${first.digest} -> ${again.digest})`);
       // Hash and exec through one descriptor, immediately before spawn.
       launcher = await launcherHandle();
@@ -357,7 +360,8 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   };
 
   const port: ContainedStdioSpawnPort = {
-    plan: async (spec, ctx) => { const r = await resolve(spec, ctx); return { plan: r.plan, digest: r.digest }; },
+    plan: async (spec, ctx) => { const r = await resolve(spec, ctx); return { plan: r.plan, digest: r.digest, executionProfile: r.profile, executionProfileDigest: r.profileDigest }; },
+    executionProfile: async (spec) => { const r = await resolve(spec, { intentId: "profile", runId: "profile" }); return { profile: r.profile, digest: r.profileDigest }; },
     spawn,
     async write(id, line) {
       const item = get(id);

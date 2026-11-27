@@ -117,6 +117,12 @@ returning a Cognate `Component`; many also export their input/result types and c
   [containedStdioPort.ts:containedStdioSpawnPort] — the host-owned bubblewrap `StdioSpawnPort`, built only from
   `ServerOptions.rlmContainedPort` (absent keeps Cognate's refusing port); host objects are bound into the
   sandbox by inherited descriptor, teardown kills the process group and pid namespace and records `nsKnown`.
+  [containedLaunch.ts:ExecutionProfile], [containedLaunch.ts:executionProfileDigest] — the operator-approved,
+  launch-independent half: pinned launcher and executable, restrictions, ceilings, mount roles, flag template, fixed
+  env and allowlisted env names (never ids, dev/inode, per-case host paths or env values). Identical across runs,
+  workspaces, port instances and host restarts, so a fixed list of its digests can sit in SEA policy; each plan embeds
+  it, `authorize(plan, digest, ctx, executionProfileDigest)` receives both, and the pre-spawn recompute confirms both.
+  `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching anything.
   [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port.
 
 - [aggregateContainment.ts:CONTAINMENT_THREAD] — shared-state thread id `containment:aggregate:v1`;

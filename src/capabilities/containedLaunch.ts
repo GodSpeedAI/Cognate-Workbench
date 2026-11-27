@@ -58,7 +58,7 @@ export interface ContainedStdioPortConfig {
   /** Operator attestation that the launcher carries the CVE-2026-87766 fix, for a distro build whose version number is below 0.12.0. */
   readonly launcherPatchedAttested?: boolean;
   /** Authority seam (#116): called with the plan and digest before spawn. Throw to refuse. */
-  readonly authorize?: (plan: LaunchPlan, digest: string, ctx: { readonly intentId: string; readonly runId: string }) => Promise<void>;
+  readonly authorize?: (plan: LaunchPlan, digest: string, ctx: { readonly intentId: string; readonly runId: string }, executionProfileDigest: string) => Promise<void>;
 }
 
 export const DEFAULT_CEILINGS: ContainedCeilings = {
@@ -87,8 +87,39 @@ export interface HostIdentity {
   readonly ino: string;
 }
 
+/**
+ * What an operator approves, independent of any one launch: stable across runs, workspaces, port instances and host
+ * restarts for the same configuration, so a fixed list of its digests can live in policy (ticket #116). It holds the
+ * pinned launcher and executable, the restrictions, ceilings, mount roles, the bubblewrap flag template (every flag
+ * except the launcher path; host objects appear only as inherited-descriptor roles), the fixed environment and the
+ * allowlisted environment NAMES. It never holds run or intent ids, dev/inode, per-case host paths, or env values.
+ */
+export interface ExecutionProfile {
+  readonly version: 1;
+  readonly launcher: PinnedBinary & { readonly version: string };
+  /** The pinned executable by its configured (logical) path. */
+  readonly executable: PinnedBinary;
+  readonly sandboxExecutable: string;
+  /** The child's arguments after argv[0], as sandbox-side strings. */
+  readonly args: readonly string[];
+  /** The network policy by role: the host socket path is a per-deployment host path and stays out. */
+  readonly restrictions: Omit<LaunchPlan["restrictions"], "network"> & { readonly network: "none" | "host-socket" };
+  readonly ceilings: ContainedCeilings;
+  readonly maxLineBytes: number;
+  readonly mounts: {
+    readonly workspace: { readonly sandboxPath: string; readonly mode: "read-only" };
+    readonly egress: { readonly sandboxPath: string } | null;
+  };
+  /** `sandboxArgv` without the launcher path. */
+  readonly flagTemplate: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  readonly envAllowlist: readonly string[];
+}
+
 export interface LaunchPlan {
   readonly version: 2;
+  /** Digest of the operator-approved profile this launch instantiates; confirmed unchanged immediately before spawn. */
+  readonly executionProfileDigest: string;
   /** The run and intent this launch is for; a digest authorizes this launch, not any launch of the same command. */
   readonly binding: { readonly intentId: string; readonly runId: string };
   /** The pinned executable with the identity of the file that was hashed. `fd` means it is bound by descriptor
@@ -141,6 +172,11 @@ export function canonicalJson(value: unknown): string {
     return `{${Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
+}
+
+/** `sha256:<hex>` of the canonical execution profile: the value an operator writes into policy. */
+export function executionProfileDigest(profile: ExecutionProfile): string {
+  return `sha256:${createHash("sha256").update(canonicalJson(profile)).digest("hex")}`;
 }
 
 /** `sha256:<hex>` of the canonical plan. Ticket #116 binds a SEA authority decision to exactly this value. */
@@ -295,7 +331,7 @@ export interface BuildPlanInput {
  * the workspace and the egress socket so a retargeted path is a different plan. Throws the typed Cognate
  * refusal for anything the port cannot enforce; it never narrows silently.
  */
-export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: LaunchPlan; material: LaunchMaterial }> {
+export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: LaunchPlan; material: LaunchMaterial; profile: ExecutionProfile; profileDigest: string }> {
   const { config, spec } = input;
   validateConfig(config);
   if (process.platform !== "linux") throw refuse("rlm-containment-unavailable", "the contained port requires Linux namespaces; there is no fallback");
@@ -412,8 +448,24 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     "--", ...prlimit, ...argv,
   ];
   const probeArgv = [launcherPath, ...common, ...mounts, "--proc", "/proc", "--dev", "/dev", "--", "/usr/bin/true"];
+  const profile: ExecutionProfile = {
+    version: 1,
+    launcher: { path: config.launcher.path, sha256: config.launcher.sha256, version: input.launcherVersion },
+    executable: { path: pinned.path, sha256: pinned.sha256 },
+    sandboxExecutable,
+    args: spec.argv.slice(1),
+    restrictions: { filesystem: "read-only", network: network === "none" ? "none" : "host-socket", credentials: "none", subprocess: "contained" },
+    ceilings: effective,
+    maxLineBytes: config.maxLineBytes ?? 65_536,
+    mounts: { workspace: { sandboxPath: SANDBOX_WORKSPACE, mode: "read-only" }, egress: egress ? { sandboxPath: SANDBOX_EGRESS_SOCKET } : null },
+    flagTemplate: sandboxArgv.slice(1),
+    env: fixedEnv,
+    envAllowlist: allowlist,
+  };
+  const profileDigest = executionProfileDigest(profile);
   const plan: LaunchPlan = {
     version: 2,
+    executionProfileDigest: profileDigest,
     binding: { intentId: input.ctx.intentId, runId: input.ctx.runId },
     executable: { ...identity(requested, executableInfo), sha256: pinned.sha256, bound: execInside ? "runtime-root" : "fd" },
     launcher: { path: launcherPath, sha256: config.launcher.sha256, version: input.launcherVersion },
@@ -428,5 +480,5 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     userEnvHmac,
     envAllowlist: allowlist,
   };
-  return { plan, material: { argsFile, probeArgv } };
+  return { plan, material: { argsFile, probeArgv }, profile, profileDigest };
 }
