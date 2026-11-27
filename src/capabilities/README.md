@@ -124,16 +124,31 @@ returning a Cognate `Component`; many also export their input/result types and c
   it, `authorize(plan, digest, ctx, executionProfileDigest)` receives both, and the pre-spawn recompute confirms both.
   The egress socket's resolved path is in the profile (fixed deployment configuration); the workspace is not: it is per
   case, SEA authorizes it as the governed request's case resource, and the plan digest pins the exact directory by
-  dev/inode. Allowlisted env names that control loading or interpretation (LD_*, DYLD_*, NODE_OPTIONS, NODE_PATH,
-  PYTHON*, BASH_ENV, ENV, PERL5OPT, PERL5LIB, RUBYOPT, RUBYLIB, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, GCONV_PATH, LOCPATH,
-  NLSPATH, PATH, HOME, BASH_FUNC_*) are refused at port construction, because env values are not in the profile.
+  dev/inode. Every allowlisted env name declares an anchored, length-capped value pattern
+  (`envValuePatterns`) that is part of the profile, and a spawn value outside it is refused; names that control loading,
+  interpretation or traffic (LD_*, DYLD_*, NODE_*, BUN_*, DENO_*, npm_config_*, PYTHON*, RUBY*, PERL*, GEM_*, BUNDLE_*,
+  GIT_*, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, JDK_JAVA_OPTIONS, CLASSPATH, JAVA_HOME, BASH_ENV, ENV, GCONV_PATH, LOCPATH,
+  NLSPATH, SSL_CERT_FILE, SSL_CERT_DIR, *_proxy, *_PROXY, PATH, HOME, TMPDIR, BASH_FUNC_*) are refused at construction.
+  [containedSeccomp.ts:noUnixSocketFilter] — with network `none` the sandbox loads a hand-assembled BPF filter
+  (`--seccomp 7`): architecture check (x86_64, aarch64; anything else, x32 included, is killed), `socket(AF_UNIX)` is
+  EACCES, `io_uring_setup` is EPERM, the rest is allowed (socketpair stays). Its id and sha256 are in the profile. This
+  closes pathname unix sockets under the workspace bind; egress profiles cannot take it yet (#115: hand the child a
+  pre-connected fd, then filter every profile).
   `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching anything.
   [containedProfileAuthority.ts:profileAuthorize] — #116 host half: the port's `authorize` hook asks SEA-Forge (the
   existing `SeaForgeAuthority.decide` route, claim `execution_profile_digest`) and launches only on a `boundary` allow
   carrying exactly one `execution_profile` constraint equal to the profile digest, with a plan that embeds it; every
   other answer, an unreachable or malformed one included, refuses before spawn (`rlm-containment-unavailable`,
-  reason `rlm-profile-unauthorized: ...`). `startServer` composes it from the external authority and refuses a contained
-  port that has neither that nor an explicit `authorize`. Evidence keeps digests and the decision id only.
+  reason `rlm-profile-unauthorized: ...`). `startServer` always composes it, from the external authority or an injected
+  `rlmProfileAuthority` (tests); a bare hook is not accepted, and with neither it refuses at startup. The decision must be
+  a `boundary` allow with exactly one `execution_profile` constraint (any other constraint type refuses) and a SEA ledger
+  entry (a 26-character ULID). Policy authors: the launch asks about its OWN target, `workbench.rlm.contained-spawn`
+  (`CONTAINED_SPAWN_CAPABILITY`), carrying `claims.execution_profile_digest`; the parent's `rlm.invoke` admission is a
+  separate request with no claim. Write the profile rule on the launch target and an ordinary rule on `rlm.invoke`; a rule
+  on one never decides the other. The port requests authority before ANY bubblewrap starts (the namespace preflight runs
+  after the allow), refuses to launch once disposed, and refuses a spawn whose network exceeds the reach the operator
+  declared for the admitted provider (`declareReach`, called by the server from the registration's `portGovernance`).
+  Evidence keeps digests and the decision id only.
   [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port: exact input digest, claimed once by one run, started as the parent's agent principal, expiring if unclaimed, never re-armed by a repeat invoke, disarmed if dispatch fails.
 
 - [aggregateContainment.ts:CONTAINMENT_THREAD] — shared-state thread id `containment:aggregate:v1`;

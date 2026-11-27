@@ -12,7 +12,8 @@
 //               bytes enforced by the port
 //   spawn       refused with a typed Cognate code BEFORE any process starts; never an uncontained fallback
 // Not enforced here (reported, not claimed): per-process memory beyond RLIMIT_AS, disk quota, UDP/DNS
-// beyond the namespace itself (it has no interface at all), seccomp syscall filtering.
+// beyond the namespace itself (it has no interface at all). Seccomp: with no network, only AF_UNIX socket() and io_uring_setup are
+// denied (containedSeccomp.ts); there is no general syscall filter.
 import { closeSync, constants, fstatSync, lstatSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, readFile, readlink } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -73,7 +74,13 @@ export interface ContainedStdioSpawnPort extends StdioSpawnPort {
    * port interface carries no caller identity, so the unguessable id remains the capability on the shared port.
    */
   forRun(ctx: RunBinding): StdioSpawnPort;
-  /** Terminate every live sandbox. Idempotent. */
+  /**
+   * Record the network reach the operator declared for the provider that runs as `runId` (review M9). A spawn that asks for
+   * more (the host socket, when `none` was declared) is refused before any authority request. A run with no declaration is
+   * treated as `none`: the most restrictive reading, never a default of convenience.
+   */
+  declareReach(runId: string, reach: "none" | "host-socket"): void;
+  /** Close the port, then terminate every live sandbox. A spawn still waiting on its authority decision launches nothing. Idempotent. */
   dispose(): Promise<void>;
 }
 
@@ -146,6 +153,8 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   const finished = new Map<string, Live>();
   const envKey = randomBytes(32);
   let preflighted = false;
+  let closed = false;
+  const declared = new Map<string, "none" | "host-socket">();
 
   /**
    * The launcher, opened once: its path checks (writable roots, owner, directory chain) pass before it is ever executed,
@@ -199,7 +208,12 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
    * this point. Each descriptor must still be the object the plan recorded (dev/inode and resolved path).
    */
   function openPinned(plan: LaunchPlan): { workspace: number; egress: number | undefined; executable: number | undefined } {
+    // One cleanup path: whatever throws after a descriptor was acquired, every acquired descriptor is closed (review L11).
     const opened: number[] = [];
+    try { return openPinnedInner(plan, opened); } catch (error) { for (const fd of opened) { try { closeSync(fd); } catch { /* closed */ } } throw error; }
+  }
+
+  function openPinnedInner(plan: LaunchPlan, opened: number[]): { workspace: number; egress: number | undefined; executable: number | undefined } {
     const pin = (path: string, flags: number, want: { dev: string; ino: string }, what: string): number => {
       let fd: number;
       try { fd = openSync(path, flags | constants.O_NOFOLLOW); } catch { throw refuse("rlm-containment-unavailable", `${what} ${path} could not be opened`); }
@@ -207,7 +221,6 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       const info = fstatSync(fd, { bigint: true });
       const link = (() => { try { return readlinkSync(`/proc/self/fd/${fd}`); } catch { return undefined; } })();
       if (String(info.dev) !== want.dev || String(info.ino) !== want.ino || link !== path) {
-        for (const o of opened) closeSync(o);
         throw refuse("rlm-containment-unavailable", `${what} ${path} is no longer the object the launch plan recorded`);
       }
       return fd;
@@ -217,9 +230,9 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     // The executable is hashed through the descriptor it is bound by, so the hashed bytes are the bound bytes.
     const exe = pin(plan.executable.path, O_PATH, plan.executable, "executable");
     let bytes: Buffer;
-    try { bytes = readFileSync(`/proc/self/fd/${exe}`); } catch { for (const o of opened) closeSync(o); throw refuse("rlm-port-unavailable", "the executable could not be read through its descriptor"); }
-    if (createHash("sha256").update(bytes).digest("hex") !== plan.executable.sha256) { for (const o of opened) closeSync(o); throw refuse("rlm-port-unavailable", "the executable digest does not match the host pin"); }
-    if (plan.executable.bound !== "fd") { closeSync(exe); return { workspace, egress, executable: undefined }; }
+    try { bytes = readFileSync(`/proc/self/fd/${exe}`); } catch { throw refuse("rlm-port-unavailable", "the executable could not be read through its descriptor"); }
+    if (createHash("sha256").update(bytes).digest("hex") !== plan.executable.sha256) throw refuse("rlm-port-unavailable", "the executable digest does not match the host pin");
+    if (plan.executable.bound !== "fd") { closeSync(exe); opened.splice(opened.indexOf(exe), 1); return { workspace, egress, executable: undefined }; }
     return { workspace, egress, executable: exe };
   }
 
@@ -229,6 +242,16 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     const path = join(dir, "args");
     try {
       writeFileSync(path, material.argsFile, { mode: 0o600 });
+      return openSync(path, constants.O_RDONLY);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  /** The seccomp program travels in a private, already-unlinked file passed as fd 7. */
+  function seccompFd(program: Buffer): number {
+    const dir = mkdtempSync(join(tmpdir(), "contained-seccomp-"));
+    const path = join(dir, "filter");
+    try {
+      writeFileSync(path, program, { mode: 0o600 });
       return openSync(path, constants.O_RDONLY);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
@@ -261,13 +284,23 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     return { pids: left, known: true };
   }
 
+  const disposed = (): ReturnType<typeof refuse> => refuse("rlm-containment-unavailable", "the contained port has been disposed; nothing more is launched");
+
   async function spawn(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly id: string }> {
+    if (closed) throw disposed();
     const first = await resolve(spec, ctx);
-    await preflight(first.material.probeArgv);
+    // M9: the spawn may not exceed the network reach the operator declared for this run's provider; refused before any authority request.
+    if (first.plan.restrictions.network !== "none" && (declared.get(ctx.runId) ?? "none") === "none") {
+      throw refuse("rlm-egress-uncontrolled", `the spawn asks for the host socket, but the provider of run ${ctx.runId} was declared with network none (or declared nothing)`);
+    }
+    // The decision comes first. No sandbox of any kind (the namespace preflight included) starts before SEA-Forge allows (review M5).
     await config.authorize(first.plan, first.digest, ctx, first.profileDigest);
+    if (closed) throw disposed();
+    await preflight(first.material.probeArgv);
     const fds = openPinned(first.plan);
     const closeFds = (...extra: number[]) => { for (const fd of [fds.workspace, fds.egress, fds.executable, ...extra]) if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } } };
     const argFd = (() => { try { return argsFd(first.material); } catch (error) { closeFds(); throw error; } })();
+    const filterFd = (() => { try { return first.material.seccomp ? seccompFd(first.material.seccomp) : undefined; } catch (error) { closeFds(argFd); throw error; } })();
     let proc: ReturnType<typeof Bun.spawn>;
     let launcher: Awaited<ReturnType<typeof launcherHandle>> | undefined;
     try {
@@ -278,14 +311,17 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       // Hash and exec through one descriptor, immediately before spawn.
       launcher = await launcherHandle();
       const stdio: (string | number)[] = ["pipe", "pipe", "pipe", fds.workspace, argFd];
-      if (fds.egress !== undefined || fds.executable !== undefined) stdio.push(fds.egress ?? "ignore");
-      if (fds.executable !== undefined) stdio.push(fds.executable);
+      if (fds.egress !== undefined || fds.executable !== undefined || filterFd !== undefined) stdio.push(fds.egress ?? "ignore");
+      if (fds.executable !== undefined || filterFd !== undefined) stdio.push(fds.executable ?? "ignore");
+      if (filterFd !== undefined) stdio.push(filterFd);
+      // Disposal may have happened while the awaits above were pending: re-check immediately before the process exists (review M7).
+      if (closed) throw disposed();
       proc = Bun.spawn([launcher.exec, ...first.plan.sandboxArgv.slice(1)], { env: {}, stdio: stdio as never, detached: true });
     } catch (error) {
       launcher?.close();
       throw error;
     } finally {
-      closeFds(argFd);
+      closeFds(argFd, ...(filterFd !== undefined ? [filterFd] : []));
     }
     const built = first.plan;
     const digest = first.digest;
@@ -364,6 +400,11 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     plan: async (spec, ctx) => { const r = await resolve(spec, ctx); return { plan: r.plan, digest: r.digest, executionProfile: r.profile, executionProfileDigest: r.profileDigest }; },
     executionProfile: async (spec) => { const r = await resolve(spec, { intentId: "profile", runId: "profile" }); return { profile: r.profile, digest: r.profileDigest }; },
     spawn,
+    declareReach(runId, reach) {
+      declared.delete(runId);
+      declared.set(runId, reach);
+      while (declared.size > 256) declared.delete(declared.keys().next().value as string);
+    },
     async write(id, line) {
       const item = get(id);
       if (item.exit) throw new Error(`contained process ${id} has exited`);
@@ -398,6 +439,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       };
     },
     async dispose() {
+      closed = true; // first: a spawn awaiting its authority decision re-checks this before it launches
       await Promise.all([...live.values()].map(async (item) => { await teardown(item, { reason: "killed", detail: "dispose" }); await item.done; }));
     },
   };

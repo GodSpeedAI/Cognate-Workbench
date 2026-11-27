@@ -10,6 +10,7 @@ import { createHash, createHmac } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, sep } from "node:path";
+import { noUnixSocketFilter } from "./containedSeccomp.ts";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
 import type { RlmRefusalCode, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 
@@ -46,8 +47,12 @@ export interface ContainedStdioPortConfig {
   readonly writableRoots: readonly string[];
   /** Public runtime directories bound read-only. Default: /usr/bin /usr/lib /lib /lib64. */
   readonly runtimeRoots?: readonly string[];
-  /** Environment names a spec may set. Everything else is refused. */
+  /** Environment names a spec may set. Everything else is refused. Each name must have a value pattern in `envValuePatterns`. */
   readonly envAllowlist?: readonly string[];
+  /** Per allowlisted name, the anchored regex (`^...$`, at most 200 characters) its value must match; values are also capped
+   *  at 256 characters. The pattern is part of the execution profile, so an operator approves WHICH values may be set, not
+   *  only which names. A name that selects code (an agent path, a config file) can then only ever name what was approved. */
+  readonly envValuePatterns?: Readonly<Record<string, string>>;
   /** The one host-owned unix socket the sandbox may reach (the #115 metering proxy); network is otherwise unshared. */
   readonly hostSocket?: string;
   readonly ceilings?: Partial<ContainedCeilings>;
@@ -74,6 +79,8 @@ export const DEFAULT_CEILINGS: ContainedCeilings = {
 export const DEFAULT_RUNTIME_ROOTS = ["/usr/bin", "/usr/lib", "/lib", "/lib64"] as const;
 export const SANDBOX_WORKSPACE = "/workspace";
 export const SANDBOX_EGRESS_SOCKET = "/run/egress.sock";
+/** Inherited descriptor numbers: 3 workspace, 4 argument file, 5 egress socket, 6 executable, 7 seccomp program. */
+export const SECCOMP_FD = 7;
 export const SANDBOX_EXECUTABLE_DIR = "/opt/cognate/bin";
 const PUBLIC_ROOTS = new Set(["/usr/bin", "/usr/lib", "/usr/lib64", "/bin", "/lib", "/lib64"]);
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -117,6 +124,10 @@ export interface ExecutionProfile {
   readonly flagTemplate: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly envAllowlist: readonly string[];
+  /** The value pattern of each allowlisted environment name. */
+  readonly envPatterns: Readonly<Record<string, string>>;
+  /** The seccomp filter loaded into the sandbox (id and digest of its bytes), or null when none applies (egress profiles). */
+  readonly seccomp: { readonly id: string; readonly sha256: string } | null;
 }
 
 export interface LaunchPlan {
@@ -163,6 +174,8 @@ export interface LaunchPlan {
 export interface LaunchMaterial {
   /** NUL-joined `--setenv NAME VALUE` for the allowlisted caller environment (fd 4). */
   readonly argsFile: string;
+  /** The seccomp program for `--seccomp 7`, when the profile has no network (the digest is in the execution profile). */
+  readonly seccomp?: Buffer;
   /** Namespace and mount probe built structurally, so no spec value can cut it. */
   readonly probeArgv: readonly string[];
 }
@@ -240,8 +253,41 @@ export function validateConfig(config: ContainedStdioPortConfig): void {
   if (config.hostSocket !== undefined && !isAbsolute(config.hostSocket)) throw new Error("contained port: hostSocket must be an absolute path");
   for (const root of config.runtimeRoots ?? []) if (!PUBLIC_ROOTS.has(root)) throw new Error(`contained port: runtime root ${root} is not a public executable/library directory`);
   for (const name of config.envAllowlist ?? []) if (typeof name !== "string" || isForbiddenEnvName(name)) throw new Error(`contained port: envAllowlist name ${String(name)} controls code loading or interpretation and cannot be allowlisted`);
+  validateEnvPatterns(config);
   const ceilings = { ...DEFAULT_CEILINGS, ...config.ceilings };
   for (const [key, value] of Object.entries(ceilings)) if (!Number.isSafeInteger(value) || value < 1) throw new Error(`contained port: ceiling ${key} must be a positive integer`);
+}
+
+/** Longest env value, and longest pattern source, the port accepts. */
+const MAX_ENV_VALUE = 256;
+const MAX_ENV_PATTERN = 200;
+
+function validateEnvPatterns(config: ContainedStdioPortConfig): void {
+  const allowed = new Set(config.envAllowlist ?? []);
+  const patterns = config.envValuePatterns ?? {};
+  for (const name of allowed) {
+    const pattern = patterns[name];
+    if (typeof pattern !== "string") throw new Error(`contained port: envAllowlist name ${name} needs a value pattern in envValuePatterns`);
+    if (pattern.length > MAX_ENV_PATTERN || !pattern.startsWith("^") || !pattern.endsWith("$") || pattern.endsWith("\\$")) throw new Error(`contained port: the value pattern of ${name} must be an anchored regex (^...$) of at most ${MAX_ENV_PATTERN} characters`);
+    try { new RegExp(pattern); } catch { throw new Error(`contained port: the value pattern of ${name} is not a valid regular expression`); }
+    // An alternation at the top level would let "^a$|b" match unanchored text: every alternative must be anchored, so refuse any top-level "|".
+    if (hasTopLevelAlternation(pattern)) throw new Error(`contained port: the value pattern of ${name} must not use a top-level alternation; group it: ^(a|b)$`);
+  }
+  for (const name of Object.keys(patterns)) if (!allowed.has(name)) throw new Error(`contained port: envValuePatterns names ${name}, which is not allowlisted`);
+}
+
+function hasTopLevelAlternation(pattern: string): boolean {
+  let depth = 0; let inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!;
+    if (c === "\\") { i += 1; continue; }
+    if (inClass) { if (c === "]") inClass = false; continue; }
+    if (c === "[") inClass = true;
+    else if (c === "(") depth += 1;
+    else if (c === ")") depth -= 1;
+    else if (c === "|" && depth === 0) return true;
+  }
+  return false;
 }
 
 export function resolveCeilings(config: ContainedStdioPortConfig): ContainedCeilings {
@@ -251,15 +297,20 @@ export function resolveCeilings(config: ContainedStdioPortConfig): ContainedCeil
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RESERVED_ENV = new Set(["PATH", "HOME", "SEA_EGRESS_SOCKET"]);
 /**
- * Environment names that control how code is found, loaded or interpreted. Env VALUES are not part of the execution
- * profile, so a name that changes what runs may not be allowlisted at all: the dynamic loader (LD_*, DYLD_*),
- * language runtimes and their startup hooks (NODE_OPTIONS, NODE_PATH, PYTHON*, PERL5OPT, PERL5LIB, RUBYOPT, RUBYLIB,
- * JAVA_TOOL_OPTIONS, _JAVA_OPTIONS), shell startup (BASH_ENV, ENV, BASH_FUNC_*), libc locale and charset loading
- * (GCONV_PATH, LOCPATH, NLSPATH), and the fixed PATH and HOME.
+ * Environment names that control how code is found, loaded or interpreted, or where traffic goes. They may not be
+ * allowlisted at all, whatever pattern is offered: the dynamic loader (LD_*, DYLD_*), language runtimes, VMs and their
+ * package managers (NODE_*, BUN_*, DENO_*, npm_config_*, PYTHON*, RUBY*, PERL*, GEM_*, BUNDLE_*, JAVA_TOOL_OPTIONS,
+ * _JAVA_OPTIONS, JDK_JAVA_OPTIONS, CLASSPATH, JAVA_HOME), VCS hooks (GIT_*), shell startup (BASH_ENV, ENV, BASH_FUNC_*),
+ * libc locale and charset loading (GCONV_PATH, LOCPATH, NLSPATH), TLS roots (SSL_CERT_FILE, SSL_CERT_DIR), proxies
+ * (*_proxy, *_PROXY), and the fixed PATH, HOME and TMPDIR. Every other allowlisted name still carries an operator-approved
+ * value pattern that is part of the execution profile (`envValuePatterns`).
  */
-const FORBIDDEN_ENV_NAMES = new Set(["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "GCONV_PATH", "LOCPATH", "NLSPATH", "PATH", "HOME"]);
-const FORBIDDEN_ENV_PREFIXES = ["LD_", "DYLD_", "PYTHON", "BASH_FUNC_"];
-export const isForbiddenEnvName = (name: string): boolean => FORBIDDEN_ENV_NAMES.has(name) || FORBIDDEN_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
+const FORBIDDEN_ENV_NAMES = new Set(["BASH_ENV", "ENV", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "JAVA_HOME", "GCONV_PATH", "LOCPATH", "NLSPATH", "PATH", "HOME", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"]);
+/** Matched case-sensitively as prefixes: loaders, language runtimes and their package managers, VCS and ruby/perl tooling. */
+const FORBIDDEN_ENV_PREFIXES = ["LD_", "DYLD_", "PYTHON", "BASH_FUNC_", "NODE_", "BUN_", "DENO_", "npm_config_", "GIT_", "RUBY", "PERL", "GEM_", "BUNDLE_"];
+/** Proxy settings redirect traffic: `*_proxy` and `*_PROXY` (http_proxy, HTTPS_PROXY, all_proxy, NO_PROXY ...). */
+const FORBIDDEN_ENV_SUFFIXES = ["_proxy", "_PROXY"];
+export const isForbiddenEnvName = (name: string): boolean => FORBIDDEN_ENV_NAMES.has(name) || FORBIDDEN_ENV_PREFIXES.some((prefix) => name.startsWith(prefix)) || FORBIDDEN_ENV_SUFFIXES.some((suffix) => name.endsWith(suffix));
 const SPEC_KEYS = new Set(["argv", "cwd", "env", "restrictions"]);
 const RESTRICTION_KEYS = new Set(["filesystem", "network", "caps", "subprocess"]);
 const NETWORK_KEYS = new Set(["outbound"]);
@@ -427,8 +478,10 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
   for (const [name, value] of Object.entries(spec.env)) {
     if (!allowlist.includes(name)) throw refuse("rlm-containment-unavailable", `environment variable ${name} is not in the host allowlist`);
     if (typeof value !== "string" || value.includes("\0")) throw refuse("rlm-containment-unavailable", `environment variable ${name} has an invalid value`);
+    if (value.length > MAX_ENV_VALUE || !new RegExp(config.envValuePatterns![name]!).test(value)) throw refuse("rlm-containment-unavailable", `environment variable ${name} has a value outside the pattern the operator approved for it`);
     userEnv[name] = value;
   }
+  const envPatterns: Record<string, string> = Object.fromEntries(allowlist.map((name) => [name, config.envValuePatterns![name]!]));
   const fixedEnv: Record<string, string> = { PATH: `${SANDBOX_EXECUTABLE_DIR}:/usr/bin:/bin`, HOME: "/nonexistent", ...(network === "none" ? {} : { SEA_EGRESS_SOCKET: SANDBOX_EGRESS_SOCKET }) };
   const userNames = Object.keys(userEnv).sort();
   const userEnvHmac = Object.fromEntries(userNames.map((name) => [name, createHmac("sha256", input.envKey).update(name).update("\0").update(userEnv[name]!).digest("hex")]));
@@ -449,6 +502,9 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     assertTrustedPath(egress.path, "host socket", "rlm-egress-uncontrolled", false);
   }
 
+  // H4: with no network, the sandbox may not create an AF_UNIX socket at all (a pathname socket under the workspace bind is
+  // otherwise reachable). With the egress slot the child needs AF_UNIX, so no filter yet: #115 must hand it a pre-connected fd.
+  const seccomp = network === "none" ? noUnixSocketFilter() : undefined;
   const argv = [sandboxExecutable, ...spec.argv.slice(1)];
   const prlimit = ["/usr/bin/prlimit", `--as=${effective.addressSpaceBytes}`, `--cpu=${effective.cpuSeconds}:${effective.cpuSeconds + 1}`, `--nofile=${effective.nofile}`, `--nproc=${effective.nproc}`, `--fsize=${effective.fsizeBytes}`, "--"];
   const common = ["--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--new-session", "--die-with-parent", "--cap-drop", "ALL", "--clearenv"];
@@ -460,6 +516,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     "--chdir", cwd,
     ...Object.entries(fixedEnv).sort(([a], [b]) => (a < b ? -1 : 1)).flatMap(([name, value]) => ["--setenv", name, value]),
     "--args", "4",
+    ...(seccomp ? ["--seccomp", String(SECCOMP_FD)] : []),
     "--", ...prlimit, ...argv,
   ];
   const probeArgv = [launcherPath, ...common, ...mounts, "--proc", "/proc", "--dev", "/dev", "--", "/usr/bin/true"];
@@ -476,6 +533,8 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     flagTemplate: sandboxArgv.slice(1),
     env: fixedEnv,
     envAllowlist: allowlist,
+    envPatterns,
+    seccomp: seccomp ? { id: seccomp.id, sha256: seccomp.sha256 } : null,
   };
   const profileDigest = executionProfileDigest(profile);
   const plan: LaunchPlan = {
@@ -495,5 +554,5 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     userEnvHmac,
     envAllowlist: allowlist,
   };
-  return { plan, material: { argsFile, probeArgv }, profile, profileDigest };
+  return { plan, material: { argsFile, probeArgv, ...(seccomp ? { seccomp: seccomp.bytes } : {}) }, profile, profileDigest };
 }

@@ -5,8 +5,8 @@
 // The route to SEA-Forge is the one Workbench already has: the typed `SeaForgeAuthority.decide` client over the CEP
 // authority socket (`externalAuthorityFromEnv`). No transport is added here.
 //
-// Accepted: disposition `boundary` whose constraints hold EXACTLY ONE constraint of type `execution_profile` with the
-// claimed digest, and a plan that embeds that same digest. Everything else refuses before spawn, fail closed: deny,
+// Accepted: disposition `boundary` whose constraints are EXACTLY ONE constraint, of type `execution_profile`, with the
+// claimed digest (any other constraint type is one the port cannot enforce, so it refuses), and a plan that embeds that same digest. Everything else refuses before spawn, fail closed: deny,
 // escalate (an approval is not awaited here: a contained spawn does not park a run), a plain allow, a constrained or
 // degraded allow, a decision with no ledger entry, a missing, wrong, extra or duplicate profile constraint, an unreachable or erroring SEA-Forge, a
 // malformed decision, a missing world reference. SEA-Forge binds the digest the host claims and cannot verify it, so the
@@ -14,14 +14,21 @@
 //
 // Evidence records the digests and the decision id only, never the raw packets.
 import { RlmRefusedError, type GovernanceDecision, type GovernedOperation } from "@godspeedai/cognate-runtime-bun";
-import { RLM_CAPABILITIES } from "@godspeedai/cognate-runtime-api";
 import type { Principal } from "@godspeedai/cognate-kernel-api";
 import type { ContainedStdioPortConfig } from "./containedLaunch.ts";
 
 /** The claim key SEA-Forge reads, the boundary dimension it narrows, and the constraint type it exports. */
 export const EXECUTION_PROFILE_CLAIM = "execution_profile_digest";
 export const EXECUTION_PROFILE_CONSTRAINT = "execution_profile";
+/**
+ * The policy target of the LAUNCH, distinct from the parent's `rlm.invoke` admission (review M8). A profile rule written for
+ * this target never matches the admission request, and an admission-only rule on `rlm.invoke` never decides a launch, so the
+ * two checks can be authored (and subject-scoped) independently.
+ */
+export const CONTAINED_SPAWN_CAPABILITY = "workbench.rlm.contained-spawn";
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
+/** A SEA ledger entry is a ULID (`entry_ulid`): 26 Crockford base32 characters. A `decision_id` such as `auth_01` is not one. */
+const LEDGER_ENTRY = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The part of `SeaForgeAuthority` this needs; a stand-in implements the same. */
 export interface ProfileAuthority {
@@ -60,13 +67,16 @@ export function checkProfileDecision(decision: unknown, executionProfileDigest: 
   let matching = 0;
   for (const constraint of decision.constraints) {
     if (!isObject(constraint) || typeof constraint.type !== "string" || typeof constraint.value !== "string") throw unauthorized("a constraint in the decision is malformed");
-    if (constraint.type !== EXECUTION_PROFILE_CONSTRAINT) continue;
+    // Fail closed on the class: the port enforces exactly the execution profile, so any other constraint (timeout_secs, ...) is one it cannot honor.
+    if (constraint.type !== EXECUTION_PROFILE_CONSTRAINT) throw unauthorized(`the decision carries a ${JSON.stringify(constraint.type)} constraint that this port cannot enforce`);
     if (constraint.value !== executionProfileDigest) throw unauthorized("the decision authorizes a different execution profile");
     matching += 1;
   }
   if (matching !== 1) throw unauthorized(matching === 0 ? "the decision carries no execution_profile constraint" : "the decision carries more than one execution_profile constraint");
   // The evidence is an allow SEA-Forge COMMITTED before spawn: its ledger entry (Cognate's `decisionRef`). An envelope id alone is not it.
-  if (typeof decision.decisionRef !== "string" || decision.decisionRef.length === 0) throw unauthorized("the decision carries no ledger entry");
+  // TODO(cognate ledgerEntry): Cognate folds decisionRef as `ledger_entry ?? decision_id`, so a reply with only a decision_id looks like a
+  // ledger entry. Until the typed decision exposes `ledgerEntry` separately, the ULID shape is the interim proof.
+  if (typeof decision.decisionRef !== "string" || !LEDGER_ENTRY.test(decision.decisionRef)) throw unauthorized("the decision carries no ledger entry");
   return decision.decisionRef;
 }
 
@@ -83,7 +93,7 @@ export function profileAuthorize(options: ProfileAuthorizeOptions): NonNullable<
       kind: "capability",
       request: {
         operation: "invoke", actor: options.actor, tenant: options.tenant, scopeId: ctx.runId,
-        capability: { id: RLM_CAPABILITIES.invoke, version: "1.0.0" }, providerId: "workbench-contained-port", correlationId: ctx.runId,
+        capability: { id: CONTAINED_SPAWN_CAPABILITY, version: "1.0.0" }, providerId: "workbench-contained-port", correlationId: ctx.runId,
       },
       claims: { [EXECUTION_PROFILE_CLAIM]: executionProfileDigest },
     };

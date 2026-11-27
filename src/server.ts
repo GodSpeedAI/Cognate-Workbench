@@ -48,7 +48,7 @@ import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from ".
 import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
 import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
 import { rlmAdmissionGuard } from "./capabilities/rlmAdmissionGuard.ts";
-import { profileAuthorize, type ProfileAuthorization } from "./capabilities/containedProfileAuthority.ts";
+import { profileAuthorize, type ProfileAuthority, type ProfileAuthorization } from "./capabilities/containedProfileAuthority.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
@@ -208,7 +208,10 @@ export interface ServerOptions {
   readonly rlmProviders?: readonly RlmProviderRegistration[];
   /** SEA-Forge #114: trusted host configuration for the contained bubblewrap `StdioSpawnPort`. Absent
    *  (the default) keeps Cognate's `unavailableSpawnPort()`: providers that need a port stay refused. */
-  readonly rlmContainedPort?: Omit<ContainedStdioPortConfig, "authorize"> & { readonly authorize?: ContainedStdioPortConfig["authorize"] };
+  readonly rlmContainedPort?: Omit<ContainedStdioPortConfig, "authorize">;
+  /** The authority a contained spawn asks (#116). Absent, the external SEA-Forge authority is used. A test double goes here,
+   *  never around it: `profileAuthorize` composes the decision check either way, and there is no way to supply a bare hook. */
+  readonly rlmProfileAuthority?: { readonly authority: ProfileAuthority; readonly worldRef: string };
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -600,16 +603,16 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // J-RLM-CHILD-RUN: empty unless the host explicitly registers providers (ServerOptions only).
   const rlmRegistry = createRlmRegistry();
   for (const registration of options.rlmProviders ?? []) rlmRegistry.register(registration);
-  // #116: a contained spawn is authorized by SEA-Forge for exactly its execution profile before any sandbox starts. The
-  // route is the existing external authority client; an explicit host `authorize` hook may replace it, and with neither the
+  // #116: a contained spawn is authorized by SEA-Forge for exactly its execution profile before any sandbox starts. The route is
+  // the existing external authority client, or an injected `ProfileAuthority` (tests); either way `profileAuthorize` applies the
+  // same decision check. A caller-supplied bare hook is not accepted (it could skip SEA-Forge), and with no authority at all the
   // port is refused at startup rather than spawning without a decision.
   const profileAuthorizations: ProfileAuthorization[] = [];
+  const profileAuthority = options.rlmProfileAuthority ?? (externalAuthority ? { authority: externalAuthority.client, worldRef: externalAuthority.governance.worldRef } : undefined);
   const rlmContainedConfig: ContainedStdioPortConfig | undefined = options.rlmContainedPort
-    ? options.rlmContainedPort.authorize
-      ? { ...options.rlmContainedPort, authorize: options.rlmContainedPort.authorize }
-      : externalAuthority
-        ? { ...options.rlmContainedPort, authorize: profileAuthorize({ authority: externalAuthority.client, worldRef: externalAuthority.governance.worldRef, actor: SYSTEM_CALLER.actor, tenant: SYSTEM_CALLER.tenant, record: (a) => { profileAuthorizations.push(a); if (profileAuthorizations.length > 256) profileAuthorizations.shift(); } }) }
-        : (() => { throw new Error("rlmContainedPort needs SEA-Forge governance (COGNATE_GOVERNANCE=sea-forge) or an explicit authorize hook: a contained spawn is never launched without an authority decision"); })()
+    ? profileAuthority
+      ? { ...(({ authorize: _ignored, ...rest }) => rest)(options.rlmContainedPort as ContainedStdioPortConfig), authorize: profileAuthorize({ authority: profileAuthority.authority, worldRef: profileAuthority.worldRef, actor: SYSTEM_CALLER.actor, tenant: SYSTEM_CALLER.tenant, record: (a) => { profileAuthorizations.push(a); if (profileAuthorizations.length > 256) profileAuthorizations.shift(); } }) }
+      : (() => { throw new Error("rlmContainedPort needs SEA-Forge governance (COGNATE_GOVERNANCE=sea-forge) or an rlmProfileAuthority: a contained spawn is never launched without an authority decision"); })()
     : undefined;
   const rlmSpawnPort = rlmContainedConfig ? containedStdioSpawnPort(rlmContainedConfig) : undefined;
   // With a spawn port registered, only children admitted by the governed rlm.invoke may reach it (see rlmAdmissionGuard).
@@ -825,7 +828,18 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), (() => { const agent = createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) }); return rlmGuard ? rlmGuard.wrap(agent) : agent; })()],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), (() => {
+      const agent = createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) });
+      if (!rlmSpawnPort || !rlmGuard) return agent;
+      // M9: before the child runs, bind the port to the reach the OPERATOR declared for the admitted provider (never the provider's own facts).
+      const bound = { ...agent, async run(input: Parameters<typeof agent.run>[0], context: Parameters<typeof agent.run>[1]) {
+        const providerId = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).providerId : undefined;
+        const reach = typeof providerId === "string" ? rlmRegistry.get(providerId)?.portGovernance?.reach.network : undefined;
+        rlmSpawnPort.declareReach(context.runId, reach === "host-mediated" ? "host-socket" : "none");
+        return agent.run(input, context);
+      } };
+      return rlmGuard.wrap(bound);
+    })()],
     components: [
       terminalComponent({
         getService,
