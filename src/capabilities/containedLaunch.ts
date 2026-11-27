@@ -6,7 +6,7 @@
 //
 // Everything here is host-owned and pure of side effects except `hashFile`/`realpath` reads. Nothing
 // is taken from a request except the spec the port validates against trusted host configuration.
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, sep } from "node:path";
@@ -91,14 +91,19 @@ export interface LaunchPlan {
   readonly version: 2;
   /** The run and intent this launch is for; a digest authorizes this launch, not any launch of the same command. */
   readonly binding: { readonly intentId: string; readonly runId: string };
-  readonly executable: PinnedBinary;
+  /** The pinned executable with the identity of the file that was hashed. `fd` means it is bound by descriptor
+   *  (fd 6); `runtime-root` means it is reached through a public runtime directory that is bound by path. */
+  readonly executable: PinnedBinary & { readonly dev: string; readonly ino: string; readonly bound: "fd" | "runtime-root" };
   readonly launcher: PinnedBinary & { readonly version: string };
   /** The child's argv exactly as the sandbox will exec it (argv[0] is the sandbox-side executable path). */
   readonly argv: readonly string[];
   /**
-   * The complete argv handed to the launcher, derived deterministically from this plan. Host objects are bound by
-   * inherited file descriptor (3 workspace, 4 argument file, 5 egress socket), never re-resolved by path, and
-   * allowlisted environment values travel in fd 4 so they are not visible in the process table.
+   * The complete argv handed to the launcher, derived deterministically from this plan. The workspace, the egress
+   * socket and an executable outside the runtime roots are bound by inherited file descriptor (3 workspace, 4
+   * argument file, 5 egress socket, 6 executable), not re-resolved by path, and allowlisted environment values
+   * travel in fd 4 so they are not visible in the process table. Residual path resolution: the public runtime roots
+   * (root-owned directories) and an executable inside them are bound by path; the launcher itself is executed
+   * through the descriptor it was hashed from (see containedStdioPort).
    */
   readonly sandboxArgv: readonly string[];
   readonly workspace: HostIdentity & { readonly sandboxPath: string; readonly mode: "read-only"; readonly cwd: string };
@@ -114,8 +119,9 @@ export interface LaunchPlan {
   readonly maxLineBytes: number;
   /** Fixed, non-secret environment. */
   readonly env: Readonly<Record<string, string>>;
-  /** Allowlisted caller environment: names with value digests only; the values never enter the plan. */
-  readonly userEnvSha256: Readonly<Record<string, string>>;
+  /** Allowlisted caller environment: names with a keyed digest (HMAC under a per-port random key, so a low-entropy
+   *  value cannot be guessed offline); the values never enter the plan. */
+  readonly userEnvHmac: Readonly<Record<string, string>>;
   readonly envAllowlist: readonly string[];
 }
 
@@ -209,6 +215,39 @@ const RESTRICTION_KEYS = new Set(["filesystem", "network", "caps", "subprocess"]
 const NETWORK_KEYS = new Set(["outbound"]);
 const CAP_KEYS = new Set(["memoryBytes", "cpuSeconds"]);
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/** A malformed spec is a typed refusal, not a TypeError from deep inside the planner. */
+function checkShape(spec: unknown): asserts spec is StdioSpawnSpec {
+  const bad = (why: string): never => { throw refuse("rlm-containment-unavailable", `malformed spawn spec: ${why}`); };
+  if (!isRecord(spec)) return bad("not an object");
+  if (!isStrings(spec.argv)) bad("argv must be an array of strings");
+  if (typeof spec.cwd !== "string") bad("cwd must be a string");
+  if (!isRecord(spec.env) || Object.values(spec.env).some((v) => typeof v !== "string")) bad("env must be an object of strings");
+  const r = spec.restrictions;
+  if (!isRecord(r)) return bad("restrictions must be an object");
+  if (r.filesystem !== undefined && !isStrings(r.filesystem)) bad("restrictions.filesystem must be an array of strings");
+  if (r.subprocess !== undefined && typeof r.subprocess !== "boolean") bad("restrictions.subprocess must be a boolean");
+  if (r.network !== undefined && (!isRecord(r.network) || (r.network.outbound !== undefined && !isStrings(r.network.outbound)))) bad("restrictions.network.outbound must be an array of strings");
+  if (r.caps !== undefined && (!isRecord(r.caps) || Object.values(r.caps).some((v) => v !== undefined && typeof v !== "number"))) bad("restrictions.caps must be an object of numbers");
+}
+
+/**
+ * The launcher checks that must hold BEFORE the launcher is executed for any reason (even `--version`):
+ * it exists, is outside every writable root, and has a trusted owner and directory chain. Returns the resolved path.
+ */
+export async function verifyLauncherPath(config: ContainedStdioPortConfig): Promise<string> {
+  validateConfig(config);
+  const launcherPath = await realFile(config.launcher.path, "launcher", "rlm-containment-unavailable");
+  let workspace = config.workspaceRoot;
+  try { workspace = await realpath(config.workspaceRoot); } catch { /* reported by the planner */ }
+  const writable = [workspace, ...(await Promise.all(config.writableRoots.map((root) => realpath(root).catch(() => root))))];
+  if (writable.some((root) => inside(root, launcherPath))) throw refuse("rlm-containment-unavailable", "the launcher must be outside every writable root");
+  assertTrustedPath(launcherPath, "launcher", "rlm-containment-unavailable", false);
+  return launcherPath;
+}
+
 /** A key the port does not handle is a request it cannot honor: refuse, never drop. */
 function rejectUnknown(value: object | undefined, known: ReadonlySet<string>, where: string): void {
   for (const key of Object.keys(value ?? {})) {
@@ -242,6 +281,8 @@ const identity = (path: string, info: { dev: number | bigint; ino: number | bigi
 
 export interface BuildPlanInput {
   readonly config: ContainedStdioPortConfig;
+  /** Per-port random key for the environment digests. */
+  readonly envKey: Uint8Array;
   readonly spec: StdioSpawnSpec;
   readonly ctx: { readonly intentId: string; readonly runId: string };
   /** The launcher's self-reported `--version` (measured by the port, never supplied by a request). */
@@ -258,6 +299,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
   const { config, spec } = input;
   validateConfig(config);
   if (process.platform !== "linux") throw refuse("rlm-containment-unavailable", "the contained port requires Linux namespaces; there is no fallback");
+  checkShape(spec);
   rejectUnknown(spec, SPEC_KEYS, "spec");
   rejectUnknown(spec.restrictions, RESTRICTION_KEYS, "restriction");
   rejectUnknown(spec.restrictions.network, NETWORK_KEYS, "network restriction");
@@ -324,7 +366,8 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
   if (mounts.length === 0) throw refuse("rlm-containment-unavailable", "no usable runtime roots");
   const base = requested.slice(requested.lastIndexOf("/") + 1);
   const sandboxExecutable = execInside ?? `${SANDBOX_EXECUTABLE_DIR}/${base}`;
-  const executableMount = execInside ? [] : ["--dir", SANDBOX_EXECUTABLE_DIR, "--ro-bind", requested, sandboxExecutable];
+  const executableMount = execInside ? [] : ["--dir", SANDBOX_EXECUTABLE_DIR, "--ro-bind-fd", "6", sandboxExecutable];
+  const executableInfo = await stat(requested);
 
   // Environment: cleared, plus the allowlist. Caller values travel in fd 4 and appear in the plan as digests only.
   const allowlist = [...new Set(config.envAllowlist ?? [])].sort();
@@ -337,7 +380,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
   }
   const fixedEnv: Record<string, string> = { PATH: `${SANDBOX_EXECUTABLE_DIR}:/usr/bin:/bin`, HOME: "/nonexistent", ...(network === "none" ? {} : { SEA_EGRESS_SOCKET: SANDBOX_EGRESS_SOCKET }) };
   const userNames = Object.keys(userEnv).sort();
-  const userEnvSha256 = Object.fromEntries(userNames.map((name) => [name, createHash("sha256").update(userEnv[name]!).digest("hex")]));
+  const userEnvHmac = Object.fromEntries(userNames.map((name) => [name, createHmac("sha256", input.envKey).update(name).update("\0").update(userEnv[name]!).digest("hex")]));
   const argsFile = userNames.map((name) => `--setenv\0${name}\0${userEnv[name]}\0`).join("");
 
   // Network: unshared always; one host socket, pinned by resolved path and inode, is the single exception.
@@ -372,7 +415,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
   const plan: LaunchPlan = {
     version: 2,
     binding: { intentId: input.ctx.intentId, runId: input.ctx.runId },
-    executable: { path: requested, sha256: pinned.sha256 },
+    executable: { ...identity(requested, executableInfo), sha256: pinned.sha256, bound: execInside ? "runtime-root" : "fd" },
     launcher: { path: launcherPath, sha256: config.launcher.sha256, version: input.launcherVersion },
     argv,
     sandboxArgv,
@@ -382,7 +425,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     ceilings: effective,
     maxLineBytes: config.maxLineBytes ?? 65_536,
     env: fixedEnv,
-    userEnvSha256,
+    userEnvHmac,
     envAllowlist: allowlist,
   };
   return { plan, material: { argsFile, probeArgv } };

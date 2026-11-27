@@ -13,13 +13,14 @@
 //   spawn       refused with a typed Cognate code BEFORE any process starts; never an uncontained fallback
 // Not enforced here (reported, not claimed): per-process memory beyond RLIMIT_AS, disk quota, UDP/DNS
 // beyond the namespace itself (it has no interface at all), seccomp syscall filtering.
-import { closeSync, constants, fstatSync, mkdtempSync, openSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, readFile, readlink } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StdioSpawnPort, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
-import { buildLaunchPlan, launchPlanDigest, refuse, sha256File, validateConfig, type ContainedStdioPortConfig, type LaunchMaterial, type LaunchPlan } from "./containedLaunch.ts";
+import { createHash } from "node:crypto";
+import { buildLaunchPlan, launchPlanDigest, refuse, validateConfig, verifyLauncherPath, type ContainedStdioPortConfig, type LaunchMaterial, type LaunchPlan } from "./containedLaunch.ts";
 
 const O_PATH = 0o10000000;
 const FINISHED_RETAINED = 64;
@@ -140,35 +141,52 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   validateConfig(config);
   const live = new Map<string, Live>();
   const finished = new Map<string, Live>();
-  let versionByDigest: { digest: string; version: string } | undefined;
+  const envKey = randomBytes(32);
   let preflighted = false;
 
-  /** Verify the launcher digest BEFORE executing it, then read its version (memoized per digest). */
+  /**
+   * The launcher, opened once: its path checks (writable roots, owner, directory chain) pass before it is ever executed,
+   * it is hashed THROUGH the open descriptor, and it is executed through `/proc/<pid>/fd/<n>` of that same descriptor,
+   * so the bytes that were hashed are the bytes that run. Close the handle when the process no longer needs it.
+   */
+  async function launcherHandle(): Promise<{ readonly exec: string; close(): void }> {
+    const path = await verifyLauncherPath(config);
+    let fd: number;
+    try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); } catch { throw refuse("rlm-containment-unavailable", `bubblewrap launcher ${config.launcher.path} is missing`); }
+    const close = () => { try { closeSync(fd); } catch { /* already closed */ } };
+    try {
+      const info = fstatSync(fd);
+      const at = lstatSync(path);
+      if (info.dev !== at.dev || info.ino !== at.ino) throw refuse("rlm-containment-unavailable", "the launcher changed while it was being opened");
+      if (createHash("sha256").update(readFileSync(fd)).digest("hex") !== config.launcher.sha256) throw refuse("rlm-containment-unavailable", "the launcher digest does not match the host pin");
+    } catch (error) { close(); throw error; }
+    return { exec: `/proc/${process.pid}/fd/${fd}`, close };
+  }
+
   async function launcherVersion(): Promise<string> {
-    let digest: string;
-    try { digest = await sha256File(config.launcher.path); } catch { throw refuse("rlm-containment-unavailable", `bubblewrap launcher ${config.launcher.path} is missing`); }
-    if (digest !== config.launcher.sha256) throw refuse("rlm-containment-unavailable", "the launcher digest does not match the host pin");
-    if (versionByDigest?.digest === digest) return versionByDigest.version;
-    const result = Bun.spawnSync([config.launcher.path, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
-    const version = result.stdout.toString().trim().replace(/^bubblewrap\s+/, "");
-    if (result.exitCode !== 0 || !/^\d+\.\d+\.\d+/.test(version)) throw refuse("rlm-containment-unavailable", "the launcher did not report a bubblewrap version");
-    const parts = version.split(".").map((p) => Number.parseInt(p, 10));
-    const patched = config.launcherPatchedAttested === true || parts[0]! > 0 || parts[1]! >= 12;
-    if (!patched) throw refuse("rlm-containment-unavailable", `bubblewrap ${version} predates the CVE-2026-87766 fix and is not attested as patched`);
-    versionByDigest = { digest, version };
-    return version;
+    const handle = await launcherHandle();
+    try {
+      const result = Bun.spawnSync([handle.exec, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
+      const version = result.stdout.toString().trim().replace(/^bubblewrap\s+/, "");
+      if (result.exitCode !== 0 || !/^\d+\.\d+\.\d+/.test(version)) throw refuse("rlm-containment-unavailable", "the launcher did not report a bubblewrap version");
+      const parts = version.split(".").map((p) => Number.parseInt(p, 10));
+      const patched = config.launcherPatchedAttested === true || parts[0]! > 0 || parts[1]! >= 12;
+      if (!patched) throw refuse("rlm-containment-unavailable", `bubblewrap ${version} predates the CVE-2026-87766 fix and is not attested as patched`);
+      return version;
+    } finally { handle.close(); }
   }
 
   async function resolve(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ plan: LaunchPlan; material: LaunchMaterial; digest: string }> {
     const version = await launcherVersion();
-    const built = await buildLaunchPlan({ config, spec, ctx, launcherVersion: version });
+    const built = await buildLaunchPlan({ config, spec, ctx, envKey, launcherVersion: version });
     return { ...built, digest: launchPlanDigest(built.plan) };
   }
 
   /** User namespaces and mounts must actually work here. A failure is a refusal, never a local run. */
-  function preflight(probeArgv: readonly string[]): void {
+  async function preflight(probeArgv: readonly string[]): Promise<void> {
     if (preflighted) return;
-    const probe = Bun.spawnSync([...probeArgv], { stdout: "pipe", stderr: "pipe", env: {} });
+    const handle = await launcherHandle();
+    const probe = (() => { try { return Bun.spawnSync([handle.exec, ...probeArgv.slice(1)], { stdout: "pipe", stderr: "pipe", env: {} }); } finally { handle.close(); } })();
     if (probe.exitCode !== 0) throw refuse("rlm-containment-unavailable", `bubblewrap could not create the sandbox (user namespaces unavailable?): ${probe.stderr.toString().slice(0, 300)}`);
     preflighted = true;
   }
@@ -177,7 +195,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
    * Open the workspace and egress socket once and hand bubblewrap the descriptors, so no path is re-resolved after
    * this point. Each descriptor must still be the object the plan recorded (dev/inode and resolved path).
    */
-  function openPinned(plan: LaunchPlan): { workspace: number; egress: number | undefined } {
+  function openPinned(plan: LaunchPlan): { workspace: number; egress: number | undefined; executable: number | undefined } {
     const opened: number[] = [];
     const pin = (path: string, flags: number, want: { dev: string; ino: string }, what: string): number => {
       let fd: number;
@@ -193,7 +211,13 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     };
     const workspace = pin(plan.workspace.path, constants.O_RDONLY | constants.O_DIRECTORY, plan.workspace, "workspace");
     const egress = plan.egress ? pin(plan.egress.path, O_PATH, plan.egress, "host socket") : undefined;
-    return { workspace, egress };
+    // The executable is hashed through the descriptor it is bound by, so the hashed bytes are the bound bytes.
+    const exe = pin(plan.executable.path, O_PATH, plan.executable, "executable");
+    let bytes: Buffer;
+    try { bytes = readFileSync(`/proc/self/fd/${exe}`); } catch { for (const o of opened) closeSync(o); throw refuse("rlm-port-unavailable", "the executable could not be read through its descriptor"); }
+    if (createHash("sha256").update(bytes).digest("hex") !== plan.executable.sha256) { for (const o of opened) closeSync(o); throw refuse("rlm-port-unavailable", "the executable digest does not match the host pin"); }
+    if (plan.executable.bound !== "fd") { closeSync(exe); return { workspace, egress, executable: undefined }; }
+    return { workspace, egress, executable: exe };
   }
 
   /** Allowlisted environment values travel in a private, already-unlinked file passed as fd 4. */
@@ -236,18 +260,28 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
 
   async function spawn(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly id: string }> {
     const first = await resolve(spec, ctx);
-    preflight(first.material.probeArgv);
+    await preflight(first.material.probeArgv);
     await config.authorize?.(first.plan, first.digest, ctx);
     const fds = openPinned(first.plan);
-    const argFd = (() => { try { return argsFd(first.material); } catch (error) { closeSync(fds.workspace); if (fds.egress !== undefined) closeSync(fds.egress); throw error; } })();
+    const closeFds = (...extra: number[]) => { for (const fd of [fds.workspace, fds.egress, fds.executable, ...extra]) if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } } };
+    const argFd = (() => { try { return argsFd(first.material); } catch (error) { closeFds(); throw error; } })();
     let proc: ReturnType<typeof Bun.spawn>;
+    let launcher: Awaited<ReturnType<typeof launcherHandle>> | undefined;
     try {
       // Drift check immediately before spawn: re-resolve and re-hash everything; any change refuses.
       const again = await resolve(spec, ctx);
       if (again.digest !== first.digest) throw refuse("rlm-containment-unavailable", `launch plan drifted before spawn (${first.digest} -> ${again.digest})`);
-      proc = Bun.spawn([...first.plan.sandboxArgv], { env: {}, stdio: ["pipe", "pipe", "pipe", fds.workspace, argFd, ...(fds.egress !== undefined ? [fds.egress] : [])], detached: true });
+      // Hash and exec through one descriptor, immediately before spawn.
+      launcher = await launcherHandle();
+      const stdio: (string | number)[] = ["pipe", "pipe", "pipe", fds.workspace, argFd];
+      if (fds.egress !== undefined || fds.executable !== undefined) stdio.push(fds.egress ?? "ignore");
+      if (fds.executable !== undefined) stdio.push(fds.executable);
+      proc = Bun.spawn([launcher.exec, ...first.plan.sandboxArgv.slice(1)], { env: {}, stdio: stdio as never, detached: true });
+    } catch (error) {
+      launcher?.close();
+      throw error;
     } finally {
-      closeSync(fds.workspace); closeSync(argFd); if (fds.egress !== undefined) closeSync(fds.egress);
+      closeFds(argFd);
     }
     const built = first.plan;
     const digest = first.digest;
@@ -285,6 +319,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     item.timer = setTimeout(() => stop("wall-clock"), built.ceilings.wallSeconds * 1000);
     (item as { done: Promise<ExitRecord> }).done = (async () => {
       const code = await proc.exited;
+      launcher?.close();
       item.nsInode ??= await sandboxNamespace(proc.pid); // usually gone with the launcher; then the namespace stays unknown
       if (item.timer) clearTimeout(item.timer);
       const left = await residual(item);

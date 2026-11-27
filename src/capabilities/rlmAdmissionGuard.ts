@@ -1,16 +1,21 @@
 // Admission guard for the contained spawn path (SEA-Forge #114). The `agent.rlm` child run is the code that
 // reaches the spawn port, and a run for that agent can be started by anything that may start runs. Only the
-// governed `rlm.invoke` (grant subset, depth, reservation, pinned context) may cause a spawn, so the governed
-// component records each invocation it admits, and this guard refuses an `agent.rlm` run that was not admitted
-// that way. The record is in memory: after a host restart an in-flight child is refused rather than re-spawned,
-// which fails closed (a contained process does not survive a restart anyway).
+// governed `rlm.invoke` (grant subset, depth, reservation, pinned context) may cause a spawn. The governed
+// component records, for each invocation it admits, a digest of the exact child input it derived; this guard
+// refuses an `agent.rlm` run whose input is not byte-for-byte that input (so a replay with wider authority, a
+// bigger budget or another task is refused), and binds each admission to the first run that uses it (so a second
+// run with identical input is refused too). Cognate re-runs a child body on resume, so the same run may enter
+// again. The record is in memory and bounded: after a host restart an in-flight child is refused rather than
+// re-spawned, which fails closed (a contained process does not survive a restart anyway).
 import type { AgentDefinition } from "@godspeedai/cognate-runtime-api";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
+import { createHash } from "node:crypto";
+import { canonicalJson } from "./containedLaunch.ts";
 
 export interface AdmittedInvocation {
   readonly invocationId: string;
-  readonly parentRunId: string;
-  readonly providerId: string;
+  /** The child input the governed component derived and will hand to Cognate's `agent.rlm`. */
+  readonly input: unknown;
 }
 
 export interface RlmAdmissionGuard {
@@ -18,19 +23,30 @@ export interface RlmAdmissionGuard {
   wrap(agent: AgentDefinition): AgentDefinition;
 }
 
+const RETAINED = 256;
+const digestOf = (input: unknown): string => createHash("sha256").update(canonicalJson(JSON.parse(JSON.stringify(input ?? null)))).digest("hex");
+
 export function rlmAdmissionGuard(): RlmAdmissionGuard {
-  const admitted = new Map<string, AdmittedInvocation>();
+  const admitted = new Map<string, { digest: string; consumedBy?: string }>();
   return {
-    admit(invocation) { admitted.set(invocation.invocationId, invocation); },
+    admit(invocation) {
+      admitted.delete(invocation.invocationId);
+      admitted.set(invocation.invocationId, { digest: digestOf(invocation.input) });
+      while (admitted.size > RETAINED) admitted.delete(admitted.keys().next().value as string);
+    },
     wrap(agent) {
       return {
         ...agent,
         async run(input, context) {
-          const child = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
-          const entry = typeof child.invocationId === "string" ? admitted.get(child.invocationId) : undefined;
-          if (!entry || entry.parentRunId !== child.runId || entry.providerId !== child.providerId) {
-            throw new RlmRefusedError("rlm-posture-refused", "this child run was not admitted by the governed rlm.invoke, so it may not use the contained spawn port");
+          const id = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).invocationId : undefined;
+          const entry = typeof id === "string" ? admitted.get(id) : undefined;
+          if (!entry || entry.digest !== digestOf(input)) {
+            throw new RlmRefusedError("rlm-posture-refused", "this child run is not the input the governed rlm.invoke admitted, so it may not use the contained spawn port");
           }
+          if (entry.consumedBy !== undefined && entry.consumedBy !== context.runId) {
+            throw new RlmRefusedError("rlm-posture-refused", "this admission was already used by another run");
+          }
+          entry.consumedBy = context.runId;
           return agent.run(input, context);
         },
       };
