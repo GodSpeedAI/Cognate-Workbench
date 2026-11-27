@@ -90,7 +90,7 @@ export interface GovernedRlmOptions {
   /** True when the host registered the contained `StdioSpawnPort` (`ServerOptions.rlmContainedPort`). */
   readonly containedPort?: boolean;
   /** Called with each invocation this component admits, immediately before it dispatches the child run. */
-  readonly onAdmit?: (invocation: { invocationId: string; input: unknown }) => void;
+  readonly onAdmit?: (invocation: { invocationId: string; input: unknown; principal: string }) => () => void;
   readonly getExperts: () => ExpertsService;
   /** The one durable operator identity; the only non-run caller that may inspect or cancel. */
   readonly operator: Principal;
@@ -230,8 +230,14 @@ export function governedRlmComponent(options: GovernedRlmOptions): Component {
       }
     }
     // The exact child input Cognate's rlm.invoke derives from `derived`, so a guard can refuse any other.
-    options.onAdmit?.({ invocationId, input: { invocationId, providerId: selected, runId, depth: derived.parent.depth + 1, maxDepth: derived.parent.maxDepth, task: derived.task, authority: derived.authority, budget: derived.budget, ...(derived.caseContext ? { caseContext: derived.caseContext } : {}) } });
-    const admitted = (await inner(derived as unknown as Json, ctx)) as unknown as { invocationId: string; runId: string; status: string };
+    const disarm = options.onAdmit?.({ invocationId, input: { invocationId, providerId: selected, runId, depth: derived.parent.depth + 1, maxDepth: derived.parent.maxDepth, task: derived.task, authority: derived.authority, budget: derived.budget, ...(derived.caseContext ? { caseContext: derived.caseContext } : {}) }, principal: parentView.startedBy });
+    let admitted: { invocationId: string; runId: string; status: string };
+    try {
+      admitted = (await inner(derived as unknown as Json, ctx)) as unknown as { invocationId: string; runId: string; status: string };
+    } catch (error) {
+      disarm?.(); // a refused or failed dispatch leaves no usable admission
+      throw error;
+    }
     return {
       ...admitted,
       providerId: selected,

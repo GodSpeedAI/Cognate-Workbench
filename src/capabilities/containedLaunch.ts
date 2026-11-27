@@ -108,7 +108,10 @@ export interface ExecutionProfile {
   readonly maxLineBytes: number;
   readonly mounts: {
     readonly workspace: { readonly sandboxPath: string; readonly mode: "read-only" };
-    readonly egress: { readonly sandboxPath: string } | null;
+    /** The egress socket is fixed deployment configuration, so its resolved host path is part of the approval. The
+     *  workspace is per case and stays out: SEA authorizes it as the governed request's case resource, and the plan
+     *  digest pins the exact directory by dev/inode. */
+    readonly egress: { readonly sandboxPath: string; readonly hostPath: string } | null;
   };
   /** `sandboxArgv` without the launcher path. */
   readonly flagTemplate: readonly string[];
@@ -236,6 +239,7 @@ export function validateConfig(config: ContainedStdioPortConfig): void {
   if (!Array.isArray(config.writableRoots) || config.writableRoots.some((root) => typeof root !== "string" || !isAbsolute(root))) throw new Error("contained port: writableRoots must be an explicit array of absolute paths");
   if (config.hostSocket !== undefined && !isAbsolute(config.hostSocket)) throw new Error("contained port: hostSocket must be an absolute path");
   for (const root of config.runtimeRoots ?? []) if (!PUBLIC_ROOTS.has(root)) throw new Error(`contained port: runtime root ${root} is not a public executable/library directory`);
+  for (const name of config.envAllowlist ?? []) if (typeof name !== "string" || isForbiddenEnvName(name)) throw new Error(`contained port: envAllowlist name ${String(name)} controls code loading or interpretation and cannot be allowlisted`);
   const ceilings = { ...DEFAULT_CEILINGS, ...config.ceilings };
   for (const [key, value] of Object.entries(ceilings)) if (!Number.isSafeInteger(value) || value < 1) throw new Error(`contained port: ceiling ${key} must be a positive integer`);
 }
@@ -246,13 +250,24 @@ export function resolveCeilings(config: ContainedStdioPortConfig): ContainedCeil
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RESERVED_ENV = new Set(["PATH", "HOME", "SEA_EGRESS_SOCKET"]);
+/**
+ * Environment names that control how code is found, loaded or interpreted. Env VALUES are not part of the execution
+ * profile, so a name that changes what runs may not be allowlisted at all: the dynamic loader (LD_*, DYLD_*),
+ * language runtimes and their startup hooks (NODE_OPTIONS, NODE_PATH, PYTHON*, PERL5OPT, PERL5LIB, RUBYOPT, RUBYLIB,
+ * JAVA_TOOL_OPTIONS, _JAVA_OPTIONS), shell startup (BASH_ENV, ENV, BASH_FUNC_*), libc locale and charset loading
+ * (GCONV_PATH, LOCPATH, NLSPATH), and the fixed PATH and HOME.
+ */
+const FORBIDDEN_ENV_NAMES = new Set(["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "GCONV_PATH", "LOCPATH", "NLSPATH", "PATH", "HOME"]);
+const FORBIDDEN_ENV_PREFIXES = ["LD_", "DYLD_", "PYTHON", "BASH_FUNC_"];
+export const isForbiddenEnvName = (name: string): boolean => FORBIDDEN_ENV_NAMES.has(name) || FORBIDDEN_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
 const SPEC_KEYS = new Set(["argv", "cwd", "env", "restrictions"]);
 const RESTRICTION_KEYS = new Set(["filesystem", "network", "caps", "subprocess"]);
 const NETWORK_KEYS = new Set(["outbound"]);
 const CAP_KEYS = new Set(["memoryBytes", "cpuSeconds"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+/** A dense array of strings: `every` skips holes, which Bun would spawn as the string "undefined". */
+const isStrings = (value: unknown): value is string[] => Array.isArray(value) && Object.keys(value).length === value.length && Array.from(value).every((item) => typeof item === "string");
 
 /** A malformed spec is a typed refusal, not a TypeError from deep inside the planner. */
 function checkShape(spec: unknown): asserts spec is StdioSpawnSpec {
@@ -457,7 +472,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     restrictions: { filesystem: "read-only", network: network === "none" ? "none" : "host-socket", credentials: "none", subprocess: "contained" },
     ceilings: effective,
     maxLineBytes: config.maxLineBytes ?? 65_536,
-    mounts: { workspace: { sandboxPath: SANDBOX_WORKSPACE, mode: "read-only" }, egress: egress ? { sandboxPath: SANDBOX_EGRESS_SOCKET } : null },
+    mounts: { workspace: { sandboxPath: SANDBOX_WORKSPACE, mode: "read-only" }, egress: egress ? { sandboxPath: SANDBOX_EGRESS_SOCKET, hostPath: egress.path } : null },
     flagTemplate: sandboxArgv.slice(1),
     env: fixedEnv,
     envAllowlist: allowlist,

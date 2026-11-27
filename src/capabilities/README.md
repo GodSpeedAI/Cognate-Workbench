@@ -122,8 +122,13 @@ returning a Cognate `Component`; many also export their input/result types and c
   env and allowlisted env names (never ids, dev/inode, per-case host paths or env values). Identical across runs,
   workspaces, port instances and host restarts, so a fixed list of its digests can sit in SEA policy; each plan embeds
   it, `authorize(plan, digest, ctx, executionProfileDigest)` receives both, and the pre-spawn recompute confirms both.
+  The egress socket's resolved path is in the profile (fixed deployment configuration); the workspace is not: it is per
+  case, SEA authorizes it as the governed request's case resource, and the plan digest pins the exact directory by
+  dev/inode. Allowlisted env names that control loading or interpretation (LD_*, DYLD_*, NODE_OPTIONS, NODE_PATH,
+  PYTHON*, BASH_ENV, ENV, PERL5OPT, PERL5LIB, RUBYOPT, RUBYLIB, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, GCONV_PATH, LOCPATH,
+  NLSPATH, PATH, HOME, BASH_FUNC_*) are refused at port construction, because env values are not in the profile.
   `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching anything.
-  [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port.
+  [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port: exact input digest, claimed once by one run, started as the parent's agent principal, expiring if unclaimed, never re-armed by a repeat invoke, disarmed if dispatch fails.
 
 - [aggregateContainment.ts:CONTAINMENT_THREAD] — shared-state thread id `containment:aggregate:v1`;
   [aggregateContainment.ts:ContainmentQuotas], [aggregateContainment.ts:ContainmentExecution],
