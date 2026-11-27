@@ -7,8 +7,9 @@
 // Everything here is host-owned and pure of side effects except `hashFile`/`realpath` reads. Nothing
 // is taken from a request except the spec the port validates against trusted host configuration.
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, sep } from "node:path";
+import { dirname, isAbsolute, relative, sep } from "node:path";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
 import type { RlmRefusalCode, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 
@@ -25,6 +26,10 @@ export interface ContainedCeilings {
   readonly nofile: number;
   readonly nproc: number;
   readonly outputBytes: number;
+  /** Size of the /tmp tmpfs (host RAM); a process cannot fill more. */
+  readonly tmpBytes: number;
+  /** RLIMIT_FSIZE: the largest single file a process may write. */
+  readonly fsizeBytes: number;
 }
 
 /** Trusted host configuration for the contained port. Never a request, never agent-supplied. */
@@ -35,8 +40,10 @@ export interface ContainedStdioPortConfig {
   readonly executables: readonly PinnedBinary[];
   /** Mounted read-only at /workspace. */
   readonly workspaceRoot: string;
-  /** Host directories a process can write to; the launcher and executables must live outside them. The workspace is always one. */
-  readonly writableRoots?: readonly string[];
+  /** Host directories a process can write to; the launcher and executables must live outside them. The workspace is always one.
+   *  Required and explicit (an empty list is a deliberate statement). Independently of this list the launcher and executables
+   *  must be owned by root or the host user, not group/other-writable, with a trusted directory chain. */
+  readonly writableRoots: readonly string[];
   /** Public runtime directories bound read-only. Default: /usr/bin /usr/lib /lib /lib64. */
   readonly runtimeRoots?: readonly string[];
   /** Environment names a spec may set. Everything else is refused. */
@@ -61,6 +68,8 @@ export const DEFAULT_CEILINGS: ContainedCeilings = {
   nofile: 256,
   nproc: 128,
   outputBytes: 1_048_576,
+  tmpBytes: 67_108_864,
+  fsizeBytes: 16_777_216,
 };
 export const DEFAULT_RUNTIME_ROOTS = ["/usr/bin", "/usr/lib", "/lib", "/lib64"] as const;
 export const SANDBOX_WORKSPACE = "/workspace";
@@ -71,25 +80,51 @@ const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 export type NetworkRestriction = "none" | `host-socket:${string}`;
 
+/** dev/inode of a pinned host object, as decimal strings (inode numbers can exceed 2^53). */
+export interface HostIdentity {
+  readonly path: string;
+  readonly dev: string;
+  readonly ino: string;
+}
+
 export interface LaunchPlan {
-  readonly version: 1;
+  readonly version: 2;
+  /** The run and intent this launch is for; a digest authorizes this launch, not any launch of the same command. */
+  readonly binding: { readonly intentId: string; readonly runId: string };
   readonly executable: PinnedBinary;
   readonly launcher: PinnedBinary & { readonly version: string };
   /** The child's argv exactly as the sandbox will exec it (argv[0] is the sandbox-side executable path). */
   readonly argv: readonly string[];
-  /** The complete argv handed to the launcher, derived deterministically from this plan. */
+  /**
+   * The complete argv handed to the launcher, derived deterministically from this plan. Host objects are bound by
+   * inherited file descriptor (3 workspace, 4 argument file, 5 egress socket), never re-resolved by path, and
+   * allowlisted environment values travel in fd 4 so they are not visible in the process table.
+   */
   readonly sandboxArgv: readonly string[];
-  readonly workspace: { readonly hostPath: string; readonly sandboxPath: string; readonly mode: "read-only"; readonly cwd: string };
+  readonly workspace: HostIdentity & { readonly sandboxPath: string; readonly mode: "read-only"; readonly cwd: string };
   readonly restrictions: {
     readonly filesystem: "read-only";
     readonly network: NetworkRestriction;
     readonly credentials: "none";
     readonly subprocess: "contained";
   };
+  /** The one bound-in host socket (resolved), when network is a host socket. */
+  readonly egress?: HostIdentity;
   readonly ceilings: ContainedCeilings;
   readonly maxLineBytes: number;
+  /** Fixed, non-secret environment. */
   readonly env: Readonly<Record<string, string>>;
+  /** Allowlisted caller environment: names with value digests only; the values never enter the plan. */
+  readonly userEnvSha256: Readonly<Record<string, string>>;
   readonly envAllowlist: readonly string[];
+}
+
+/** What the port needs to launch that must not be part of the digestible record. */
+export interface LaunchMaterial {
+  /** NUL-joined `--setenv NAME VALUE` for the allowlisted caller environment (fd 4). */
+  readonly argsFile: string;
+  /** Namespace and mount probe built structurally, so no spec value can cut it. */
+  readonly probeArgv: readonly string[];
 }
 
 /** Canonical JSON: object keys sorted, no insignificant whitespace, undefined dropped. */
@@ -129,10 +164,34 @@ async function realFile(path: string, what: string, code: RlmRefusalCode): Promi
   }
 }
 
+const hostUid = (): number => (typeof process.getuid === "function" ? process.getuid() : 0);
+
+/**
+ * A path whose trust does not depend on a digest alone: owned by root or the host user, not group/other-writable,
+ * and every ancestor directory the same (a world-writable ancestor is accepted only when sticky, which stops others
+ * renaming entries they do not own). `leafStrict` also refuses a sticky world-writable leaf.
+ */
+export function assertTrustedPath(real: string, what: string, code: RlmRefusalCode, leafStrict: boolean): void {
+  const me = hostUid();
+  let current = real;
+  for (let first = true; ; first = false) {
+    let info;
+    try { info = lstatSync(current); } catch { throw refuse(code, `${what}: cannot inspect ${current}`); }
+    if (info.uid !== 0 && info.uid !== me) throw refuse(code, `${what}: ${current} is owned by uid ${info.uid}, not root or the host user`);
+    const loose = (info.mode & 0o022) !== 0;
+    const sticky = (info.mode & 0o1000) !== 0 && info.isDirectory();
+    if (loose && !(sticky && !(first && leafStrict))) throw refuse(code, `${what}: ${current} is group- or other-writable`);
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
 export function validateConfig(config: ContainedStdioPortConfig): void {
   if (!isAbsolute(config.launcher.path) || !SHA256_HEX.test(config.launcher.sha256)) throw new Error("contained port: launcher needs an absolute path and a lowercase hex sha256");
   if (config.executables.length === 0 || config.executables.some((e) => !isAbsolute(e.path) || !SHA256_HEX.test(e.sha256))) throw new Error("contained port: executables need absolute paths and lowercase hex sha256 pins");
   if (!isAbsolute(config.workspaceRoot)) throw new Error("contained port: workspaceRoot must be absolute");
+  if (!Array.isArray(config.writableRoots) || config.writableRoots.some((root) => typeof root !== "string" || !isAbsolute(root))) throw new Error("contained port: writableRoots must be an explicit array of absolute paths");
   if (config.hostSocket !== undefined && !isAbsolute(config.hostSocket)) throw new Error("contained port: hostSocket must be an absolute path");
   for (const root of config.runtimeRoots ?? []) if (!PUBLIC_ROOTS.has(root)) throw new Error(`contained port: runtime root ${root} is not a public executable/library directory`);
   const ceilings = { ...DEFAULT_CEILINGS, ...config.ceilings };
@@ -145,6 +204,17 @@ export function resolveCeilings(config: ContainedStdioPortConfig): ContainedCeil
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RESERVED_ENV = new Set(["PATH", "HOME", "SEA_EGRESS_SOCKET"]);
+const SPEC_KEYS = new Set(["argv", "cwd", "env", "restrictions"]);
+const RESTRICTION_KEYS = new Set(["filesystem", "network", "caps", "subprocess"]);
+const NETWORK_KEYS = new Set(["outbound"]);
+const CAP_KEYS = new Set(["memoryBytes", "cpuSeconds"]);
+
+/** A key the port does not handle is a request it cannot honor: refuse, never drop. */
+function rejectUnknown(value: object | undefined, known: ReadonlySet<string>, where: string): void {
+  for (const key of Object.keys(value ?? {})) {
+    if (!known.has(key)) throw refuse("rlm-containment-unavailable", `${where} key ${JSON.stringify(key)} is not enforced by this port`);
+  }
+}
 
 function parseNetwork(spec: StdioSpawnSpec, config: ContainedStdioPortConfig): NetworkRestriction {
   const outbound = spec.restrictions.network?.outbound ?? [];
@@ -168,22 +238,30 @@ function parseFilesystem(spec: StdioSpawnSpec): void {
   }
 }
 
+const identity = (path: string, info: { dev: number | bigint; ino: number | bigint }): HostIdentity => ({ path, dev: String(info.dev), ino: String(info.ino) });
+
 export interface BuildPlanInput {
   readonly config: ContainedStdioPortConfig;
   readonly spec: StdioSpawnSpec;
+  readonly ctx: { readonly intentId: string; readonly runId: string };
   /** The launcher's self-reported `--version` (measured by the port, never supplied by a request). */
   readonly launcherVersion: string;
 }
 
 /**
  * Resolve a spec against trusted host configuration into a launch plan. Hashes the launcher and the
- * executable from disk at call time, so recomputing it detects a swapped binary. Throws the typed
- * Cognate refusal for anything the port cannot enforce; it never narrows silently.
+ * executable from disk at call time, so recomputing it detects a swapped binary, and records the dev/inode of
+ * the workspace and the egress socket so a retargeted path is a different plan. Throws the typed Cognate
+ * refusal for anything the port cannot enforce; it never narrows silently.
  */
-export async function buildLaunchPlan(input: BuildPlanInput): Promise<LaunchPlan> {
+export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: LaunchPlan; material: LaunchMaterial }> {
   const { config, spec } = input;
   validateConfig(config);
   if (process.platform !== "linux") throw refuse("rlm-containment-unavailable", "the contained port requires Linux namespaces; there is no fallback");
+  rejectUnknown(spec, SPEC_KEYS, "spec");
+  rejectUnknown(spec.restrictions, RESTRICTION_KEYS, "restriction");
+  rejectUnknown(spec.restrictions.network, NETWORK_KEYS, "network restriction");
+  rejectUnknown(spec.restrictions.caps, CAP_KEYS, "cap");
   if (spec.argv.length === 0 || spec.argv.some((arg) => typeof arg !== "string" || arg.includes("\0"))) throw refuse("rlm-port-unavailable", "invalid argv");
   parseFilesystem(spec);
   if (spec.restrictions.subprocess === false) throw refuse("rlm-containment-unavailable", "forbidding subprocesses cannot be enforced; descendants are contained, not forbidden");
@@ -198,20 +276,24 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<LaunchPlan
   }
   const effective: ContainedCeilings = { ...ceilings, ...(asked.memoryBytes !== undefined ? { addressSpaceBytes: asked.memoryBytes } : {}), ...(asked.cpuSeconds !== undefined ? { cpuSeconds: asked.cpuSeconds } : {}) };
 
-  // Launcher: path exists, outside every writable root, digest matches the pin.
+  // Launcher: path exists, outside every writable root, trusted ownership and chain, digest matches the pin.
   const launcherPath = await realFile(config.launcher.path, "launcher", "rlm-containment-unavailable");
   let workspace: string;
+  let workspaceInfo;
   try {
     workspace = await realpath(config.workspaceRoot);
-    if (workspace === "/" || !(await stat(workspace)).isDirectory()) throw new Error("bad workspace");
+    workspaceInfo = await stat(workspace);
+    if (workspace === "/" || !workspaceInfo.isDirectory()) throw new Error("bad workspace");
   } catch {
     throw refuse("rlm-containment-unavailable", "a dedicated workspace directory is required");
   }
-  const writable = [workspace, ...(await Promise.all((config.writableRoots ?? []).map((root) => realpath(root).catch(() => root))))];
+  const writable = [workspace, ...(await Promise.all(config.writableRoots.map((root) => realpath(root).catch(() => root))))];
   if (writable.some((root) => inside(root, launcherPath))) throw refuse("rlm-containment-unavailable", "the launcher must be outside every writable root");
+  assertTrustedPath(launcherPath, "launcher", "rlm-containment-unavailable", false);
   if ((await sha256File(launcherPath)) !== config.launcher.sha256) throw refuse("rlm-containment-unavailable", "the launcher digest does not match the host pin");
+  assertTrustedPath(workspace, "workspace", "rlm-containment-unavailable", true);
 
-  // Executable: must be one of the pinned executables, outside writable roots, digest matches.
+  // Executable: must be one of the pinned executables, outside writable roots, trusted, digest matches.
   const requested = await realFile(spec.argv[0]!, "executable", "rlm-port-unavailable");
   let pinned: PinnedBinary | undefined;
   for (const candidate of config.executables) {
@@ -219,9 +301,10 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<LaunchPlan
   }
   if (!pinned) throw refuse("rlm-port-unavailable", `executable ${requested} is not one of the host-pinned executables`);
   if (writable.some((root) => inside(root, requested))) throw refuse("rlm-containment-unavailable", "the executable must be outside every writable root");
+  assertTrustedPath(requested, "executable", "rlm-containment-unavailable", false);
   if ((await sha256File(requested)) !== pinned.sha256) throw refuse("rlm-port-unavailable", "the executable digest does not match the host pin");
 
-  // Workspace and cwd.
+  // Workspace cwd.
   let cwdHost: string;
   try { cwdHost = await realpath(spec.cwd); } catch { throw refuse("rlm-containment-unavailable", `cwd ${spec.cwd} does not exist`); }
   if (!inside(workspace, cwdHost)) throw refuse("rlm-containment-unavailable", "cwd must be inside the workspace");
@@ -243,49 +326,64 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<LaunchPlan
   const sandboxExecutable = execInside ?? `${SANDBOX_EXECUTABLE_DIR}/${base}`;
   const executableMount = execInside ? [] : ["--dir", SANDBOX_EXECUTABLE_DIR, "--ro-bind", requested, sandboxExecutable];
 
-  // Environment: cleared, plus the allowlist.
+  // Environment: cleared, plus the allowlist. Caller values travel in fd 4 and appear in the plan as digests only.
   const allowlist = [...new Set(config.envAllowlist ?? [])].sort();
   for (const name of allowlist) if (!ENV_NAME.test(name) || RESERVED_ENV.has(name)) throw new Error(`contained port: envAllowlist name ${name} is invalid or reserved`);
-  const env: Record<string, string> = {};
+  const userEnv: Record<string, string> = {};
   for (const [name, value] of Object.entries(spec.env)) {
     if (!allowlist.includes(name)) throw refuse("rlm-containment-unavailable", `environment variable ${name} is not in the host allowlist`);
     if (typeof value !== "string" || value.includes("\0")) throw refuse("rlm-containment-unavailable", `environment variable ${name} has an invalid value`);
-    env[name] = value;
+    userEnv[name] = value;
   }
   const fixedEnv: Record<string, string> = { PATH: `${SANDBOX_EXECUTABLE_DIR}:/usr/bin:/bin`, HOME: "/nonexistent", ...(network === "none" ? {} : { SEA_EGRESS_SOCKET: SANDBOX_EGRESS_SOCKET }) };
-  const fullEnv = { ...env, ...fixedEnv };
+  const userNames = Object.keys(userEnv).sort();
+  const userEnvSha256 = Object.fromEntries(userNames.map((name) => [name, createHash("sha256").update(userEnv[name]!).digest("hex")]));
+  const argsFile = userNames.map((name) => `--setenv\0${name}\0${userEnv[name]}\0`).join("");
 
-  // Network: unshared always; a host socket is the single bound-in exception.
-  const socketMount: string[] = [];
+  // Network: unshared always; one host socket, pinned by resolved path and inode, is the single exception.
+  let egress: HostIdentity | undefined;
   if (network !== "none") {
-    const path = network.slice("host-socket:".length);
-    let isSocket = false;
-    try { isSocket = (await stat(path)).isSocket(); } catch { /* absent */ }
-    if (!isSocket) throw refuse("rlm-egress-uncontrolled", `host socket ${path} is not an existing unix socket`);
-    socketMount.push("--dir", "/run", "--bind", path, SANDBOX_EGRESS_SOCKET);
+    try {
+      const resolved = await realpath(network.slice("host-socket:".length));
+      const info = await stat(resolved);
+      if (!info.isSocket()) throw new Error("not a socket");
+      egress = identity(resolved, info);
+    } catch {
+      throw refuse("rlm-egress-uncontrolled", `host socket ${network.slice("host-socket:".length)} is not an existing unix socket`);
+    }
+    assertTrustedPath(dirname(egress.path), "host socket directory", "rlm-egress-uncontrolled", true);
+    assertTrustedPath(egress.path, "host socket", "rlm-egress-uncontrolled", false);
   }
 
   const argv = [sandboxExecutable, ...spec.argv.slice(1)];
-  const prlimit = ["/usr/bin/prlimit", `--as=${effective.addressSpaceBytes}`, `--cpu=${effective.cpuSeconds}:${effective.cpuSeconds + 1}`, `--nofile=${effective.nofile}`, `--nproc=${effective.nproc}`, "--"];
+  const prlimit = ["/usr/bin/prlimit", `--as=${effective.addressSpaceBytes}`, `--cpu=${effective.cpuSeconds}:${effective.cpuSeconds + 1}`, `--nofile=${effective.nofile}`, `--nproc=${effective.nproc}`, `--fsize=${effective.fsizeBytes}`, "--"];
+  const common = ["--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--new-session", "--die-with-parent", "--cap-drop", "ALL", "--clearenv"];
   const sandboxArgv = [
-    launcherPath,
-    "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--new-session", "--die-with-parent", "--cap-drop", "ALL", "--clearenv",
-    ...mounts, "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", ...executableMount,
-    "--ro-bind", workspace, SANDBOX_WORKSPACE, ...socketMount, "--chdir", cwd,
-    ...Object.entries(fullEnv).sort(([a], [b]) => (a < b ? -1 : 1)).flatMap(([name, value]) => ["--setenv", name, value]),
+    launcherPath, ...common, ...mounts,
+    "--size", String(effective.tmpBytes), "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", ...executableMount,
+    "--ro-bind-fd", "3", SANDBOX_WORKSPACE,
+    ...(egress ? ["--dir", "/run", "--bind-fd", "5", SANDBOX_EGRESS_SOCKET] : []),
+    "--chdir", cwd,
+    ...Object.entries(fixedEnv).sort(([a], [b]) => (a < b ? -1 : 1)).flatMap(([name, value]) => ["--setenv", name, value]),
+    "--args", "4",
     "--", ...prlimit, ...argv,
   ];
-  return {
-    version: 1,
+  const probeArgv = [launcherPath, ...common, ...mounts, "--proc", "/proc", "--dev", "/dev", "--", "/usr/bin/true"];
+  const plan: LaunchPlan = {
+    version: 2,
+    binding: { intentId: input.ctx.intentId, runId: input.ctx.runId },
     executable: { path: requested, sha256: pinned.sha256 },
     launcher: { path: launcherPath, sha256: config.launcher.sha256, version: input.launcherVersion },
     argv,
     sandboxArgv,
-    workspace: { hostPath: workspace, sandboxPath: SANDBOX_WORKSPACE, mode: "read-only", cwd },
+    workspace: { ...identity(workspace, workspaceInfo), sandboxPath: SANDBOX_WORKSPACE, mode: "read-only", cwd },
     restrictions: { filesystem: "read-only", network, credentials: "none", subprocess: "contained" },
+    ...(egress ? { egress } : {}),
     ceilings: effective,
     maxLineBytes: config.maxLineBytes ?? 65_536,
-    env: fullEnv,
+    env: fixedEnv,
+    userEnvSha256,
     envAllowlist: allowlist,
   };
+  return { plan, material: { argsFile, probeArgv } };
 }

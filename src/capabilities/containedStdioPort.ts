@@ -13,10 +13,17 @@
 //   spawn       refused with a typed Cognate code BEFORE any process starts; never an uncontained fallback
 // Not enforced here (reported, not claimed): per-process memory beyond RLIMIT_AS, disk quota, UDP/DNS
 // beyond the namespace itself (it has no interface at all), seccomp syscall filtering.
+import { closeSync, constants, fstatSync, mkdtempSync, openSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, readFile, readlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { StdioSpawnPort, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
-import { buildLaunchPlan, launchPlanDigest, refuse, sha256File, validateConfig, type ContainedStdioPortConfig, type LaunchPlan } from "./containedLaunch.ts";
+import { buildLaunchPlan, launchPlanDigest, refuse, sha256File, validateConfig, type ContainedStdioPortConfig, type LaunchMaterial, type LaunchPlan } from "./containedLaunch.ts";
+
+const O_PATH = 0o10000000;
+const FINISHED_RETAINED = 64;
+type RunBinding = { readonly intentId: string; readonly runId: string };
 
 export type ExitReason =
   | "exited"
@@ -34,8 +41,11 @@ export interface ExitRecord {
   readonly exitCode: number | null;
   readonly signalCode: string | null;
   readonly at: string;
-  /** Host pids still in the sandbox pid namespace after teardown (empty when containment held). */
+  /** Host pids still in the sandbox pid namespace after teardown (empty when containment held and `nsKnown`). */
   readonly residualPids: readonly number[];
+  /** Whether the sandbox pid namespace was identified (and differs from the host's). When false, an empty
+   *  `residualPids` is NOT evidence of a clean teardown. */
+  readonly nsKnown: boolean;
   readonly outputBytes: number;
   readonly stderr: string;
 }
@@ -51,10 +61,15 @@ export interface ContainedInspection {
 
 export interface ContainedStdioSpawnPort extends StdioSpawnPort {
   /** Resolve a spec into the plan that spawn would run, without spawning. #116 binds an authority decision to this digest. */
-  plan(spec: StdioSpawnSpec): Promise<{ readonly plan: LaunchPlan; readonly digest: string }>;
+  plan(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly plan: LaunchPlan; readonly digest: string }>;
   inspect(id: string): ContainedInspection;
   /** Resolves with the exit record once the sandbox is gone. */
   exited(id: string): Promise<ExitRecord>;
+  /**
+   * A view of this port bound to one run: write, readLines and kill refuse ids another run spawned. Cognate's own
+   * port interface carries no caller identity, so the unguessable id remains the capability on the shared port.
+   */
+  forRun(ctx: RunBinding): StdioSpawnPort;
   /** Terminate every live sandbox. Idempotent. */
   dispose(): Promise<void>;
 }
@@ -64,6 +79,7 @@ const TEXT = new TextDecoder();
 
 interface Live {
   readonly id: string;
+  readonly owner: RunBinding;
   readonly plan: LaunchPlan;
   readonly digest: string;
   readonly proc: ReturnType<typeof Bun.spawn>;
@@ -86,6 +102,7 @@ async function pidNamespace(pid: number): Promise<string | undefined> {
 
 /** Host pids whose pid namespace is `inode`. Observed through the host's /proc, not through the child. */
 export async function pidsInNamespace(inode: string): Promise<number[]> {
+  if (inode === readlinkSync("/proc/self/ns/pid")) throw new Error("refusing to enumerate the host's own pid namespace");
   const found: number[] = [];
   for (const entry of await readdir("/proc")) {
     if (!/^\d+$/.test(entry)) continue;
@@ -107,11 +124,22 @@ async function childrenOf(pid: number): Promise<number[]> {
   return out;
 }
 
+/** The sandbox pid namespace of the launcher's child, or undefined when unknown or equal to the host's. */
+async function sandboxNamespace(launcherPid: number): Promise<string | undefined> {
+  const host = readlinkSync("/proc/self/ns/pid");
+  for (const child of await childrenOf(launcherPid)) {
+    const ns = await pidNamespace(child);
+    if (ns && ns !== host) return ns;
+  }
+  return undefined;
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function containedStdioSpawnPort(config: ContainedStdioPortConfig): ContainedStdioSpawnPort {
   validateConfig(config);
   const live = new Map<string, Live>();
+  const finished = new Map<string, Live>();
   let versionByDigest: { digest: string; version: string } | undefined;
   let preflighted = false;
 
@@ -131,58 +159,101 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     return version;
   }
 
-  async function plan(spec: StdioSpawnSpec): Promise<{ plan: LaunchPlan; digest: string }> {
+  async function resolve(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ plan: LaunchPlan; material: LaunchMaterial; digest: string }> {
     const version = await launcherVersion();
-    const built = await buildLaunchPlan({ config, spec, launcherVersion: version });
-    return { plan: built, digest: launchPlanDigest(built) };
+    const built = await buildLaunchPlan({ config, spec, ctx, launcherVersion: version });
+    return { ...built, digest: launchPlanDigest(built.plan) };
   }
 
   /** User namespaces and mounts must actually work here. A failure is a refusal, never a local run. */
-  async function preflight(built: LaunchPlan): Promise<void> {
+  function preflight(probeArgv: readonly string[]): void {
     if (preflighted) return;
-    const probe = Bun.spawnSync([...built.sandboxArgv.slice(0, built.sandboxArgv.indexOf("--") + 1), "/usr/bin/true"], { stdout: "pipe", stderr: "pipe", env: {} });
+    const probe = Bun.spawnSync([...probeArgv], { stdout: "pipe", stderr: "pipe", env: {} });
     if (probe.exitCode !== 0) throw refuse("rlm-containment-unavailable", `bubblewrap could not create the sandbox (user namespaces unavailable?): ${probe.stderr.toString().slice(0, 300)}`);
     preflighted = true;
+  }
+
+  /**
+   * Open the workspace and egress socket once and hand bubblewrap the descriptors, so no path is re-resolved after
+   * this point. Each descriptor must still be the object the plan recorded (dev/inode and resolved path).
+   */
+  function openPinned(plan: LaunchPlan): { workspace: number; egress: number | undefined } {
+    const opened: number[] = [];
+    const pin = (path: string, flags: number, want: { dev: string; ino: string }, what: string): number => {
+      let fd: number;
+      try { fd = openSync(path, flags | constants.O_NOFOLLOW); } catch { throw refuse("rlm-containment-unavailable", `${what} ${path} could not be opened`); }
+      opened.push(fd);
+      const info = fstatSync(fd, { bigint: true });
+      const link = (() => { try { return readlinkSync(`/proc/self/fd/${fd}`); } catch { return undefined; } })();
+      if (String(info.dev) !== want.dev || String(info.ino) !== want.ino || link !== path) {
+        for (const o of opened) closeSync(o);
+        throw refuse("rlm-containment-unavailable", `${what} ${path} is no longer the object the launch plan recorded`);
+      }
+      return fd;
+    };
+    const workspace = pin(plan.workspace.path, constants.O_RDONLY | constants.O_DIRECTORY, plan.workspace, "workspace");
+    const egress = plan.egress ? pin(plan.egress.path, O_PATH, plan.egress, "host socket") : undefined;
+    return { workspace, egress };
+  }
+
+  /** Allowlisted environment values travel in a private, already-unlinked file passed as fd 4. */
+  function argsFd(material: LaunchMaterial): number {
+    const dir = mkdtempSync(join(tmpdir(), "contained-args-"));
+    const path = join(dir, "args");
+    try {
+      writeFileSync(path, material.argsFile, { mode: 0o600 });
+      return openSync(path, constants.O_RDONLY);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   }
 
   async function teardown(item: Live, why: { reason: ExitReason; detail?: string }): Promise<void> {
     if (item.exit) return;
     item.requested ??= why;
     if (item.timer) clearTimeout(item.timer);
-    // Record the sandbox's pid namespace first: after the kill its members are only findable by it.
-    if (item.nsInode === undefined) {
-      for (const child of await childrenOf(item.proc.pid)) item.nsInode ??= await pidNamespace(child);
+    // Learn the namespace before the kill: afterwards its members are only findable by it.
+    item.nsInode ??= await sandboxNamespace(item.proc.pid);
+    // Signal the launcher's group only while the launcher is still ours: a reaped pid may be recycled.
+    if (item.proc.exitCode === null && item.proc.signalCode === null) {
+      try { process.kill(-item.proc.pid, "SIGKILL"); } catch { /* group already gone */ }
+      try { item.proc.kill("SIGKILL"); } catch { /* already gone */ }
     }
-    try { process.kill(-item.proc.pid, "SIGKILL"); } catch { /* group already gone */ }
-    try { item.proc.kill("SIGKILL"); } catch { /* already gone */ }
     await item.proc.exited;
   }
 
-  async function residual(item: Live): Promise<number[]> {
-    if (!item.nsInode) return [];
+  /** Survivors in the sandbox namespace; only ever by a namespace known to differ from the host's. */
+  async function residual(item: Live): Promise<{ pids: number[]; known: boolean }> {
+    if (!item.nsInode) return { pids: [], known: false };
     let left: number[] = [];
     for (let i = 0; i < 40; i++) {
       left = (await pidsInNamespace(item.nsInode)).filter((pid) => pid !== process.pid);
-      if (left.length === 0) return [];
+      if (left.length === 0) return { pids: [], known: true };
       await sleep(50);
     }
     // Backstop: anything still in the sandbox namespace is killed individually and reported.
     for (const pid of left) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
-    return left;
+    return { pids: left, known: true };
   }
 
-  async function spawn(spec: StdioSpawnSpec, ctx: { readonly intentId: string; readonly runId: string }): Promise<{ readonly id: string }> {
-    const { plan: built, digest } = await plan(spec);
-    await preflight(built);
-    await config.authorize?.(built, digest, ctx);
-    // Drift check immediately before spawn: re-resolve and re-hash everything; any change refuses.
-    const again = await plan(spec);
-    if (again.digest !== digest) throw refuse("rlm-containment-unavailable", `launch plan drifted before spawn (${digest} -> ${again.digest})`);
-
+  async function spawn(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly id: string }> {
+    const first = await resolve(spec, ctx);
+    preflight(first.material.probeArgv);
+    await config.authorize?.(first.plan, first.digest, ctx);
+    const fds = openPinned(first.plan);
+    const argFd = (() => { try { return argsFd(first.material); } catch (error) { closeSync(fds.workspace); if (fds.egress !== undefined) closeSync(fds.egress); throw error; } })();
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      // Drift check immediately before spawn: re-resolve and re-hash everything; any change refuses.
+      const again = await resolve(spec, ctx);
+      if (again.digest !== first.digest) throw refuse("rlm-containment-unavailable", `launch plan drifted before spawn (${first.digest} -> ${again.digest})`);
+      proc = Bun.spawn([...first.plan.sandboxArgv], { env: {}, stdio: ["pipe", "pipe", "pipe", fds.workspace, argFd, ...(fds.egress !== undefined ? [fds.egress] : [])], detached: true });
+    } finally {
+      closeSync(fds.workspace); closeSync(argFd); if (fds.egress !== undefined) closeSync(fds.egress);
+    }
+    const built = first.plan;
+    const digest = first.digest;
     const id = randomUUID();
-    const proc = Bun.spawn([...built.sandboxArgv], { env: {}, stdin: "pipe", stdout: "pipe", stderr: "pipe", detached: true });
     const item: Live = {
-      id, plan: built, digest, proc, lines: [], sink: undefined, stderr: "", outputBytes: 0, requested: undefined, exit: undefined, timer: undefined, nsInode: undefined,
+      id, owner: { intentId: ctx.intentId, runId: ctx.runId }, plan: built, digest, proc, lines: [], sink: undefined, stderr: "", outputBytes: 0, requested: undefined, exit: undefined, timer: undefined, nsInode: undefined,
       stdoutDone: Promise.resolve(), stderrDone: Promise.resolve(),
       done: undefined as unknown as Promise<ExitRecord>,
     };
@@ -214,36 +285,44 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     item.timer = setTimeout(() => stop("wall-clock"), built.ceilings.wallSeconds * 1000);
     (item as { done: Promise<ExitRecord> }).done = (async () => {
       const code = await proc.exited;
-      // A sandbox member can outlive the launcher only if containment failed; make sure none do.
-      if (item.nsInode === undefined) for (const child of await childrenOf(proc.pid)) item.nsInode ??= await pidNamespace(child);
+      item.nsInode ??= await sandboxNamespace(proc.pid); // usually gone with the launcher; then the namespace stays unknown
       if (item.timer) clearTimeout(item.timer);
-      try { process.kill(-proc.pid, "SIGKILL"); } catch { /* group empty */ }
-      const residualPids = await residual(item);
+      const left = await residual(item);
       await Promise.allSettled([item.stdoutDone, item.stderrDone]);
       const signal = proc.signalCode ?? null;
       const reason: ExitReason = item.requested?.reason
         ?? (code === 128 + 24 || signal === "SIGXCPU" ? "cpu-ceiling" : signal ? "signal" : "exited");
       const record: ExitRecord = {
         reason, ...(item.requested?.detail ? { detail: item.requested.detail } : {}), exitCode: code, signalCode: signal ?? (SIGNAL_NUMBERS[code - 128] ?? null),
-        at: new Date().toISOString(), residualPids, outputBytes: item.outputBytes, stderr: item.stderr,
+        at: new Date().toISOString(), residualPids: left.pids, nsKnown: left.known, outputBytes: item.outputBytes, stderr: item.stderr,
       };
       item.exit = record;
+      // Keep the exit record (bounded) but release the live entry.
+      live.delete(id);
+      finished.set(id, item);
+      while (finished.size > FINISHED_RETAINED) finished.delete(finished.keys().next().value as string);
       return record;
     })();
     live.set(id, item);
     // Learn the namespace as soon as the launcher has forked its init, so teardown can sweep it.
-    void (async () => { for (let i = 0; i < 20 && !item.nsInode && !item.exit; i++) { for (const child of await childrenOf(proc.pid)) item.nsInode ??= await pidNamespace(child); if (!item.nsInode) await sleep(10); } })();
+    void (async () => { for (let i = 0; i < 40 && !item.nsInode && !item.exit; i++) { item.nsInode ??= await sandboxNamespace(proc.pid); if (!item.nsInode) await sleep(10); } })();
     return { id };
   }
 
+  const find = (id: string): Live | undefined => live.get(id) ?? finished.get(id);
   const get = (id: string): Live => {
-    const item = live.get(id);
+    const item = find(id);
     if (!item) throw new Error(`rlm-port-unavailable: unknown contained process ${id}`);
     return item;
   };
+  const owned = (id: string, owner: RunBinding): Live => {
+    const item = get(id);
+    if (item.owner.runId !== owner.runId || item.owner.intentId !== owner.intentId) throw new Error(`rlm-port-unavailable: contained process ${id} belongs to another run`);
+    return item;
+  };
 
-  return {
-    plan,
+  const port: ContainedStdioSpawnPort = {
+    plan: async (spec, ctx) => { const r = await resolve(spec, ctx); return { plan: r.plan, digest: r.digest }; },
     spawn,
     async write(id, line) {
       const item = get(id);
@@ -260,8 +339,8 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       await item.stdoutDone;
     },
     async kill(id, reason) {
-      const item = live.get(id);
-      if (!item) return; // idempotent: an unknown or already-reaped id is already gone
+      const item = find(id);
+      if (!item) return; // idempotent: an unknown or already-pruned id is already gone
       await teardown(item, { reason: "killed", detail: reason });
       await item.done;
     },
@@ -270,8 +349,17 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       return { id, hostPid: item.proc.pid, launchPlanDigest: item.digest, plan: item.plan, state: item.exit ? "exited" : "running", ...(item.exit ? { exit: item.exit } : {}) };
     },
     exited: (id) => get(id).done,
+    forRun(ctx) {
+      return {
+        spawn: (spec, c) => { if (c.runId !== ctx.runId || c.intentId !== ctx.intentId) return Promise.reject(new Error("rlm-port-unavailable: spawn for another run")); return spawn(spec, c); },
+        write: (id, line) => { try { owned(id, ctx); } catch (error) { return Promise.reject(error); } return port.write(id, line); },
+        readLines: (id, sink) => { try { owned(id, ctx); } catch (error) { return Promise.reject(error); } return port.readLines(id, sink); },
+        kill: (id, reason) => { try { owned(id, ctx); } catch (error) { return Promise.reject(error); } return port.kill(id, reason); },
+      };
+    },
     async dispose() {
       await Promise.all([...live.values()].map(async (item) => { await teardown(item, { reason: "killed", detail: "dispose" }); await item.done; }));
     },
   };
+  return port;
 }
