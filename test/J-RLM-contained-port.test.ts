@@ -72,6 +72,8 @@ function udpListener(): Promise<Listener & { port: number }> {
 // ── a line session over the port ──
 interface Session { readonly id: string; readonly lines: Record<string, unknown>[]; readonly raw: string[]; ask(msg: Record<string, unknown>, ms?: number): Promise<Record<string, any>>; hostPid: number }
 async function open(port: ContainedStdioSpawnPort, spec: StdioSpawnSpec): Promise<Session> {
+  // Stands in for the server's declaration of the operator-declared reach of the admitted provider (review M9).
+  port.declareReach(ctx.runId, spec.restrictions.network?.outbound?.length ? "host-socket" : "none");
   const { id } = await port.spawn(spec, ctx);
   const lines: Record<string, unknown>[] = [];
   const raw: string[] = [];
@@ -179,7 +181,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       tcp.connections = 0; tcp.data.length = 0; udp.connections = 0; udp.data.length = 0; egress.connections = 0; egress.data.length = 0;
 
       // The contained run: host socket slot configured so egress is one reachable path and nothing else.
-      const port = makePort(f.workspace, { hostSocket: join(f.dir, "egress.sock"), envAllowlist: ["FIXTURE_FLAG"] });
+      const port = makePort(f.workspace, { hostSocket: join(f.dir, "egress.sock"), envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: { FIXTURE_FLAG: "^[a-z]+$" } });
       const containedSpec = spec(f.workspace, { network: { outbound: [`host-socket:${join(f.dir, "egress.sock")}`] } });
       const { plan, digest, executionProfileDigest: profileDigest } = await port.plan({ ...containedSpec, env: { FIXTURE_FLAG: "on" } }, ctx);
       if (rep === 1) { manifestPlan = plan; manifestDigest = digest; expect(digest).toBe(launchPlanDigest(plan)); }

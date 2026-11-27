@@ -48,6 +48,22 @@ def nested_userns():
     # A contained child must not be able to create a user namespace (and so regain capabilities in it).
     os.unshare(os.CLONE_NEWUSER); return "unshared"
 
+def socketpair_ok():
+    a, b = socket.socketpair(); a.close(); b.close(); return "pair"
+
+def unix_create():
+    s = socket.socket(socket.AF_UNIX); s.close(); return "created"
+
+def inet_create():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close(); return "created"
+
+def io_uring_setup():
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    r = libc.syscall(425, 4, ctypes.create_string_buffer(120))
+    if r >= 0: os.close(r); return {"ret": r, "errno": 0}
+    return {"ret": r, "errno": ctypes.get_errno()}
+
 def fill_tmp(path, chunk, count):
     with open(path, "wb") as f:
         for _ in range(count): f.write(b"x" * chunk); f.flush()
@@ -91,6 +107,10 @@ for raw in sys.stdin:
     elif op == "burn":
         while True: pass
     elif op == "sleep": time.sleep(m["s"]); say(op=op, done=True)
+    elif op == "socketpair": say(op=op, **attempt(socketpair_ok))
+    elif op == "unix_create": say(op=op, **attempt(unix_create))
+    elif op == "inet_create": say(op=op, **attempt(inet_create))
+    elif op == "io_uring": say(op=op, **attempt(io_uring_setup))
     elif op == "caps": say(op=op, caps=caps(), userns=attempt(nested_userns))
     elif op == "filltmp": say(op=op, **attempt(lambda: fill_tmp(m["path"], m["chunk"], m["count"])))
     elif op == "unlink": say(op=op, **attempt(lambda: os.unlink(m["path"])))

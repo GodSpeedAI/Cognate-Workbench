@@ -37,11 +37,14 @@ beforeAll(async () => {
   await writeFile(executable, EXE);
   await chmod(launcher, 0o755);
   await chmod(executable, 0o755);
-  config = { authorize: async () => {}, launcher: { path: launcher, sha256: sha(FAKE_LAUNCHER(marker, false)) }, executables: [{ path: executable, sha256: sha(EXE) }], workspaceRoot: workspace, writableRoots: [], envAllowlist: ["FIXTURE_FLAG"] };
+  config = { authorize: async () => {}, launcher: { path: launcher, sha256: sha(FAKE_LAUNCHER(marker, false)) }, executables: [{ path: executable, sha256: sha(EXE) }], workspaceRoot: workspace, writableRoots: [], envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: PATS };
 });
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
 const ctx = { intentId: "i", runId: "r" };
+const PAT = "^[A-Za-z0-9._-]{0,64}$";
+const PATS = { FIXTURE_FLAG: PAT };
+const PATS2 = { FIXTURE_FLAG: PAT, OTHER: PAT };
 const KEY = new Uint8Array(32).fill(7);
 const spec = (over: Partial<StdioSpawnSpec> & { restrictions?: StdioSpawnSpec["restrictions"] } = {}): StdioSpawnSpec => ({ argv: [executable, "--serve"], cwd: workspace, env: {}, restrictions: {}, ...over });
 const refusal = async (promise: Promise<unknown>): Promise<RlmRefusedError> => {
@@ -345,7 +348,7 @@ describe("M6: binaries must be trusted, not merely pinned; writableRoots is expl
 
 describe("L1/L3: probe argv is structural; environment values stay out of the plan and the process table", () => {
   test("an allowlisted value of '--' cannot cut the probe and no value appears in the plan or argv", async () => {
-    const withEnv = { ...config, envAllowlist: ["FIXTURE_FLAG", "OTHER"] };
+    const withEnv = { ...config, envAllowlist: ["FIXTURE_FLAG", "OTHER"], envValuePatterns: PATS2 };
     const s = spec({ env: { FIXTURE_FLAG: "--", OTHER: "s3cret-value-123" } });
     const built = await buildLaunchPlan({ config: withEnv, spec: s, ctx, envKey: KEY, launcherVersion: "0.13.1" });
     expect(built.material.probeArgv.filter((a) => a === "--")).toHaveLength(1);
@@ -435,7 +438,7 @@ describe("N2/N4/N5/N6", () => {
 
   test("N4: the environment digest is keyed per port: stable within a port, different across ports", async () => {
     const lc = await okLauncherFor("hmac-bwrap", join(root, "hmac-ran"));
-    const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"] };
+    const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: PATS };
     const s = spec({ env: { FIXTURE_FLAG: "low-entropy" } });
     const a = containedStdioSpawnPort(withEnv); const b = containedStdioSpawnPort(withEnv);
     const a1 = await a.plan(s, ctx); const a2 = await a.plan(s, ctx); const b1 = await b.plan(s, ctx);
@@ -495,7 +498,7 @@ describe("execution profile: the operator-approved, launch-independent digest (#
 
   test("two port instances agree, including with allowlisted env values that differ", async () => {
     const lc = await okLauncher("prof-b");
-    const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"] };
+    const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: PATS };
     const one = await containedStdioSpawnPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "x" } }), ctx);
     const two = await containedStdioSpawnPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "y" } }), ctx);
     expect(one.executionProfileDigest).toBe(two.executionProfileDigest);   // env values are not part of the profile
@@ -506,7 +509,7 @@ describe("execution profile: the operator-approved, launch-independent digest (#
 
   test("changing the executable, launcher, a ceiling, the network policy, an env name, args or a caps request changes it", async () => {
     const lc = await okLauncher("prof-c");
-    const base = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"] };
+    const base = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: PATS };
     const baseline = await profileOf(base);
     expect(await profileOf(base)).toBe(baseline);
     const otherText = "#!/bin/sh\necho other\n";
@@ -524,7 +527,7 @@ describe("execution profile: the operator-approved, launch-independent digest (#
         ["fsizeBytes", await profileOf({ ...base, ceilings: { fsizeBytes: 1_048_576 } })],
         ["caps request", await profileOf(base, spec({ restrictions: { caps: { cpuSeconds: 3 } } }))],
         ["network policy", await profileOf({ ...base, hostSocket: sock }, spec({ restrictions: { network: { outbound: [`host-socket:${sock}`] } } }))],
-        ["env allowlist name", await profileOf({ ...base, envAllowlist: ["FIXTURE_FLAG", "OTHER"] })],
+        ["env allowlist name", await profileOf({ ...base, envAllowlist: ["FIXTURE_FLAG", "OTHER"], envValuePatterns: PATS2 })],
         ["args", await profileOf(base, spec({ argv: [executable, "--other"] }))],
         ["runtime roots", await profileOf({ ...base, runtimeRoots: ["/usr/bin", "/usr/lib"] })],
       ];
@@ -574,13 +577,16 @@ describe("delta-2: egress socket in the profile, env names that change what runs
       "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "NODE_OPTIONS", "NODE_PATH",
       "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PYTHONINSPECT", "BASH_ENV", "ENV", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
       "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "GCONV_PATH", "LOCPATH", "NLSPATH", "PATH", "HOME", "BASH_FUNC_x%%",
+      // M10 (delta-1): runtimes, VMs, package managers and TLS or proxy settings that change what is loaded or where traffic goes.
+      "JDK_JAVA_OPTIONS", "CLASSPATH", "JAVA_HOME", "NODE_ENV", "NODE_EXTRA_CA_CERTS", "BUN_CONFIG_REGISTRY", "BUN_INSTALL", "DENO_DIR", "DENO_AUTH_TOKENS", "npm_config_registry", "npm_config_prefix",
+      "GIT_SSH_COMMAND", "GIT_CONFIG_GLOBAL", "SSL_CERT_FILE", "SSL_CERT_DIR", "http_proxy", "HTTPS_PROXY", "all_proxy", "NO_PROXY", "PYTHONUNBUFFERED", "RUBYGEMS_GEMDEPS", "PERL5DB", "PERLIO", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "BUNDLE_PATH", "TMPDIR",
     ];
     for (const name of forbidden) {
       expect(isForbiddenEnvName(name)).toBe(true);
-      expect(() => containedStdioSpawnPort({ ...config, envAllowlist: [name] }), name).toThrow(/cannot be allowlisted/);
+      expect(() => containedStdioSpawnPort({ ...config, envAllowlist: [name], envValuePatterns: { [name]: PAT } }), name).toThrow(/cannot be allowlisted/);
     }
-    for (const fine of ["FIXTURE_FLAG", "LANG", "TZ", "MODEL_NAME", "SEA_REGION"]) expect(isForbiddenEnvName(fine)).toBe(false);
-    expect(() => containedStdioSpawnPort({ ...config, envAllowlist: ["LANG", "TZ"] })).not.toThrow();
+    for (const fine of ["FIXTURE_FLAG", "LANG", "TZ", "MODEL_NAME", "SEA_REGION", "node_env", "Http_Proxy", "MYPROXY", "GITHUB_USER", "TMPDIR2"]) expect(isForbiddenEnvName(fine)).toBe(false);
+    expect(() => containedStdioSpawnPort({ ...config, envAllowlist: ["LANG", "TZ"], envValuePatterns: { LANG: PAT, TZ: PAT } })).not.toThrow();
   });
 
   test("A3: sparse argv, args and string arrays are malformed", async () => {
@@ -597,5 +603,41 @@ describe("delta-2: egress socket in the profile, env names that change what runs
       expect(e.code).toBe("rlm-containment-unavailable");
       expect(e.reason).toContain("malformed");
     }
+  });
+});
+
+describe("M10: an allowlisted environment name declares the values it accepts, and the pattern is part of the approval", () => {
+  const withEnv = (patterns: Record<string, string> | undefined, allow: string[] = ["FIXTURE_FLAG"]) => ({ ...config, envAllowlist: allow, envValuePatterns: patterns }) as ContainedStdioPortConfig;
+  const planWith = (c: ContainedStdioPortConfig, value: string) => buildLaunchPlan({ config: c, spec: spec({ env: { FIXTURE_FLAG: value } }), ctx, envKey: KEY, launcherVersion: "0.13.1" });
+
+  test("an allowlisted name with no pattern, or an unanchored, oversized or invalid one, is refused at construction", () => {
+    expect(() => containedStdioSpawnPort(withEnv(undefined))).toThrow(/pattern/);
+    expect(() => containedStdioSpawnPort(withEnv({}))).toThrow(/FIXTURE_FLAG.*pattern|pattern.*FIXTURE_FLAG/);
+    for (const bad of ["[a-z]+", "^[a-z]+", "[a-z]+$", "^(a$", `^${"a".repeat(300)}$`, "^.*$|x"]) {
+      expect(() => containedStdioSpawnPort(withEnv({ FIXTURE_FLAG: bad })), bad).toThrow(/pattern/);
+    }
+    expect(() => containedStdioSpawnPort(withEnv({ FIXTURE_FLAG: PAT, UNLISTED: PAT }))).toThrow(/not allowlisted|UNLISTED/);
+    expect(() => containedStdioSpawnPort(withEnv({ FIXTURE_FLAG: PAT }))).not.toThrow();
+  });
+
+  test("a spawn value outside its pattern, or longer than the cap, is refused; one inside it plans (positive control)", async () => {
+    const c = withEnv({ FIXTURE_FLAG: "^(on|off)$" });
+    await planWith(c, "on");                                              // control
+    for (const value of ["--agent=/workspace/evil.jar", "ON", "on\n", "onoff", "", "on ", "o".repeat(5000)]) {
+      const e = await refusal(planWith(c, value));
+      expect(e.reason).toMatch(/FIXTURE_FLAG/);
+    }
+    const capped = withEnv({ FIXTURE_FLAG: "^[a-z]*$" });
+    await planWith(capped, "a".repeat(256));
+    expect((await refusal(planWith(capped, "a".repeat(257)))).reason).toMatch(/FIXTURE_FLAG/);
+  });
+
+  test("the pattern is part of the execution profile: widening it is a different approval, and values stay out", async () => {
+    const profileOf = async (c: ContainedStdioPortConfig) => (await containedStdioSpawnPort(c).executionProfile(spec())).digest;
+    const narrow = await profileOf(withEnv({ FIXTURE_FLAG: "^(on|off)$" }));
+    expect(await profileOf(withEnv({ FIXTURE_FLAG: "^(on|off)$" }))).toBe(narrow);
+    expect(await profileOf(withEnv({ FIXTURE_FLAG: "^(on|off|maybe)$" }))).not.toBe(narrow);
+    const built = await buildLaunchPlan({ config: withEnv({ FIXTURE_FLAG: "^(on|off)$" }), spec: spec(), ctx, envKey: KEY, launcherVersion: "0.13.1" });
+    expect(built.profile.envPatterns).toEqual({ FIXTURE_FLAG: "^(on|off)$" });
   });
 });

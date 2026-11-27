@@ -14,7 +14,7 @@ import type { InvocationView, ProviderFacts, RlmInvokeRequest, RlmProvider } fro
 import { RLM_AGENT_ID, RLM_CAPABILITIES } from "@godspeedai/cognate-runtime-api";
 import type { ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
 import { containedStdioSpawnPort } from "../src/capabilities/containedStdioPort.ts";
-import { profileAuthorize } from "../src/capabilities/containedProfileAuthority.ts";
+import { CONTAINED_SPAWN_CAPABILITY, type ProfileAuthority } from "../src/capabilities/containedProfileAuthority.ts";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import { collaborationResponder, configureDefaultRoutes, invoke, waitForAssignment, withExpertApp, type FakeResponder } from "./expert-helpers.ts";
 
@@ -67,14 +67,17 @@ async function fixture() {
 }
 
 /** The server's #116 authority route, with a stand-in SEA-Forge whose policy lists `allowed` profile digests. */
-function withAuthority(config: ContainedStdioPortConfig, allowed: readonly string[]): { config: ContainedStdioPortConfig; asked: string[] } {
+function withAuthority(config: ContainedStdioPortConfig, allowed: readonly string[]): { options: { rlmContainedPort: Omit<ContainedStdioPortConfig, "authorize">; rlmProfileAuthority: { authority: ProfileAuthority; worldRef: string } }; asked: string[]; resources: string[] } {
   const asked: string[] = [];
+  const resources: string[] = [];
   const authority = { decide: async (operation: GovernedOperation) => {
+    resources.push(operation.kind === "capability" ? operation.request.capability.id : "");
     const digest = String(operation.kind === "capability" ? operation.claims?.execution_profile_digest ?? "" : "");
     asked.push(digest);
-    return allowed.includes(digest) ? { disposition: "boundary" as const, reason: "ok", constraints: [{ type: "execution_profile", value: digest }], decisionRef: "L-1" } : { disposition: "deny" as const, reason: "no profile rule" };
+    return allowed.includes(digest) ? { disposition: "boundary" as const, reason: "ok", constraints: [{ type: "execution_profile", value: digest }], decisionRef: "01HZX3Q7M9K2N4P6R8T0VWXYZ1" } : { disposition: "deny" as const, reason: "no profile rule" };
   } };
-  return { config: { ...config, authorize: profileAuthorize({ authority, worldRef: `world:t@sha256:${"a".repeat(64)}`, actor: { id: "system", kind: "system" }, tenant: "local" }) }, asked };
+  const { authorize: _unused, ...port } = config;
+  return { options: { rlmContainedPort: port, rlmProfileAuthority: { authority, worldRef: `world:t@sha256:${"a".repeat(64)}` } }, asked, resources };
 }
 const markerLines = async (marker: string): Promise<number> => (existsSync(marker) ? (await readFile(marker, "utf8")).split("\n").filter(Boolean).length : 0);
 
@@ -161,7 +164,7 @@ describe("J-RLM-contained-port wiring", () => {
         expect(status).toBe("failed");
         expect(provider.invokes).toHaveLength(1); // the provider was never invoked for the forged child
         expect(await markerLines(f.marker)).toBe(governedLines); // and the launcher never ran again
-      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmContainedPort: authority.config });
+      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], ...authority.options });
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 120_000);
 
@@ -177,16 +180,36 @@ describe("J-RLM-contained-port wiring", () => {
         cases.denied = [{ id: "c1", args: { purpose: "Investigate recursively", acceptance: ["Report"], contextRefs: ["assignment"], tools: ["read"], budget: { limit: 0.5 } } }];
         const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "CASE:denied", requestId: "contained-denied", rlmProvider: "cp" }) as { assignmentId: string };
         await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status), 90_000);
+        expect(denied.resources).toEqual([CONTAINED_SPAWN_CAPABILITY]);        // the launch is its own policy target, not the parent's rlm.invoke
         expect(denied.asked).toEqual([f.profileDigest]);                       // SEA-Forge was asked about exactly this profile
         expect(provider.spawns).toHaveLength(1);
         expect(provider.spawns[0]).toContain("rlm-profile-unauthorized");
-        expect(await markerLines(f.marker)).toBeLessThanOrEqual(1);            // at most the namespace preflight: no sandbox launched
+        expect(await markerLines(f.marker)).toBe(0);                            // no bubblewrap of any kind: the namespace preflight waits for the allow
         expect(existsSync(f.marker) ? (await readFile(f.marker, "utf8")).includes("--serve") : false).toBe(false);
-      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmContainedPort: denied.config });
+      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], ...denied.options });
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 120_000);
 
-  test("#116: a contained port with neither SEA-Forge governance nor an explicit authorize hook is refused at startup", async () => {
+  test("H2: a caller-supplied authorize hook is ignored; SEA-Forge's deny still stops the sandbox", async () => {
+    const f = await fixture();
+    try {
+      const provider = containedProvider("cp", f.config, f.exe, f.ws);
+      const denied = withAuthority(f.config, []);
+      await withExpertApp(responder, async (t) => {
+        await configureDefaultRoutes(t);
+        const current = (await t.state()).experts["product-manager"]!;
+        await invoke(t, "expert.save", { expertId: "product-manager", name: current.name, specialization: current.definition.specialization, instructions: current.definition.instructions, tools: current.definition.tools, route: current.definition.route, budget: { contextTokens: 32000, maxOutputTokens: 400, maxCostUsd: 5, prices: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } } });
+        cases.bypass = [{ id: "c1", args: { purpose: "Investigate recursively", acceptance: ["Report"], contextRefs: ["assignment"], tools: ["read"], budget: { limit: 0.5 } } }];
+        const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "CASE:bypass", requestId: "contained-bypass", rlmProvider: "cp" }) as { assignmentId: string };
+        await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status), 90_000);
+        expect(denied.asked).toEqual([f.profileDigest]);                       // SEA-Forge was asked despite the permissive hook
+        expect(provider.spawns[0]).toContain("rlm-profile-unauthorized");
+        expect(await markerLines(f.marker)).toBe(0);
+      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmProfileAuthority: denied.options.rlmProfileAuthority, rlmContainedPort: { ...denied.options.rlmContainedPort, authorize: async () => {} } as never });
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test("#116: a contained port with no SEA-Forge governance and no profile authority is refused at startup", async () => {
     const f = await fixture();
     try {
       await expect(withExpertApp(responder, async () => {}, { rlmContainedPort: (({ authorize: _a, ...rest }) => rest)(f.config) })).rejects.toThrow(/authority decision/);
