@@ -1,23 +1,19 @@
-# Current status — revision 59
+# Current status — revision 60
 
 SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for recursive child runs.
 
-**Behaviour.** `src/capabilities/containedStdioPort.ts` implements Cognate's `StdioSpawnPort` and is built only from trusted host configuration, `ServerOptions.rlmContainedPort`. Absent (default) means Cognate's `unavailableSpawnPort()`, so ordinary execution and every current refusal are unchanged. With it, `rlmGoverned.providerRefusal` admits a no-network contained provider and still refuses open egress.
+**Behaviour.** `containedStdioPort.ts` implements Cognate's `StdioSpawnPort` from trusted host configuration, `ServerOptions.rlmContainedPort`; absent, Cognate's refusing port stays. `rlmGoverned.providerRefusal` admits a no-network contained provider and refuses open egress. `declareReach` binds each run to the operator-declared reach of its admitted provider; a spawn exceeding it is refused before any authority request.
 
-**Launch plan and digest.** `src/capabilities/containedLaunch.ts` resolves each spec into a canonical record: pinned executable and launcher (path, sha256), the full sandbox argv, read-only workspace, network `none` or one host unix socket, ceilings (wall, CPU, address space, nofile, nproc, output bytes), env allowlist. `launchPlanDigest(plan)` = `sha256:<hex of canonical JSON>`; ticket #116 binds an authority decision to it through the optional `authorize` hook. The plan is recomputed and compared just before spawn; drift refuses.
+**Plan and profile.** `containedLaunch.ts` resolves a spec into a canonical plan (`launchPlanDigest`, per launch) that embeds the operator-approved `executionProfileDigest`: pinned launcher and executable, restrictions, ceilings, flag template, fixed env, allowlisted env names with their value patterns, seccomp filter digest. Policy lists profile digests. The plan is recomputed before spawn; drift refuses. `bun scripts/contained-profile.ts` prints a profile.
 
-**Spawn and teardown.** `--unshare-all` (net, pid, user), `--die-with-parent`, `--new-session`, cleared env, read-only workspace and runtime roots, tmpfs `/tmp`, minimal `/dev`, caps dropped, `prlimit` ceilings, line streaming with bounded output, line length and stderr. `kill`, wall-clock, and ceilings kill the process group and pid namespace, then check the host `/proc` for survivors; teardown is idempotent and records the exit.
+**Containment.** `--unshare-all`, `--die-with-parent`, read-only workspace, tmpfs `/tmp`, caps dropped, `prlimit`, bounded output, group and namespace kill with a `/proc` survivor check. With no network a BPF filter (`containedSeccomp.ts`, `--seccomp 7`) denies `socket(AF_UNIX)` (EACCES) and `io_uring_setup` (EPERM), which closes host pathname sockets under the workspace bind.
 
-**Refusals before spawn** (typed Cognate codes, never a fallback): missing or digest-mismatched launcher, unpatched launcher, user namespaces unavailable, unpinned or digest-mismatched executable, executable or launcher in a writable root, outbound network other than the host socket, unenforceable filesystem, subprocess or cap requests.
+**Authority (#116 host half).** `startServer` always composes `profileAuthorize`, from the external SEA-Forge or an injected `rlmProfileAuthority`; no bare hook, and the port requires one. The launch asks the target `workbench.rlm.contained-spawn` with `claims.execution_profile_digest`, before any bubblewrap starts, and proceeds only on a `boundary` allow with one `execution_profile` constraint, no other constraint, a ULID ledger entry, and a plan embedding the digest. A disposed port launches nothing.
 
-**Execution profile (rev 55).** Policy needs a digest that is stable per approved configuration, so the identity is split. `executionProfileDigest` (pinned launcher and executable, restrictions, ceilings, mount roles, flag template, fixed env, allowlisted env names, args) is identical across runs, workspaces, port instances and restarts and is what an operator lists; `launchPlanDigest` stays per launch and embeds it. `authorize` receives both; the pre-spawn recompute confirms both. `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching.
+**Verified.** Real bwrap batch (unit, guard, authority, seccomp unit, conformance, H4 pathname-socket test) 85/85 three times; server wiring plus child-run 20/20. Review rounds: delta-1 fixes H1-H4, M5, M7-M10, L11.
 
-**SEA-Forge authority (rev 58, #116 host half).** The port's `authorize` hook asks SEA-Forge through the existing `SeaForgeAuthority.decide` route, claiming `execution_profile_digest` on the `rlm.invoke` capability, and launches only on a `boundary` allow with exactly one `execution_profile` constraint equal to the digest and a plan that embeds it. Deny, escalate, plain allow, wrong, missing or duplicate digest, unreachable, silent or malformed SEA-Forge: refused before spawn (`rlm-profile-unauthorized`). `startServer` composes it from the external authority, else refuses. Rev 59: port requires `authorize` (construction throws); a decision with no ledger entry is refused. Evidence: digests and decision id only.
+**Limits.** Egress profiles carry no seccomp filter (#115: pre-connected fd, then filter all); runtime-root binaries are bound by path, so a root-owned replacement between the last digest check and bwrap's resolve is a declared residual (host root is trusted); no disk quota; `subprocess:false` refused; RLIMIT_AS fails allocations. Cognate folds `decisionRef` as `ledger_entry ?? decision_id`: ULID shape is the interim proof (TODO cognate ledgerEntry).
 
-**Verified.** Real bwrap run 67/67 (unit, guard, authority), three times; authority 18/18 against a stand-in SEA-Forge socket; wiring plus child-run 19/19.
+**Next.** Review and merge; #115; live SEA-Forge check.
 
-**Limits.** No seccomp or disk quota; `subprocess:false` is refused; RLIMIT_AS fails allocations rather than terminating; the output cap is checked per chunk; bwrap path-exec after a hash check has a narrowed, not eliminated, swap window; `prlimit` comes from the read-only runtime roots. The metering proxy is #115, authority binding is #116. Cognate does not export its bwrap argv builder.
-
-**Next.** Review and merge; #115; a live SEA-Forge check.
-
-Plan: none. Spec: SEA-Forge #114. Full history is in `.agents/CURRENT_STATUS.jsonl`.
+Plan: none. Spec: SEA-Forge #114. History: `.agents/CURRENT_STATUS.jsonl`.
