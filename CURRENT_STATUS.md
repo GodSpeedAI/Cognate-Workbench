@@ -1,10 +1,10 @@
 # Current status
 
-**Status revision:** 44
+**Status revision:** 45
 
-**Stage:** WP-23 operator hand-off of approved case assignments (PR #40)
+**Stage:** WP-23 E2E interrupt determinism fix
 
-**Summary:** The operator hands an approved case assignment to a conversation (J-CASE-ASSIGNMENT-handoff). The host's hand-off source supplies the approved Brief, Budget and case context and a request carrying its own is refused; one run per assignment id is bound to the session; session-assignment-bindings folds that run's own start; only the local operator, outside any run, can hand off, interrupt, resume or report spend. Hosted verify passed on 1a105bf.
+**Summary:** The WP-23 browser journey was nondeterministic: the slow scenario streamed for about 8 s, so on a loaded host the operator's Interrupt could land after the run had completed or after its model call ended, leaving no interrupted step to reconcile. The slow scenario's first model call now streams for about ten minutes (the retry answers promptly) and both WP-23 tests wait until the call is in flight before issuing controls, so the interrupt lands mid-call by construction.
 
 **Verified:**
 
@@ -12,7 +12,7 @@
 - just typecheck clean; domainforge validate 0 violations; fmt --check clean; bun scripts/verify-sea-format.ts ok
 - test/J-CASE-ASSIGNMENT-handoff.test.ts 3 pass (real server, production session posture; reconciles a mid-stream interrupt)
 - test/assignment-operator-controls.test.ts 4 pass (red 4 fail before the fix): system spend refused, in-run operator refused for interrupt/resume/spend, foreign tenant refused identically before any lookup, candidates read refused
-- test/E2E-case-assignment-handoff.test.ts passes on hosted CI; locally it passes most runs (see limits)
+- test/E2E-case-assignment-handoff.test.ts: interrupt now lands mid-call by construction (gated slow scenario plus an in-flight barrier); pass count in the PR
 - Merged origin/main (capability runtime T3); Cognate pins kept at 0.10.0, 35 packages resolve to 0.10.0, frozen install clean
 - DomainForge 0.22.2 platform-package binding resolver (scripts/package.ts, tauri-sidecar.ts) and validated SSH host key helper (ssh2 ed25519 under Bun unparseable 7/2000) cherry-picked from the CognitiveOS integration
 
@@ -27,7 +27,7 @@
 
 **Next:**
 
-- Merge PR #40
+- Merge the determinism fix PR
 - Release Cognate with the structural control fix (owner authorization for publication), bump, drop the contention retries
 - Horizon production hand-off source
 
