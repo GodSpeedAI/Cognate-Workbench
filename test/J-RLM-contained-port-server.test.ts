@@ -123,6 +123,8 @@ describe("J-RLM-contained-port wiring", () => {
         for (const [name, replayInput] of Object.entries(replays)) {
           const replay = await t.app.runtime.service.startRun(LOCAL_OPERATOR, { agent: RLM_AGENT_ID, idempotencyKey: `replay-${name}`, correlationId: genuine!.correlationId ?? `rlm:replay:${name}`, input: replayInput as unknown as Json });
           expect(await terminal(replay.runId)).toBe("failed");
+          const failure = String(((await t.app.runtime.service.getRun(LOCAL_OPERATOR, { runId: replay.runId })) as { error?: unknown }).error ?? "");
+          if (name === "identicalSecondUse") expect(failure).toContain("parent run's principal"); // the operator is not the parent's agent principal
           expect(provider.invokes).toHaveLength(1); // never invoked again
           expect(await markerLines(f.marker)).toBe(governedLines); // and the launcher never ran again
         }

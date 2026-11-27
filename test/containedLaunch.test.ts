@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
-import { buildLaunchPlan, canonicalJson, launchPlanDigest, type ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
+import { buildLaunchPlan, canonicalJson, isForbiddenEnvName, launchPlanDigest, type ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
 import { containedStdioSpawnPort } from "../src/capabilities/containedStdioPort.ts";
 import { providerRefusal } from "../src/capabilities/rlmGoverned.ts";
 
@@ -545,5 +545,53 @@ describe("execution profile: the operator-approved, launch-independent digest (#
     const flaky = { ...config, launcher: lc, get ceilings() { return widened ? { outputBytes: 8192 } : { outputBytes: 4096 }; }, authorize: async () => { widened = true; } } as ContainedStdioPortConfig;
     const e = await refusal(containedStdioSpawnPort(flaky).spawn(spec(), ctx));
     expect(e.reason).toContain("execution profile drifted");
+  });
+});
+
+describe("delta-2: egress socket in the profile, env names that change what runs, sparse arrays", () => {
+  test("A2: the egress socket's resolved path is part of the profile; the workspace is not", async () => {
+    const lc = await okLauncherFor("d2-bwrap", join(root, "d2-ran"));
+    const dir = join(root, "d2-socks"); await mkdir(dir);
+    const s1 = join(dir, "one.sock"); const s2 = join(dir, "two.sock"); const link = join(dir, "link.sock");
+    const l1 = Bun.listen({ unix: s1, socket: { data() {} } }); const l2 = Bun.listen({ unix: s2, socket: { data() {} } });
+    try {
+      await symlink(s1, link);
+      const prof = async (path: string) => (await containedStdioSpawnPort({ ...config, launcher: lc, hostSocket: path }).plan(spec({ restrictions: { network: { outbound: [`host-socket:${path}`] } } }), ctx));
+      const one = await prof(s1); const two = await prof(s2); const viaLink = await prof(link);
+      expect(one.executionProfile.mounts.egress).toEqual({ sandboxPath: "/run/egress.sock", hostPath: realpathSync(s1) });
+      expect(one.executionProfileDigest).not.toBe(two.executionProfileDigest);        // another socket is another approval
+      expect(viaLink.executionProfileDigest).toBe(one.executionProfileDigest);        // a symlink to the same socket is the same one
+      expect(JSON.stringify(one.executionProfile)).not.toContain(workspace);          // the workspace stays out
+    } finally { l1.stop(true); l2.stop(true); }
+  });
+
+  test("A2: an allowlisted env name that controls loading or interpretation is refused at construction", () => {
+    const forbidden = [
+      "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "NODE_OPTIONS", "NODE_PATH",
+      "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PYTHONINSPECT", "BASH_ENV", "ENV", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
+      "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "GCONV_PATH", "LOCPATH", "NLSPATH", "PATH", "HOME", "BASH_FUNC_x%%",
+    ];
+    for (const name of forbidden) {
+      expect(isForbiddenEnvName(name)).toBe(true);
+      expect(() => containedStdioSpawnPort({ ...config, envAllowlist: [name] }), name).toThrow(/cannot be allowlisted/);
+    }
+    for (const fine of ["FIXTURE_FLAG", "LANG", "TZ", "MODEL_NAME", "SEA_REGION"]) expect(isForbiddenEnvName(fine)).toBe(false);
+    expect(() => containedStdioSpawnPort({ ...config, envAllowlist: ["LANG", "TZ"] })).not.toThrow();
+  });
+
+  test("A3: sparse argv, args and string arrays are malformed", async () => {
+    const holes = (items: unknown[], at: number) => { const a = [...items]; a.length += 1; delete a[at]; return a; };
+    const sparseArgv = holes([executable, "--serve"], 1) as unknown as string[]; // [exe, <hole>... ] with a hole at index 1
+    sparseArgv[2] = "a";
+    for (const bad of [
+      spec({ argv: sparseArgv }),
+      spec({ argv: Object.assign([executable], { length: 3 }) as string[] }),
+      spec({ restrictions: { filesystem: Object.assign(["read-only"], { length: 2 }) } }),
+      spec({ restrictions: { network: { outbound: Object.assign([], { length: 1 }) } } }),
+    ]) {
+      const e = await refusal(plan(bad));
+      expect(e.code).toBe("rlm-containment-unavailable");
+      expect(e.reason).toContain("malformed");
+    }
   });
 });
