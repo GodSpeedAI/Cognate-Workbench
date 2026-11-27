@@ -110,6 +110,15 @@ returning a Cognate `Component`; many also export their input/result types and c
 
 ### Exported types, constants and helpers
 
+- [containedLaunch.ts:buildLaunchPlan], [containedLaunch.ts:launchPlanDigest], [containedLaunch.ts:LaunchPlan] —
+  SEA-Forge #114: the canonical, digestible record of one contained launch (pinned executable and launcher,
+  full sandbox argv, read-only workspace and egress socket pinned by resolved path and dev/inode, ceilings,
+  env digests, run binding). `launchPlanDigest` is the value ticket #116 binds an authority decision to.
+  [containedStdioPort.ts:containedStdioSpawnPort] — the host-owned bubblewrap `StdioSpawnPort`, built only from
+  `ServerOptions.rlmContainedPort` (absent keeps Cognate's refusing port); host objects are bound into the
+  sandbox by inherited descriptor, teardown kills the process group and pid namespace and records `nsKnown`.
+  [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port.
+
 - [aggregateContainment.ts:CONTAINMENT_THREAD] — shared-state thread id `containment:aggregate:v1`;
   [aggregateContainment.ts:ContainmentQuotas], [aggregateContainment.ts:ContainmentExecution],
   [aggregateContainment.ts:ContainmentState], [aggregateContainment.ts:ContainmentQuotaError],
@@ -321,4 +330,5 @@ No child subdirectories.
   `test/containedWorkspace.test.ts`, `test/executionWorlds.test.ts`, `test/expert-effect.test.ts`,
   `test/expert-model-routing.test.ts`, plus the journey suites `test/J-CHECKOUT-lifecycle.test.ts`,
   `test/J-RW-AGGREGATE-CONTAINMENT.test.ts`, `test/J-SEA-FORGE-AUTHORITY.test.ts`,
-  `test/J-AUTH-SESSION.test.ts`.
+  `test/J-AUTH-SESSION.test.ts`; contained spawn port: `test/containedLaunch.test.ts`,
+  `test/J-RLM-contained-port-server.test.ts`, and `COGNATE_BWRAP_TESTS=1 test/J-RLM-contained-port.test.ts`.

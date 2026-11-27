@@ -47,6 +47,7 @@ import { providerRoutesProjection } from "./projections/providerRoutes.ts";
 import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
 import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
 import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
+import { rlmAdmissionGuard } from "./capabilities/rlmAdmissionGuard.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
@@ -201,8 +202,8 @@ export interface ServerOptions {
   /** Supervisor timings for executable payloads (graceful drain, SIGTERM-to-SIGKILL). Defaults apply in production. */
   readonly mcpSupervisorTimings?: { readonly graceMs?: number; readonly killMs?: number };
   /** J-RLM-CHILD-RUN: the recursive child-run providers this host registers. Trusted host configuration,
-   *  never a request; the default is empty, which leaves ordinary execution unchanged. No spawn port is
-   *  registered in this slice, so a provider that needs one, containment or egress is refused. */
+   *  never a request; the default is empty, which leaves ordinary execution unchanged. Without
+   *  `rlmContainedPort` no spawn port is registered, so a provider that needs one, containment or egress is refused. */
   readonly rlmProviders?: readonly RlmProviderRegistration[];
   /** SEA-Forge #114: trusted host configuration for the contained bubblewrap `StdioSpawnPort`. Absent
    *  (the default) keeps Cognate's `unavailableSpawnPort()`: providers that need a port stay refused. */
@@ -597,6 +598,8 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const rlmRegistry = createRlmRegistry();
   for (const registration of options.rlmProviders ?? []) rlmRegistry.register(registration);
   const rlmSpawnPort = options.rlmContainedPort ? containedStdioSpawnPort(options.rlmContainedPort) : undefined;
+  // With a spawn port registered, only children admitted by the governed rlm.invoke may reach it (see rlmAdmissionGuard).
+  const rlmGuard = rlmSpawnPort ? rlmAdmissionGuard() : undefined;
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const governanceRefs = bindGovernanceCapabilities(domain);
   const settlementRefs = bindSettlementCapabilities(domain);
@@ -808,7 +811,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) })],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), (() => { const agent = createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) }); return rlmGuard ? rlmGuard.wrap(agent) : agent; })()],
     components: [
       terminalComponent({
         getService,
@@ -839,9 +842,10 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
       governedRlmComponent({
-        // Governed admission is closed: governance off, posture uncontained-local, no spawn port (Cognate defaults).
+        // Governance off and posture uncontained-local (Cognate defaults). The spawn port exists only when the host sets
+        // ServerOptions.rlmContainedPort; the child run that uses it sits behind rlmGuard, which this component feeds.
         base: createRlmComponent({ registry: rlmRegistry, getService, semanticRef: rlmRefs["rlm.invoke"] }),
-        registry: rlmRegistry, containedPort: rlmSpawnPort !== undefined, getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant, system: SYSTEM_CALLER.actor,
+        registry: rlmRegistry, containedPort: rlmSpawnPort !== undefined, ...(rlmGuard ? { onAdmit: rlmGuard.admit } : {}), getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant, system: SYSTEM_CALLER.actor,
       }),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),

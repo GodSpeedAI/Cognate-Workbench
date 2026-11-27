@@ -89,6 +89,8 @@ export interface GovernedRlmOptions {
   readonly registry: RlmRegistry;
   /** True when the host registered the contained `StdioSpawnPort` (`ServerOptions.rlmContainedPort`). */
   readonly containedPort?: boolean;
+  /** Called with each invocation this component admits, immediately before it dispatches the child run. */
+  readonly onAdmit?: (invocation: { invocationId: string; parentRunId: string; providerId: string }) => void;
   readonly getExperts: () => ExpertsService;
   /** The one durable operator identity; the only non-run caller that may inspect or cancel. */
   readonly operator: Principal;
@@ -227,6 +229,7 @@ export function governedRlmComponent(options: GovernedRlmOptions): Component {
         throw refuse("rlm-invocation-ambiguous", `request ${requestId} was already used for different parameters; use a new request id for a different task`);
       }
     }
+    options.onAdmit?.({ invocationId, parentRunId: runId, providerId: selected });
     const admitted = (await inner(derived as unknown as Json, ctx)) as unknown as { invocationId: string; runId: string; status: string };
     return {
       ...admitted,
