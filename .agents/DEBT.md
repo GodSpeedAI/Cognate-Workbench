@@ -185,3 +185,11 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: the WP-23 browser test passed all 18 behavioural assertions locally and failed only on that console line.
 - Confidence: medium (host cause observed, per-event causation not traced)
 - Closure: none needed in code; run browser gates on a stable-network runner.
+
+### `worldHash` does not cover the real model, policy and environment
+- Date: 2026-11-27
+- Location: src/capabilities/cognitive.ts `manifestOf` (the `semanticModelHash`, `policyHash` and `environmentHash` fields).
+- Debt: the Execution Manifest hashes the fixed strings `deepseek-harness-model` and `deepseek-harness-app-policy` for the semantic model and policy, and only `{ worldKind }` for the environment. A change to the loaded model, the active policy or the environment (other than the world kind) leaves `worldHash` unchanged, so a matching hash does not show that they are unchanged.
+- Evidence: `manifestOf` in src/capabilities/cognitive.ts; the limit is stated in docs/reference/terminology-implementation.md (Execution Manifest).
+- Confidence: high
+- Closure: hash the real values: the model digest the server records at boot, a canonical digest of the effective policy, and an environment digest (world kind plus the facts the verification depends on, such as runtime and tool versions). Needs a test that changing each input changes `worldHash`, and a note on how existing stored hashes are treated; size M.
