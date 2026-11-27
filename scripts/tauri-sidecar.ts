@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PLATFORMS, stageShareTree, writeManifest } from "./package.ts";
+import { domainforgeBinding, PLATFORMS, stageShareTree, writeManifest } from "./package.ts";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 
@@ -42,12 +42,8 @@ const platform = PLATFORMS[bunTarget];
 if (!platform) throw new Error(`tauri-sidecar: unsupported target ${bunTarget}`);
 const exeSuffix = platform.exeSuffix;
 
-// The DomainForge npm package ships only the linux-x64 binding; other targets need it built first
-// (see .github/workflows/package.yml). Without it the exe compiles but crashes at startup.
-const bindingFile = join(repo, "node_modules", "@godspeedai", "domainforge", `domainforge-core.${platform.binding}.node`);
-if (!existsSync(bindingFile)) {
-  throw new Error(`tauri-sidecar: missing DomainForge binding ${bindingFile}; build it for ${platform.binding} first (see .github/workflows/package.yml)`);
-}
+// Without the DomainForge binding the exe compiles but crashes at startup.
+domainforgeBinding(repo, platform.binding, "tauri-sidecar");
 
 const binaries = join(repo, "src-tauri", "binaries");
 const resources = join(repo, "src-tauri", "resources", "cognate-workbench");

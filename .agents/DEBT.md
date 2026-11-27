@@ -145,3 +145,43 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: the failing run's diff (`+ undefined` before `"model-one"`).
 - Confidence: low
 - Closure: record the request path and a per-test nonce header in `providerFake.ts` and reject requests without it; size S.
+
+### Assignment controls refused under stream contention until the Cognate bump
+- Date: 2026-11-26
+- Location: src/capabilities/assignmentControls.ts; Cognate `packages/runtime-bun/src/assignment.ts` (`AssignmentService.append`).
+- Debt: an operator Interrupt or Spend that lands while the bound run streams can be refused with "too much contention on run <id>"; the control shows the refusal and stays open (fail closed, nothing lost). The cause is structural in Cognate: `AssignmentService.append` writes control events onto the run stream, which the executor writes with its own serialized version and halts on a conflict. Cognate's `fold.ts` (spec §29.1) forbids such foreign appends. Cognate #91 (DEBT-033, merged e33978a) adds bounded backoff, which only lowers the odds; the structural fix (branch `fix/assignment-controls-off-run-stream`) moves controls off the run stream.
+- Evidence: the browser journey failed about 5 of 16 local runs under load (contention persisted until the slow run ended); hosted CI passed it at 6a812e2 and 1a105bf. Both WP-23 tests retry only this refusal (documented in both). Separate from contention: the journey's red on main was a test timing defect, not this debt (the interrupt could land after the 8 s slow stream ended, so no step was in flight and no reconciliation arose); fixed by gating the slow scenario's first model call (about ten minutes, interrupted never waited out) and waiting for the call to be in flight before controls.
+- Confidence: high
+- Closure: release Cognate with the structural fix (publication needs owner authorization), bump this repo, then remove the contention retries from both tests; size S here.
+
+### Reconciliation card blames a restart for an operator interrupt
+- Date: 2026-11-26
+- Location: src/ui/AmbiguousStepCard.tsx.
+- Debt: the card says the step "was interrupted by a restart" even when the operator interrupted it through the Assignment control. The governed behaviour (no blind repeat, written observation required) is correct; only the cause text is wrong.
+- Evidence: screenshots/workbench/e2e-wp23-assignment-06-reconciliation.png.
+- Confidence: high
+- Closure: carry the interruption cause (restart or operator) to the card and word it accordingly; size S.
+
+### Interrupt records a fixed reason
+- Date: 2026-11-26
+- Location: src/ui/workbench/AssignmentChip.tsx.
+- Debt: the lifecycle requires a reason; the control records a fixed one naming where it came from. There is no free-text reason yet.
+- Evidence: AssignmentChip.tsx interrupt handler.
+- Confidence: high
+- Closure: add an optional reason field to the Interrupt confirmation; size S.
+
+### No production hand-off source
+- Date: 2026-11-26
+- Location: src/server.ts (`ServerOptions.handoffSource`), src/assignments/handoffSource.ts.
+- Debt: the Assignment control works only with a host-supplied hand-off source. Tests use test/handoff-fixture.ts. No production source exists until Horizon's case keeper is wired; the default (absent) fails closed: the control is unavailable and a hand-off is refused.
+- Evidence: test/J-CASE-ASSIGNMENT-handoff.test.ts "no source" case.
+- Confidence: high
+- Closure: Horizon wiring that supplies approved assignments (SEA-Forge #119/#120 track); size M.
+
+### Local WSL host flaps the network under browser tests
+- Date: 2026-11-26
+- Location: test/E2E-*.test.ts strict console-error assertions.
+- Debt: on the development WSL host, Chromium logs `net::ERR_NETWORK_CHANGED` 1-5 times per run; `ip monitor address route` printed 44 address/route changes in 30 s (eth2 deleted and re-added). Every E2E file's strict `expect(errors).toEqual([])` can fail there for a host reason. The assertion is kept strict; qualification uses the hosted CI shards.
+- Evidence: the WP-23 browser test passed all 18 behavioural assertions locally and failed only on that console line.
+- Confidence: medium (host cause observed, per-event causation not traced)
+- Closure: none needed in code; run browser gates on a stable-network runner.

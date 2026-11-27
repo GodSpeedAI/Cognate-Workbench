@@ -705,6 +705,37 @@
    "response": {
     "content": "# Summary\n\nHere is what I found:\n\n- first point\n- second point\n\n```ts\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n```"
    }
+  },
+  {
+   "_comment": "WP-23 (J-CASE-ASSIGNMENT-handoff): the Brief a stand-in hand-off source offers; the handed-off run's first message is that instruction, so the bound run settles instead of failing on an unmatched fixture.",
+   "match": {
+    "userMessage": "Record the verifier's observation for gate G3."
+   },
+   "response": {
+    "content": "Recorded the verifier's observation for gate G3 in the evidence record."
+   }
+  },
+  {
+   "_comment": "WP-23 (J-CASE-ASSIGNMENT-handoff, E2E-case-assignment-handoff): the FIRST model call of the slow scenario streams for about ten minutes, so a handed-off run is certain to still be mid-call when the operator reports spend and interrupts it, however slow the host is. Tests interrupt the call; they never wait it out. sequenceIndex counts per llmock process: boot one per test.",
+   "match": {
+    "userMessage": "[[scenario:wp23-handoff-slow]]",
+    "sequenceIndex": 0
+   },
+   "latency": 1000,
+   "chunkSize": 1,
+   "response": {
+    "content": "Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. Working through the slow observation for gate G4. "
+   }
+  },
+  {
+   "_comment": "WP-23: the retry that the operator's reconciliation (outcome failed) lets the agent make answers promptly.",
+   "match": {
+    "userMessage": "[[scenario:wp23-handoff-slow]]",
+    "sequenceIndex": 1
+   },
+   "response": {
+    "content": "Working through the slow observation for gate G4. This answer is streamed deliberately slowly so the operator has time to report spend and interrupt the handed-off run while it is still live, and can then resume it to let the same run finish its answer."
+   }
   }
  ]
 }

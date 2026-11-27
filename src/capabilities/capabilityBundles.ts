@@ -40,6 +40,30 @@ const registerSchema = {
         complements: { type: "array", items: { type: "string" } },
         owns: { type: "array", items: { type: "string" } },
         harness: { type: "object" },
+        mcpServers: {
+          type: "array", maxItems: 4,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,31}$" },
+              command: { type: "array", minItems: 1, maxItems: 32, items: { type: "string", minLength: 1, maxLength: 512 } },
+              secrets: { type: "array", maxItems: 16, items: { type: "object", properties: { env: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,63}$" }, key: { type: "string", minLength: 1, maxLength: 128 } }, required: ["env", "key"], additionalProperties: false } },
+              restrictions: {
+                type: "object",
+                properties: {
+                  filesystem: { type: "array", maxItems: 16, items: { type: "string", maxLength: 512 } },
+                  network: { type: "object", properties: { outbound: { type: "array", maxItems: 16, items: { type: "string", maxLength: 256 } } }, required: ["outbound"], additionalProperties: false },
+                  caps: { type: "object", properties: { memoryBytes: { type: "integer", minimum: 1 }, cpuSeconds: { type: "integer", minimum: 1 } }, additionalProperties: false },
+                  subprocess: { type: "boolean" },
+                },
+                additionalProperties: false,
+              },
+              stop: { enum: ["graceful", "emergency"] },
+            },
+            required: ["id", "command"],
+            additionalProperties: false,
+          },
+        },
       },
       required: ["name", "purpose", "skills"],
       additionalProperties: false,
@@ -51,7 +75,7 @@ const registerSchema = {
 
 const SYSTEM = { actor: { id: "system", kind: "system" as const }, tenant: "local" };
 
-const KNOWN_REQUIREMENT_KINDS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate"]);
+const KNOWN_REQUIREMENT_KINDS: ReadonlySet<string> = new Set(["capability.invoke", "skill.load", "harness.modify", "bundle.create", "bundle.activate", "mcp.server"]);
 
 export interface CapabilityBundlesOptions {
   readonly getService: () => RuntimeService;
@@ -127,6 +151,22 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
         for (const requirement of manifest.requirements ?? []) {
           if (!KNOWN_REQUIREMENT_KINDS.has(requirement)) await refuse(`unknown requirement kind ${requirement} — unsatisfiable declarations fail install (§1.2)`);
         }
+        // Executable payloads: the declaration must carry the mcp.server requirement (so activation is
+        // clamped on it), unique ids, and no environment name that could subvert the child's loader.
+        if ((manifest.mcpServers?.length ?? 0) > 0) {
+          if (!(manifest.requirements ?? []).includes("mcp.server")) await refuse("mcpServers require the mcp.server requirement (executable payloads are authority-gated)");
+          const seen = new Set<string>();
+          for (const server of manifest.mcpServers ?? []) {
+            if (seen.has(server.id)) await refuse(`duplicate MCP server id ${server.id}`);
+            seen.add(server.id);
+            for (const secret of server.secrets ?? []) {
+              if (/^(PATH|HOME|SHELL|IFS|ENV|BASH_ENV|NODE_OPTIONS|BUN_.*|LD_.*|DYLD_.*)$/.test(secret.env)) await refuse(`server ${server.id} maps a secret onto the reserved environment name ${secret.env}`);
+            }
+            for (const arg of server.command) {
+              if (arg.includes("${") && !/^[^$]*(\$\{bundleDir\}[^$]*)*$/.test(arg)) await refuse(`server ${server.id} uses a placeholder other than \${bundleDir}`);
+            }
+          }
+        }
         let harness: ReturnType<typeof validateHarness>;
         try {
           harness = validateHarness(manifest.harness);
@@ -166,7 +206,7 @@ export function capabilityBundlesComponent(options: CapabilityBundlesOptions): C
           for (const skill of manifest.skills) {
             if (skill.entry.startsWith("/") || skill.entry.split("/").includes("..") || !present.has(skill.entry)) await refuse(`skill ${skill.name} declares entry ${skill.entry}, which is not a file inside the bundle`);
           }
-          const stored = JSON.parse(JSON.stringify({ name: manifest.name, purpose: manifest.purpose, skills: manifest.skills, tools: manifest.tools ?? [], requirements: manifest.requirements ?? [], conflicts: manifest.conflicts ?? [], complements: manifest.complements ?? [], owns: manifest.owns ?? [], harness })) as Record<string, unknown>;
+          const stored = JSON.parse(JSON.stringify({ name: manifest.name, purpose: manifest.purpose, skills: manifest.skills, tools: manifest.tools ?? [], requirements: manifest.requirements ?? [], ...(manifest.mcpServers?.length ? { mcpServers: manifest.mcpServers } : {}), conflicts: manifest.conflicts ?? [], complements: manifest.complements ?? [], owns: manifest.owns ?? [], harness })) as Record<string, unknown>;
           // The version identity covers payload AND the whole validated manifest (R1-2).
           const materialized = await materializeVersion(options.home, capabilityId, sourceDir, stored);
           const versionHash = versionHashFor(materialized.manifest, stored);

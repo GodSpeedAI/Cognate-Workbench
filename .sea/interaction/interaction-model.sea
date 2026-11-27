@@ -164,6 +164,12 @@ Entity "ExpertEffectCommitment"
 // an attributable reason and observed outcome. Orchestrators and Specialists cannot resolve it.
 Entity "Handoff"
 
+// WP-23 (J-CASE-ASSIGNMENT-handoff): the FDE case assignment — `assign:<case>:<step>:<n>:<k>`, an
+// approved Brief and Budget delegated to this Workbench under a link. Not the team `Assignment`
+// above: one id and one episode_ref for its whole lifecycle, and exactly one bound run per id
+// (issued -> started -> (interrupted <-> resumed)* -> completed | failed | cancelled).
+Entity "CaseAssignment"
+
 Entity "ExpertMessage"
 
 Entity "ExpertMemory"
@@ -282,6 +288,8 @@ Resource "AssignmentRecord" units
 Resource "ExpertRunReceipt" units
 
 Resource "HandoffRecord" units
+
+Resource "CaseAssignmentBinding" units
 
 Resource "ExpertMessageRecord" units
 
@@ -429,6 +437,9 @@ Flow "SessionDraft" from "User" to "Session" quantity 1
 Flow "DirectorySuggestion" from "ExecutionWorld" to "User" quantity 1
 
 Flow "TaskBindingRecord" from "Task" to "Session" quantity 1
+
+// WP-23 (J-CASE-ASSIGNMENT-handoff): the governed CaseAssignment-to-Session binding a hand-off writes.
+Flow "CaseAssignmentBinding" from "CaseAssignment" to "Session" quantity 1
 
 Flow "TaskMoveRecord" from "User" to "Task" quantity 1
 
@@ -949,6 +960,21 @@ Instance j_remote_diagnostics of "CanonicalJourney" {
     settlement: "Every remote state change, pairing and error is a bounded workbench.remote.* event folded into the workbench projection's remote row, the Remote panel renders that durable history, the row never holds a pairing secret or link, polls are never recorded, and the history survives reload and restart",
     steps: "the server-side remote surface transitions (start, refresh, stop, phone pairing, pairing error) -> the recorder emits the bounded workbench.remote.* event -> the workbench projection folds it into the remote row's state and recent-transition ring -> the Remote panel renders the durable transitions beside the live status -> the operator copies a report that includes them",
     variants: "start then stop records both transitions; a pairing records the device label, never a credential or challenge; an error records a bounded message; closing the dialog loses nothing; a restart preserves the history; the 2 s and 5 s polls record nothing"
+}
+
+// WP-23: the operator hands an approved case assignment to a session. The approved Brief, Budget and case
+// context are resolved by the host from its hand-off source, never supplied by the request.
+Instance j_case_assignment_handoff of "CanonicalJourney" {
+    actor: "User",
+    capabilities: "session.caseAssignment.candidates, session.caseAssignment.handoff, assignment.view, assignment.interrupt, assignment.resume, assignment.spend",
+    evidence_class: "proposed",
+    initiating_condition: "A case assignment with an approved Brief and Budget awaits delegation and no session is working it",
+    journey_id: "J-CASE-ASSIGNMENT-handoff",
+    precondition: "The session exists in the sessions projection and the host's hand-off source offers the approved assignment",
+    purpose: "Let the operator hand an approved case assignment to a session so that exactly one run executes its Brief, bound to that assignment, its budget and its link",
+    settlement: "One run per assignment id is bound to the session and to the approved Brief, Budget and link, the session's assignment binding is recorded and folded, the operator alone can interrupt, resume and report spend against it, and the run's own agent can never drive its assignment",
+    steps: "operator opens the Assignment control and chooses an approved assignment -> the capability resolves the approved inputs from the host's hand-off source -> the session's run is opened bound to the assignment -> the session binding is recorded and folded -> the operator sees the assignment, its budget and its spend and can interrupt, resume or report spend -> an interrupted step's outcome being unknown, the operator reconciles it before the same run continues",
+    variants: "handing off the same assignment again resolves to the same run; no hand-off source is configured so the control is unavailable and the capability is refused; an unknown assignment or session is refused; a request that carries its own assignment is refused; an agent or another identity can neither hand off nor drive an assignment; spend above a numeric ceiling stops the run and is recorded, not dropped; interrupt then resume keeps the assignment id; a step interrupted mid-flight is never repeated blindly: the run waits until the operator reconciles it (a model call is retried, an effect is confirmed)"
 }
 
 Instance j_prefs_shortcuts of "CanonicalJourney" {

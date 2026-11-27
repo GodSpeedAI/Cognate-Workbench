@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { bootApp, inv, seedWorkspaceOnly, waitUntil, withTempHome, wbRows } from "./wb-helpers.ts";
+import { sshHostKeyPem } from "./helpers.ts";
 import { startSshFixture, type SshFixture } from "@godspeedai/cognate-execution-ssh/fixture";
 import type { PreviewView } from "../src/preview/service.ts";
 import type { PreviewRow } from "../src/workbench/state.ts";
@@ -158,7 +159,7 @@ describe("J-PREVIEW-register", () => {
 
   test("an SSH world's preview is reached through a real local forward; secrets stay out of the record", async () => {
     await withTempHome(async (home) => {
-      const fixture: SshFixture = await startSshFixture({ users: { dev: { password: PASSWORD } } });
+      const fixture: SshFixture = await startSshFixture({ hostKeyPem: sshHostKeyPem(), users: { dev: { password: PASSWORD } } });
       const { app, client } = await bootApp(home);
       try {
         const probe = (await client.invoke("execution.world.probe", { host: "127.0.0.1", port: fixture.port })) as { fingerprint: string };

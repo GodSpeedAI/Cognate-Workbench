@@ -42,16 +42,37 @@ export class AuthorityIndex {
    *  boot rebuild (which must not block server boot under full-suite parallelism) stays
    *  deterministic for handlers. */
   ready: Promise<void> = Promise.resolve();
+  #settleInitial: { resolve(): void; reject(error: unknown): void } | undefined;
   #sequence = 0;
   #unlisten: (() => void) | undefined;
 
-  constructor(readonly store: DurableStore, readonly tenant: string) {}
+  /** `awaitInitialRebuild`: `ready` stays pending from construction until the FIRST rebuild completes (or `fail` is called),
+   *  so a reader can never mistake the not-yet-initialised index for a ready one. */
+  constructor(readonly store: DurableStore, readonly tenant: string, options: { readonly awaitInitialRebuild?: boolean } = {}) {
+    if (options.awaitInitialRebuild) {
+      this.ready = new Promise<void>((resolve, reject) => { this.#settleInitial = { resolve, reject }; });
+      this.ready.catch(() => {}); // a rejection is observed by readers that await it; never an unhandled one
+    }
+  }
+
+  /** Fatal boot failure: readers awaiting the initial rebuild are rejected. */
+  fail(error: unknown): void {
+    this.#settleInitial?.reject(error);
+    this.#settleInitial = undefined;
+  }
 
   /** Boot: rebuild from the workbench projection fold (the reducer's rows are the fold truth),
    *  then subscribe to the commit hook for synchronous deltas. Fire-and-forget from boot —
    *  readers await `ready`. */
   rebuild(rows: readonly { key: string; value: unknown }[]): Promise<void> {
-    this.ready = this.#rebuild(rows);
+    const run = this.#rebuild(rows);
+    const initial = this.#settleInitial;
+    if (initial) {
+      // A failed attempt (a transient boot retry) leaves `ready` pending; only success settles it, `fail` rejects it.
+      run.then(() => { if (this.#settleInitial === initial) this.#settleInitial = undefined; initial.resolve(); }, () => {});
+      return run;
+    }
+    this.ready = run;
     return this.ready;
   }
 

@@ -340,6 +340,27 @@ export function bindSessionPin(domain: Domain) {
   return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
 }
 
+/**
+ * WP-23 (J-CASE-ASSIGNMENT-handoff): the operator's Hand off and the controls over the case
+ * assignment a run is bound to, anchored on `CaseAssignment` — the FDE case assignment, which is
+ * not the team `Assignment`.
+ */
+export const CASE_ASSIGNMENT_ANCHORS: readonly (readonly [string, string])[] = [
+  ["session.caseAssignment.candidates", "CaseAssignment"],
+  ["session.caseAssignment.handoff", "CaseAssignment"],
+  ["assignment.view", "CaseAssignment"],
+  ["assignment.interrupt", "CaseAssignment"],
+  ["assignment.resume", "CaseAssignment"],
+  ["assignment.spend", "CaseAssignment"],
+];
+
+export function bindCaseAssignment(domain: Domain) {
+  const bindings = CASE_ASSIGNMENT_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} case-assignment contracts, got ${contracts.length}`);
+  return Object.fromEntries(contracts.map((c) => [c.id, c.semanticRef])) as Readonly<Record<string, CapabilityContract["semanticRef"]>>;
+}
+
 export function tranche11Bindings(domain: Domain): readonly CapabilityBinding[] {
   return TRANCHE11_ANCHORS.map(([id, entity]) => ({ semanticId: domain.semanticId(entity), capability: { id, version: "1.0.0" } }));
 }
@@ -702,6 +723,10 @@ export const CAPABILITY_RUNTIME_ANCHORS: Readonly<Record<string, string>> = {
   "tool.skill_load": "CapabilityBundle",
   "capability.harness.resolve": "CapabilityBundle",
   "capability.harness.refresh": "CapabilityBundle",
+  "capability.mcp.start": "CapabilityBundle",
+  "capability.mcp.stop": "CapabilityBundle",
+  "capability.bundle.suspend": "CapabilityBundle",
+  "capability.bundle.resume": "CapabilityBundle",
 };
 
 export function bindCapabilityRuntime(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {

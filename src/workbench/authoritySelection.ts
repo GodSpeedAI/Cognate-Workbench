@@ -60,7 +60,7 @@ export function liveAuthorityFor(index: AuthorityIndex, row: ActivationRow, perm
   return liveClamp(index, row, nowMs);
 }
 
-export type CapabilityOp = "invoke" | "skill.load" | "activate" | "deactivate" | "harness.resolve" | "harness.refresh" | "harness.apply" | "uninstall" | "grant.issue" | "grant.revoke";
+export type CapabilityOp = "invoke" | "skill.load" | "activate" | "deactivate" | "harness.resolve" | "harness.refresh" | "harness.apply" | "uninstall" | "grant.issue" | "grant.revoke" | "suspend" | "resume" | "mcp.start" | "mcp.stop";
 
 export interface AuthorizeArgs {
   /** The durable enablement marker (§1.7). */
@@ -89,10 +89,27 @@ export function authorizeCapabilityOp(op: CapabilityOp, a: AuthorizeArgs): Autho
   // run. They carry no enablement or root-liveness precondition (revoking the root grant must
   // never lock the operator out), but they pass through this function as the LAST step before
   // their commit, so the one decision point covers every mutating op.
-  if (op === "uninstall" || op === "grant.issue" || op === "grant.revoke") {
+  if (op === "uninstall" || op === "grant.issue" || op === "grant.revoke" || op === "suspend" || op === "resume" || op === "mcp.stop") {
     if (a.actor.kind !== "user" || a.runId) return { ok: false, code: "operator-only", reason: `${op} is a human decision: only a direct operator may do this, not ${a.actor.kind} "${a.actor.id}"${a.runId ? ` inside run ${a.runId}` : ""}` };
     if (!a.index) return { ok: false, code: "index-unavailable", reason: "the authority index is unavailable — failing closed" };
     return { ok: true, index: a.index, principalId: LOCAL_ROOT_ID };
+  }
+  // Spawning a server (T3): a human act like activation, but it creates a process, so it carries
+  // the full precondition set: enablement, deployment invariant, live operator root, and the
+  // TARGET slot's activation active, unsuspended, covering `mcp.server` under a live clamp. The
+  // slot is the operator's explicit target (like activate/deactivate), never a caller's session.
+  if (op === "mcp.start") {
+    if (a.actor.kind !== "user" || a.runId) return { ok: false, code: "operator-only", reason: `mcp.start is a human decision: only a direct operator may do this, not ${a.actor.kind} "${a.actor.id}"${a.runId ? ` inside run ${a.runId}` : ""}` };
+    if (!a.enabled) return { ok: false, code: "runtime-disabled", reason: "the capability runtime is not enabled (workbench.capability_runtime.enabled marker absent)" };
+    if (!a.deploymentOk) return { ok: false, code: "deployment-invariant", reason: "the capability runtime is disabled: external PostgreSQL without an operator-declared single-writer deployment (§1.5)" };
+    if (!a.index || !a.capabilityId) return { ok: false, code: "index-unavailable", reason: "the authority index is unavailable — failing closed" };
+    const slot = a.index.activations.get(a.index.activationKey(a.capabilityId, "user", a.sessionId));
+    if (!slot) return { ok: false, code: "no-activation", reason: `capability ${a.capabilityId} has no activation in this slot` };
+    if (slot.state !== "active" || slot.suspensionReasons.length > 0) return { ok: false, code: slot.state === "suspended" || slot.suspensionReasons.length > 0 ? "suspended" : `inactive:${slot.state}`, reason: `activation of ${a.capabilityId} is ${slot.state}${slot.suspensionReasons.length ? ` (${slot.suspensionReasons.join(", ")})` : ""}` };
+    if (!permissionCovered(slot.ceiling, "mcp.server")) return { ok: false, code: "beyond-ceiling", reason: `mcp.server exceeds the activation ceiling of ${a.capabilityId}` };
+    const rootLive = liveAuthorityFor(a.index, slot, "mcp.server", a.nowMs);
+    if (!rootLive.ok) return rootLive;
+    return { ok: true, index: a.index, principalId: LOCAL_ROOT_ID, row: slot };
   }
   if (!a.enabled) return { ok: false, code: "runtime-disabled", reason: "the capability runtime is not enabled (workbench.capability_runtime.enabled marker absent)" };
   if (!a.deploymentOk) return { ok: false, code: "deployment-invariant", reason: "the capability runtime is disabled: external PostgreSQL without an operator-declared single-writer deployment (§1.5)" };

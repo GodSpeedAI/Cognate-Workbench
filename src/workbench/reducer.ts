@@ -470,6 +470,19 @@ export function reduceWorkbench(eventType: string, payload: unknown, recordedAt:
       const capabilityId = String(p.capabilityId ?? "unknown");
       return [{ key: `fault/${eventType}/${capabilityId}/${recordedAt}`, value: j({ capabilityId, kind: eventType, reason: String(p.reason ?? "unknown"), recordedAt }) }];
     }
+    // Spawn ledger (design 6.3): one row per spawn, folded from the intent / confirmed / terminal records.
+    case "capability.mcp.spawn.intended":
+    case "capability.mcp.spawned":
+    case "capability.mcp.exited": {
+      const spawnId = String(p.spawnId ?? "");
+      if (!spawnId) return [];
+      const key = `spawn/${spawnId}`;
+      const prev = get(key) as { [k: string]: unknown } | undefined;
+      if (eventType === "capability.mcp.spawn.intended") return [{ key, value: j({ ...p, status: "intended", intendedAt: recordedAt }) }];
+      if (!prev) return [];
+      if (eventType === "capability.mcp.spawned") return [{ key, value: j({ ...prev, status: prev.status === "exited" || prev.status === "reconciled-unknown" || prev.status === "reconcile-incomplete" ? prev.status : "confirmed", pid: p.pid ?? null, pgid: p.pgid ?? null, spawnedAt: recordedAt }) }];
+      return [{ key, value: j({ ...prev, status: p.outcome === "reconcile-incomplete" || p.reconciled === "reconcile-incomplete" || p.survivors === true ? "reconcile-incomplete" : p.outcome === "reconciled-unknown" ? "reconciled-unknown" : "exited", outcome: p.outcome ?? "unknown", exitCode: p.exitCode ?? null, stopReason: p.stopReason ?? null, termination: p.termination ?? null, stderrBytes: p.stderrBytes ?? null, stderrSha256: p.stderrSha256 ?? null, endedAt: recordedAt }) }];
+    }
     case "authority.grant.issued":
     case "authority.grant.revoked":
     case "authority.grant.expired": {

@@ -9,6 +9,7 @@ import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect
 import { resolvePg0Url } from "@godspeedai/cognate-store-postgres";
 import { startServer, LOCAL_OPERATOR, type AppServer, type ServerOptions } from "../src/server.ts";
 import { postgresUrl, schemaFor, storeConfigFor } from "../src/store.ts";
+import { utils as sshUtils } from "ssh2";
 
 /** Every app name a store is opened under for a temp home (`src/server.ts` uses "harness"; the
  *  migration tests use "migration"). Keep in sync with the `storeConfigFor`/`schemaFor` call sites. */
@@ -84,7 +85,7 @@ export async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise
  * posture (`uncontained-local`, `devAuth`) are out of T2 scope by design: the packaged app runs
  * its default posture.
  */
-export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks" | "executionPostureRecords" | "mcpSupervisorTimings">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   return await bootAppOnce(home, 0, extra);
 }
 
@@ -92,8 +93,10 @@ export async function bootApp(home: string, extra: Partial<Pick<ServerOptions, "
  *  race the same instance start and the losers get "Instance already running" from the pg0
  *  binary — the instance is up moments later. Retry the boot; per-attempt failures surface
  *  after the retries are spent. */
-async function bootAppOnce(home: string, attempt: number, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
+async function bootAppOnce(home: string, attempt: number, extra: Partial<Pick<ServerOptions, "capabilityRuntimeHooks" | "executionPostureRecords" | "mcpSupervisorTimings">> = {}): Promise<{ readonly app: AppServer; readonly client: ReturnType<typeof createClient> }> {
   const sidecar = process.env.COGNATE_TEST_SIDECAR;
+  // A sidecar child takes only port and resource settings: fail fast rather than run against a silent default.
+  if (sidecar && ("executionPostureRecords" in extra || "mcpSupervisorTimings" in extra)) throw new Error("bootApp: executionPostureRecords and mcpSupervisorTimings cannot be forwarded to a sidecar boot");
   if (!sidecar) {
     let app: AppServer;
     try {
@@ -246,4 +249,16 @@ export async function aimockChatRequests(port: number): Promise<readonly {
   const res = await fetch(`http://127.0.0.1:${port}/__aimock/journal?path=/v1/chat/completions`);
   if (!res.ok) throw new Error(`aimock journal fetch failed: HTTP ${res.status}`);
   return (await res.json()) as never;
+}
+
+/** An ed25519 SSH host key that ssh2 can parse. Under Bun, ssh2's own ed25519 generation yields a
+ *  private key its parser rejects ("Malformed OpenSSH private key") about once in 300 draws (7 of
+ *  2000 measured), which made every SSH journey flake. Draw until one parses; never hand a fixture
+ *  an unvalidated key. */
+export function sshHostKeyPem(): string {
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const pem = sshUtils.generateKeyPairSync("ed25519").private;
+    if (!(sshUtils.parseKey(pem) instanceof Error)) return pem;
+  }
+  throw new Error("sshHostKeyPem: ssh2 produced no parseable ed25519 host key in 32 draws");
 }

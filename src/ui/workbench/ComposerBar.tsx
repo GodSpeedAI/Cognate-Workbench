@@ -37,6 +37,8 @@ export interface ComposerBarProps {
   /** Which agent runs this session (chip + menu) and the one-line posture notice for a bound CLI. */
   readonly agentChip?: ReactNode;
   readonly agentNotice?: ReactNode;
+  /** The Assignment control (WP-23): the case assignment handed to this conversation. */
+  readonly assignmentChip?: ReactNode;
 }
 
 const LEVEL_WORDS: Readonly<Record<AttentionLevel, string>> = {
@@ -158,7 +160,7 @@ function TaskChip({
   );
 }
 
-export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bindError, onOpenWorkbench, state, steps, elapsedSeconds, approvalsPending, referent, onClearFocus, workspaceTitle, workspaceRoot, posture, agentChip, agentNotice }: ComposerBarProps) {
+export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bindError, onOpenWorkbench, state, steps, elapsedSeconds, approvalsPending, referent, onClearFocus, workspaceTitle, workspaceRoot, posture, agentChip, agentNotice, assignmentChip }: ComposerBarProps) {
   const tasks = useBindableTasks(workspaceId, sessionId);
   const bound = tasks.find((t) => t.id === taskId);
   const usage = useWbRow<UsageRow>(`usage/${taskId ?? `session:${sessionId ?? "none"}`}`);
@@ -182,6 +184,7 @@ export function ComposerBar({ workspaceId, sessionId, taskId, onTaskChange, bind
         )}
         {agentChip}
         <TaskChip tasks={tasks} taskId={taskId} locked={state !== "idle"} onTaskChange={onTaskChange} onOpenWorkbench={onOpenWorkbench} />
+        {assignmentChip}
         {referent && (
           <span className="ctx-chip ctx-chip-focus" role="status" aria-label="Focus" title={`"this" means ${describeFocusRef(referent.ref)} (${LEVEL_WORDS[referent.level]})`}>
             <span className="ctx-chip-key">Focus</span>
