@@ -49,8 +49,10 @@ export function providerRefusal(entry: RlmProviderRegistration, facts: Awaited<R
     // The host registered the contained bubblewrap port (#114): it provides containment and a spawn port,
     // with no network except the one host socket. Reach it cannot meter or enforce is still refused here;
     // the port itself refuses anything unenforceable again at spawn, before any process starts.
-    const reach = governance?.reach.network ?? "none";
-    if (reach !== "none" && !(reach === "host-mediated" && governance?.egress?.via === "unix-socket")) {
+    // As on the closed path, reach is admitted only when the OPERATOR declared it: a provider's own facts are self-attested.
+    if (!governance) return { code: "rlm-egress-uncontrolled", reason: `provider ${entry.provider.id} has no operator-declared port governance; its network reach is unverified` };
+    const reach = governance.reach.network;
+    if (reach !== "none" && !(reach === "host-mediated" && governance.egress?.via === "unix-socket")) {
       return { code: "rlm-egress-uncontrolled", reason: `provider declares ${reach} network reach; the contained port allows only none or one host unix socket` };
     }
     return undefined;

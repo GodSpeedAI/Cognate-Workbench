@@ -215,6 +215,10 @@ describe("provider admission follows the registered port", () => {
   test("without the port a contained provider is refused (today's behaviour)", () => {
     expect(providerRefusal(entry, facts)?.code).toBe("rlm-containment-unavailable");
   });
+  test("with the port, undeclared port governance is still refused (#112: reach is admitted only when the operator declared it)", () => {
+    const undeclared = { ...entry, portGovernance: undefined } as unknown as typeof entry;
+    expect(providerRefusal(undeclared, facts, true)?.code).toBe("rlm-egress-uncontrolled");
+  });
   test("with the port a no-network contained provider is admitted; open egress still is not", () => {
     expect(providerRefusal(entry, facts, true)).toBeUndefined();
     const open = { ...entry, portGovernance: { ...entry.portGovernance!, reach: { ...entry.portGovernance!.reach, network: "open" } } } as typeof entry;
