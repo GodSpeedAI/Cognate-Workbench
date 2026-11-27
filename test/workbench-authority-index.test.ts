@@ -68,14 +68,17 @@ describe("workbench authority index + lifecycle recorder", () => {
         expect(selected?.state).toBe("suspended");
         expect(selected?.suspensionReasons).toEqual(["grant-revoked"]);
         // A fresh rebuild (the replay-equality control) must see the identical row. The projection
-        // folds asynchronously — wait for the fold to catch up to suspend2 before rebuilding.
-        await waitUntil("fold catches up to suspend2", async () => {
-          const rows = await wbRows(app);
-          const key = rows.get(`activation/${capabilityId}/user`) as { state?: string } | undefined;
-          return key?.state === "suspended" ? key : undefined;
+        // folds asynchronously. "suspended" alone is ambiguous (the first operator-yank suspension
+        // also reads suspended), so wait for the exact suspend2 state and rebuild from that snapshot.
+        const freshRows = await waitUntil("fold catches up to suspend2", async () => {
+          const rows = (await app.runtime.service.readProjection(SYSTEM, { name: "workbench" })).rows;
+          const row = rows.find((r) => r.key === `activation/${capabilityId}/user`);
+          const value = row?.value as { state?: string; suspensionReasons?: string[] } | undefined;
+          const atSuspend2 = value?.state === "suspended"
+            && JSON.stringify(value.suspensionReasons) === JSON.stringify(["grant-revoked"]);
+          return atSuspend2 ? rows : undefined;
         });
         const fresh = new AuthorityIndex(app.runtime.store, LOCAL_OPERATOR.tenant);
-        const freshRows = (await app.runtime.service.readProjection(SYSTEM, { name: "workbench" })).rows;
         await fresh.rebuild(freshRows.map((r) => ({ key: r.key, value: r.value })));
         const freshRow = fresh.selectActivation(capabilityId, "user");
         expect(freshRow?.state).toBe("suspended");
