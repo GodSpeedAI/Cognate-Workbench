@@ -245,9 +245,10 @@ const GRANTED_CAPABILITIES = [
   RUNTIME_EXECUTION_INSPECT,
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
-  // J-RLM-CHILD-RUN: granted to the operator, system and agent principals; none is operator-only in
-  // the policy because the governed handlers enforce standing themselves and must refuse with a typed
-  // `rlm-*` code (a top-level or out-of-scope caller), which a policy denial would hide.
+  // J-RLM-CHILD-RUN: granted to the operator, system and agent principals. `rlm.providers` is operator-only
+  // in the policy (it exposes the registry); invoke/inspect/cancel are not, because the governed handlers
+  // enforce standing themselves and must refuse with a typed `rlm-*` code (a top-level or out-of-scope
+  // caller), which a policy denial would hide.
   ...Object.keys(RLM_CAPABILITY_ANCHORS),
   ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
   ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
@@ -374,6 +375,8 @@ function buildPolicy(): Policy {
     "session.harness.bind",
     "authority.grant.issue", "authority.grant.revoke", "authority.grant.list", "capability.runtime.enable",
     "workbench.safemode.clear",
+    // The provider registry and its refusal reasons are operator-facing.
+    "rlm.providers",
   ]);
   return rulePolicy(
     "deepseek-harness-app",
@@ -832,7 +835,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       governedRlmComponent({
         // Governed admission is closed: governance off, posture uncontained-local, no spawn port (Cognate defaults).
         base: createRlmComponent({ registry: rlmRegistry, getService, semanticRef: rlmRefs["rlm.invoke"] }),
-        registry: rlmRegistry, getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant,
+        registry: rlmRegistry, getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant, system: SYSTEM_CALLER.actor,
       }),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),

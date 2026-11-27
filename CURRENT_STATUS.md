@@ -1,4 +1,4 @@
-# Current status — revision 51
+# Current status — revision 52
 
 CognitiveOS #112 (Workbench half): the Workbench now consumes the published Cognate 0.11.0 `rlm.*` recursive child-run contract.
 
@@ -7,6 +7,8 @@ CognitiveOS #112 (Workbench half): the Workbench now consumes the published Cogn
 The parent waits on an `rlm-child` continuation that the completion bridge resolves when the `agent.rlm` run is terminal; the handoff then carries `rlmChildren` (run id, status) and evidence. Independent review and human settlement are unchanged. `rlm.inspect`/`rlm.cancel` are parent-scoped: the parent run, or the operator acting through the parent principal.
 
 **Unknown outcomes.** A provider view of `unknown` parks the child on `ambiguous:<id>` and the parent keeps waiting. `run.invocation.reconcile` resolves it; the handoff records the child as reconciled with an uncertainty, so it never reads as plain success.
+
+**Review fixes (rev 52).** Reach is admitted only when the operator declared `portGovernance` with network `none`. Prior child reservations are read from typed bindings and an unreadable one refuses (`rlm-budget-unverifiable`). Children get no `workspace-write` and no `edit`/`bash`/`run_code`/`capability_invoke`. Cancelling the parent Assignment cancels open children through `rlm.cancel` and records it. Each `rlm-child` wait resolves in isolation; `completed` needs a recorded `rlm.outcome`. No tenant fallback; `rlm.providers` is operator-only; a reused request key with different parameters is refused. The Cognate invoke re-entry is a `test.failing` plus a DEBT entry (Cognate PR #94).
 
 **Governed admission is closed.** Providers that spawn, claim isolation, need containment or have network reach are refused. No spawn port is registered.
 

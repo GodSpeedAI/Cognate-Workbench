@@ -51,9 +51,12 @@ tool capabilities.
 
 Cognate's published `rlm.*` contract, wrapped by `rlmGoverned.ts`. The provider registry is host
 configuration (`ServerOptions.rlmProviders`, default empty). Granted to operator, system and agent
-principals; none is operator-only in the policy because the handlers enforce standing and return a
-typed `rlm-*` refusal. Governed admission is closed in this slice: a provider that spawns, claims
-isolation, needs containment or has network reach is refused.
+principals; `rlm.providers` is operator-only (it exposes the registry). The others are not, because the
+handlers enforce standing and return a typed `rlm-*` refusal. Governed admission is closed in this slice: a provider that spawns, claims
+isolation, needs containment or has network reach is refused, and so is any provider whose reach the
+operator has not declared (`portGovernance` with network `none`). Children get no `workspace-write`
+mode and no effect-bearing tool (`edit`, `bash`, `run_code`, `capability_invoke`) until a governed
+effect path exists. Cancelling the parent Assignment cancels its open children through `rlm.cancel`.
 
 | Capability | Provider | Bound to | Notes |
 |---|---|---|---|

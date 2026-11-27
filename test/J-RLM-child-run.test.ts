@@ -10,12 +10,13 @@ import { RLM_AGENT_ID, RLM_CAPABILITIES, RLM_REFUSAL_CODES } from "@godspeedai/c
 import type { RlmProviderRegistration } from "@godspeedai/cognate-runtime-bun";
 import type { Component, CapabilityContract, FiberContext } from "@godspeedai/cognate-kernel-api";
 import { createRlmRegistry } from "@godspeedai/cognate-runtime-bun";
+import { ExpertCompletionBridge } from "../src/experts/bridge.ts";
 import { governedRlmComponent } from "../src/capabilities/rlmGoverned.ts";
 import type { ExpertsService } from "../src/experts/service.ts";
 import { LOCAL_OPERATOR } from "../src/server.ts";
 import type { Assignment } from "../src/experts/types.ts";
 import {
-  collaborationResponder, configureDefaultRoutes, invoke, waitForAssignment, withExpertApp,
+  collaborationResponder, configureDefaultRoutes, invoke, waitForAssignment, waitForState, withExpertApp,
   type ExpertTestApp, type FakeResponder,
 } from "./expert-helpers.ts";
 
@@ -68,7 +69,9 @@ function testProvider(id: string, options: { gate?: Deferred; facts?: Partial<Pr
   return provider as TestProvider;
 }
 
-const registration = (provider: RlmProvider, extra: Partial<RlmProviderRegistration> = {}): RlmProviderRegistration => ({ provider, label: `Test ${provider.id}`, ...extra });
+/** The operator declares each provider's reach; the default test provider declares none (no network). */
+const NO_REACH: NonNullable<RlmProviderRegistration["portGovernance"]> = { world: "local", reach: { filesystem: "none", network: "none", process: "group-kill", lifetime: "parent-death" }, evidence: "none" };
+const registration = (provider: RlmProvider, extra: Partial<RlmProviderRegistration> = {}): RlmProviderRegistration => ({ provider, label: `Test ${provider.id}`, portGovernance: NO_REACH, ...extra });
 
 const completion = (model: string, content: string): ModelResponse => ({ message: { role: "assistant", content }, toolCalls: [], finishReason: "stop", model });
 
@@ -94,7 +97,10 @@ async function runCase(t: ExpertTestApp, name: string, rlmProvider?: string, pla
     teamId: "cognate-team", workspaceId: t.workspaceId, message: `CASE:${name}`, requestId: `rlm-case-${name}`,
     ...(rlmProvider ? { rlmProvider } : {}),
   }) as { assignmentId: string };
-  return waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status));
+  return waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status)).catch(async (error: Error) => {
+    const a = (await t.state()).assignments[started.assignmentId];
+    throw new Error(`case ${name} did not settle (status ${a?.status}, run ${a?.runId}): ${error.message}`);
+  });
 }
 
 async function runEvents(t: ExpertTestApp, runId: string) {
@@ -123,6 +129,8 @@ describe("J-RLM-CHILD-RUN", () => {
       expect(providers.providers).toEqual([]);
       // Governed admission stays closed: no SEA authority and no containment claim.
       expect(providers.admission).toMatchObject({ governance: "off", posture: "uncontained-local" });
+      // L9: the provider registry and its refusal reasons are operator-only; an agent principal is denied.
+      await expect(t.app.runtime.service.invoke({ actor: { id: "wb-agent:builder", kind: "agent" }, tenant: LOCAL_OPERATOR.tenant }, { capability: RLM_CAPABILITIES.providers, input: {} })).rejects.toThrow();
 
       // Ordinary Team delegation (Orchestrator -> Builder) behaves exactly as before.
       const ordinary = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "ordinary delegation", requestId: "rlm-empty-ordinary" }) as { assignmentId: string };
@@ -290,7 +298,9 @@ describe("J-RLM-CHILD-RUN", () => {
     const spawns = testProvider("spawns", { facts: { executable: { version: "1.0.0", sha256: "a".repeat(64) } } });
     const boxed = testProvider("boxed", { facts: { toolPolicy: "contained" } });
     const egress = testProvider("egress");
-    const all = [det, down, spawns, boxed, egress];
+    // Self-attested facts only (no executable, no isolation, bridge-only) and NO declared port governance.
+    const undeclared = testProvider("undeclared");
+    const all = [det, down, spawns, boxed, egress, undeclared];
     await withExpertApp(responderFor("pm-model"), async (t) => {
       await configureDefaultRoutes(t);
       const refusedWith = async (a: Assignment, code: string) => {
@@ -324,6 +334,8 @@ describe("J-RLM-CHILD-RUN", () => {
       await refusedWith(await runCase(t, "spawns", "spawns"), "rlm-port-unavailable");
       await refusedWith(await runCase(t, "boxed", "boxed"), "rlm-containment-unavailable");
       await refusedWith(await runCase(t, "egress", "egress"), "rlm-egress-uncontrolled");
+      // H1: undeclared or self-attested reach is refused, never admitted on the provider's own say-so.
+      await refusedWith(await runCase(t, "undeclared", "undeclared"), "rlm-egress-uncontrolled");
       // A request for a provider other than the frozen selection is refused.
       await refusedWith(await runCase(t, "other", "det", [{ id: "c1", args: base({ providerId: "egress" }) }]), "rlm-provider-unknown");
       // An unresolvable pinned context is refused.
@@ -331,14 +343,18 @@ describe("J-RLM-CHILD-RUN", () => {
       // No selection frozen: the tool is not offered and a hallucinated call is refused (old snapshots behave as no RLM).
       const unselected = await runCase(t, "noselect");
       expect(unselected.execution.rlm).toBeUndefined();
-      expect((await toolFailures(t, unselected)).length).toBeGreaterThan(0);
-      expect(t.providerCalls.filter((c) => c.model === "pm-model" && JSON.stringify(c.messages).includes("CASE:noselect")).every((c) => !c.toolNames.includes("rlm_delegate"))).toBe(true);
+      // The model-visible tool is absent by name, so a hallucinated call dies at the tool boundary before any dispatch.
+      expect((await toolFailures(t, unselected)).join("\n")).toContain('unknown tool "rlm_delegate"');
+      const noselectCalls = t.providerCalls.filter((c) => c.model === "pm-model" && JSON.stringify(c.messages).includes("CASE:noselect"));
+      expect(noselectCalls.length).toBeGreaterThan(0);
+      for (const call of noselectCalls) expect(call.toolNames).not.toContain("rlm_delegate");
       await nothingDispatched();
     }, {
       rlmProviders: [
         registration(det),
         registration(down, { availability: { status: "unavailable", reason: "operator disabled" } }),
         registration(spawns),
+        registration(undeclared, { portGovernance: undefined }),
         registration(boxed, { portGovernance: { world: "contained-streaming", reach: { filesystem: "workspace-ro", network: "none", process: "group-kill", lifetime: "parent-death" }, evidence: "process-ledger" } }),
         registration(egress, { portGovernance: { world: "local", reach: { filesystem: "none", network: "proxied", process: "group-kill", lifetime: "parent-death" }, evidence: "none", egress: { via: "loopback-proxy", destinations: ["example.invalid"] } } }),
       ],
@@ -455,5 +471,175 @@ describe("J-RLM-CHILD-RUN", () => {
       await expect(handler({ invocationId: "inv-1", parentRunId: "run-parent" }, { actor: { id: "wb-agent:product-manager", kind: "agent" }, tenant: LOCAL_OPERATOR.tenant } as never)).rejects.toThrow("rlm-invocation-unknown");
       expect(seen).toHaveLength(2);
     }
+  });
+
+  /** A PM -> Builder flow in which the Builder (depth 1, inheriting the frozen selection) makes the given rlm calls. */
+  const builderResponder = (tag: string, builderCalls: readonly { id: string; args: ToolArgs }[]): FakeResponder => async (route, request) => {
+    const text = JSON.stringify(request.messages);
+    const noTool = !request.messages.some((m) => m.role === "tool");
+    if (route.model === "pm-model" && text.includes(`CASE:${tag}`) && noTool) {
+      return { message: { role: "assistant", content: "" }, toolCalls: [{ id: `delegate-${tag}`, name: "team_delegate", arguments: { expertId: "builder", purpose: `CASE:${tag}-builder work`, acceptance: ["Report"] } }], finishReason: "tool_calls", model: route.model };
+    }
+    if (route.model === "builder-model" && noTool) {
+      return { message: { role: "assistant", content: "" }, toolCalls: builderCalls.map((c) => ({ id: c.id, name: "rlm_delegate", arguments: c.args })), finishReason: "tool_calls", model: route.model };
+    }
+    return collaborationResponder(route, request);
+  };
+
+  test("reservations accumulate: a second child that pushes past the ceiling is refused, and a duplicate still resolves to the first", async () => {
+    const provider = testProvider("det");
+    await withExpertApp(responderFor("pm-model"), async (t) => {
+      await configureDefaultRoutes(t);
+      await saveExpertBudget(t, "product-manager", "pm-model", 1);
+      const a = await runCase(t, "accum", "det", [
+        { id: "a1", args: base({ key: "k-a", budget: { limit: 0.6 } }) },
+        { id: "b1", args: base({ key: "k-b", budget: { limit: 0.6 } }) },
+        { id: "a2", args: base({ key: "k-a", budget: { limit: 0.6 } }) },
+      ]);
+      const failures = await toolFailures(t, a);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toContain("rlm-budget-unverifiable");
+      const started = (await runEvents(t, a.runId!)).filter((e) => e.eventType === "rlm.child.started");
+      expect(started).toHaveLength(2);
+      expect(started[0]!.payload.childRunId).toBe(started[1]!.payload.childRunId);
+      expect(await childRuns(t)).toHaveLength(1);
+      expect(new Set(provider.invokes.map((r) => r.invocationId)).size).toBe(1);
+    }, { rlmProviders: [registration(provider)] });
+  }, 90_000);
+
+  test("a repeated request key with different parameters is refused, not answered with the first child", async () => {
+    const provider = testProvider("det");
+    await withExpertApp(responderFor("pm-model"), async (t) => {
+      await configureDefaultRoutes(t);
+      await saveExpertBudget(t, "product-manager", "pm-model");
+      const a = await runCase(t, "dupdiff", "det", [
+        { id: "d1", args: base({ key: "same-key", purpose: "First purpose" }) },
+        { id: "d2", args: base({ key: "same-key", purpose: "A different purpose" }) },
+        { id: "d3", args: base({ key: "same-key", purpose: "First purpose" }) },
+      ]);
+      const failures = await toolFailures(t, a);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toContain("rlm-invocation-ambiguous");
+      expect(await childRuns(t)).toHaveLength(1);
+      expect(new Set(provider.invokes.map((r) => r.invocationId)).size).toBe(1);
+    }, { rlmProviders: [registration(provider)] });
+  }, 90_000);
+
+  test("while governed admission is closed a child gets no workspace-write mode and no mutating tool, even from a writing parent", async () => {
+    const det = testProvider("det");
+    const responder = builderResponder("mut", [
+      { id: "m-edit", args: base({ tools: ["edit"] }) },
+      { id: "m-bash", args: base({ tools: ["bash"] }) },
+      { id: "m-mode", args: base({ mode: "workspace-write" }) },
+    ]);
+    await withExpertApp(responder, async (t) => {
+      await configureDefaultRoutes(t);
+      await saveExpertBudget(t, "builder", "builder-model", 1);
+      const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "CASE:mut", requestId: "rlm-case-mut", mode: "workspace-write", rlmProvider: "det" }) as { assignmentId: string };
+      const parent = await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status));
+      const builder = Object.values((await t.state()).assignments).find((a) => a.parentId === parent.id)!;
+      expect(builder.mode).toBe("workspace-write");
+      expect(builder.execution.tools).toEqual(expect.arrayContaining(["edit", "bash"]));
+      const failures = await toolFailures(t, builder);
+      expect(failures).toHaveLength(3);
+      for (const failure of failures) expect(failure).toContain("rlm-authority-exceeds-parent");
+      expect(det.invokes).toHaveLength(0);
+      expect(await childRuns(t)).toHaveLength(0);
+    }, { rlmProviders: [registration(det)] });
+  }, 90_000);
+
+  test("cancelling the parent Assignment cancels its open child run through rlm.cancel and records it", async () => {
+    const gate = deferred();
+    const provider = testProvider("det", { gate });
+    await withExpertApp(responderFor("pm-model"), async (t) => {
+      await configureDefaultRoutes(t);
+      await saveExpertBudget(t, "product-manager", "pm-model");
+      cases.pcancel = [{ id: "call-pcancel", args: base() }];
+      const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "CASE:pcancel", requestId: "rlm-case-pcancel", rlmProvider: "det" }) as { assignmentId: string };
+      const parent = await waitForAssignment(t, started.assignmentId, (a) => !!a.runId);
+      let childRunId = "";
+      for (const deadline = Date.now() + 20_000; !childRunId; await Bun.sleep(25)) {
+        const e = (await runEvents(t, parent.runId!)).find((ev) => ev.eventType === "rlm.child.started");
+        if (e) childRunId = String(e.payload.childRunId);
+        else if (Date.now() > deadline) throw new Error("no child started");
+      }
+      await invoke(t, "team.cancel", { assignmentId: started.assignmentId, requestId: "rlm-parent-cancel" });
+      let status = "";
+      for (const deadline = Date.now() + 20_000; status !== "cancelled"; await Bun.sleep(25)) {
+        status = (await t.app.runtime.service.getRun(LOCAL_OPERATOR, { runId: childRunId })).status;
+        if (Date.now() > deadline) throw new Error(`child run stayed ${status}`);
+      }
+      expect(provider.cancels).toEqual([childRunId]);
+      // The bridge records the cancellation after rlm.cancel returns.
+      const state = await waitForState(t, (s) => !!s.audit?.some((entry) => entry.capability === "rlm.cancel" && entry.runId === parent.runId), "recorded rlm.cancel outcome");
+      expect(state.assignments[started.assignmentId]!.status).toBe("cancelled");
+    }, { rlmProviders: [registration(provider)] });
+  }, 90_000);
+
+  // Known gap: Cognate 0.11.0 re-executes the agent.rlm body on resume, so a provider's invoke is entered
+  // again for the SAME invocation after operator reconciliation. Cognate PR #94 fixes it; remove `.failing`
+  // once the Workbench consumes that release (tracked in .agents/DEBT.md).
+  test.failing("a provider invoke is entered exactly once per invocation across a reconciliation (Cognate PR #94)", async () => {
+    const provider = testProvider("amb", { unknown: true });
+    await withExpertApp(responderFor("pm-model"), async (t) => {
+      await configureDefaultRoutes(t);
+      await saveExpertBudget(t, "product-manager", "pm-model");
+      cases.reentry = [{ id: "call-reentry", args: base() }];
+      const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "CASE:reentry", requestId: "rlm-case-reentry", rlmProvider: "amb" }) as { assignmentId: string };
+      let wait: Awaited<ReturnType<typeof t.app.runtime.service.listContinuations>>[number] | undefined;
+      for (const deadline = Date.now() + 20_000; !wait; await Bun.sleep(25)) {
+        wait = (await t.app.runtime.service.listContinuations(LOCAL_OPERATOR, { status: "OPEN" })).find((c) => c.type === "ambiguous-invocation");
+        if (Date.now() > deadline) throw new Error("child never parked");
+      }
+      await invoke(t, "run.invocation.reconcile", { continuationId: wait.id, outcome: "succeeded", reason: "operator observed success" });
+      await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status));
+      const perInvocation = new Map<string, number>();
+      for (const r of provider.invokes) perInvocation.set(r.invocationId, (perInvocation.get(r.invocationId) ?? 0) + 1);
+      expect([...perInvocation.values()]).toEqual([1]);
+    }, { rlmProviders: [registration(provider)] });
+  }, 90_000);
+
+  test("one bad rlm-child wait never blocks the others, and completed needs recorded rlm.outcome evidence", async () => {
+    const resolved: { id: string; input: Record<string, unknown> }[] = [];
+    const run = (runId: string, status = "completed") => ({ runId, agent: RLM_AGENT_ID, status, correlationId: `rlm:p1:inv-${runId}`, output: { runId, status: "completed" } });
+    const service = {
+      getRun: async (_caller: unknown, r: { runId: string }) => { if (r.runId === "c-missing") throw new Error("child run gone"); return run(r.runId); },
+      events: async function* (_caller: unknown, r: { runId: string }) { if (r.runId === "c-out") yield { eventType: "rlm.outcome", payload: { status: "completed", evidence: ["e1"] } }; },
+      resolveContinuation: async (_caller: unknown, r: { continuationId: string; input: Record<string, unknown> }) => {
+        if (r.continuationId === "w-conflict") throw new Error("continuation conflict");
+        resolved.push({ id: r.continuationId, input: r.input });
+        return { outcome: "transitioned" };
+      },
+    };
+    const bridge = new ExpertCompletionBridge({ service, caller: () => ({ actor: { id: "system", kind: "system" }, tenant: "t" }) } as never, "t");
+    const wait = (id: string, child: string) => ({ id, type: "rlm-child", runId: "p1", condition: { invocationId: `inv-${child}`, childRunId: child } });
+    await bridge.reconcileRlmChildren([wait("w-bad", "c-missing"), wait("w-conflict", "c-conflict"), wait("w-noout", "c-noout"), wait("w-out", "c-out")]);
+    expect(resolved.map((r) => r.id)).toEqual(["w-noout", "w-out"]);
+    // No rlm.outcome evidence: an unestablished outcome is unknown, never completed.
+    expect(resolved[0]!.input.status).toBe("unknown");
+    expect(resolved[1]!.input).toMatchObject({ status: "completed", evidence: ["e1"] });
+  });
+
+  test("the wrapper requires a tenant and surfaces infrastructure errors as themselves", async () => {
+    const contracts: CapabilityContract[] = Object.values(RLM_CAPABILITIES).map((id) => ({ id, version: "1.0.0" }) as CapabilityContract);
+    const base: Component = { id: "rlm", provides: contracts, activate(fiber) { for (const c of contracts) fiber.provide(c, async () => ({ status: "admitted" })); } };
+    const mount = async (invocation: () => Promise<unknown>) => {
+      const handlers = new Map<string, (input: unknown, ctx: never) => Promise<unknown>>();
+      const experts = { caller: () => LOCAL_OPERATOR, invocation, service: {}, state: async () => ({}) } as unknown as ExpertsService;
+      await governedRlmComponent({ base, registry: createRlmRegistry(), getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant })
+        .activate({ provide: (c: CapabilityContract, h: never) => handlers.set(c.id, h) } as unknown as FiberContext);
+      return handlers.get(RLM_CAPABILITIES.invoke)!;
+    };
+    const ctx = (tenant?: string) => ({ runId: "run-parent", actor: { id: "wb-agent:product-manager", kind: "agent" }, ...(tenant ? { tenant } : {}) }) as never;
+    const input = { requestId: "r1", task: { purpose: "p", acceptance: [] }, budget: { limit: 0.1 } };
+    // No silent tenant fallback.
+    await expect((await mount(async () => { throw new Error("unused"); }))(input, ctx())).rejects.toThrow("tenant");
+    // A known parent-binding refusal maps to the typed code; an infrastructure error is not disguised as one.
+    await expect((await mount(async () => { throw new Error("Untrusted or inactive Expert run"); }))(input, ctx("t"))).rejects.toThrow("rlm-budget-unverifiable");
+    const infra = (await mount(async () => { throw new Error("database unreachable"); }))(input, ctx("t"));
+    await expect(infra).rejects.toThrow("database unreachable");
+    await infra.catch((e: Error) => expect(e.message).not.toContain("rlm-budget-unverifiable"));
+    // A live Assignment with no frozen provider selection is refused with the exact code before any dispatch.
+    await expect((await mount(async () => ({ id: "a1", attempt: 1, depth: 0, mode: "read-only", teamId: null, execution: { tools: ["read"] } })))(input, ctx("t"))).rejects.toThrow("rlm-provider-unavailable");
   });
 });

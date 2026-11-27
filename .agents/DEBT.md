@@ -145,3 +145,11 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: the failing run's diff (`+ undefined` before `"model-one"`).
 - Confidence: low
 - Closure: record the request path and a per-test nonce header in `providerFake.ts` and reject requests without it; size S.
+
+### Cognate 0.11.0 re-enters a provider's invoke after RLM reconciliation
+- Date: 2026-11-26
+- Location: node_modules/@godspeedai/cognate-runtime-bun/src/rlm.ts (`createRlmAgent`: `entry.provider.invoke` runs outside a recorded step); test/J-RLM-child-run.test.ts (`test.failing`, "a provider invoke is entered exactly once per invocation").
+- Debt: After an operator reconciles an ambiguous child (`run.invocation.reconcile`), the child body replays and the provider's `invoke` is entered a second time for the same invocation. A real provider could repeat its external work. The Workbench creates no second child run or invocation id, and registers no spawn port, so nothing spawns today.
+- Evidence: `provider.invokes` holds 2 requests with one `invocationId` after one reconciliation (observed in the #112 journey).
+- Confidence: high
+- Closure: Cognate PR #94 fixes it. Consume that release, then delete the `.failing` marker so the test asserts exactly one entry; size S.
