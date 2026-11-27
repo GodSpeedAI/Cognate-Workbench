@@ -469,3 +469,81 @@ describe("N2/N4/N5/N6", () => {
     expect(existsSync(ran)).toBe(false);
   });
 });
+
+describe("execution profile: the operator-approved, launch-independent digest (#116)", () => {
+  const profileOf = async (c: ContainedStdioPortConfig, s: StdioSpawnSpec = spec()) => (await containedStdioSpawnPort(c).executionProfile(s)).digest;
+  const okLauncher = async (name: string) => okLauncherFor(name, join(root, `${name}-ran`));
+
+  test("two launches with different runs and workspaces: equal profile digest, different plan digests", async () => {
+    const lc = await okLauncher("prof-a");
+    const ws2 = join(root, "prof-ws2"); await mkdir(ws2);
+    const portA = containedStdioSpawnPort({ ...config, launcher: lc });
+    const portB = containedStdioSpawnPort({ ...config, launcher: lc, workspaceRoot: ws2 });
+    const a = await portA.plan(spec(), { intentId: "i1", runId: "r1" });
+    const b = await portB.plan(spec({ cwd: ws2 }), { intentId: "i2", runId: "r2" });
+    expect(a.executionProfileDigest).toBe(b.executionProfileDigest);
+    expect(a.digest).not.toBe(b.digest);
+    expect(a.plan.executionProfileDigest).toBe(a.executionProfileDigest); // the plan embeds it
+    expect(a.executionProfileDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const blob = JSON.stringify(a.executionProfile);
+    for (const forbidden of ["r1", workspace, "\"dev\"", "\"ino\"", "intentId", "runId"]) expect(blob).not.toContain(forbidden);
+  });
+
+  test("two port instances agree, including with allowlisted env values that differ", async () => {
+    const lc = await okLauncher("prof-b");
+    const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"] };
+    const one = await containedStdioSpawnPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "x" } }), ctx);
+    const two = await containedStdioSpawnPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "y" } }), ctx);
+    expect(one.executionProfileDigest).toBe(two.executionProfileDigest);   // env values are not part of the profile
+    expect(one.digest).not.toBe(two.digest);                               // but they are part of the launch
+    const same = containedStdioSpawnPort(withEnv);
+    expect((await same.plan(spec({ env: { FIXTURE_FLAG: "x" } }), ctx)).executionProfileDigest).toBe(one.executionProfileDigest);
+  });
+
+  test("changing the executable, launcher, a ceiling, the network policy, an env name, args or a caps request changes it", async () => {
+    const lc = await okLauncher("prof-c");
+    const base = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"] };
+    const baseline = await profileOf(base);
+    expect(await profileOf(base)).toBe(baseline);
+    const otherText = "#!/bin/sh\necho other\n";
+    const exe2 = join(root, "bin", "child2"); await writeFile(exe2, otherText); await chmod(exe2, 0o755);
+    const lc2Text = FAKE_LAUNCHER(join(root, "prof-c2-ran"), true).replace("0.13.1", "0.13.2");
+    const lc2 = join(root, "bin", "prof-c2"); await writeFile(lc2, lc2Text); await chmod(lc2, 0o755);
+    const sock = join(root, "prof.sock");
+    const server = Bun.listen({ unix: sock, socket: { data() {} } });
+    try {
+      const changed: [string, string][] = [
+        ["executable digest", await profileOf({ ...base, executables: [{ path: exe2, sha256: sha(otherText) }] }, spec({ argv: [exe2, "--serve"] }))],
+        ["launcher digest and version", await profileOf({ ...base, launcher: { path: lc2, sha256: sha(lc2Text) } })],
+        ["ceiling", await profileOf({ ...base, ceilings: { outputBytes: 2048 } })],
+        ["tmpBytes", await profileOf({ ...base, ceilings: { tmpBytes: 1_048_576 } })],
+        ["fsizeBytes", await profileOf({ ...base, ceilings: { fsizeBytes: 1_048_576 } })],
+        ["caps request", await profileOf(base, spec({ restrictions: { caps: { cpuSeconds: 3 } } }))],
+        ["network policy", await profileOf({ ...base, hostSocket: sock }, spec({ restrictions: { network: { outbound: [`host-socket:${sock}`] } } }))],
+        ["env allowlist name", await profileOf({ ...base, envAllowlist: ["FIXTURE_FLAG", "OTHER"] })],
+        ["args", await profileOf(base, spec({ argv: [executable, "--other"] }))],
+        ["runtime roots", await profileOf({ ...base, runtimeRoots: ["/usr/bin", "/usr/lib"] })],
+      ];
+      for (const [what, digest] of changed) expect([what, digest === baseline]).toEqual([what, false]);
+      expect(new Set(changed.map(([, d]) => d)).size).toBe(changed.length);
+    } finally { server.stop(true); }
+  });
+
+  test("authorize receives the plan digest and the profile digest, and the second computation confirms the profile", async () => {
+    const lc = await okLauncher("prof-d");
+    let seen: { digest: string; profile: string; planProfile: string } | undefined;
+    const port = containedStdioSpawnPort({ ...config, launcher: lc, authorize: async (plan, digest, _ctx, profileDigest) => { seen = { digest, profile: profileDigest, planProfile: plan.executionProfileDigest }; } });
+    const expected = await port.plan(spec(), ctx);
+    await port.spawn(spec(), ctx);
+    expect(seen).toEqual({ digest: expected.digest, profile: expected.executionProfileDigest, planProfile: expected.executionProfileDigest });
+    await port.dispose();
+  });
+
+  test("profile drift between authorization and spawn refuses with a profile-specific reason", async () => {
+    const lc = await okLauncher("prof-e");
+    let widened = false;
+    const flaky = { ...config, launcher: lc, get ceilings() { return widened ? { outputBytes: 8192 } : { outputBytes: 4096 }; }, authorize: async () => { widened = true; } } as ContainedStdioPortConfig;
+    const e = await refusal(containedStdioSpawnPort(flaky).spawn(spec(), ctx));
+    expect(e.reason).toContain("execution profile drifted");
+  });
+});

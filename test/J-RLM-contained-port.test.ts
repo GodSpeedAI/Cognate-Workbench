@@ -109,6 +109,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
   let failure: string | undefined;
   let manifestPlan: unknown;
   let manifestDigest: string | undefined;
+  let manifestProfile: string | undefined;
 
   const fixture = async (label: string) => {
     const dir = join(base, label);
@@ -180,8 +181,11 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       // The contained run: host socket slot configured so egress is one reachable path and nothing else.
       const port = makePort(f.workspace, { hostSocket: join(f.dir, "egress.sock"), envAllowlist: ["FIXTURE_FLAG"] });
       const containedSpec = spec(f.workspace, { network: { outbound: [`host-socket:${join(f.dir, "egress.sock")}`] } });
-      const { plan, digest } = await port.plan({ ...containedSpec, env: { FIXTURE_FLAG: "on" } }, ctx);
-      if (rep === 1) { manifestPlan = plan; manifestDigest = digest; expect(digest).toBe(launchPlanDigest(plan)); }
+      const { plan, digest, executionProfileDigest: profileDigest } = await port.plan({ ...containedSpec, env: { FIXTURE_FLAG: "on" } }, ctx);
+      if (rep === 1) { manifestPlan = plan; manifestDigest = digest; manifestProfile = profileDigest; expect(digest).toBe(launchPlanDigest(plan)); }
+      // The operator-approved profile is stable across repetitions (fresh workspaces, sockets and runs); the launch digest is not.
+      expect(profileDigest).toBe(manifestProfile as string);
+      if (rep > 1) expect(digest).not.toBe(manifestDigest);
       const s = await open(port, { ...containedSpec, env: { FIXTURE_FLAG: "on" } });
       expect(port.inspect(s.id).launchPlanDigest).toBe(digest);
 
@@ -463,7 +467,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       ticket: "SEA-Forge #114", complete: failure === undefined, ...(failure ? { failure } : {}), recordedAt: new Date().toISOString(), commit,
       host: { kernel: Bun.spawnSync(["uname", "-r"]).stdout.toString().trim(), os: process.platform, arch: process.arch, bun: Bun.version, wsl: existsSync("/proc/sys/fs/binfmt_misc/WSLInterop") || existsSync("/proc/sys/fs/binfmt_misc/WSLInterop-late") },
       launcher: { ...launcher, version: bwrapVersion }, fixtureInterpreter: pythonPin,
-      launchPlan: manifestPlan, launchPlanDigest: manifestDigest,
+      launchPlan: manifestPlan, launchPlanDigest: manifestDigest, executionProfileDigest: manifestProfile,
       scenarios: evidence,
     };
     const out = join(outDir, `contained-port-${Date.now()}.json`);
