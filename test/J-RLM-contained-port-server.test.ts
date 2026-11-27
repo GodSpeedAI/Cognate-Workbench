@@ -107,6 +107,26 @@ describe("J-RLM-contained-port wiring", () => {
         const governedLines = await markerLines(f.marker);
         expect(governedLines).toBeGreaterThanOrEqual(2);
 
+        // Attack: replay the genuine admission. The child input the governed rlm.invoke derived is recorded in the child run.
+        const [genuine] = await t.app.runtime.service.listRuns(LOCAL_OPERATOR, { agent: RLM_AGENT_ID });
+        const real = genuine!.input as Record<string, unknown>;
+        const terminal = async (runId: string): Promise<string> => {
+          let status = "";
+          for (let i = 0; i < 200 && !["failed", "completed", "cancelled"].includes(status); i++) { await Bun.sleep(50); status = (await t.app.runtime.service.getRun(LOCAL_OPERATOR, { runId })).status; }
+          return status;
+        };
+        const replays: Record<string, Record<string, unknown>> = {
+          identicalSecondUse: real,
+          widenedAuthority: { ...real, authority: { tools: ["read", "bash"], mode: "read-only" } },
+          biggerBudget: { ...real, budget: { ...(real.budget as object), limit: 50 } },
+        };
+        for (const [name, replayInput] of Object.entries(replays)) {
+          const replay = await t.app.runtime.service.startRun(LOCAL_OPERATOR, { agent: RLM_AGENT_ID, idempotencyKey: `replay-${name}`, correlationId: genuine!.correlationId ?? `rlm:replay:${name}`, input: replayInput as unknown as Json });
+          expect(await terminal(replay.runId)).toBe("failed");
+          expect(provider.invokes).toHaveLength(1); // never invoked again
+          expect(await markerLines(f.marker)).toBe(governedLines); // and the launcher never ran again
+        }
+
         // Attack: start the agent.rlm child run directly, bypassing rlm.invoke's grant, depth and reservation checks.
         const forged = await t.app.runtime.service.startRun(LOCAL_OPERATOR, {
           agent: RLM_AGENT_ID, idempotencyKey: "forged-direct", correlationId: "rlm:forged:forged",

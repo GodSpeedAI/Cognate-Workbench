@@ -42,13 +42,14 @@ beforeAll(async () => {
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
 const ctx = { intentId: "i", runId: "r" };
+const KEY = new Uint8Array(32).fill(7);
 const spec = (over: Partial<StdioSpawnSpec> & { restrictions?: StdioSpawnSpec["restrictions"] } = {}): StdioSpawnSpec => ({ argv: [executable, "--serve"], cwd: workspace, env: {}, restrictions: {}, ...over });
 const refusal = async (promise: Promise<unknown>): Promise<RlmRefusedError> => {
   try { await promise; } catch (error) { if (error instanceof RlmRefusedError) return error; throw error; }
   throw new Error("expected a typed refusal, but the call succeeded");
 };
-const plan = async (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config, c2 = ctx) => (await buildLaunchPlan({ config: c, spec: s, ctx: c2, launcherVersion: "0.13.1" })).plan;
-const material = async (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config) => (await buildLaunchPlan({ config: c, spec: s, ctx, launcherVersion: "0.13.1" })).material;
+const plan = async (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config, c2 = ctx) => (await buildLaunchPlan({ config: c, spec: s, ctx: c2, envKey: KEY, launcherVersion: "0.13.1" })).plan;
+const material = async (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config) => (await buildLaunchPlan({ config: c, spec: s, ctx, envKey: KEY, launcherVersion: "0.13.1" })).material;
 
 describe("launch plan", () => {
   test("is read-only, unshared, capability-free and records every control", async () => {
@@ -69,7 +70,8 @@ describe("launch plan", () => {
     expect(p.sandboxArgv.join(" ")).not.toContain("/home");
     expect(p.sandboxArgv.join(" ")).toContain("--tmpfs /tmp");
     expect(p.sandboxArgv.join(" ")).toMatch(/--as=\d+ --cpu=\d+:\d+ --nofile=\d+ --nproc=\d+ --fsize=\d+ --/);
-    expect(p.executable).toEqual({ path: executable, sha256: sha(EXE) });
+    expect(p.executable).toMatchObject({ path: executable, sha256: sha(EXE), bound: "fd" });
+    expect(p.sandboxArgv.join(" ")).toContain("--ro-bind-fd 6 /opt/cognate/bin/child");
     expect(p.argv.slice(1)).toEqual(["--serve"]);
     expect(Object.keys(p.env).sort()).toEqual(["HOME", "PATH"]);
   });
@@ -341,12 +343,13 @@ describe("L1/L3: probe argv is structural; environment values stay out of the pl
   test("an allowlisted value of '--' cannot cut the probe and no value appears in the plan or argv", async () => {
     const withEnv = { ...config, envAllowlist: ["FIXTURE_FLAG", "OTHER"] };
     const s = spec({ env: { FIXTURE_FLAG: "--", OTHER: "s3cret-value-123" } });
-    const built = await buildLaunchPlan({ config: withEnv, spec: s, ctx, launcherVersion: "0.13.1" });
+    const built = await buildLaunchPlan({ config: withEnv, spec: s, ctx, envKey: KEY, launcherVersion: "0.13.1" });
     expect(built.material.probeArgv.filter((a) => a === "--")).toHaveLength(1);
     expect(built.material.probeArgv.at(-2)).toBe("--");
     expect(JSON.stringify(built.plan)).not.toContain("s3cret-value-123");
     expect(built.plan.sandboxArgv.join("\0")).not.toContain("s3cret-value-123");
-    expect(built.plan.userEnvSha256.OTHER).toBe(sha("s3cret-value-123"));
+    expect(built.plan.userEnvHmac.OTHER).toMatch(/^[0-9a-f]{64}$/);
+    expect(built.plan.userEnvHmac.OTHER).not.toBe(sha("s3cret-value-123")); // keyed, not a plain hash;
     expect(built.material.argsFile).toContain("s3cret-value-123");
     // The authorize payload and inspect() carry the plan only.
     let seen = "";
@@ -362,8 +365,8 @@ describe("L1/L3: probe argv is structural; environment values stay out of the pl
 describe("L2: drift between the two plan computations", () => {
   test("a configuration change between the computations reaches the drift branch", async () => {
     const lc = await okLauncherFor("drift2-bwrap", join(root, "drift2-ran"));
-    let reads = 0; // reads: constructor validation (1), first plan (2,3), second plan (4,5)
-    const flaky = { ...config, launcher: lc, get ceilings() { reads += 1; return reads <= 3 ? { outputBytes: 4096 } : { outputBytes: 8192 }; } } as ContainedStdioPortConfig;
+    let widened = false; // flipped by the authorize hook, i.e. between the two plan computations
+    const flaky = { ...config, launcher: lc, get ceilings() { return widened ? { outputBytes: 8192 } : { outputBytes: 4096 }; }, authorize: async () => { widened = true; } } as ContainedStdioPortConfig;
     const e = await refusal(containedStdioSpawnPort(flaky).spawn(spec(), ctx));
     expect(e.code).toBe("rlm-containment-unavailable");
     expect(e.reason).toContain("drifted");
@@ -399,7 +402,7 @@ describe("L4/L5/M1: run binding, retention, unknown namespace", () => {
     for (let i = 0; i < 70; i++) { const { id } = await port.spawn(spec(), { intentId: "i", runId: `r${i}` }); ids.push(id); await port.exited(id); }
     expect(() => port.inspect(ids[0]!)).toThrow(/unknown/);
     expect(port.inspect(ids.at(-1)!).exit?.reason).toBe("exited");
-  });
+  }, 60_000);
 
   test("a sandbox whose pid namespace was never identified is not reported as a clean teardown", async () => {
     const lc = await okLauncherFor("ns-bwrap", join(root, "ns-ran"));
@@ -408,5 +411,61 @@ describe("L4/L5/M1: run binding, retention, unknown namespace", () => {
     const exit = await port.exited(id);
     expect(exit.nsKnown).toBe(false);
     expect(exit.residualPids).toEqual([]);
+  });
+});
+
+describe("N2/N4/N5/N6", () => {
+  test("N2: the executable is bound by descriptor with its identity recorded; a replacement with the same bytes is a different object", async () => {
+    const exe = join(root, "bin", "swap-child"); await writeFile(exe, EXE); await chmod(exe, 0o755);
+    const pinned = { ...config, executables: [{ path: exe, sha256: sha(EXE) }] };
+    const built = await plan(spec({ argv: [exe] }), pinned);
+    expect(built.executable.ino).toMatch(/^\d+$/);
+    expect(built.executable.bound).toBe("fd");
+    const lc = await okLauncherFor("exe-bwrap", join(root, "exe-ran"));
+    const port = containedStdioSpawnPort({ ...pinned, launcher: lc, authorize: async () => { await writeFile(`${exe}.new`, EXE); await chmod(`${exe}.new`, 0o755); await rename(`${exe}.new`, exe); } });
+    const e = await refusal(port.spawn(spec({ argv: [exe] }), ctx));
+    expect(e.code).toBe("rlm-containment-unavailable");
+    expect(e.reason).toMatch(/no longer the object|drifted/);
+    expect((await readFile(join(root, "exe-ran"), "utf8")).split("\n").filter(Boolean)).toHaveLength(1); // preflight only
+  });
+
+  test("N4: the environment digest is keyed per port: stable within a port, different across ports", async () => {
+    const lc = await okLauncherFor("hmac-bwrap", join(root, "hmac-ran"));
+    const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"] };
+    const s = spec({ env: { FIXTURE_FLAG: "low-entropy" } });
+    const a = containedStdioSpawnPort(withEnv); const b = containedStdioSpawnPort(withEnv);
+    const a1 = await a.plan(s, ctx); const a2 = await a.plan(s, ctx); const b1 = await b.plan(s, ctx);
+    expect(a1.plan.userEnvHmac.FIXTURE_FLAG).toBe(a2.plan.userEnvHmac.FIXTURE_FLAG);
+    expect(a1.digest).toBe(a2.digest);
+    expect(b1.plan.userEnvHmac.FIXTURE_FLAG).not.toBe(a1.plan.userEnvHmac.FIXTURE_FLAG);
+    expect(b1.plan.userEnvHmac.FIXTURE_FLAG).not.toBe(sha("low-entropy"));
+  });
+
+  test("N5: malformed specs are typed refusals, not TypeErrors", async () => {
+    const bad: unknown[] = [
+      null, "spec", { ...spec(), restrictions: undefined }, { ...spec(), restrictions: null }, { ...spec(), restrictions: [] },
+      { ...spec(), argv: "not-an-array" }, { ...spec(), argv: [1] }, { ...spec(), cwd: 5 }, { ...spec(), env: undefined }, { ...spec(), env: { A: 1 } },
+      spec({ restrictions: { network: { outbound: "host-socket:/x" } } as never }),
+      spec({ restrictions: { network: "none" } as never }),
+      spec({ restrictions: { filesystem: "read-only" } as never }),
+      spec({ restrictions: { caps: { memoryBytes: "big" } } as never }),
+      spec({ restrictions: { subprocess: "yes" } as never }),
+    ];
+    for (const b of bad) {
+      const e = await refusal(plan(b as StdioSpawnSpec));
+      expect(e.code).toBe("rlm-containment-unavailable");
+    }
+  });
+
+  test("N6: a launcher in a writable root or a loose directory is never executed, not even for --version", async () => {
+    const ran = join(root, "n6-ran");
+    const text = `#!/bin/sh\necho ran >> ${ran}\nif [ "$1" = "--version" ]; then echo "bubblewrap 0.13.1"; fi\nexit 0\n`;
+    const writableDir = join(root, "n6-writable"); await mkdir(writableDir);
+    const inWritable = join(writableDir, "bwrap"); await writeFile(inWritable, text); await chmod(inWritable, 0o755);
+    const pinned = { path: inWritable, sha256: sha(text) };
+    expect((await refusal(containedStdioSpawnPort({ ...config, launcher: pinned, writableRoots: [writableDir] }).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
+    await chmod(inWritable, 0o775);
+    expect((await refusal(containedStdioSpawnPort({ ...config, launcher: pinned }).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
+    expect(existsSync(ran)).toBe(false);
   });
 });

@@ -420,6 +420,25 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       await small.kill(s.id, "done"); await roomy.kill(r.id, "done");
     }
 
+    { if (process.env.CONTAINED_PORT_TRACE) console.error("[trace] begin fd-bound executable"); // N2: an executable outside the runtime roots is bound by descriptor
+      const script = realpathSync(join(import.meta.dir, "fixtures", "fd-bound.sh"));
+      const port = makePort(f.workspace, { executables: [{ path: script, sha256: sha(readFileSync(script)) }] });
+      const { plan, digest } = await port.plan({ argv: [script], cwd: f.workspace, env: {}, restrictions: {} }, ctx);
+      const { id } = await port.spawn({ argv: [script], cwd: f.workspace, env: {}, restrictions: {} }, ctx);
+      const got: string[] = [];
+      void port.readLines(id, (l) => got.push(l));
+      await port.write(id, "ping");
+      for (let i = 0; i < 200 && got.length < 2; i++) await sleep(25);
+      const exit = await port.exited(id);
+      expect(plan.executable.bound).toBe("fd");
+      expect(plan.sandboxArgv.join(" ")).toContain("--ro-bind-fd 6 /opt/cognate/bin/fd-bound.sh");
+      expect(got[0]).toMatch(/^fd-bound:\/opt\/cognate\/bin\/fd-bound\.sh:/);
+      expect(got[1]).toBe("got:ping");
+      expect(exit.reason).toBe("exited");
+      expect(exit.exitCode).toBe(0);
+      record("executable-bound-by-fd", "PASS", { digest, executable: plan.executable, output: got, exit });
+    }
+
     // ════════ READ-ONLY WORKSPACE IS NOT AN ARTIFACT OF THE FIXTURE: wall of refusal before spawn on a real launcher ════════
     {
       const bad = containedStdioSpawnPort({ launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace, writableRoots: [] });
