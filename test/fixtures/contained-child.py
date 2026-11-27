@@ -37,6 +37,22 @@ def flood(n):
         sys.stdout.write("y" * 1023 + "\n"); sys.stdout.flush()
     say(op="flood", done=True)
 
+def caps():
+    status = {}
+    for line in open("/proc/self/status"):
+        k, _, v = line.partition(":")
+        if k in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb", "NoNewPrivs", "Seccomp"): status[k] = v.strip()
+    return status
+
+def nested_userns():
+    # A contained child must not be able to create a user namespace (and so regain capabilities in it).
+    os.unshare(os.CLONE_NEWUSER); return "unshared"
+
+def fill_tmp(path, chunk, count):
+    with open(path, "wb") as f:
+        for _ in range(count): f.write(b"x" * chunk); f.flush()
+    return "filled"
+
 def stubborn(late_socket, delay):
     # Double fork; the grandchild leaves the session, ignores SIGTERM/SIGHUP, and after a delay tries to
     # reach the host (the host checks that this never arrives once the sandbox is torn down).
@@ -75,5 +91,9 @@ for raw in sys.stdin:
     elif op == "burn":
         while True: pass
     elif op == "sleep": time.sleep(m["s"]); say(op=op, done=True)
+    elif op == "caps": say(op=op, caps=caps(), userns=attempt(nested_userns))
+    elif op == "filltmp": say(op=op, **attempt(lambda: fill_tmp(m["path"], m["chunk"], m["count"])))
+    elif op == "unlink": say(op=op, **attempt(lambda: os.unlink(m["path"])))
+    elif op == "mountinfo": say(op=op, tmp=[l for l in open("/proc/self/mountinfo") if " /tmp " in l])
     elif op == "limits": say(op=op, limits=open("/proc/self/limits").read())
     elif op == "exit": sys.exit(0)

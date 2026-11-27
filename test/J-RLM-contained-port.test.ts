@@ -106,6 +106,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
   const evidence: Record<string, unknown>[] = [];
   const T = (m: string): void => { if (process.env.CONTAINED_PORT_TRACE) console.error(`[trace] ${m}`); };
   const record = (scenario: string, status: "PASS" | "FAIL", detail: Record<string, unknown>) => { if (process.env.CONTAINED_PORT_TRACE) console.error(`[trace] ${scenario} ${status}`); evidence.push({ scenario, status, ...detail }); };
+  let failure: string | undefined;
   let manifestPlan: unknown;
   let manifestDigest: string | undefined;
 
@@ -160,6 +161,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       const ctlWrite = await ctl.ask({ op: "write", path: join(f.dir, "control-write.txt"), text: "control" });
       const ctlRead = await ctl.ask({ op: "read", path: f.credential });
       const ctlEnv = await ctl.ask({ op: "env" });
+      const ctlCaps = await ctl.ask({ op: "caps" });
       const ctlTcp = await ctl.ask({ op: "tcp", host: "127.0.0.1", port: tcp.port });
       const ctlUdp = await ctl.ask({ op: "udp", host: "127.0.0.1", port: udp.port });
       const ctlUnix = await ctl.ask({ op: "unix", path: join(f.dir, "egress.sock"), payload: "CONTROL-UNIX" });
@@ -169,15 +171,16 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
         writeLanded: ctlWrite.ok === true && existsSync(join(f.dir, "control-write.txt")),
         credentialReadable: ctlRead.ok === true && String(ctlRead.value).includes(f.secret),
         envSecretVisible: JSON.stringify(ctlEnv).includes(f.envSecret),
+        capabilityBoundingSetNonEmpty: !/^0+$/.test(ctlCaps.caps.CapBnd), nestedUsernsPossible: ctlCaps.userns.ok === true,
         tcpReached: tcp.connections === 1, udpReached: udp.connections === 1, unixReached: egress.data.join("").includes("CONTROL-UNIX"),
       };
-      expect(control_).toEqual({ writeLanded: true, credentialReadable: true, envSecretVisible: true, tcpReached: true, udpReached: true, unixReached: true });
+      expect(control_).toEqual({ writeLanded: true, credentialReadable: true, envSecretVisible: true, capabilityBoundingSetNonEmpty: true, nestedUsernsPossible: true, tcpReached: true, udpReached: true, unixReached: true });
       tcp.connections = 0; tcp.data.length = 0; udp.connections = 0; udp.data.length = 0; egress.connections = 0; egress.data.length = 0;
 
       // The contained run: host socket slot configured so egress is one reachable path and nothing else.
       const port = makePort(f.workspace, { hostSocket: join(f.dir, "egress.sock"), envAllowlist: ["FIXTURE_FLAG"] });
       const containedSpec = spec(f.workspace, { network: { outbound: [`host-socket:${join(f.dir, "egress.sock")}`] } });
-      const { plan, digest } = await port.plan({ ...containedSpec, env: { FIXTURE_FLAG: "on" } });
+      const { plan, digest } = await port.plan({ ...containedSpec, env: { FIXTURE_FLAG: "on" } }, ctx);
       if (rep === 1) { manifestPlan = plan; manifestDigest = digest; expect(digest).toBe(launchPlanDigest(plan)); }
       const s = await open(port, { ...containedSpec, env: { FIXTURE_FLAG: "on" } });
       expect(port.inspect(s.id).launchPlanDigest).toBe(digest);
@@ -196,6 +199,15 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       expect(hello.home_exists).toBe(false);     // no host home
       expect(hello.root.sort()).toEqual(["dev", "lib", "lib64", "opt", "proc", "run", "tmp", "usr", "workspace"].filter((d) => hello.root.includes(d)));
       expect(hello.root).not.toContain("home");
+
+      // M2: no capabilities and no way to regain them, read from /proc/self/status and a real unshare attempt.
+      const capsReport = await s.ask({ op: "caps" });
+      const zero = (v: string) => /^0+$/.test(v);
+      expect(["CapEff", "CapPrm", "CapBnd", "CapInh", "CapAmb"].map((k) => zero(capsReport.caps[k]))).toEqual([true, true, true, true, true]);
+      expect(capsReport.userns.ok).toBe(false);
+      // The host reads the same sets from outside (the child's report is not the only evidence).
+      const memberCaps = mem.pids.map((pid) => readFileSync(`/proc/${pid}/status`, "utf8").match(/CapEff:\s+(\w+)/)?.[1]);
+      expect(memberCaps.every((c) => c !== undefined && zero(c))).toBe(true);
 
       // Filesystem: write into the workspace and outside it.
       const inWs = await s.ask({ op: "write", path: "/workspace/new.txt" });
@@ -284,12 +296,14 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       expect(lateArrived).toBe(false);
       expect(exit.reason).toBe("killed");
       expect(exit.residualPids).toEqual([]);
+      expect(exit.nsKnown).toBe(true);
       const again = await stubbornPort.kill(v.id, "third");
       expect(again).toBeUndefined();
       expect(stubbornPort.inspect(v.id).exit).toEqual(exit); // idempotent: the first recorded exit stands
 
       record(`essential-${rep}`, "PASS", {
         control: control_, planDigest: digest, inside, before, after,
+        capabilities: { report: capsReport, hostObservedCapEff: memberCaps },
         filesystem: { inWorkspace: inWs, overwriteExisting: overwrite, hostPathWorkspace: hostWs, outsideCanary: outside, usr, tmpfsScratch: tmpWrite },
         credentials: { readFakeCredential: readCred, readHomeRelative: readHome, envKeys: Object.keys(env.env), secretInCapturedOutput: captured.includes(f.secret) || captured.includes(f.envSecret) },
         network: { attempts: { tcpLoop, tcpExt1, tcpExt2, udpLoop, abstractUnix: abs, otherHostUnix: otherSock, boundHostSocket: egressOk }, hostObservations, sandboxNetDevices: devices },
@@ -378,15 +392,44 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       await port.kill(s.id, "done");
     }
 
+    { if (process.env.CONTAINED_PORT_TRACE) console.error("[trace] begin tmp and file size"); // M3: tmpfs size and RLIMIT_FSIZE
+      const small = makePort(f.workspace, { ceilings: { tmpBytes: 1024 * 1024, fsizeBytes: 512 * 1024 } });
+      const s = await open(small, spec(f.workspace));
+      await s.ask({ op: "echo", v: "alive" });
+      const m = sandboxMembers(s.hostPid);
+      const py = m.pids.find((pid) => { try { const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0"); return /python/.test(argv[0] ?? "") && argv.includes("/workspace/child.py"); } catch { return false; } });
+      const hostLimits = readFileSync(`/proc/${py}/limits`, "utf8");
+      const hostMounts = readFileSync(`/proc/${py}/mountinfo`, "utf8").split("\n").filter((l) => l.includes(" /tmp "));
+      const oneBig = await s.ask({ op: "filltmp", path: "/tmp/big", chunk: 1024 * 1024, count: 1 });       // over RLIMIT_FSIZE
+      await s.ask({ op: "unlink", path: "/tmp/big" });                                                         // free the partial 512K it left
+      const first = await s.ask({ op: "filltmp", path: "/tmp/a", chunk: 256 * 1024, count: 1 });            // fits
+      const second = await s.ask({ op: "filltmp", path: "/tmp/b", chunk: 256 * 1024, count: 2 });           // fits (total 768K)
+      const third = await s.ask({ op: "filltmp", path: "/tmp/c", chunk: 256 * 1024, count: 2 });            // exceeds the 1 MiB tmpfs
+      expect(hostLimits).toMatch(/Max file size\s+524288\s+524288/);
+      expect(hostMounts.join("\n")).toMatch(/size=1024k/);
+      expect(oneBig.ok).toBe(false);
+      expect([first.ok, second.ok]).toEqual([true, true]);
+      expect(third.ok).toBe(false);
+      // Control: the default ceilings let the same total be written.
+      const roomy = makePort(f.workspace);
+      const r = await open(roomy, spec(f.workspace));
+      const ctlA = await r.ask({ op: "filltmp", path: "/tmp/a", chunk: 256 * 1024, count: 2 });
+      const ctlB = await r.ask({ op: "filltmp", path: "/tmp/b", chunk: 256 * 1024, count: 2 });
+      expect([ctlA.ok, ctlB.ok]).toEqual([true, true]);
+      record("ceiling-tmpBytes-and-fsize", "PASS", { hostObservedLimits: hostLimits.split("\n").filter((l) => /file size/i.test(l)), hostObservedTmpMount: hostMounts, oneBig, first, second, third, control: { ctlA, ctlB } });
+      await small.kill(s.id, "done"); await roomy.kill(r.id, "done");
+    }
+
     // ════════ READ-ONLY WORKSPACE IS NOT AN ARTIFACT OF THE FIXTURE: wall of refusal before spawn on a real launcher ════════
     {
-      const bad = containedStdioSpawnPort({ launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace });
+      const bad = containedStdioSpawnPort({ launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace, writableRoots: [] });
       const marker = join(f.dir, "must-not-exist");
       await expect(bad.spawn({ ...spec(f.workspace), argv: [python, "-c", `open('${marker}','w')`] }, ctx)).rejects.toMatchObject({ code: "rlm-containment-unavailable" });
       expect(existsSync(marker)).toBe(false);
       record("refusal-launcher-digest-real", "PASS", { marker: "absent" });
     }
   } catch (error) {
+    failure = error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 2000) : String(error);
     if (process.env.CONTAINED_PORT_TRACE) console.error("[trace] ERROR", error);
     throw error;
   } finally {
@@ -398,7 +441,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
     const outDir = join(import.meta.dir, "..", ".tmp", "evidence", "114");
     mkdirSync(outDir, { recursive: true });
     const manifest = {
-      ticket: "SEA-Forge #114", recordedAt: new Date().toISOString(), commit,
+      ticket: "SEA-Forge #114", complete: failure === undefined, ...(failure ? { failure } : {}), recordedAt: new Date().toISOString(), commit,
       host: { kernel: Bun.spawnSync(["uname", "-r"]).stdout.toString().trim(), os: process.platform, arch: process.arch, bun: Bun.version, wsl: existsSync("/proc/sys/fs/binfmt_misc/WSLInterop") || existsSync("/proc/sys/fs/binfmt_misc/WSLInterop-late") },
       launcher: { ...launcher, version: bwrapVersion }, fixtureInterpreter: pythonPin,
       launchPlan: manifestPlan, launchPlanDigest: manifestDigest,

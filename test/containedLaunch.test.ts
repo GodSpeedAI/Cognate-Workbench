@@ -1,8 +1,8 @@
 // Unit tests for the contained launch plan, its digest and the pre-spawn refusals (SEA-Forge #114).
 // These always run: they never start bubblewrap. The OS-boundary proof is J-RLM-contained-port.test.ts.
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -37,31 +37,38 @@ beforeAll(async () => {
   await writeFile(executable, EXE);
   await chmod(launcher, 0o755);
   await chmod(executable, 0o755);
-  config = { launcher: { path: launcher, sha256: sha(FAKE_LAUNCHER(marker, false)) }, executables: [{ path: executable, sha256: sha(EXE) }], workspaceRoot: workspace, envAllowlist: ["FIXTURE_FLAG"] };
+  config = { launcher: { path: launcher, sha256: sha(FAKE_LAUNCHER(marker, false)) }, executables: [{ path: executable, sha256: sha(EXE) }], workspaceRoot: workspace, writableRoots: [], envAllowlist: ["FIXTURE_FLAG"] };
 });
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
+const ctx = { intentId: "i", runId: "r" };
 const spec = (over: Partial<StdioSpawnSpec> & { restrictions?: StdioSpawnSpec["restrictions"] } = {}): StdioSpawnSpec => ({ argv: [executable, "--serve"], cwd: workspace, env: {}, restrictions: {}, ...over });
 const refusal = async (promise: Promise<unknown>): Promise<RlmRefusedError> => {
   try { await promise; } catch (error) { if (error instanceof RlmRefusedError) return error; throw error; }
   throw new Error("expected a typed refusal, but the call succeeded");
 };
-const plan = (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config) => buildLaunchPlan({ config: c, spec: s, launcherVersion: "0.13.1" });
-const ctx = { intentId: "i", runId: "r" };
+const plan = async (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config, c2 = ctx) => (await buildLaunchPlan({ config: c, spec: s, ctx: c2, launcherVersion: "0.13.1" })).plan;
+const material = async (s: StdioSpawnSpec = spec(), c: ContainedStdioPortConfig = config) => (await buildLaunchPlan({ config: c, spec: s, ctx, launcherVersion: "0.13.1" })).material;
 
 describe("launch plan", () => {
   test("is read-only, unshared, capability-free and records every control", async () => {
     const p = await plan();
     expect(p.restrictions).toEqual({ filesystem: "read-only", network: "none", credentials: "none", subprocess: "contained" });
-    expect(p.workspace).toMatchObject({ mode: "read-only", sandboxPath: "/workspace", cwd: "/workspace" });
+    expect(p.workspace).toMatchObject({ mode: "read-only", sandboxPath: "/workspace", cwd: "/workspace", path: workspace });
+    expect(p.workspace.dev).toMatch(/^\d+$/);
+    expect(p.workspace.ino).toMatch(/^\d+$/);
+    expect(p.binding).toEqual(ctx);
     for (const flag of ["--unshare-all", "--unshare-user", "--disable-userns", "--die-with-parent", "--new-session", "--clearenv"]) expect(p.sandboxArgv).toContain(flag);
     expect(p.sandboxArgv.join(" ")).toContain("--cap-drop ALL");
-    expect(p.sandboxArgv.join(" ")).toContain(`--ro-bind ${workspace} /workspace`);
+    expect(p.sandboxArgv.join(" ")).toContain("--ro-bind-fd 3 /workspace"); // bound by inherited descriptor, never re-resolved by path
+    expect(p.sandboxArgv.join(" ")).toContain("--args 4");
+    expect(p.sandboxArgv.join(" ")).toMatch(/--size \d+ --tmpfs \/tmp/);
     expect(p.sandboxArgv).not.toContain("--share-net");
     expect(p.sandboxArgv).not.toContain("--bind"); // no writable bind in the default plan
+    expect(p.sandboxArgv).not.toContain("--bind-fd");
     expect(p.sandboxArgv.join(" ")).not.toContain("/home");
     expect(p.sandboxArgv.join(" ")).toContain("--tmpfs /tmp");
-    expect(p.sandboxArgv.join(" ")).toMatch(/--as=\d+ --cpu=\d+:\d+ --nofile=\d+ --nproc=\d+ --/);
+    expect(p.sandboxArgv.join(" ")).toMatch(/--as=\d+ --cpu=\d+:\d+ --nofile=\d+ --nproc=\d+ --fsize=\d+ --/);
     expect(p.executable).toEqual({ path: executable, sha256: sha(EXE) });
     expect(p.argv.slice(1)).toEqual(["--serve"]);
     expect(Object.keys(p.env).sort()).toEqual(["HOME", "PATH"]);
@@ -93,7 +100,8 @@ describe("launch plan", () => {
       const withSocket = { ...config, hostSocket: sock };
       const p = await plan(spec({ restrictions: { network: { outbound: [`host-socket:${sock}`] } } }), withSocket);
       expect(p.restrictions.network).toBe(`host-socket:${sock}`);
-      expect(p.sandboxArgv.join(" ")).toContain(`--bind ${sock} /run/egress.sock`);
+      expect(p.sandboxArgv.join(" ")).toContain("--bind-fd 5 /run/egress.sock");
+      expect(p.egress).toMatchObject({ path: realpathSync(sock) });
       expect(p.sandboxArgv).toContain("--unshare-all");
       expect(p.env.SEA_EGRESS_SOCKET).toBe("/run/egress.sock");
       expect(launchPlanDigest(p)).not.toBe(launchPlanDigest(await plan(spec(), withSocket)));
@@ -209,5 +217,196 @@ describe("provider admission follows the registered port", () => {
     expect(providerRefusal(entry, facts, true)).toBeUndefined();
     const open = { ...entry, portGovernance: { ...entry.portGovernance!, reach: { ...entry.portGovernance!.reach, network: "open" } } } as typeof entry;
     expect(providerRefusal(open, facts, true)?.code).toBe("rlm-egress-uncontrolled");
+  });
+});
+
+// ── review findings (#114 review pass 1) ─────────────────────────────────────────────────
+const okLauncherFor = async (name: string, marker2: string): Promise<{ path: string; sha256: string }> => {
+  const path = join(root, "bin", name);
+  const text = FAKE_LAUNCHER(marker2, true);
+  await writeFile(path, text);
+  await chmod(path, 0o755);
+  return { path, sha256: sha(text) };
+};
+
+describe("H1: the workspace and the egress socket are pinned, not re-resolved", () => {
+  test("the plan records resolved path, dev and inode of the workspace; retargeting a symlinked workspace is a different plan", async () => {
+    const a = join(root, "wsA"); const b = join(root, "wsB"); const link = join(root, "ws-link");
+    await mkdir(a); await mkdir(b); await symlink(a, link);
+    const linked = { ...config, workspaceRoot: link };
+    const first = await plan(spec({ cwd: a }), linked);
+    expect(first.workspace.path).toBe(realpathSync(a));
+    await rm(link); await symlink(b, link);
+    const second = await plan(spec({ cwd: b }), linked);
+    expect(second.workspace.path).toBe(realpathSync(b));
+    expect(launchPlanDigest(second)).not.toBe(launchPlanDigest(first));
+    expect(second.workspace.ino).not.toBe(first.workspace.ino);
+  });
+
+  test("swapping the workspace symlink between authorization and spawn refuses; nothing is spawned", async () => {
+    const a = join(root, "swapA"); const b = join(root, "swapB"); const link = join(root, "swap-link");
+    await mkdir(a); await mkdir(b); await symlink(a, link);
+    const lc = await okLauncherFor("swap-bwrap", join(root, "swap-ran"));
+    const port = containedStdioSpawnPort({ ...config, launcher: lc, workspaceRoot: link, authorize: async () => { await rm(link); await symlink(b, link); } });
+    const error = await refusal(port.spawn(spec({ cwd: link }), ctx));
+    expect(error.code).toBe("rlm-containment-unavailable");
+    expect(error.reason).toContain("drifted");
+    // Only the namespace preflight ran; the real spawn never happened.
+    expect((await readFile(join(root, "swap-ran"), "utf8")).split("\n").filter(Boolean)).toHaveLength(1);
+  });
+
+  test("a workspace replaced after planning (new inode at the same path) is refused when opened", async () => {
+    const dir = join(root, "replaced"); await mkdir(dir);
+    const lc = await okLauncherFor("replace-bwrap", join(root, "replace-ran"));
+    const port = containedStdioSpawnPort({ ...config, launcher: lc, workspaceRoot: dir, authorize: async () => { await rename(dir, `${dir}.old`); await mkdir(dir); } });
+    const error = await refusal(port.spawn(spec({ cwd: dir }), ctx));
+    expect(error.code).toBe("rlm-containment-unavailable");
+    expect(error.reason).toMatch(/no longer the object|could not be opened/);
+  });
+
+  test("a workspace or socket directory others can write to, or that the host user does not own, is refused", async () => {
+    const loose = join(root, "loose-ws"); await mkdir(loose); await chmod(loose, 0o775);
+    expect((await refusal(plan(spec({ cwd: loose }), { ...config, workspaceRoot: loose }))).code).toBe("rlm-containment-unavailable");
+    const sockDir = join(root, "loose-sock"); await mkdir(sockDir); await chmod(sockDir, 0o777);
+    const sock = join(sockDir, "e.sock");
+    const server = Bun.listen({ unix: sock, socket: { data() {} } });
+    try {
+      const e = await refusal(plan(spec({ restrictions: { network: { outbound: [`host-socket:${sock}`] } } }), { ...config, hostSocket: sock }));
+      expect(e.code).toBe("rlm-egress-uncontrolled");
+    } finally { server.stop(true); }
+    expect((await refusal(plan(spec({ cwd: "/" }), { ...config, workspaceRoot: "/usr" }))).code).toBe("rlm-containment-unavailable"); // root-owned but not the dedicated workspace: cwd outside
+  });
+
+  test("a symlinked host socket is resolved and recorded; retargeting it changes the plan", async () => {
+    const dir = join(root, "sockdir"); await mkdir(dir);
+    const real1 = join(dir, "one.sock"); const real2 = join(dir, "two.sock"); const link = join(dir, "link.sock");
+    const s1 = Bun.listen({ unix: real1, socket: { data() {} } });
+    const s2 = Bun.listen({ unix: real2, socket: { data() {} } });
+    try {
+      await symlink(real1, link);
+      const withSock = { ...config, hostSocket: link };
+      const net = spec({ restrictions: { network: { outbound: [`host-socket:${link}`] } } });
+      const first = await plan(net, withSock);
+      expect(first.egress?.path).toBe(realpathSync(real1));
+      await rm(link); await symlink(real2, link);
+      const second = await plan(net, withSock);
+      expect(second.egress?.path).toBe(realpathSync(real2));
+      expect(launchPlanDigest(second)).not.toBe(launchPlanDigest(first));
+    } finally { s1.stop(true); s2.stop(true); }
+  });
+});
+
+describe("M4: a restriction or cap the port does not handle is refused, never dropped", () => {
+  test("unknown spec, restriction, network and cap keys", async () => {
+    const cases: [string, unknown][] = [
+      ["restriction", { credentials: "none" }],
+      ["restriction", { wallClockSeconds: 5 }],
+      ["network restriction", { network: { outbound: [], inbound: ["*"] } }],
+      ["cap", { caps: { memoryBytes: 1000, wallSeconds: 1 } }],
+    ];
+    for (const [, restrictions] of cases) {
+      const e = await refusal(plan(spec({ restrictions: restrictions as StdioSpawnSpec["restrictions"] })));
+      expect(e.code).toBe("rlm-containment-unavailable");
+      expect(e.reason).toContain("not enforced by this port");
+    }
+    const extra = { ...spec(), stdin: "inherit" } as unknown as StdioSpawnSpec;
+    expect((await refusal(plan(extra))).code).toBe("rlm-containment-unavailable");
+  });
+});
+
+describe("M6: binaries must be trusted, not merely pinned; writableRoots is explicit", () => {
+  test("missing writableRoots is a configuration error", () => {
+    const { writableRoots: _omitted, ...bad } = config;
+    expect(() => containedStdioSpawnPort(bad as ContainedStdioPortConfig)).toThrow(/writableRoots/);
+  });
+
+  test("a group-writable launcher or executable, or one in a world-writable directory, is refused despite a matching digest", async () => {
+    const dir = join(root, "bin2"); await mkdir(dir);
+    const exe = join(dir, "child"); await writeFile(exe, EXE); await chmod(exe, 0o775);
+    const pinned = { ...config, executables: [{ path: exe, sha256: sha(EXE) }] };
+    expect((await refusal(plan(spec({ argv: [exe] }), pinned))).code).toBe("rlm-containment-unavailable");
+    await chmod(exe, 0o755); await chmod(dir, 0o777);
+    const e2 = await refusal(plan(spec({ argv: [exe] }), pinned));
+    expect(e2.code).toBe("rlm-containment-unavailable");
+    expect(e2.reason).toContain("writable");
+    await chmod(dir, 0o755);
+    await plan(spec({ argv: [exe] }), pinned); // once trusted, it plans
+    const lc = join(dir, "bwrap"); await writeFile(lc, FAKE_LAUNCHER(marker, false)); await chmod(lc, 0o775);
+    const looseLauncher = { ...config, launcher: { path: lc, sha256: sha(FAKE_LAUNCHER(marker, false)) } };
+    expect((await refusal(plan(spec(), looseLauncher))).code).toBe("rlm-containment-unavailable");
+  });
+});
+
+describe("L1/L3: probe argv is structural; environment values stay out of the plan and the process table", () => {
+  test("an allowlisted value of '--' cannot cut the probe and no value appears in the plan or argv", async () => {
+    const withEnv = { ...config, envAllowlist: ["FIXTURE_FLAG", "OTHER"] };
+    const s = spec({ env: { FIXTURE_FLAG: "--", OTHER: "s3cret-value-123" } });
+    const built = await buildLaunchPlan({ config: withEnv, spec: s, ctx, launcherVersion: "0.13.1" });
+    expect(built.material.probeArgv.filter((a) => a === "--")).toHaveLength(1);
+    expect(built.material.probeArgv.at(-2)).toBe("--");
+    expect(JSON.stringify(built.plan)).not.toContain("s3cret-value-123");
+    expect(built.plan.sandboxArgv.join("\0")).not.toContain("s3cret-value-123");
+    expect(built.plan.userEnvSha256.OTHER).toBe(sha("s3cret-value-123"));
+    expect(built.material.argsFile).toContain("s3cret-value-123");
+    // The authorize payload and inspect() carry the plan only.
+    let seen = "";
+    const lc = await okLauncherFor("env-bwrap", join(root, "env-ran"));
+    const port = containedStdioSpawnPort({ ...withEnv, launcher: lc, authorize: async (p, d) => { seen = JSON.stringify({ p, d }); } });
+    const { id } = await port.spawn(s, ctx);
+    expect(seen).not.toContain("s3cret-value-123");
+    expect(JSON.stringify(port.inspect(id).plan)).not.toContain("s3cret-value-123");
+    await port.dispose();
+  });
+});
+
+describe("L2: drift between the two plan computations", () => {
+  test("a configuration change between the computations reaches the drift branch", async () => {
+    const lc = await okLauncherFor("drift2-bwrap", join(root, "drift2-ran"));
+    let reads = 0; // reads: constructor validation (1), first plan (2,3), second plan (4,5)
+    const flaky = { ...config, launcher: lc, get ceilings() { reads += 1; return reads <= 3 ? { outputBytes: 4096 } : { outputBytes: 8192 }; } } as ContainedStdioPortConfig;
+    const e = await refusal(containedStdioSpawnPort(flaky).spawn(spec(), ctx));
+    expect(e.code).toBe("rlm-containment-unavailable");
+    expect(e.reason).toContain("drifted");
+  });
+});
+
+describe("L4/L5/M1: run binding, retention, unknown namespace", () => {
+  test("the digest binds the run and intent", async () => {
+    const a = launchPlanDigest(await plan(spec(), config, { intentId: "i", runId: "r1" }));
+    const b = launchPlanDigest(await plan(spec(), config, { intentId: "i", runId: "r2" }));
+    const c = launchPlanDigest(await plan(spec(), config, { intentId: "i2", runId: "r1" }));
+    expect(new Set([a, b, c]).size).toBe(3);
+  });
+
+  test("a run-bound view cannot write to, read from or kill another run's process", async () => {
+    const lc = await okLauncherFor("run-bwrap", join(root, "run-ran"));
+    const port = containedStdioSpawnPort({ ...config, launcher: lc });
+    const { id } = await port.spawn(spec(), ctx);
+    const other = port.forRun({ intentId: "i", runId: "someone-else" });
+    await expect(other.write(id, "x")).rejects.toThrow(/another run/);
+    await expect(other.kill(id, "x")).rejects.toThrow(/another run/);
+    await expect(other.readLines(id, () => {})).rejects.toThrow(/another run/);
+    await expect(other.spawn(spec(), ctx)).rejects.toThrow(/another run/);
+    const mine = port.forRun(ctx);
+    await mine.kill(id, "done"); // the owner may
+    await port.dispose();
+  });
+
+  test("finished processes are pruned to a bounded retention; the oldest exit record is dropped", async () => {
+    const lc = await okLauncherFor("prune-bwrap", join(root, "prune-ran"));
+    const port = containedStdioSpawnPort({ ...config, launcher: lc });
+    const ids: string[] = [];
+    for (let i = 0; i < 70; i++) { const { id } = await port.spawn(spec(), { intentId: "i", runId: `r${i}` }); ids.push(id); await port.exited(id); }
+    expect(() => port.inspect(ids[0]!)).toThrow(/unknown/);
+    expect(port.inspect(ids.at(-1)!).exit?.reason).toBe("exited");
+  });
+
+  test("a sandbox whose pid namespace was never identified is not reported as a clean teardown", async () => {
+    const lc = await okLauncherFor("ns-bwrap", join(root, "ns-ran"));
+    const port = containedStdioSpawnPort({ ...config, launcher: lc });
+    const { id } = await port.spawn(spec(), ctx);
+    const exit = await port.exited(id);
+    expect(exit.nsKnown).toBe(false);
+    expect(exit.residualPids).toEqual([]);
   });
 });
