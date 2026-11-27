@@ -128,6 +128,12 @@ returning a Cognate `Component`; many also export their input/result types and c
   PYTHON*, BASH_ENV, ENV, PERL5OPT, PERL5LIB, RUBYOPT, RUBYLIB, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, GCONV_PATH, LOCPATH,
   NLSPATH, PATH, HOME, BASH_FUNC_*) are refused at port construction, because env values are not in the profile.
   `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching anything.
+  [containedProfileAuthority.ts:profileAuthorize] — #116 host half: the port's `authorize` hook asks SEA-Forge (the
+  existing `SeaForgeAuthority.decide` route, claim `execution_profile_digest`) and launches only on a `boundary` allow
+  carrying exactly one `execution_profile` constraint equal to the profile digest, with a plan that embeds it; every
+  other answer, an unreachable or malformed one included, refuses before spawn (`rlm-containment-unavailable`,
+  reason `rlm-profile-unauthorized: ...`). `startServer` composes it from the external authority and refuses a contained
+  port that has neither that nor an explicit `authorize`. Evidence keeps digests and the decision id only.
   [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port: exact input digest, claimed once by one run, started as the parent's agent principal, expiring if unclaimed, never re-armed by a repeat invoke, disarmed if dispatch fails.
 
 - [aggregateContainment.ts:CONTAINMENT_THREAD] — shared-state thread id `containment:aggregate:v1`;
@@ -342,4 +348,4 @@ No child subdirectories.
   `test/expert-model-routing.test.ts`, plus the journey suites `test/J-CHECKOUT-lifecycle.test.ts`,
   `test/J-RW-AGGREGATE-CONTAINMENT.test.ts`, `test/J-SEA-FORGE-AUTHORITY.test.ts`,
   `test/J-AUTH-SESSION.test.ts`; contained spawn port: `test/containedLaunch.test.ts`,
-  `test/J-RLM-contained-port-server.test.ts`, and `COGNATE_BWRAP_TESTS=1 test/J-RLM-contained-port.test.ts`.
+  `test/J-RLM-contained-port-server.test.ts`, `test/containedProfileAuthority.test.ts`, and `COGNATE_BWRAP_TESTS=1 test/J-RLM-contained-port.test.ts`.

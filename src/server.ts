@@ -48,6 +48,7 @@ import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from ".
 import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
 import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
 import { rlmAdmissionGuard } from "./capabilities/rlmAdmissionGuard.ts";
+import { profileAuthorize, type ProfileAuthorization } from "./capabilities/containedProfileAuthority.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
@@ -242,6 +243,8 @@ export interface AppServer {
   readonly executionPosture: ExecutionPosture;
   /** T8: this boot's operator browser session token (the session-authenticated HTTP test seam). */
   readonly operatorSessionToken: string;
+  /** #116: each contained spawn SEA-Forge authorized (digests and decision id only, never raw packets). */
+  readonly profileAuthorizations: () => readonly ProfileAuthorization[];
   /** P03: the settlement orchestrator, when SEA-Forge governance and RealityTrace are configured. */
   readonly settlement?: { settleRun(runId: string): Promise<void>; idle(): Promise<void> };
   stop(): Promise<void>;
@@ -597,7 +600,18 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // J-RLM-CHILD-RUN: empty unless the host explicitly registers providers (ServerOptions only).
   const rlmRegistry = createRlmRegistry();
   for (const registration of options.rlmProviders ?? []) rlmRegistry.register(registration);
-  const rlmSpawnPort = options.rlmContainedPort ? containedStdioSpawnPort(options.rlmContainedPort) : undefined;
+  // #116: a contained spawn is authorized by SEA-Forge for exactly its execution profile before any sandbox starts. The
+  // route is the existing external authority client; an explicit host `authorize` hook may replace it, and with neither the
+  // port is refused at startup rather than spawning without a decision.
+  const profileAuthorizations: ProfileAuthorization[] = [];
+  const rlmContainedConfig: ContainedStdioPortConfig | undefined = options.rlmContainedPort
+    ? options.rlmContainedPort.authorize
+      ? options.rlmContainedPort
+      : externalAuthority
+        ? { ...options.rlmContainedPort, authorize: profileAuthorize({ authority: externalAuthority.client, worldRef: externalAuthority.governance.worldRef, actor: SYSTEM_CALLER.actor, tenant: SYSTEM_CALLER.tenant, record: (a) => { profileAuthorizations.push(a); if (profileAuthorizations.length > 256) profileAuthorizations.shift(); } }) }
+        : (() => { throw new Error("rlmContainedPort needs SEA-Forge governance (COGNATE_GOVERNANCE=sea-forge) or an explicit authorize hook: a contained spawn is never launched without an authority decision"); })()
+    : undefined;
+  const rlmSpawnPort = rlmContainedConfig ? containedStdioSpawnPort(rlmContainedConfig) : undefined;
   // With a spawn port registered, only children admitted by the governed rlm.invoke may reach it (see rlmAdmissionGuard).
   const rlmGuard = rlmSpawnPort ? rlmAdmissionGuard() : undefined;
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
@@ -1442,6 +1456,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     /** T8: this boot's browser session token — the test seam for session-authenticated HTTP.
      *  In the real browser it never leaves the generated entry; production never logs it. */
     operatorSessionToken: operatorSession.token,
+    profileAuthorizations: () => [...profileAuthorizations],
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       unwatchMcp();
