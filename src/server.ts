@@ -208,7 +208,7 @@ export interface ServerOptions {
   readonly rlmProviders?: readonly RlmProviderRegistration[];
   /** SEA-Forge #114: trusted host configuration for the contained bubblewrap `StdioSpawnPort`. Absent
    *  (the default) keeps Cognate's `unavailableSpawnPort()`: providers that need a port stay refused. */
-  readonly rlmContainedPort?: ContainedStdioPortConfig;
+  readonly rlmContainedPort?: Omit<ContainedStdioPortConfig, "authorize"> & { readonly authorize?: ContainedStdioPortConfig["authorize"] };
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -606,7 +606,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const profileAuthorizations: ProfileAuthorization[] = [];
   const rlmContainedConfig: ContainedStdioPortConfig | undefined = options.rlmContainedPort
     ? options.rlmContainedPort.authorize
-      ? options.rlmContainedPort
+      ? { ...options.rlmContainedPort, authorize: options.rlmContainedPort.authorize }
       : externalAuthority
         ? { ...options.rlmContainedPort, authorize: profileAuthorize({ authority: externalAuthority.client, worldRef: externalAuthority.governance.worldRef, actor: SYSTEM_CALLER.actor, tenant: SYSTEM_CALLER.tenant, record: (a) => { profileAuthorizations.push(a); if (profileAuthorizations.length > 256) profileAuthorizations.shift(); } }) }
         : (() => { throw new Error("rlmContainedPort needs SEA-Forge governance (COGNATE_GOVERNANCE=sea-forge) or an explicit authorize hook: a contained spawn is never launched without an authority decision"); })()

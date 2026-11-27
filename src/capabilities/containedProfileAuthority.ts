@@ -8,7 +8,7 @@
 // Accepted: disposition `boundary` whose constraints hold EXACTLY ONE constraint of type `execution_profile` with the
 // claimed digest, and a plan that embeds that same digest. Everything else refuses before spawn, fail closed: deny,
 // escalate (an approval is not awaited here: a contained spawn does not park a run), a plain allow, a constrained or
-// degraded allow, a missing, wrong, extra or duplicate profile constraint, an unreachable or erroring SEA-Forge, a
+// degraded allow, a decision with no ledger entry, a missing, wrong, extra or duplicate profile constraint, an unreachable or erroring SEA-Forge, a
 // malformed decision, a missing world reference. SEA-Forge binds the digest the host claims and cannot verify it, so the
 // host also recomputes it (the port's pre-spawn recompute) and compares it with the plan before asking.
 //
@@ -32,7 +32,7 @@ export interface ProfileAuthority {
 export interface ProfileAuthorization {
   readonly executionProfileDigest: string;
   readonly launchPlanDigest: string;
-  readonly decisionId: string | undefined;
+  readonly decisionId: string;
   readonly runId: string;
   readonly at: string;
 }
@@ -52,7 +52,7 @@ const unauthorized = (why: string): RlmRefusedError => new RlmRefusedError("rlm-
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Pure decision check: returns the decision id, or throws the typed refusal. */
-export function checkProfileDecision(decision: unknown, executionProfileDigest: string): string | undefined {
+export function checkProfileDecision(decision: unknown, executionProfileDigest: string): string {
   if (!isObject(decision)) throw unauthorized("the authority decision is malformed");
   if (typeof decision.disposition !== "string") throw unauthorized("the authority decision has no disposition");
   if (decision.disposition !== "boundary") throw unauthorized(`SEA-Forge answered ${decision.disposition}, not a boundary allow bound to this execution profile`);
@@ -65,9 +65,9 @@ export function checkProfileDecision(decision: unknown, executionProfileDigest: 
     matching += 1;
   }
   if (matching !== 1) throw unauthorized(matching === 0 ? "the decision carries no execution_profile constraint" : "the decision carries more than one execution_profile constraint");
-  const ref = typeof decision.decisionRef === "string" && decision.decisionRef.length > 0 ? decision.decisionRef : undefined;
-  const authority = isObject(decision.authority) && typeof decision.authority.decisionEnvelopeId === "string" ? decision.authority.decisionEnvelopeId : undefined;
-  return ref ?? authority;
+  // The evidence is an allow SEA-Forge COMMITTED before spawn: its ledger entry (Cognate's `decisionRef`). An envelope id alone is not it.
+  if (typeof decision.decisionRef !== "string" || decision.decisionRef.length === 0) throw unauthorized("the decision carries no ledger entry");
+  return decision.decisionRef;
 }
 
 /**

@@ -57,8 +57,8 @@ export interface ContainedStdioPortConfig {
   readonly stderrBytes?: number;
   /** Operator attestation that the launcher carries the CVE-2026-87766 fix, for a distro build whose version number is below 0.12.0. */
   readonly launcherPatchedAttested?: boolean;
-  /** Authority seam (#116): called with the plan and digest before spawn. Throw to refuse. */
-  readonly authorize?: (plan: LaunchPlan, digest: string, ctx: { readonly intentId: string; readonly runId: string }, executionProfileDigest: string) => Promise<void>;
+  /** Authority seam (#116), REQUIRED: called with the plan and digest before every spawn. Throw to refuse. A port cannot be built without it. */
+  readonly authorize: (plan: LaunchPlan, digest: string, ctx: { readonly intentId: string; readonly runId: string }, executionProfileDigest: string) => Promise<void>;
 }
 
 export const DEFAULT_CEILINGS: ContainedCeilings = {

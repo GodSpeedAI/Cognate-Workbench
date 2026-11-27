@@ -140,6 +140,7 @@ async function sandboxNamespace(launcherPid: number): Promise<string | undefined
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function containedStdioSpawnPort(config: ContainedStdioPortConfig): ContainedStdioSpawnPort {
+  if (typeof config.authorize !== "function") throw new Error("contained port: an authorize hook is required; a contained spawn is never launched without an authority decision");
   validateConfig(config);
   const live = new Map<string, Live>();
   const finished = new Map<string, Live>();
@@ -263,7 +264,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   async function spawn(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly id: string }> {
     const first = await resolve(spec, ctx);
     await preflight(first.material.probeArgv);
-    await config.authorize?.(first.plan, first.digest, ctx, first.profileDigest);
+    await config.authorize(first.plan, first.digest, ctx, first.profileDigest);
     const fds = openPinned(first.plan);
     const closeFds = (...extra: number[]) => { for (const fd of [fds.workspace, fds.egress, fds.executable, ...extra]) if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } } };
     const argFd = (() => { try { return argsFd(first.material); } catch (error) { closeFds(); throw error; } })();
