@@ -1,4 +1,4 @@
-# Current status — revision 57
+# Current status — revision 58
 
 SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for recursive child runs.
 
@@ -12,12 +12,12 @@ SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for rec
 
 **Execution profile (rev 55).** Policy needs a digest that is stable per approved configuration, so the identity is split. `executionProfileDigest` (pinned launcher and executable, restrictions, ceilings, mount roles, flag template, fixed env, allowlisted env names, args) is identical across runs, workspaces, port instances and restarts and is what an operator lists; `launchPlanDigest` stays per launch and embeds it. `authorize` receives both; the pre-spawn recompute confirms both. `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching.
 
-**Delta-2 fixes (rev 56).** A repeat `rlm.invoke` keeps a spent admission spent; a failed dispatch disarms; an unclaimed admission expires; the claim needs the parent run and the parent's agent principal (the child run id is unknowable at admission). The profile now includes the egress socket's resolved path (the workspace stays out: SEA authorizes it as the case resource, the plan digest pins it by dev/inode). Loader and interpreter env names are refused at construction.
+**SEA-Forge authority (rev 58, #116 host half).** The port's `authorize` hook asks SEA-Forge through the existing `SeaForgeAuthority.decide` route, claiming `execution_profile_digest` on the `rlm.invoke` capability, and launches only on a `boundary` allow with exactly one `execution_profile` constraint equal to the digest and a plan that embeds it. Deny, escalate, plain allow, wrong, missing or duplicate digest, unreachable, silent or malformed SEA-Forge: refused before spawn (`rlm-profile-unauthorized`). `startServer` composes it from the external authority and refuses a contained port with neither. Evidence: digests and decision id only. Rebased onto #112's 572d807.
 
-**Verified.** `test/containedLaunch.test.ts` 39/39, guard 8/8, real bwrap run 48/48 with the unit files, three times; wiring plus child-run 10/10. Example profile digest from the real run: `sha256:f3019826...03e8d8`. `test/J-RLM-contained-port.test.ts` (COGNATE_BWRAP_TESTS=1) observes each control from outside with positive controls; evidence JSON under `.tmp/evidence/114/`.
+**Verified.** Real bwrap run 67/67 (unit, guard, authority), three times; authority 18/18 against a stand-in SEA-Forge socket; wiring plus child-run 19/19.
 
 **Limits.** No seccomp or disk quota; `subprocess:false` is refused; RLIMIT_AS fails allocations rather than terminating; the output cap is checked per chunk; bwrap path-exec after a hash check has a narrowed, not eliminated, swap window; `prlimit` comes from the read-only runtime roots. The metering proxy is #115, authority binding is #116. Cognate does not export its bwrap argv builder.
 
-**Next.** Review and merge; #115 and #116.
+**Next.** Review and merge; #115; a live SEA-Forge check.
 
 Plan: none. Spec: SEA-Forge #114. Full history is in `.agents/CURRENT_STATUS.jsonl`.
