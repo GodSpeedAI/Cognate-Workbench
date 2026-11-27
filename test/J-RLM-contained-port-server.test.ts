@@ -59,7 +59,7 @@ async function fixture() {
   const exeText = "#!/bin/sh\necho child\n";
   await writeFile(join(bin, "bwrap"), launcherText); await chmod(join(bin, "bwrap"), 0o755);
   await writeFile(join(bin, "child"), exeText); await chmod(join(bin, "child"), 0o755);
-  const config: ContainedStdioPortConfig = { launcher: { path: join(bin, "bwrap"), sha256: sha(launcherText) }, executables: [{ path: join(bin, "child"), sha256: sha(exeText) }], workspaceRoot: ws, writableRoots: [] };
+  const config: ContainedStdioPortConfig = { authorize: async () => {}, launcher: { path: join(bin, "bwrap"), sha256: sha(launcherText) }, executables: [{ path: join(bin, "child"), sha256: sha(exeText) }], workspaceRoot: ws, writableRoots: [] };
   const exe = join(bin, "child");
   // What an operator writes into policy: the execution profile digest of this provider's spawn spec.
   const profileDigest = (await containedStdioSpawnPort(config).executionProfile({ argv: [exe], cwd: ws, env: {}, restrictions: {} })).digest;
@@ -189,7 +189,7 @@ describe("J-RLM-contained-port wiring", () => {
   test("#116: a contained port with neither SEA-Forge governance nor an explicit authorize hook is refused at startup", async () => {
     const f = await fixture();
     try {
-      await expect(withExpertApp(responder, async () => {}, { rlmContainedPort: f.config })).rejects.toThrow(/authority decision/);
+      await expect(withExpertApp(responder, async () => {}, { rlmContainedPort: (({ authorize: _a, ...rest }) => rest)(f.config) })).rejects.toThrow(/authority decision/);
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 60_000);
 });

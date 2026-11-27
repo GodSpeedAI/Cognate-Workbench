@@ -37,7 +37,7 @@ beforeAll(async () => {
   await writeFile(executable, EXE);
   await chmod(launcher, 0o755);
   await chmod(executable, 0o755);
-  config = { launcher: { path: launcher, sha256: sha(FAKE_LAUNCHER(marker, false)) }, executables: [{ path: executable, sha256: sha(EXE) }], workspaceRoot: workspace, writableRoots: [], envAllowlist: ["FIXTURE_FLAG"] };
+  config = { authorize: async () => {}, launcher: { path: launcher, sha256: sha(FAKE_LAUNCHER(marker, false)) }, executables: [{ path: executable, sha256: sha(EXE) }], workspaceRoot: workspace, writableRoots: [], envAllowlist: ["FIXTURE_FLAG"] };
 });
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 

@@ -29,7 +29,7 @@ beforeAll(async () => {
   const exeText = "#!/bin/sh\necho child\n";
   await writeFile(join(root, "bin", "bwrap"), launcherText); await chmod(join(root, "bin", "bwrap"), 0o755);
   await writeFile(join(root, "bin", "child"), exeText); await chmod(join(root, "bin", "child"), 0o755);
-  config = { launcher: { path: join(root, "bin", "bwrap"), sha256: sha(launcherText) }, executables: [{ path: join(root, "bin", "child"), sha256: sha(exeText) }], workspaceRoot: workspace, writableRoots: [] };
+  config = { authorize: async () => {}, launcher: { path: join(root, "bin", "bwrap"), sha256: sha(launcherText) }, executables: [{ path: join(root, "bin", "child"), sha256: sha(exeText) }], workspaceRoot: workspace, writableRoots: [] };
   spec = { argv: [join(root, "bin", "child"), "--serve"], cwd: workspace, env: {}, restrictions: {} };
 });
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
@@ -39,7 +39,7 @@ const lines = async (): Promise<number> => (existsSync(marker) ? (await readFile
 
 /** What the stand-in SEA-Forge answers for one request. */
 type Answer =
-  | { kind: "boundary"; digests: string[]; extraConstraints?: { constraint_type: string; description: string }[] }
+  | { kind: "boundary"; digests: string[]; extraConstraints?: { constraint_type: string; description: string }[]; noLedger?: boolean }
   | { kind: "plain"; decision: "allow" | "deny" | "escalate" | "constrained_allow" }
   | { kind: "malformed" } | { kind: "error" } | { kind: "silent" };
 
@@ -68,7 +68,7 @@ async function seaForge(path: string, answerFor: (digest: string | undefined) =>
           scope: { world_ref: WORLD }, constraints,
           extensions: {
             "cep.profile": { profile_id: "godspeed.authority_decision", profile_version: "1.0.0" },
-            "godspeed.authority_decision": { request_ref: request.envelope.envelope_id, operation_id: request.request_id, decision, decision_id: `D-${request.request_id}`, ledger_entry: `L-${request.request_id}`, ...(decision === "boundary" ? { policy_basis: ["rule:profile"] } : {}) },
+            "godspeed.authority_decision": { request_ref: request.envelope.envelope_id, operation_id: request.request_id, decision, ...(answer.kind === "boundary" && answer.noLedger ? {} : { decision_id: `D-${request.request_id}`, ledger_entry: `L-${request.request_id}` }), ...(decision === "boundary" ? { policy_basis: ["rule:profile"] } : {}) },
           },
         },
       }) + "\n");
@@ -124,6 +124,7 @@ describe("#116: the host asks SEA-Forge and launches only on the exact boundary 
     ["a boundary allow with the right digest and a wrong one", (claimed) => ({ kind: "boundary", digests: [claimed!, `sha256:${"c".repeat(64)}`] }), /different execution profile/],
     ["a boundary allow with only another constraint type", () => ({ kind: "boundary", digests: [], extraConstraints: [{ constraint_type: "timeout_secs", description: "30" }] }), /no execution_profile constraint/],
     ["a boundary allow with no constraints at all", () => ({ kind: "boundary", digests: [] }), /without constraints|answered unknown/],
+    ["a boundary allow with no ledger entry", (claimed) => ({ kind: "boundary", digests: [claimed!], noLedger: true }), /carries no ledger entry/],
     ["a malformed reply", () => ({ kind: "malformed" }), /answered unknown|could not decide/],
     ["an authority error", () => ({ kind: "error" }), /answered unknown/],
     ["a SEA-Forge that never answers", () => ({ kind: "silent" }), /answered unknown|could not decide/],
@@ -142,6 +143,14 @@ describe("#116: the host asks SEA-Forge and launches only on the exact boundary 
       } finally { await r.port.dispose(); await r.close(); }
     });
   }
+
+  test("a port built without an authorize hook fails at construction, so no spawn can happen", async () => {
+    const before = await lines();
+    for (const bad of [undefined, null, "yes", {}]) {
+      expect(() => containedStdioSpawnPort({ ...config, authorize: bad } as unknown as ContainedStdioPortConfig)).toThrow(/authorize/);
+    }
+    expect(await lines()).toBe(before);
+  });
 
   test("an unreachable SEA-Forge (no socket at all) refuses", async () => {
     const client = new SeaForgeAuthority({ socketPath: join(root, "absent.sock"), timeoutMs: 300 });
@@ -171,19 +180,21 @@ describe("#116: the hook's own checks (no socket needed)", () => {
 
   test("a plan that does not embed the digest being authorized refuses without asking SEA-Forge", async () => {
     let asked = 0;
-    const hook = profileAuthorize({ authority: { decide: async () => { asked += 1; return { disposition: "boundary", reason: "", constraints: [{ type: "execution_profile", value: D }] }; } }, worldRef: WORLD, actor: { id: "s", kind: "system" }, tenant: "t" });
+    const hook = profileAuthorize({ authority: { decide: async () => { asked += 1; return { disposition: "boundary", reason: "", decisionRef: "L-1", constraints: [{ type: "execution_profile", value: D }] }; } }, worldRef: WORLD, actor: { id: "s", kind: "system" }, tenant: "t" });
     expect((await refused(run(hook, `sha256:${"f".repeat(64)}`, D))).reason).toContain("does not embed");
     expect(asked).toBe(0);
   });
 
   test("malformed digests, a missing world reference and malformed decisions refuse", async () => {
     expect((await refused(run(stub(null), "bad", "bad"))).reason).toContain("malformed");
-    const noWorld = profileAuthorize({ authority: { decide: async () => ({ disposition: "boundary", reason: "", constraints: [{ type: "execution_profile", value: D }] }) }, worldRef: undefined, actor: { id: "s", kind: "system" }, tenant: "t" });
+    const noWorld = profileAuthorize({ authority: { decide: async () => ({ disposition: "boundary", reason: "", decisionRef: "L-1", constraints: [{ type: "execution_profile", value: D }] }) }, worldRef: undefined, actor: { id: "s", kind: "system" }, tenant: "t" });
     expect((await refused(run(noWorld, D, D))).reason).toContain("world reference");
     for (const bad of [null, "boundary", 7, {}, { disposition: 5 }, { disposition: "boundary" }, { disposition: "boundary", constraints: "x" }, { disposition: "boundary", constraints: [null] }, { disposition: "boundary", constraints: [{ type: "execution_profile" }] }]) {
       await refused(run(stub(bad), D, D));
     }
-    expect(() => checkProfileDecision({ disposition: "boundary", constraints: [{ type: "execution_profile", value: D }] }, D)).not.toThrow();
+    expect(() => checkProfileDecision({ disposition: "boundary", constraints: [{ type: "execution_profile", value: D }] }, D)).toThrow(/no ledger entry/);
+    expect(() => checkProfileDecision({ disposition: "boundary", decisionRef: "", authority: { decisionEnvelopeId: "env-1" }, constraints: [{ type: "execution_profile", value: D }] }, D)).toThrow(/no ledger entry/);
+    expect(checkProfileDecision({ disposition: "boundary", decisionRef: "L-9", constraints: [{ type: "execution_profile", value: D }] }, D)).toBe("L-9");
   });
 
   test("a thrown client error refuses", async () => {

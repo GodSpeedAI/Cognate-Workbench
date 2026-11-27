@@ -131,7 +131,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
     argv: [python, "/workspace/child.py"], cwd: workspace, env: {}, restrictions: { filesystem: ["read-only"], subprocess: true, ...restrictions },
   });
   const makePort = (workspace: string, extra: Partial<Parameters<typeof containedStdioSpawnPort>[0]> = {}) => {
-    const port = containedStdioSpawnPort({ launcher, executables: [pythonPin], workspaceRoot: workspace, writableRoots: [base], ...extra });
+    const port = containedStdioSpawnPort({ authorize: async () => {}, launcher, executables: [pythonPin], workspaceRoot: workspace, writableRoots: [base], ...extra });
     ports.push(port);
     return port;
   };
@@ -451,7 +451,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
 
     // ════════ READ-ONLY WORKSPACE IS NOT AN ARTIFACT OF THE FIXTURE: wall of refusal before spawn on a real launcher ════════
     {
-      const bad = containedStdioSpawnPort({ launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace, writableRoots: [] });
+      const bad = containedStdioSpawnPort({ authorize: async () => {}, launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace, writableRoots: [] });
       const marker = join(f.dir, "must-not-exist");
       await expect(bad.spawn({ ...spec(f.workspace), argv: [python, "-c", `open('${marker}','w')`] }, ctx)).rejects.toMatchObject({ code: "rlm-containment-unavailable" });
       expect(existsSync(marker)).toBe(false);
