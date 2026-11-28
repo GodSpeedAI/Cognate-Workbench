@@ -1,4 +1,4 @@
-# Current status — revision 62
+# Current status — revision 63
 
 SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for recursive child runs.
 
@@ -8,7 +8,7 @@ SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for rec
 
 **Containment.** `--unshare-all`, `--die-with-parent`, read-only workspace, tmpfs `/tmp`, caps dropped, `prlimit`, bounded output, group and namespace kill with a `/proc` survivor check. With no network a BPF filter (`containedSeccomp.ts`, `--seccomp 7`) allow-lists socket creation: AF_INET, AF_INET6, NETLINK_ROUTE and AF_UNIX stream or seqpacket socketpairs; the rest is EACCES, `io_uring_setup` is EPERM, x32 and the legacy 512-547 range are killed. That closes host pathname sockets (stream and datagram) under the workspace bind, and vsock.
 
-**Authority (#116 host half).** `startServer` always composes `profileAuthorize`, from the external SEA-Forge or an injected `rlmProfileAuthority` (refused beside configured governance); one canonical client decides admission and launch; no bare hook, and the port requires one. The launch asks the target `workbench.rlm.contained-spawn` with `claims.execution_profile_digest`, before any bubblewrap starts, and proceeds only on a `boundary` allow with one `execution_profile` constraint, no other constraint, a ULID ledger entry, and a plan embedding the digest. Disposal cancels (per-operation registrations) and awaits in-flight spawns, and owns every launcher descriptor; a disposed port launches nothing.
+**Authority (#116 host half).** `startServer` always composes `profileAuthorize`, from the external SEA-Forge or an injected `rlmProfileAuthority` (refused beside configured governance); one canonical client decides admission and launch; no bare hook, and the port requires one. The launch asks the target `workbench.rlm.contained-spawn` with `claims.execution_profile_digest`, before any bubblewrap starts, and proceeds only on a `boundary` allow with one `execution_profile` constraint, no other constraint, a ULID ledger entry, and a plan embedding the digest. Lifetime is two constructs: one synchronous launch gate (`launchGate.ts`) is the only place a process is started and dispose() closes it first, and one scope per spawn (`spawnScope.ts`) owns every descriptor, handle and waiter and is cancelled by dispose; a disposed port launches nothing.
 
 **Verified.** Real bwrap batch (unit, guard, authority, seccomp, env pattern, profile CLI, conformance, pathname-socket) 111/111 three times; server wiring plus child-run 24/24. Delta-1, delta-2 and delta-3 findings fixed.
 
