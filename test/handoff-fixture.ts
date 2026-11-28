@@ -3,12 +3,14 @@
 // one. It offers approved case assignments shaped like the binding SEA-Forge serves (assignment.v1
 // Brief and Budget, the frozen world and kind) — see sea-rs
 // crates/sea-forge-server/tests/conformance_fde_scenarios.rs, delegate-complete-freeze-accepted.
+import { LOCAL_OPERATOR, type AppServer } from "../src/server.ts";
+import { waitUntil } from "./wb-helpers.ts";
 import type { HandoffCandidate, HandoffSource } from "../src/assignments/handoffSource.ts";
 
 export const GATE_G3_INSTRUCTION = "Record the verifier's observation for gate G3.";
 export const GATE_G3_ASSIGNMENT_ID = "assign:case-0001:item-03:1:1";
-/** The aimock `wp23-handoff-slow` fixture streams this for about eight seconds, so an operator can report
- *  spend and interrupt the run while it is live. */
+/** The aimock `wp23-handoff-slow` fixture streams its first model call for about ten minutes (and answers the
+ *  retry promptly), so an operator can report spend and interrupt the run while a call is certainly in flight. */
 export const SLOW_GATE_INSTRUCTION = "[[scenario:wp23-handoff-slow]] Record the slow observation for gate G4.";
 export const SLOW_GATE_ASSIGNMENT_ID = "assign:case-0001:item-03:1:2";
 
@@ -69,3 +71,13 @@ export function standInHandoffSource(initial: readonly HandoffCandidate[]): Hand
     },
   };
 }
+
+/** Resolves once the run's model call has begun streaming. Together with the slow scenario's long first
+ *  call this makes an interrupt land mid-call by construction, not by timing. */
+export const modelCallInFlight = (app: AppServer, runId: string) =>
+  waitUntil(`run ${runId}'s model call to start streaming`, async () => {
+    for await (const event of app.runtime.service.events(LOCAL_OPERATOR, { runId })) {
+      if (event.eventType === "run.invocation.progress") return true;
+    }
+    return undefined;
+  });

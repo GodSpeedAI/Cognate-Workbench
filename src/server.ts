@@ -12,7 +12,7 @@ import type { Policy } from "@godspeedai/cognate-kernel-api";
 import { ServiceError, type Caller, type RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { createRlmAgent, createRlmComponent, createRlmRegistry, createRuntime, type RlmProviderRegistration } from "@godspeedai/cognate-runtime-bun";
 import { authorizeAssignmentAction } from "./assignments/assignmentBinding.ts";
-import { storeConfigFor } from "./store.ts";
+import { storeConfigForHome } from "./store.ts";
 import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
 import type { ActionPolicy, Runtime } from "@godspeedai/cognate-runtime-bun";
 import { devTokenAuthenticator } from "@godspeedai/cognate-protocol-connect-bun";
@@ -598,7 +598,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   // Freeze this server's policy by value; caller-owned options cannot reroute an active world.
   if (containmentConfig) containmentConfig = validateContainmentConfig(structuredClone(containmentConfig));
   await mkdir(home, { recursive: true });
-  const store = storeConfigFor(home, "harness");
+  const store = await storeConfigForHome(home, "harness");
   const opened = await openSecretStore(home);
   const secrets = opened.store;
   const secretsBackend = {

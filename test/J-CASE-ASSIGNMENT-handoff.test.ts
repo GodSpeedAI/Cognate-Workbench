@@ -17,7 +17,7 @@ import { createRemoteRuntimeService } from "@godspeedai/cognate-protocol-connect
 import type { Json } from "@godspeedai/cognate-events";
 import type { AssignmentView, Caller } from "@godspeedai/cognate-runtime-api";
 import { LOCAL_OPERATOR, startServer, type AppServer } from "../src/server.ts";
-import { approvedGateG3, approvedSlowGate, GATE_G3_ASSIGNMENT_ID, SLOW_GATE_ASSIGNMENT_ID, standInHandoffSource } from "./handoff-fixture.ts";
+import { approvedGateG3, approvedSlowGate, modelCallInFlight, GATE_G3_ASSIGNMENT_ID, SLOW_GATE_ASSIGNMENT_ID, standInHandoffSource } from "./handoff-fixture.ts";
 import { bootAimock, withTempHome } from "./helpers.ts";
 import { inv, seed, seedWorkspaceOnly, waitUntil } from "./wb-helpers.ts";
 
@@ -125,12 +125,7 @@ describe("J-CASE-ASSIGNMENT-handoff", () => {
         expect(await inv(client, "assignment.spend", spend)).toEqual(spent);
         // The interrupt lands while the model call is streaming (as the browser journey's does), so the step's
         // outcome is unknown and the resumed run waits for the operator rather than finishing by timing alone.
-        await waitUntil("the slow run's model call to start streaming", async () => {
-          for await (const event of app.runtime.service.events(LOCAL_OPERATOR, { runId: slowHanded.runId })) {
-            if (event.eventType === "run.invocation.progress") return true;
-          }
-          return undefined;
-        });
+        await modelCallInFlight(app, slowHanded.runId);
         const paused = (await amidStreaming(() => inv(client, "assignment.interrupt", { runId: slowHanded.runId, reason: "operator pause", token: "pause-once" }))) as unknown as AssignmentView;
         expect(paused.status).toBe("interrupted");
         const resumed = (await inv(client, "assignment.resume", { runId: slowHanded.runId, token: "resume-once" })) as unknown as AssignmentView;

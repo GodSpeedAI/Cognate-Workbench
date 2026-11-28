@@ -150,7 +150,7 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Date: 2026-11-26
 - Location: src/capabilities/assignmentControls.ts; Cognate `packages/runtime-bun/src/assignment.ts` (`AssignmentService.append`).
 - Debt: an operator Interrupt or Spend that lands while the bound run streams can be refused with "too much contention on run <id>"; the control shows the refusal and stays open (fail closed, nothing lost). The cause is structural in Cognate: `AssignmentService.append` writes control events onto the run stream, which the executor writes with its own serialized version and halts on a conflict. Cognate's `fold.ts` (spec §29.1) forbids such foreign appends. Cognate #91 (DEBT-033, merged e33978a) adds bounded backoff, which only lowers the odds; the structural fix (branch `fix/assignment-controls-off-run-stream`) moves controls off the run stream.
-- Evidence: the browser journey failed about 5 of 16 local runs under load (contention persisted until the slow run ended); hosted CI passed it at 6a812e2 and 1a105bf. Both WP-23 tests retry only this refusal (documented in both).
+- Evidence: the browser journey failed about 5 of 16 local runs under load (contention persisted until the slow run ended); hosted CI passed it at 6a812e2 and 1a105bf. Both WP-23 tests retry only this refusal (documented in both). Separate from contention: the journey's red on main was a test timing defect, not this debt (the interrupt could land after the 8 s slow stream ended, so no step was in flight and no reconciliation arose); fixed by gating the slow scenario's first model call (about ten minutes, interrupted never waited out) and waiting for the call to be in flight before controls.
 - Confidence: high
 - Closure: release Cognate with the structural fix (publication needs owner authorization), bump this repo, then remove the contention retries from both tests; size S here.
 
@@ -193,3 +193,11 @@ explicit configuration (T7); no production-hardened multi-user closure is claime
 - Evidence: `provider.invokes` holds 2 requests with one `invocationId` after one reconciliation (observed in the #112 journey).
 - Confidence: high
 - Closure: Cognate PR #94 fixes it. Consume that release, then delete the `.failing` marker so the test asserts exactly one entry; size S.
+
+### `worldHash` does not cover the real model, policy and environment
+- Date: 2026-11-27
+- Location: src/capabilities/cognitive.ts `manifestOf` (the `semanticModelHash`, `policyHash` and `environmentHash` fields).
+- Debt: the Execution Manifest hashes the fixed strings `deepseek-harness-model` and `deepseek-harness-app-policy` for the semantic model and policy, and only `{ worldKind }` for the environment. A change to the loaded model, the active policy or the environment (other than the world kind) leaves `worldHash` unchanged, so a matching hash does not show that they are unchanged.
+- Evidence: `manifestOf` in src/capabilities/cognitive.ts; the limit is stated in docs/reference/terminology-implementation.md (Execution Manifest).
+- Confidence: high
+- Closure: hash the real values: the model digest the server records at boot, a canonical digest of the effective policy, and an environment digest (world kind plus the facts the verification depends on, such as runtime and tool versions). Needs a test that changing each input changes `worldHash`, and a note on how existing stored hashes are treated; size M.

@@ -23,7 +23,7 @@ import type { Caller, RuntimeService } from "@godspeedai/cognate-runtime-api";
 import { AGENT_COGNITIVE } from "../agents/agentCognitive.ts";
 import { hashOf } from "../cognitive/canonical.ts";
 import { checkPromotion, foldLineage, worldHash, worldManifest, WORLD_EVENTS, type WorldManifest } from "../cognitive/world.ts";
-import { freezeCriterion, type CriterionSpec, type FrozenCriterion } from "../cognitive/criterion.ts";
+import { freezeCriterion, reviseCriterion, type CriterionSpec, type FrozenCriterion } from "../cognitive/criterion.ts";
 import { CASE_EVENTS, deriveCase, reality, type CaseEvent, type CaseProjection } from "../cognitive/case.ts";
 import type { PossibleOperation } from "../cognitive/affordance.ts";
 import { createMediationHost, type MediatorSpec, type Outcome } from "../cognitive/mediation.ts";
@@ -162,8 +162,13 @@ export function cognitiveComponent(options: CognitiveOptions): Component {
         return { caseId: i.caseId };
       }));
 
-      fiber.provide(contract("criterion.freeze"), withCtx(async (i: { caseId: string; spec: CriterionSpec }) => {
-        const criterion = freezeCriterion(i.spec);
+      fiber.provide(contract("criterion.freeze"), withCtx(async (i: { caseId: string; spec: CriterionSpec }, ctx) => {
+        // The first criterion of a case is frozen as submitted. Replacing one is a revision and needs
+        // human authority: the same rule `reviseCriterion` encodes. The refusal records nothing, so the
+        // earlier criterion stays the case's effective one.
+        const prior = [...(await events(options.systemCaller))].reverse().find((e) => e.eventType === CASE_EVENTS.criterion && e.payload.caseId === i.caseId)?.payload.criterion as FrozenCriterion | undefined;
+        const { version: _submitted, ...next } = i.spec;
+        const criterion = prior ? reviseCriterion(prior, next, ctx.actor) : freezeCriterion(i.spec);
         await record("criterion.frozen", { caseId: i.caseId, criterion: criterion as unknown as Json });
         return { criterionHash: criterion.criterionHash };
       }));

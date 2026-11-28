@@ -50,8 +50,10 @@ The [interaction model](../../.sea/interaction/interaction-model.sea) supplies d
 ### Binding
 
 The only path from a semantic object to a capability contract. `domain/index.ts` performs every
-binding through `bindCapabilities` and asserts the expected count for each tranche, so a silent
-loss of a binding fails at boot.
+binding through `bindCapabilities` and compares the number of contracts it returns with the number
+of bindings it was given for each tranche, so a binding lost *during binding* fails at boot. The
+expected count comes from the anchor list itself, so an entry removed from `WORKBENCH_ANCHORS` (or
+another tranche's list) shortens both sides and is not detected by this check.
 
 ### Journey
 
@@ -137,6 +139,14 @@ The consequential state a `worldHash` is computed over: workspace file digests, 
 model / policy / environment hashes, and criterion and method hashes. Lineage metadata is
 deliberately excluded.
 
+The semantic-model, policy and environment inputs are placeholders today. `manifestOf`
+(`src/capabilities/cognitive.ts`) hashes the fixed strings `deepseek-harness-model` and
+`deepseek-harness-app-policy` for the first two, and only `{ worldKind }` for the environment. A
+change to the loaded model, to the policy, or to anything about the environment other than the world
+kind therefore does not change `worldHash`. A matching `worldHash` is not evidence that the policy or
+environment are unchanged. The gap is recorded in `.agents/DEBT.md` ("`worldHash` does not cover the
+real model, policy and environment").
+
 ### Execution State Digest
 
 The implementation name for Execution State Digest. SHA-256 covers the canonicalized Execution Manifest. A matching hash establishes manifest equality at this scope. Status, lineage and semantic world identity remain separate.
@@ -153,7 +163,12 @@ The local operation `world.settle` records Candidate Promotion as `world.settled
 
 A frozen evaluation definition: required check ids, consequences, and observer coverage. Once
 frozen it is deep-frozen and bound to its hash. A revision is a new criterion with a new hash and
-requires human authority.
+requires human authority. `criterion.freeze` enforces this when the case already has a criterion:
+the replacement goes through `reviseCriterion`, so the actor must be a user, and a refused revision
+records nothing (the earlier criterion stays effective in `deriveCase`). The first criterion of a
+case is frozen without that check. Before [PR #45](https://github.com/GodSpeedAI/Cognate-Workbench/pull/45)
+the handler froze any submitted spec and the check existed only in the unused `reviseCriterion`
+helper, so a caller holding `criterion.freeze` could replace the active criterion.
 
 ### Mediation
 
@@ -175,12 +190,37 @@ residuals; only a human can accept it and move the active method hash.
 ### Home
 
 The application data directory. `COGNATE_WORKBENCH_HOME`, else the legacy `COGNATE_HARNESS_HOME`,
-else `<repo>/.data`. It holds `secrets.json` and determines the PostgreSQL schema.
+else the default below. It determines the PostgreSQL schema. It holds `secrets.json` only when the
+file backend is in use (see Secret storage).
+
+Defaults without an override (`defaultHome`, `src/resources.ts`):
+
+| Install | Default home |
+| --- | --- |
+| Development checkout | `<repo>/.data` |
+| Packaged, Windows | `%LOCALAPPDATA%\CognateWorkbench` (`~\AppData\Local\CognateWorkbench` if unset) |
+| Packaged, macOS | `~/Library/Application Support/CognateWorkbench` |
+| Packaged, Linux and others | `$XDG_DATA_HOME/cognate-workbench` (`~/.local/share/cognate-workbench` if unset) |
+
+### Secret storage
+
+The native store is primary: the operating system's secret store through `Bun.secrets` (macOS
+Keychain, Linux Secret Service, Windows Credential Manager), scoped by a hash of the home path. The
+file `<home>/secrets.json` (mode 0600, not encrypted) is a fallback, used when the native store is
+unavailable or `COGNATE_SECRET_STORE=file` forces it. When the native store is in use, existing file
+entries are copied into it, read back, and the file is overwritten and removed
+(`src/secrets.ts`, `migrateFileSecrets`). Do not assume `secrets.json` holds all credentials, or
+exists at all.
 
 ### Schema
 
-`cognate_harness_<sanitised home path>`. Derived deterministically, so a home always maps to the
-same schema and each test's temp home maps to an isolated one.
+`cognate_harness_<sanitised path tail>_<10 hex of sha256(resolved path)>`, at most 63 bytes
+(`schemaFor`, `src/store.ts`). Derived deterministically and recomputed at every boot (it is not
+stored), so a home always maps to the same schema and distinct homes, including `/tmp/a-b` and
+`/tmp/a_b`, map to distinct ones. A schema that already exists under the pre-hash name
+(`cognate_harness_<sanitised last 40 characters>`) keeps being used (`resolveSchemaFor`), so an
+existing install is not moved. Before [PR #45](https://github.com/GodSpeedAI/Cognate-Workbench/pull/45)
+only the sanitised tail was used and such homes shared a schema.
 
 ### Operator and system callers
 
