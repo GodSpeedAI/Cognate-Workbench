@@ -269,23 +269,43 @@ describe("#114 delta-2: the run identity and reach come from the runtime, and pi
 });
 
 describe("#114 delta-2: disposal during the launch path, and the version probe", () => {
-  test("M7: a disposal that lands while the launch is between its allow and its preflight starts no launcher", async () => {
-    // spawnSync blocks the event loop, so a launcher invocation is atomic: it either finished before dispose() was called or starts after.
-    // Count at the instant dispose() runs and again at the end; any difference is an invocation that began after the port closed.
-    const hops = [0, 1, 2, 3, 4, 6, 8, 12];
-    for (const hop of hops) for (const mode of ["micro", "timer", "immediate"] as const) {
-      let atDispose = -1;
+  test("M7: a disposal that lands while the launch is between its allow and its preflight begins no launcher", async () => {
+    // What is asserted is when a launch BEGINS, not when the launcher's log line lands: the real launch is an asynchronous Bun.spawn, so a
+    // launch begun just before dispose() can still write its line after it (observed under load: 8 of 780 cases, with the begin count
+    // unchanged). `__debug().launcherCalls` is incremented synchronously at each Bun.spawnSync / Bun.spawn call site; any increase after
+    // dispose() ran, is a launch that started after the port closed.
+    const iterations = Number(process.env.M7_SWEEP_ITERATIONS ?? 1);
+    const cases: ["micro" | "immediate" | "timer", number][] = [];
+    for (const hop of [0, 1, 2, 3, 4, 6, 8, 12]) { cases.push(["micro", hop]); }
+    cases.push(["immediate", 0]);
+    for (let ms = 0; ms <= 14; ms++) cases.push(["timer", ms]);
+    let reachedAllow = 0;
+    for (let it = 0; it < iterations; it++) for (const [mode, hop] of cases) {
+      let callsAtDispose = -1;
       const port = scopedPort({ ...config, authorize: async () => {
-        const dispose = (): void => { atDispose = readLaunchCount(); void port.dispose(); };
-        if (mode === "timer") setTimeout(dispose, hop % 3);
+        const dispose = (): void => { callsAtDispose = port.__debug().launcherCalls; void port.dispose(); };
+        if (mode === "timer") setTimeout(dispose, hop);
         else if (mode === "immediate") setImmediate(dispose);
         else { let p: Promise<void> = Promise.resolve(); for (let i = 0; i < hop; i++) p = p.then(() => {}); void p.then(dispose); }
+        reachedAllow += 1;
       } });
       await port.spawn(spec, ctx).catch(() => {});
       await Bun.sleep(30);
       await port.dispose();
-      if (atDispose >= 0) expect([hop, mode, readLaunchCount() - atDispose]).toEqual([hop, mode, 0]);
+      const debug = port.__debug();
+      if (callsAtDispose >= 0) expect([mode, hop, debug.launcherCalls - callsAtDispose]).toEqual([mode, hop, 0]);   // no launch began after dispose()
     }
+    expect(reachedAllow).toBe(cases.length * iterations);                                                              // every case really reached the allow
+  });
+
+  test("M7: the begin counter is exact: a launch that completes before dispose is counted, and a refused one is not", async () => {
+    const port = scopedPort({ ...config, authorize: async () => {} });
+    const base = port.__debug().launcherCalls;
+    await port.spawn(spec, ctx);
+    expect(port.__debug().launcherCalls - base).toBe(2);      // the namespace preflight and the launch itself
+    await port.dispose();
+    await refused(port.spawn(spec, { intentId: "i2", runId: "r2" }));
+    expect(port.__debug().launcherCalls - base).toBe(2);      // a disposed port begins nothing
   });
 
   test("M7: dispose awaits every in-flight spawn, and a spawn it cancelled does not launch when authority later answers", async () => {
