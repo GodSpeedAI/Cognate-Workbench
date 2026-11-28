@@ -1,13 +1,15 @@
 # Current status
 
-**Status revision:** 45
+**Status revision:** 46
 
-**Stage:** WP-23 E2E interrupt determinism fix
+**Stage:** Owner-approved GodSpeed vocabulary consolidation
 
-**Summary:** The WP-23 browser journey was nondeterministic: the slow scenario streamed for about 8 s, so on a loaded host the operator's Interrupt could land after the run had completed or after its model call ended, leaving no interrupted step to reconcile. The slow scenario's first model call now streams for about ten minutes (the retry answers promptly) and both WP-23 tests wait until the call is in flight before issuing controls, so the interrupt lands mid-call by construction.
+**Summary:** Reconciled the owning glossary against the review patch and authoritative sources. The owner approved the conceptual distinctions. Runtime, frozen specifications, and identifiers retain their existing contracts. Merged with main after revision 45; earlier snapshot facts are carried forward.
 
 **Verified:**
 
+- Cross-checked glossary targets, source links and the eleven semantic scenarios.
+- Merged origin/main into the vocabulary branch; only the status files conflicted, and main's history is kept.
 - Hosted verify 45833643135 on 1a105bf: success (typecheck+smoke, shards 1-4, tauri-linux, aggregate); earlier hosted verify 45828061942 on 6a812e2 success
 - just typecheck clean; domainforge validate 0 violations; fmt --check clean; bun scripts/verify-sea-format.ts ok
 - test/J-CASE-ASSIGNMENT-handoff.test.ts 3 pass (real server, production session posture; reconciles a mid-stream interrupt)
@@ -33,6 +35,8 @@
 
 **Evidence:**
 
+- docs/glossary.md
+- docs/reference/terminology-implementation.md
 - https://github.com/GodSpeedAI/Cognate-Workbench/actions/runs/45833643135
 - test/J-CASE-ASSIGNMENT-handoff.test.ts
 - test/E2E-case-assignment-handoff.test.ts

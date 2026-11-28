@@ -1,219 +1,160 @@
-# Glossary
+# Cognate Workbench expert and candidate work
 
-Project vocabulary. Terms are defined as they are used *in this repository*, not in general.
+Workbench gives operators a place to direct Experts, evaluate their work, and promote local candidate states.
 
----
+Workbench owns the Expert and Candidate State terms here. The [interaction model](../.sea/interaction/interaction-model.sea) and [candidate settlement workflow](workflows/cognitive-case-settlement.md) are their product sources. See [why the cognitive layer exists](explanation/why-cognitive-layer.md) and [implementation names](reference/terminology-implementation.md) for the existing types, events, operations, and operational vocabulary.
 
-## The ten you need first
+## Language
 
-### Agent
-A named run body. Three exist: `agent.coding` (the tool loop), `agent.config` (emit-only, records
-domain events), `agent.cognitive` (records cognitive facts). An agent performs I/O by invoking
-capabilities and by emitting events. It does not own state.
+### Expert work
 
-### Capability
-A governed, leased unit of effect with a stable `id.version`. Roughly 60 capability ids exist.
-A capability validates its input, performs the effect, and records the result. It is the only way
-anything consequential happens. See [Capability catalog](reference/capability-catalog.md).
+**Expert**:
+A persistent, configurable worker with a specialization and a defined set of tools.
 
-### Tool
-A model-facing schema entry the model may call: `read`, `edit`, `bash`, `todo_write`,
-`exit_plan_mode`, `subagent`, `run_code`. A tool is not an authority; it resolves to exactly one
-capability that is.
+**Team**:
+A managed group of Experts with shared tool and delegation limits. An active Team has one Team Lead.
 
-### Event
-An immutable, recorded fact. The event log is the application's truth. Nothing else is.
+**Team Lead**:
+The Team member responsible for coordinating shared work and delegating to Specialists. A Team Lead’s delegation stays within the Team’s authority ceiling and the caller’s grant.
 
-### Projection
-A derived read model folded from events. The UI subscribes to projections. A projection can be
-deleted and rebuilt without loss. Eleven exist. See [Projection catalog](reference/projection-catalog.md).
+**Specialist**:
+A Team member assigned bounded work under the Team Lead’s delegation and the Team’s limits.
 
-### Continuation
-A durable human wait inside a run. `ctx.waitFor(...)` parks a run; `client.resolveContinuation(...)`
-releases it. This is how approvals and plan reviews work, and it is why a pending approval survives
-a full process restart.
+**Expert Assignment**:
+A durable commitment of work to an Expert with a purpose, acceptance conditions, authority limits, and a return to its requester. Retries can produce new runs against the same commitment.
+_Avoid_: Assignment, Case Assignment, Task
 
-### Run
-One execution of one agent, correlated by a correlation id (`session:<id>`,
-`subagent:<parentRunId>:<toolCallId>`). Runs are replayed deterministically from their recorded steps.
+**Expert Handoff**:
+An Expert’s attributed return of an assignment’s output, artifacts, evidence, uncertainty, or reason for declining or failing.
 
-### Execution world
-Where files are read and commands run. Local, an SSH host, a WSL distribution, or a disposable
-directory copy. A workspace is `(executionWorldId, root)`; the agent loop never learns which kind it
-is talking to.
+**Expert Review**:
+A separate judgment of an Expert’s handoff, performed with independence from the work under review.
 
-### Task contract
-The declared shape of a unit of work: context, goal, skills, authority scopes, executors, budget,
-invariants, acceptance criteria. It is validated before work starts and is the thing review checks
-against.
+**Assignment Acceptance**:
+The operator’s decision to accept the returned work for an Expert Assignment after applicable review and reconciliation.
 
-### Affordance
-An operation that is *currently available*, derived from what holds right now. Distinct from
-possibility. A blocked affordance names what blocks it and the move that would unblock it.
+**Expert Memory**:
+Retained, source-attributed material associated with an Expert or Team and scoped for reuse in later work.
 
----
+**Task**:
+An operator-accountable objective that can span multiple runs and Expert Assignments and has its own acceptance conditions.
 
-## Domain concepts
+**Task Acceptance**:
+An operator’s decision that a Task satisfies its required criteria.
 
-### Semantic model
-`.sea/interaction/interaction-model.sea`. A DomainForge `.sea` file declaring 31 entities that give
-the domain its names. It is read at boot; its object count and digest are logged. It is the naming
-contract, not the runtime state.
+### Candidate work
 
-### Binding
-The only path from a semantic object to a capability contract. `domain/index.ts` performs every
-binding through `bindCapabilities` and asserts the expected count for each tranche, so a silent
-loss of a binding fails at boot.
+**Local Change Case**:
+A local navigation view of intended change, a reference state, a candidate state, available moves, and the evidence needed to decide whether to adopt the candidate.
+_Avoid_: Managed Case, Purposeful Case
 
-### Journey
-A canonical end-to-end scenario from the semantic model. Journey ids are stable and short
-(`j_d_approval`, `j_e_plan`, `j_wb_task_contract`), and tests are named after them
-(`test/J-D-approval.test.ts`).
+**Execution Manifest**:
+The identification-relevant description of a local execution state, including its contents and the semantic, policy, environmental, method, and evaluation inputs under which it is considered.
 
-### Grant
-One axis of an authority scope. Exactly one of `yes`, `approval`, `no`. `approval` means the
-operation needs a human decision before it runs.
+**Execution State Digest**:
+A content-derived identifier for an Execution Manifest. Equal digests denote equal manifest content under the same scheme.
+_Avoid_: World Reference, world identity (unqualified)
 
-### Authority scopes
-Per-task permissions for filesystem (read, write, outsideWorkspace), shell (run, destructive), and
-network. A task with no scopes falls back to the app-wide defaults.
+**Candidate State**:
+A disposable fork of a locally accepted execution state in which a change is tried before adoption.
+_Avoid_: Candidate world, semantic world
 
-### Protected evidence
-Paths matched by an app- or task-level protection rule. Enforcement is structural: `authority.check`
-runs inside the tool loop before `tool.edit` or `tool.bash` executes, so the block does not depend on
-the model agreeing to a prompt.
+**Candidate Promotion**:
+An operator’s adoption of a Candidate State as the current local baseline, after applicable verification and a check that its parent is current.
+_Avoid_: World settlement, operational settlement
 
-### Evidence
-A recorded, criterion-bound observation. Evidence entries carry a kind (`AcceptanceKind` or a wider
-`EvidenceKind`), a status (`pass` / `fail` / `pending`), and — for cognitive verification — the
-criterion hash and candidate hash they were observed under.
+**Frozen Criterion**:
+The evaluation conditions and observer coverage held fixed for a candidate’s verification.
 
-### Done level
-The taxonomy of completion: `not-started`, `finished`, `produced`, `tested`, `ready-for-review`,
-`accepted`, `operationalized`. The model deliberately does not collapse these into a single "done".
+**Affordance Block**:
+An assessed condition preventing a candidate move from becoming spendable.
 
-### Acceptance criterion
-A named, checkable condition attached to a task contract, with a kind (`test`,
-`independent-check`, `journey`, `audit`, `integrity`, `human`) and a `required` flag. Review
-readiness is computed from which required criteria are closed.
+**Steering**:
+Operator input directed to either the next boundary of a live run or the next turn.
 
-### Review gate
-The human decision that promotes work from `ready-for-review` to `accepted`. Requires a `user`
-actor, so an agent run cannot accept its own work.
+**Grounded Feedback**:
+An operator’s requested change bound to specific observed material.
 
-### Skill / Skill capability
-A named capability with an implementation binding and a lifecycle state. The catalog is seeded;
-`skill.lifecycle.advance` moves a capability through `CAPABILITY_LIFECYCLE`, one step at a time.
+**Tool**:
+A model-facing way to request an effect through the applicable operation boundary.
 
-### Workflow
-A directed graph of nodes with `needs` (must pass) and `after` (must settle) edges. Node status is
-derived; advancement is explicit and can require evidence.
+**Permission Rule**:
+The rule for a task authority dimension, which can permit, deny, or require approval for a class of effects.
 
-### Automation
-An accepted workflow plus input binding, a schedule, an execution substrate, and an outcome gate.
-Lifecycle: `SCHEDULED → DISPATCHED → RUNNING → PRODUCED → VERIFIED → COMPLETE`, with `FAILED`
-reachable from any non-terminal state. The state machine exists; no scheduler fires it. See
-[Known gaps](known-gaps.md).
+**Protected Evidence**:
+Work material whose modification is restricted so that the work being evaluated cannot silently rewrite its basis.
 
-### Steering
-Two queues of operator instructions: *steer now* (delivered at the run's next step boundary) and
-*queue next* (delivered on the next turn). Steer-now is a write into the live run's shared state,
-not a new run.
+### Work definitions
 
-### Grounded feedback
-A structured, UI-anchored repair request: a CSS selector, an optional screenshot reference, a
-viewport, and a description. The contract and its validation exist; there is no element picker.
+**Task Contract**:
+The goal, scope, limits, and outcome conditions under which a Task can be carried out and accepted.
 
----
+**Acceptance Criterion**:
+A checkable condition that an operator requires or considers when accepting a Task.
 
-## Cognitive concepts
+**Work Evidence**:
+A Workbench record of [Evidence](https://github.com/GodSpeedAI/godspeed-growth/blob/main/new_world/glossary.md#infrastructure-terms) bound to a condition for the work being evaluated.
 
-These belong to the cognitive-navigation layer, described in
-[Why the cognitive layer exists](explanation/why-cognitive-layer.md).
+**Done Level**:
+A claim about how far work has progressed from producing an output through verification, acceptance, or operational use.
 
-### Case
-The derived state of one unit of intended change: desired outcome, base world hash, candidate world
-hash, criterion, deviation, authority, evidence, unknowns, affordances, blocked affordances, and
-settlement conditions. It is a fold of events, never stored.
+**Workflow**:
+A graph of work whose steps become eligible according to the recorded outcomes of preceding work.
 
-### World manifest
-The consequential state a `worldHash` is computed over: workspace file digests, repo SHA, semantic
-model / policy / environment hashes, and criterion and method hashes. Lineage metadata is
-deliberately excluded.
+**Automation**:
+An accepted Workflow with its inputs, trigger, execution conditions, and outcome gate specified.
 
-### worldHash
-`SHA-256` over the canonicalised manifest. Two worlds with the same hash are the same world, which
-is what makes settlement promotion meaningful.
+**Semantic Surface**:
+A declarative representation of information and available interactions at the point of work.
 
-### Candidate world
-A forked, disposable execution world plus the change being trialled in it. A candidate never
-overwrites its settled parent.
+**External Harness Session**:
+An ongoing interaction with an external agent environment bound to a local execution context and its applicable limits.
 
-### Settlement
-Human promotion of a candidate to the settled world. Requires a human actor, no enclosing run,
-reachable mandatory conditions, a current parent, and evidence.
+### Interaction and recorded state
 
-### Criterion
-A frozen evaluation definition: required check ids, consequences, and observer coverage. Once
-frozen it is deep-frozen and bound to its hash. A revision is a new criterion with a new hash and
-requires human authority.
+**Workbench Event**:
+An immutable record of a fact in Workbench’s application history. The event is the source for reconstructing local state.
 
-### Reality
-Facts derived from durable events. Agent language cannot author it.
+**Workbench Projection**:
+A rebuildable view of Workbench state derived from recorded events.
 
-### Mediation
-An ordered chain of interceptors around a capability invocation, tiered
-`governance > system > product > user > core`. Sentinel sits above; risk assessment and live
-verification sit below. A lower-trust mediator cannot lower a trusted approval requirement.
+**Interaction Model**:
+The declarative vocabulary of Workbench’s interactions and their relationships.
 
-### Semantic Surface
-A closed grammar for just-in-time representation: `callout`, `entity`, `table`, `compare`,
-`timeline`, `preflight`, `ask`. Strictly validated; anything outside the grammar is rejected, never
-rendered. Representation is a governed capability, not an injection channel.
+**Capability Binding**:
+The mapping that connects a declared interaction to the Capability Contract that can handle it.
 
-### Focus
-Where the human's attention currently is. Ephemeral, and never authority.
+**Workbench Journey**:
+An end-to-end proof scenario declared by the Workbench Interaction Model.
 
-### Method
-A named approach under test. A method recommendation is a candidate change derived from observed
-residuals; only a human can accept it and move the active method hash.
+**Task Authority Scope**:
+The combined Permission Rules for a Task’s effects. A task without explicit scope uses the application defaults.
 
----
+**Review Gate**:
+The requirement that a human accept a Task after its required evidence is ready. A run’s actor cannot accept its own work.
 
-## Runtime vocabulary
+**Installed Skill**:
+An installed work procedure with a lifecycle and an implementation binding. Installation alone establishes neither effective authority nor CognitiveOS Capability.
 
-### Home
-The application data directory. `COGNATE_WORKBENCH_HOME`, else the legacy `COGNATE_HARNESS_HOME`,
-else `<repo>/.data`. It holds `secrets.json` and determines the PostgreSQL schema.
+**Recorded State**:
+Workbench’s account of facts reconstructed from durable events. An uncorroborated agent claim supplies no independent observation.
 
-### Schema
-`cognate_harness_<sanitised home path>`. Derived deterministically, so a home always maps to the
-same schema and each test's temp home maps to an isolated one.
+**Mediation**:
+Ordered invocation checks that preserve the authority of higher-trust policy. Lower-trust checks cannot relax a required approval.
 
-### Operator and system callers
-`LOCAL_OPERATOR` is `{ tenant: "local", actor: { id: "operator", kind: "user" } }`.
-`SYSTEM_CALLER` is the same tenant with a `system` actor. Both are defined in `src/server.ts`.
+**Focus**:
+The operator’s current attention in Workbench. Focus conveys no authority.
 
-### Dev authenticator
-`devTokenAuthenticator` from `@godspeedai/cognate-protocol-connect-bun`. It validates a bearer token
-and grants the operator an explicit allow-list. It is not production authentication.
+**Method**:
+An approach evaluated against its observed consequences. An operator decides whether to adopt a recommended method.
 
-### Outbox
-A generic runtime hook that commits an intent alongside an event. The observation layer uses it;
-nothing else does.
+**Workbench Observation Delivery**:
+Delivery of an observation derived from Workbench’s local event stream to RealityTrace. Delivery supplies neither verification nor settlement standing.
 
-### Observation
-One evidence record destined for RealityTrace, derived from an observed event. Delivery is
-at-least-once.
+### Shared terms
 
----
+Cognate owns [Agent Procedure, Run, Continuation, Execution World and Capability Contract](https://github.com/GodSpeedAI/Cognate/blob/29dcd1e/packages/runtime-api/README.md). An Expert, its procedure, its authenticated principal and its Run have distinct lifecycles. A local Execution State Digest cannot supply a [DomainForge World Reference](https://github.com/GodSpeedAI/DomainForge/blob/35c4ed1/docs/reference/sea-application-contract.md#L931-L957).
 
-## Words this repository deliberately does not use
+The [SEA-Forge Case Assignment](https://github.com/GodSpeedAI/SEA-Forge/blob/main/docs/reference/terminology.md) names a case-bound attempt. An Expert Assignment may refer to it when explicitly bound. Candidate Promotion and Assignment Acceptance carry local standing. SEA-Forge owns its Operational Settlement and Settlement Receipt.
 
-- **Sandbox.** `run_code`'s `sandbox_permissions` field name is borrowed from a model tool schema.
-  The mechanism is an approval gate plus workspace path containment, not an OS-level sandbox. Path
-  checks and shell parsing are best-effort.
-- **Production hardened.** The authenticator, the tool guards, and the multi-operator story are
-  incomplete by design and by record.
-- **Parity.** Pixel and behaviour parity with the original reference product was an earlier goal and
-  has been retired. Root `DESIGN.md` records the replacement.
+See [CognitiveOS Affordance](https://github.com/GodSpeedAI/godspeed-growth/blob/main/new_world/glossary.md#navigation-terms) for the source term. Workbench records both assessed moves and Affordance Blocks. RealityTrace owns [Observation and Verification Result](https://github.com/GodSpeedAI/RealityTrace/blob/42f38ca/sxr-core/src/types.rs#L207).
