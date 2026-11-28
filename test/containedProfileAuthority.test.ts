@@ -39,6 +39,11 @@ afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
 /** Real spawns recorded by the stand-in launcher: only a spawn line carries the child's arguments (the namespace preflight runs /usr/bin/true). */
 /** EVERY launcher invocation the stand-in recorded (the --version probe is not logged): a sandbox started for any reason, the namespace preflight included. */
+/** Wait until no launcher is still writing its start record: an earlier test's launch is asynchronous and can land a line late. */
+async function quiesce(): Promise<void> {
+  let last = -1;
+  for (let i = 0; i < 100; i++) { const now = existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).length : 0; if (now === last) return; last = now; await Bun.sleep(120); }
+}
 const everyLaunch = async (): Promise<number> => (existsSync(marker) ? (await readFile(marker, "utf8")).split("\n").filter(Boolean).length : 0);
 const lines = async (): Promise<number> => (existsSync(marker) ? (await readFile(marker, "utf8")).split("\n").filter((l) => l.includes("--serve")).length : 0);
 
@@ -189,6 +194,7 @@ describe("#116 delta-1: the launch is its own policy target, started only after 
   test("M5: a denied cold launch starts no bubblewrap of any kind (the namespace preflight runs only after SEA allows)", async () => {
     const r = await rig(() => ({ kind: "plain", decision: "deny" }), {}, 600);
     try {
+      await quiesce();
       const before = await everyLaunch();
       await refused(r.port.spawn(spec, ctx));
       expect(await everyLaunch()).toBe(before);
@@ -202,6 +208,7 @@ describe("#116 delta-1: the launch is its own policy target, started only after 
     const profile = (await scopedPort(config).executionProfile(spec)).digest;   // measured first: building a port runs the launcher once for its version
     const authority = { decide: async () => { asked(); await held; return { disposition: "boundary" as const, reason: "ok", decisionRef: ULID, constraints: [{ type: "execution_profile", value: profile }] }; } };
     const port = scopedPort({ ...config, authorize: profileAuthorize({ authority, worldRef: WORLD, actor: { id: "s", kind: "system" }, tenant: "t" }) });
+    await quiesce();
     const before = await everyLaunch();
     const pending = port.spawn(spec, ctx).then(() => "spawned", (e) => (e instanceof RlmRefusedError ? "refused" : "error"));
     await askedAt;
@@ -313,6 +320,7 @@ describe("#114 delta-2: disposal during the launch path, and the version probe",
     const held = new Promise<void>((resolve) => { release = resolve; });
     let started!: () => void; const startedP = new Promise<void>((resolve) => { started = resolve; });
     const port = scopedPort({ ...config, authorize: async () => { started(); await held; } });
+    await quiesce();
     const before = await everyLaunch();
     const pending = port.spawn(spec, ctx).then(() => "spawned", () => "refused");
     await startedP;
@@ -324,6 +332,7 @@ describe("#114 delta-2: disposal during the launch path, and the version probe",
   });
 
   test("F9: the launcher version is measured once, when the port is built; a cold denied spawn invokes nothing", async () => {
+    await quiesce();
     const before = await everyLaunch();
     const r = await rig(() => ({ kind: "plain", decision: "deny" }), {}, 600);
     try {
@@ -394,6 +403,7 @@ describe("#114 delta-3: the run lease is host-owned and revoked, the binding is 
     let reached!: () => void; const reachedP = new Promise<void>((resolve) => { reached = resolve; });
     let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
     debug.barrier = async () => { reached(); await held; };
+    await quiesce();
     const launches = readLaunchCount(); const fds = launcherFds();
     const pending = port.spawn(spec, ctx).then(() => "spawned", () => "refused");
     await reachedP;                                                      // the handle is being acquired: verified, not yet opened
