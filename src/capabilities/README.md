@@ -137,6 +137,11 @@ returning a Cognate `Component`; many also export their input/result types and c
   for AF_UNIX stream and seqpacket; everything else is EACCES; `io_uring_setup` is EPERM. Its id and sha256 are in the profile.
   This closes pathname unix sockets (stream and datagram) under the workspace bind and AF_VSOCK. Egress profiles cannot take it
   yet (#115: hand the child a pre-connected fd, then filter every profile).
+  [launchGate.ts:LaunchGate], [spawnScope.ts:SpawnScope] — the port's lifetime is two constructs. The gate is the ONLY place a
+  launcher process is started: it checks "open and lease active" and calls Bun.spawn / Bun.spawnSync in the same synchronous turn,
+  and dispose() closes it as its first statement, so after dispose no launch can begin whatever await a spawn is suspended at. A
+  scope per spawn owns every descriptor, the launcher handle and the cancellation waiters of each await; dispose cancels every scope
+  and the spawn's `finally` releases whatever it still owns. No other call to the spawn APIs exists in the contained modules (tested).
   [containedProfile.ts:computeExecutionProfile] — the profile and its digest from a plain configuration and the launcher version
   as a fact, running no process; `scripts/contained-profile.ts` validates the spec, measures the version once, then calls it.
   A port measures the version once at construction and snapshots the launcher pin with it.
