@@ -11,6 +11,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, rea
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import { noUnixSocketFilter } from "./containedSeccomp.ts";
+import type { LaunchGate } from "./launchGate.ts";
 import { compileEnvPattern, matchEnvPattern, type CompiledEnvPattern } from "./envPattern.ts";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
 import type { RlmRefusalCode, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
@@ -285,7 +286,7 @@ function validateEnvPatterns(config: ContainedStdioPortConfig): void {
  * for any reason (review F9: the version is measured when the port is built, never per spawn). The launcher is executed through the
  * descriptor it was hashed from. Synchronous so a port can measure at construction.
  */
-export function measureLauncherVersionSync(config: ContainedStdioPortConfig): string {
+export function measureLauncherVersionSync(config: ContainedStdioPortConfig, gate: LaunchGate): string {
   const code = "rlm-containment-unavailable" as const;
   validateConfig(config);
   let path: string;
@@ -301,8 +302,8 @@ export function measureLauncherVersionSync(config: ContainedStdioPortConfig): st
     const info = fstatSync(fd); const at = lstatSync(path);
     if (info.dev !== at.dev || info.ino !== at.ino) throw refuse(code, "the launcher changed while it was being opened");
     if (createHash("sha256").update(readFileSync(fd)).digest("hex") !== config.launcher.sha256) throw refuse(code, "the launcher digest does not match the host pin");
-    const result = Bun.spawnSync([`/proc/${process.pid}/fd/${fd}`, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
-    const version = result.stdout.toString().trim().replace(/^bubblewrap\s+/, "");
+    const result = gate.spawnSync(undefined, [`/proc/${process.pid}/fd/${fd}`, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
+    const version = (result.stdout ?? Buffer.alloc(0)).toString().trim().replace(/^bubblewrap\s+/, "");
     if (result.exitCode !== 0 || !/^\d+\.\d+\.\d+/.test(version)) throw refuse(code, "the launcher did not report a bubblewrap version");
     const parts = version.split(".").map((p) => Number.parseInt(p, 10));
     if (!(config.launcherPatchedAttested === true || parts[0]! > 0 || parts[1]! >= 12)) throw refuse(code, `bubblewrap ${version} predates the CVE-2026-87766 fix and is not attested as patched`);
