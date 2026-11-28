@@ -84,6 +84,10 @@ returning a Cognate `Component`; many also export their input/result types and c
 - [settlement.ts:settlementComponent] — mounts `workspace.proof.declare` (`PROOF_DECLARE`),
   `workspace.proof.declare_contract` (`PROOF_DECLARE_CONTRACT`), `workspace.proof.current`
   (`PROOF_CURRENT`), `settlement.status` (`SETTLEMENT_STATUS`).
+- [rlmGoverned.ts:governedRlmComponent] — wraps Cognate's `createRlmComponent` for `rlm.providers`,
+  `rlm.invoke`, `rlm.inspect`, `rlm.cancel`: derives parent lineage, grant, depth, reservation and
+  pinned context from the registered Expert Assignment, refuses before dispatch with typed `rlm-*`
+  codes, and enforces parent-scoped standing for inspect/cancel. Governed admission stays closed.
 - [subagentStart.ts:subagentStartComponent] — mounts `subagent.start`: fire-and-forget child run
   correlated `subagent:<parentRunId>:<id>`.
 - [taskCheckout.ts:taskCheckoutComponent] — mounts `git.branch.list`, `git.checkout.attach`,
@@ -105,6 +109,57 @@ returning a Cognate `Component`; many also export their input/result types and c
   the chosen execution world, derives the stable id, records `workspace.added`/`workspace.selected`.
 
 ### Exported types, constants and helpers
+
+- [containedLaunch.ts:buildLaunchPlan], [containedLaunch.ts:launchPlanDigest], [containedLaunch.ts:LaunchPlan] —
+  SEA-Forge #114: the canonical, digestible record of one contained launch (pinned executable and launcher,
+  full sandbox argv, read-only workspace and egress socket pinned by resolved path and dev/inode, ceilings,
+  env digests, run binding). `launchPlanDigest` is the value ticket #116 binds an authority decision to.
+  [containedStdioPort.ts:containedStdioSpawnPort] — the host-owned bubblewrap `StdioSpawnPort`, built only from
+  `ServerOptions.rlmContainedPort` (absent keeps Cognate's refusing port); host objects are bound into the
+  sandbox by inherited descriptor, teardown kills the process group and pid namespace and records `nsKnown`.
+  [containedLaunch.ts:ExecutionProfile], [containedLaunch.ts:executionProfileDigest] — the operator-approved,
+  launch-independent half: pinned launcher and executable, restrictions, ceilings, mount roles, flag template, fixed
+  env and allowlisted env names (never ids, dev/inode, per-case host paths or env values). Identical across runs,
+  workspaces, port instances and host restarts, so a fixed list of its digests can sit in SEA policy; each plan embeds
+  it, `authorize(plan, digest, ctx, executionProfileDigest)` receives both, and the pre-spawn recompute confirms both.
+  The egress socket's resolved path is in the profile (fixed deployment configuration); the workspace is not: it is per
+  case, SEA authorizes it as the governed request's case resource, and the plan digest pins the exact directory by
+  dev/inode. Every allowlisted env name declares a value pattern (`envValuePatterns`, restricted grammar
+  and linear-time matcher in [envPattern.ts:compileEnvPattern]: atoms with `? * + {m,n}`, 0<=m<=n<=256, `{0,0}` legal, no
+  single-number `{n}` (write `{n,n}`), no groups or alternation) that is
+  part of the profile, and a spawn value outside it is refused; names that control loading,
+  interpretation or traffic (LD_*, DYLD_*, NODE_*, BUN_*, DENO_*, npm_config_*, PYTHON*, RUBY*, PERL*, GEM_*, BUNDLE_*,
+  GIT_*, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, JDK_JAVA_OPTIONS, CLASSPATH, JAVA_HOME, BASH_ENV, ENV, GCONV_PATH, LOCPATH,
+  NLSPATH, SSL_CERT_FILE, SSL_CERT_DIR, *_proxy, *_PROXY, PATH, HOME, TMPDIR, BASH_FUNC_*) are refused at construction.
+  [containedSeccomp.ts:noUnixSocketFilter] — with network `none` the sandbox loads a hand-assembled BPF filter
+  (`--seccomp 7`) that allow-lists socket creation: architecture check (x86_64, aarch64; anything else, x32 and the legacy
+  512-547 range included, is killed); `socket()` only for AF_INET, AF_INET6 and AF_NETLINK/NETLINK_ROUTE; `socketpair()` only
+  for AF_UNIX stream and seqpacket; everything else is EACCES; `io_uring_setup` is EPERM. Its id and sha256 are in the profile.
+  This closes pathname unix sockets (stream and datagram) under the workspace bind and AF_VSOCK. Egress profiles cannot take it
+  yet (#115: hand the child a pre-connected fd, then filter every profile).
+  [containedProfile.ts:computeExecutionProfile] — the profile and its digest from a plain configuration and the launcher version
+  as a fact, running no process; `scripts/contained-profile.ts` validates the spec, measures the version once, then calls it.
+  A port measures the version once at construction and snapshots the launcher pin with it.
+  [containedRunContext.ts:runInContainedLease] — a host-owned lease (run id, operator-declared reach, `active`) the server
+  creates around each admitted child execution and revokes in `finally`; its store is module-private, the port reads it through
+  `currentLease`, snapshots it with the provider's run and intent ids into an immutable binding at spawn entry, and checks
+  `active` before authorization and before launch. A callback that outlives the run, or names another run, is refused.
+  [containedProfileAuthority.ts:profileAuthorize] — #116 host half: the port's `authorize` hook asks SEA-Forge (the
+  existing `SeaForgeAuthority.decide` route, claim `execution_profile_digest`) and launches only on a `boundary` allow
+  carrying exactly one `execution_profile` constraint equal to the profile digest, with a plan that embeds it; every
+  other answer, an unreachable or malformed one included, refuses before spawn (`rlm-containment-unavailable`,
+  reason `rlm-profile-unauthorized: ...`). `startServer` always composes it, from the external authority or an injected
+  `rlmProfileAuthority` (tests, refused when SEA-Forge governance is also configured: one authority decides admission and launch);
+  a bare hook is not accepted, and with neither it refuses at startup. The decision must be
+  a `boundary` allow with exactly one `execution_profile` constraint (any other constraint type refuses) and a SEA ledger
+  entry (a 26-character ULID). Policy authors: the launch asks about its OWN target, `workbench.rlm.contained-spawn`
+  (`CONTAINED_SPAWN_CAPABILITY`), carrying `claims.execution_profile_digest`; the parent's `rlm.invoke` admission is a
+  separate request with no claim. Write the profile rule on the launch target and an ordinary rule on `rlm.invoke`; a rule
+  on one never decides the other. The port requests authority before ANY bubblewrap starts (the namespace preflight runs
+  after the allow), refuses to launch once disposed, and refuses a spawn whose network exceeds the reach the operator
+  declared for the admitted provider (carried by the lease, from the registration's `portGovernance`).
+  Evidence keeps digests and the decision id only.
+  [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port: exact input digest, claimed once by one run, started as the parent's agent principal, expiring if unclaimed, never re-armed by a repeat invoke, disarmed if dispatch fails.
 
 - [aggregateContainment.ts:CONTAINMENT_THREAD] — shared-state thread id `containment:aggregate:v1`;
   [aggregateContainment.ts:ContainmentQuotas], [aggregateContainment.ts:ContainmentExecution],
@@ -317,4 +372,5 @@ No child subdirectories.
   `test/containedWorkspace.test.ts`, `test/executionWorlds.test.ts`, `test/expert-effect.test.ts`,
   `test/expert-model-routing.test.ts`, plus the journey suites `test/J-CHECKOUT-lifecycle.test.ts`,
   `test/J-RW-AGGREGATE-CONTAINMENT.test.ts`, `test/J-SEA-FORGE-AUTHORITY.test.ts`,
-  `test/J-AUTH-SESSION.test.ts`.
+  `test/J-AUTH-SESSION.test.ts`; contained spawn port: `test/containedLaunch.test.ts`,
+  `test/J-RLM-contained-port-server.test.ts`, `test/containedProfileAuthority.test.ts`, and `COGNATE_BWRAP_TESTS=1 test/J-RLM-contained-port.test.ts`.

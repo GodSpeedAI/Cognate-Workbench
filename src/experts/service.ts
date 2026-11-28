@@ -198,7 +198,7 @@ export class ExpertsService {
     }
     return [...selected,...recent];
   }
-  makeAssignment(state: ExpertState, input: {id:string; e:Expert; conversation:Conversation; purpose:string; acceptance:string[]; model:ModelConfig; parent?:Assignment; mode:string; authorityTools:ExpertTool[]; taskId?:string | null; reviews?:string | null; caseContext?:CaseContext; assertedBy?:string; worldCorroboration?:"verified" | "asserted"}): Assignment {
+  makeAssignment(state: ExpertState, input: {id:string; e:Expert; conversation:Conversation; purpose:string; acceptance:string[]; model:ModelConfig; parent?:Assignment; mode:string; authorityTools:ExpertTool[]; taskId?:string | null; reviews?:string | null; caseContext?:CaseContext; assertedBy?:string; worldCorroboration?:"verified" | "asserted"; rlm?:{providerId:string}}): Assignment {
     if (state.assignments[input.id]) throw new Error("Assignment identity already exists");
     const {e,conversation,parent} = input;
     const t = conversation.teamId ? team(state,conversation.teamId,true) : undefined;
@@ -232,6 +232,8 @@ export class ExpertsService {
       ...(taskId ? {taskId} : {}),
       ...(input.caseContext ? {caseContext:structuredClone(input.caseContext),worldCorroboration:input.worldCorroboration ?? "asserted"} : {}),
       ...(input.assertedBy !== undefined ? {assertedBy:input.assertedBy} : {}),
+      // J-RLM-CHILD-RUN: the operator's provider selection is frozen here; a delegated child inherits its parent's frozen selection.
+      ...((input.rlm ?? parent?.execution.rlm) ? {rlm:{providerId:(input.rlm ?? parent!.execution.rlm)!.providerId}} : {}),
     };
     const a: Assignment = {id:input.id,expertId:e.id,conversationId:conversation.id,teamId:t?.id ?? null,parentId:parent?.id ?? null,parentAttempt:parent?.attempt ?? null,
       purpose:input.purpose,acceptance:input.acceptance,depth,attempt:1,status:"queued",workspaceId:conversation.workspaceId,mode:input.mode,
@@ -358,7 +360,11 @@ export class ExpertsService {
     let handoffContext: CaseContext | undefined;
     let handoffAssertedBy: string | undefined;
     let handoffCorroboration: "verified" | "asserted" | undefined;
+    let selectedRlm: {providerId:string} | undefined;
     if (capability === "expert.converse" || capability === "team.converse") {
+      // J-RLM-CHILD-RUN: an explicit provider selection is a plain registry id; whether it is registered or
+      // available is decided at invocation, so a stale selection fails typed instead of being silently dropped.
+      if (input.rlmProvider !== undefined && input.rlmProvider !== null) selectedRlm={providerId:text(input.rlmProvider,"rlmProvider",200)};
       handoffContext = caseContextFrom(input.caseContext);
       if (input.assertedBy !== undefined) {
         if (typeof input.assertedBy !== "string" || input.assertedBy.length > 500) throw new Error("assertedBy must be a string of at most 500 characters");
@@ -454,7 +460,7 @@ export class ExpertsService {
           if (!c) {c={id:`conversation:${id}`,scope,teamId:t?.id ?? null,expertId:scope==="team" ? null:e.id,workspaceId,title:text(input.message,"message",20000).slice(0,80),messageIds:[],assignmentIds:[],createdAt:new Date().toISOString()};state.conversations[c.id]=c;}
           c.updatedAt=new Date().toISOString();
           const purpose=text(input.message,"message");
-          const a=this.makeAssignment(state,{id,e,conversation:c,purpose,acceptance:["Answer the human's objective with attributable evidence and disclose unresolved conditions"],model:selectedRoute!,mode:input.mode === "workspace-write" ? "workspace-write" : "read-only",authorityTools:t?.tools ?? [...EXPERT_TOOLS],...(namedTaskId?{taskId:namedTaskId}:{}),...(handoffContext?{caseContext:handoffContext}:{}),...(handoffAssertedBy!==undefined?{assertedBy:handoffAssertedBy}:{}),...(handoffCorroboration?{worldCorroboration:handoffCorroboration}:{}),...(input.reviews!==undefined&&input.reviews!==null?{reviews:text(input.reviews,"reviews",200)}:{})});
+          const a=this.makeAssignment(state,{id,e,conversation:c,purpose,acceptance:["Answer the human's objective with attributable evidence and disclose unresolved conditions"],model:selectedRoute!,mode:input.mode === "workspace-write" ? "workspace-write" : "read-only",authorityTools:t?.tools ?? [...EXPERT_TOOLS],...(namedTaskId?{taskId:namedTaskId}:{}),...(handoffContext?{caseContext:handoffContext}:{}),...(handoffAssertedBy!==undefined?{assertedBy:handoffAssertedBy}:{}),...(handoffCorroboration?{worldCorroboration:handoffCorroboration}:{}),...(input.reviews!==undefined&&input.reviews!==null?{reviews:text(input.reviews,"reviews",200)}:{}),...(selectedRlm?{rlm:selectedRlm}:{})});
           const messageId=`message:${id}`;
           state.messages[messageId]={id:messageId,conversationId:c.id,assignmentId:a.id,sender:{kind:"human",id:ctx.actor.id},recipientId:e.id,text:purpose,correlationId:`expert:${a.id}:1`,causationId:ctx.causationId ?? null,delivery:"queued",replyTo:null};c.messageIds.push(messageId);
           return {conversationId:c.id,assignmentId:a.id};

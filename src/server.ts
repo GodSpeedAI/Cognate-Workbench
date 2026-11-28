@@ -10,7 +10,7 @@ import { defaultHome, packaged, resourcePath } from "./resources.ts";
 import { allowCapabilities, rulePolicy } from "@godspeedai/cognate-kernel-api";
 import type { Policy } from "@godspeedai/cognate-kernel-api";
 import { ServiceError, type Caller, type RuntimeService } from "@godspeedai/cognate-runtime-api";
-import { createRuntime } from "@godspeedai/cognate-runtime-bun";
+import { createRlmAgent, createRlmComponent, createRlmRegistry, createRuntime, type RlmProviderRegistration } from "@godspeedai/cognate-runtime-bun";
 import { authorizeAssignmentAction } from "./assignments/assignmentBinding.ts";
 import { storeConfigFor } from "./store.ts";
 import { EXECUTION_POSTURE_ENV, parseExecutionPosture, postureRegistry, type ExecutionPosture } from "./executionPosture.ts";
@@ -21,7 +21,7 @@ import { createConnectRouter } from "@connectrpc/connect";
 import { createFetchHandler } from "@connectrpc/connect/protocol";
 import { stylesheetPaths } from "@godspeedai/cognate-ui-astryx/styles";
 
-import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindCaseAssignment, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime } from "../domain/index.ts";
+import { bindRuntimeExecution, bindScheduleCapabilities, SCHEDULE_CAPABILITY_ANCHORS, bindCognitiveCapabilities, bindExpertCapabilities, EXPERT_CAPABILITY_ANCHORS, bindRlmCapabilities, RLM_CAPABILITY_ANCHORS, bindAmbiguousCapabilities, AMBIGUOUS_CAPABILITY_ANCHORS, bindGovernanceCapabilities, GOVERNANCE_CAPABILITY_ANCHORS, bindSettlementCapabilities, SETTLEMENT_CAPABILITY_ANCHORS, bindExecutionWorlds, bindWorkbench, bindTranche5, bindTranche7, bindTranche9, bindTranche10, bindSessionPin, bindTranche11, bindUsage2, bindUsage3, bindT8Identity, bindRedJourneys, bindCheckoutCapabilities, bindHarnessCapabilities, bindSurfaceCapabilities, SURFACES_CAPABILITY_ANCHORS, bindProviderCapabilities, bindConformanceGaps, loadDomain, bindCapabilityRuntime, bindCaseAssignment } from "../domain/index.ts";
 import { AuthorityIndex } from "./workbench/authorityIndex.ts";
 import { createRuntimeMutex } from "./workbench/runtimeMutex.ts";
 import { LifecycleRecorder } from "./workbench/lifecycleRecorder.ts";
@@ -45,6 +45,11 @@ import { expertsProjection } from "./projections/experts.ts";
 import { expertsBillingProjection } from "./projections/expertsBilling.ts";
 import { providerRoutesProjection } from "./projections/providerRoutes.ts";
 import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from "./capabilities/expertModel.ts";
+import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
+import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
+import { rlmAdmissionGuard } from "./capabilities/rlmAdmissionGuard.ts";
+import { runInContainedLease } from "./capabilities/containedRunContext.ts";
+import { profileAuthorize, type ProfileAuthority, type ProfileAuthorization } from "./capabilities/containedProfileAuthority.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
 import { createExpertAdmissionResourceKeys, parseExpertAdmissionCapacity } from "./experts/admission.ts";
@@ -104,6 +109,7 @@ import { workspacePathComponent } from "./capabilities/workspacePath.ts";
 import { toolCapabilitiesComponent } from "./capabilities/tools.ts";
 import { planStateComponent } from "./capabilities/planState.ts";
 import { subagentStartComponent } from "./capabilities/subagentStart.ts";
+import { governedRlmComponent } from "./capabilities/rlmGoverned.ts";
 import { onboardingDismissComponent } from "./capabilities/onboardingDismiss.ts";
 import { settingsChangeComponent } from "./capabilities/settingsChange.ts";
 import { sessionArchiveComponent } from "./capabilities/sessionArchive.ts";
@@ -201,6 +207,16 @@ export interface ServerOptions {
   readonly executionPostureRecords?: readonly PostureRecord[];
   /** Supervisor timings for executable payloads (graceful drain, SIGTERM-to-SIGKILL). Defaults apply in production. */
   readonly mcpSupervisorTimings?: { readonly graceMs?: number; readonly killMs?: number };
+  /** J-RLM-CHILD-RUN: the recursive child-run providers this host registers. Trusted host configuration,
+   *  never a request; the default is empty, which leaves ordinary execution unchanged. Without
+   *  `rlmContainedPort` no spawn port is registered, so a provider that needs one, containment or egress is refused. */
+  readonly rlmProviders?: readonly RlmProviderRegistration[];
+  /** SEA-Forge #114: trusted host configuration for the contained bubblewrap `StdioSpawnPort`. Absent
+   *  (the default) keeps Cognate's `unavailableSpawnPort()`: providers that need a port stay refused. */
+  readonly rlmContainedPort?: Omit<ContainedStdioPortConfig, "authorize">;
+  /** The authority a contained spawn asks (#116). Absent, the external SEA-Forge authority is used. A test double goes here,
+   *  never around it: `profileAuthorize` composes the decision check either way, and there is no way to supply a bare hook. */
+  readonly rlmProfileAuthority?: { readonly authority: ProfileAuthority; readonly worldRef: string };
   /** Deterministic provider seam; normal execution uses the published provider adapters. */
   readonly expertProviderFactory?: ExpertModelGenerateOptions["providerFactory"];
   /** Controlled fixture seam; normal application startup always evaluates durable schedules. */
@@ -240,6 +256,8 @@ export interface AppServer {
   readonly executionPosture: ExecutionPosture;
   /** T8: this boot's operator browser session token (the session-authenticated HTTP test seam). */
   readonly operatorSessionToken: string;
+  /** #116: each contained spawn SEA-Forge authorized (digests and decision id only, never raw packets). */
+  readonly profileAuthorizations: () => readonly ProfileAuthorization[];
   /** P03: the settlement orchestrator, when SEA-Forge governance and RealityTrace are configured. */
   readonly settlement?: { settleRun(runId: string): Promise<void>; idle(): Promise<void> };
   stop(): Promise<void>;
@@ -249,6 +267,11 @@ const GRANTED_CAPABILITIES = [
   RUNTIME_EXECUTION_INSPECT,
   ...Object.keys(SCHEDULE_CAPABILITY_ANCHORS),
   ...Object.keys(EXPERT_CAPABILITY_ANCHORS),
+  // J-RLM-CHILD-RUN: granted to the operator, system and agent principals. `rlm.providers` is operator-only
+  // in the policy (it exposes the registry); invoke/inspect/cancel are not, because the governed handlers
+  // enforce standing themselves and must refuse with a typed `rlm-*` code (a top-level or out-of-scope
+  // caller), which a policy denial would hide.
+  ...Object.keys(RLM_CAPABILITY_ANCHORS),
   ...Object.keys(AMBIGUOUS_CAPABILITY_ANCHORS),
   ...Object.keys(GOVERNANCE_CAPABILITY_ANCHORS),
   ...Object.keys(SETTLEMENT_CAPABILITY_ANCHORS),
@@ -382,6 +405,8 @@ function buildPolicy(): Policy {
     "session.harness.bind",
     "authority.grant.issue", "authority.grant.revoke", "authority.grant.list", "capability.runtime.enable",
     "workbench.safemode.clear",
+    // The provider registry and its refusal reasons are operator-facing.
+    "rlm.providers",
   ]);
   return rulePolicy(
     "deepseek-harness-app",
@@ -547,6 +572,17 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   if (externalAuthority && executionPosture !== "contained") {
     throw new Error("SEA-Forge governance requires COGNATE_EXECUTION_POSTURE=contained: under uncontained-local an agent could reach the SEA-Forge socket and approve its own escalation");
   }
+  // One authority decides both the parent's admission and the contained launch: an injected profile authority beside configured SEA-Forge
+  // governance would let a launch be decided by a different client or world than the admission it follows (review finding 6).
+  if (externalAuthority && options.rlmProfileAuthority) {
+    throw new Error("rlmProfileAuthority is refused while SEA-Forge governance is configured: one authority must decide both the admission and the launch");
+  }
+  // ONE canonical authority client decides both the parent's admission (`governance.authority`) and the contained launch. An
+  // ExternalAuthority that names a different client for the two is refused (delta-3 #6); with none named the runtime is handed the
+  // very client the launch uses, never a second one it would build on its own.
+  if (externalAuthority?.governance.authority && externalAuthority.governance.authority !== externalAuthority.client) {
+    throw new Error("the SEA-Forge governance.authority differs from the authority client used for contained launches: one client must decide both the admission and the launch");
+  }
   // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
   const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
   if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
@@ -593,6 +629,24 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   const gapRefs = bindConformanceGaps(domain);
   const providerRefs = bindProviderCapabilities(domain);
   const expertRefs = bindExpertCapabilities(domain);
+  const rlmRefs = bindRlmCapabilities(domain);
+  // J-RLM-CHILD-RUN: empty unless the host explicitly registers providers (ServerOptions only).
+  const rlmRegistry = createRlmRegistry();
+  for (const registration of options.rlmProviders ?? []) rlmRegistry.register(registration);
+  // #116: a contained spawn is authorized by SEA-Forge for exactly its execution profile before any sandbox starts. The route is
+  // the existing external authority client, or an injected `ProfileAuthority` (tests); either way `profileAuthorize` applies the
+  // same decision check. A caller-supplied bare hook is not accepted (it could skip SEA-Forge), and with no authority at all the
+  // port is refused at startup rather than spawning without a decision.
+  const profileAuthorizations: ProfileAuthorization[] = [];
+  const profileAuthority = options.rlmProfileAuthority ?? (externalAuthority ? { authority: externalAuthority.client, worldRef: externalAuthority.governance.worldRef } : undefined);
+  const rlmContainedConfig: ContainedStdioPortConfig | undefined = options.rlmContainedPort
+    ? profileAuthority
+      ? { ...(({ authorize: _ignored, ...rest }) => rest)(options.rlmContainedPort as ContainedStdioPortConfig), authorize: profileAuthorize({ authority: profileAuthority.authority, worldRef: profileAuthority.worldRef, actor: SYSTEM_CALLER.actor, tenant: SYSTEM_CALLER.tenant, record: (a) => { profileAuthorizations.push(a); if (profileAuthorizations.length > 256) profileAuthorizations.shift(); } }) }
+      : (() => { throw new Error("rlmContainedPort needs SEA-Forge governance (COGNATE_GOVERNANCE=sea-forge) or an rlmProfileAuthority: a contained spawn is never launched without an authority decision"); })()
+    : undefined;
+  const rlmSpawnPort = rlmContainedConfig ? containedStdioSpawnPort(rlmContainedConfig) : undefined;
+  // With a spawn port registered, only children admitted by the governed rlm.invoke may reach it (see rlmAdmissionGuard).
+  const rlmGuard = rlmSpawnPort ? rlmAdmissionGuard() : undefined;
   const ambiguousRefs = bindAmbiguousCapabilities(domain);
   const governanceRefs = bindGovernanceCapabilities(domain);
   const settlementRefs = bindSettlementCapabilities(domain);
@@ -788,7 +842,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
     // SEA-Forge; escalations wait for the operator's resolution there.
-    ...(externalAuthority ? { governance: externalAuthority.governance } : {}),
+    ...(externalAuthority ? { governance: { ...externalAuthority.governance, authority: externalAuthority.client } } : {}),
     // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
     // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
     // An interrupted external effect is never silently repeated: a recovering owner records
@@ -804,7 +858,18 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     outboxFor: observationOutboxFor,
     policy: buildPolicy(),
     actions: buildActionPolicy(),
-    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding)],
+    agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), (() => {
+      const agent = createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) });
+      if (!rlmSpawnPort || !rlmGuard) return agent;
+      // M9: the admitted child runs inside a context that carries ITS run id and the reach the OPERATOR declared for its provider
+      // (never the provider's own facts). The port reads both from here, not from the arguments a provider passes to spawn.
+      const bound = { ...agent, async run(input: Parameters<typeof agent.run>[0], context: Parameters<typeof agent.run>[1]) {
+        const providerId = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).providerId : undefined;
+        const reach = typeof providerId === "string" ? rlmRegistry.get(providerId)?.portGovernance?.reach.network : undefined;
+        return runInContainedLease({ runId: context.runId, reach: reach === "host-mediated" ? "host-socket" : "none" }, () => agent.run(input, context));
+      } };
+      return rlmGuard.wrap(bound);
+    })()],
     components: [
       terminalComponent({
         getService,
@@ -834,6 +899,12 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       runtimeExecutionComponent({ configuredCapacity: runCapacity, semanticRef: runtimeExecutionRef }),
       schedulesComponent({getSchedules:()=>schedules,getEvaluator:()=>scheduleEvaluator,semanticRefs:scheduleRefs}),
       expertsComponent({getExperts:()=>experts,semanticRefs:expertRefs}),
+      governedRlmComponent({
+        // Governance off and posture uncontained-local (Cognate defaults). The spawn port exists only when the host sets
+        // ServerOptions.rlmContainedPort; the child run that uses it sits behind rlmGuard, which this component feeds.
+        base: createRlmComponent({ registry: rlmRegistry, getService, semanticRef: rlmRefs["rlm.invoke"] }),
+        registry: rlmRegistry, containedPort: rlmSpawnPort !== undefined, ...(rlmGuard ? { onAdmit: rlmGuard.admit } : {}), getExperts: () => experts, operator: LOCAL_OPERATOR.actor, operatorTenant: LOCAL_OPERATOR.tenant, system: SYSTEM_CALLER.actor,
+      }),
       expertModelGenerateComponent({secrets,getService,authorize:(ctx,route)=>experts.authorizeModel(ctx,route),semanticRef:expertRefs["expert.model.generate"],providerFactory:options.expertProviderFactory}),
       expertEffectComponent({getRuntime:()=>runtime,getExperts:()=>experts,semanticRef:expertRefs["expert.tool.invoke"],resolveSemanticRef:expertRefs["expert.effect.resolve"]}),
       ambiguousStepComponent({ getService, semanticRef: ambiguousRefs["run.invocation.reconcile"] }),
@@ -1432,6 +1503,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     /** T8: this boot's browser session token — the test seam for session-authenticated HTTP.
      *  In the real browser it never leaves the generated entry; production never logs it. */
     operatorSessionToken: operatorSession.token,
+    profileAuthorizations: () => [...profileAuthorizations],
     ...(settlement ? { settlement: { settleRun: settlement.settleRun, idle: settlement.idle } } : {}),
     async stop() {
       unwatchMcp();
@@ -1439,6 +1511,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       await terminalService.dispose();
       await browserService.dispose();
       await harnessHost.shutdown();
+      await rlmSpawnPort?.dispose();
       eventsController.abort();
       await remote.close();
       await scheduleEvaluator.stop();

@@ -47,6 +47,24 @@ tool capabilities.
 | `subagent.start` | `subagentStart.ts` | `Subagent` | Starts the correlated child run |
 | `onboarding.dismiss` | `onboardingDismiss.ts` | — (deliberately unbound) | A durable UI-flow flag |
 
+## Recursive child runs (`rlm.*`, J-RLM-CHILD-RUN)
+
+Cognate's published `rlm.*` contract, wrapped by `rlmGoverned.ts`. The provider registry is host
+configuration (`ServerOptions.rlmProviders`, default empty). Granted to operator, system and agent
+principals; `rlm.providers` is operator-only (it exposes the registry). The others are not, because the
+handlers enforce standing and return a typed `rlm-*` refusal. Governed admission is closed in this slice: a provider that spawns, claims
+isolation, needs containment or has network reach is refused, and so is any provider whose reach the
+operator has not declared (`portGovernance` with network `none`). Children get no `workspace-write`
+mode and no effect-bearing tool (`edit`, `bash`, `run_code`, `capability_invoke`) until a governed
+effect path exists. Cancelling the parent Assignment cancels its open children through `rlm.cancel`.
+
+| Capability | Provider | Bound to | Notes |
+|---|---|---|---|
+| `rlm.providers` | `rlmGoverned.ts` | `ChildRun` | Probed provider facts plus this host's verdict per provider |
+| `rlm.invoke` | `rlmGoverned.ts` | `ChildRun` | Parent-run only; parent, grant, depth, reservation and pinned context are derived, never supplied |
+| `rlm.inspect` | `rlmGoverned.ts` | `ChildRun` | Parent run or the operator acting through the parent principal |
+| `rlm.cancel` | `rlmGoverned.ts` | `ChildRun` | Same standing as `rlm.inspect`; terminal states are stable |
+
 ## Settings
 
 All ten are realised by one component, `settingsChange.ts`, each writing only its own field.

@@ -461,6 +461,24 @@ export function bindScheduleCapabilities(domain:Domain):Readonly<Record<string,C
   return Object.fromEntries(contracts.map(contract=>[contract.id,contract.semanticRef]));
 }
 
+/**
+ * J-RLM-CHILD-RUN: the four provider-neutral `rlm.*` capabilities of the published Cognate recursive
+ * child-run contract. They are realized by Cognate's `createRlmComponent`, wrapped by this app's
+ * `governedRlmComponent` (`src/capabilities/rlmGoverned.ts`), and anchored on the `ChildRun` concept.
+ */
+export const RLM_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
+  "rlm.providers": "ChildRun",
+  "rlm.invoke": "ChildRun",
+  "rlm.inspect": "ChildRun",
+  "rlm.cancel": "ChildRun",
+};
+export function bindRlmCapabilities(domain: Domain): Readonly<Record<string, CapabilityContract["semanticRef"]>> {
+  const bindings = Object.entries(RLM_CAPABILITY_ANCHORS).map(([id, concept]) => ({ semanticId: domain.semanticId(concept), capability: { id, version: "1.0.0" } }));
+  const contracts = bindCapabilities(domain.projection, bindings);
+  if (contracts.length !== bindings.length) throw new Error(`domain: expected ${bindings.length} rlm bindings`);
+  return Object.fromEntries(contracts.map((contract) => [contract.id, contract.semanticRef]));
+}
+
 /** SEA-Forge as the external authority (P02): status, pending approvals, operator resolution. */
 export const GOVERNANCE_CAPABILITY_ANCHORS: Readonly<Record<string, string>> = {
   "governance.status": "ApprovalAuthority",

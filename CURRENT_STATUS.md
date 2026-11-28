@@ -1,41 +1,21 @@
-# Current status
+# Current status — revision 63
 
-**Status revision:** 50
+SEA-Forge #114 (Workbench half): a contained bubblewrap `StdioSpawnPort` for recursive child runs.
 
-**Stage:** CognitiveOS #108 integration: WP-23 hand-off integrated; #109/#110 qualified on hosted CI
+**Integration (#108).** This branch merges #112 and #114 (with the #116 host half) into the WP-23 integration. From the integration line: CognitiveOS #108 integration: WP-23 hand-off integrated; #109/#110 qualified on hosted CI. Both lines wrote a revision 50: the ticket history is kept and the integration revision is carried forward in revision 63. Ticket revisions 53-62 carry estimated recorded_at values. Conflicts were additive only.
 
-**Summary:** Integration branch carries the test-client lifecycle cleanup, the DomainForge platform-package binding resolver, the validated SSH host key helper, #110 (blocked default Team restore prerequisite) and now the WP-23 operator hand-off (PR #40, merged to main d02efd60). Hosted verify at 142f7d9 passed all four shards, tauri-linux and the aggregate; clean-install x64 and arm64 passed. Cognate pins stay at the published 0.11.0.
+**Behaviour.** `containedStdioPort.ts` implements Cognate's `StdioSpawnPort` from trusted host configuration, `ServerOptions.rlmContainedPort`; absent, Cognate's refusing port stays. `rlmGoverned.providerRefusal` admits a no-network contained provider and refuses open egress. The server runs each admitted child inside a host-owned lease (`runInContainedLease`: run id, operator-declared reach, revoked in `finally`; module-private store). The port snapshots it into an immutable binding at spawn entry and checks it before authorization and launch, so a provider cannot name another run, a late timer cannot spawn, and a spawn beyond the declared reach is refused before any authority request.
 
-**Verified:**
+**Plan and profile.** `containedLaunch.ts` resolves a spec into a canonical plan (`launchPlanDigest`, per launch) that embeds the operator-approved `executionProfileDigest`: pinned launcher and executable, restrictions, ceilings, flag template, fixed env, allowlisted env names with their value patterns (restricted grammar, linear-time matcher), seccomp filter digest. The launcher pin and its `--version` are snapshotted once at port construction. `computeExecutionProfile` runs no process; `scripts/contained-profile.ts` validates the spec, measures once, then computes. Policy lists profile digests. The plan is recomputed before spawn; drift refuses. `bun scripts/contained-profile.ts` prints a profile.
 
-- Red then green: test/J-EXPERTS-restore-blocked.test.ts, 5 tests (state, capability, safe mode, agent and in-Run refusal) failed before the fix and passed after.
-- just typecheck clean.
-- Expert and Team suites on isolated pg0: 9/9, 24/24 and 53/53 pass, 0 fail.
-- Active and custom definitions and stable IDs unchanged; existing restore report shape unchanged when nothing is blocked.
-- Hosted verify 45827926682 on 142f7d9: smoke 73; shard1 41 pass 1 skip; shard2 325; shard3 141 pass 9 skip; shard4 1376 pass 3 skip; 0 fail; tauri-linux and aggregate success
-- Hosted clean-install 45829573944 on 142f7d9: x64 and arm64 success
-- WP-23 merge: frozen install unchanged, 35 Cognate packages at 0.11.0, just typecheck clean
+**Containment.** `--unshare-all`, `--die-with-parent`, read-only workspace, tmpfs `/tmp`, caps dropped, `prlimit`, bounded output, group and namespace kill with a `/proc` survivor check. With no network a BPF filter (`containedSeccomp.ts`, `--seccomp 7`) allow-lists socket creation: AF_INET, AF_INET6, NETLINK_ROUTE and AF_UNIX stream or seqpacket socketpairs; the rest is EACCES, `io_uring_setup` is EPERM, x32 and the legacy 512-547 range are killed. That closes host pathname sockets (stream and datagram) under the workspace bind, and vsock.
 
-**Limits:**
+**Authority (#116 host half).** `startServer` always composes `profileAuthorize`, from the external SEA-Forge or an injected `rlmProfileAuthority` (refused beside configured governance); one canonical client decides admission and launch; no bare hook, and the port requires one. The launch asks the target `workbench.rlm.contained-spawn` with `claims.execution_profile_digest`, before any bubblewrap starts, and proceeds only on a `boundary` allow with one `execution_profile` constraint, no other constraint, a ULID ledger entry, and a plan embedding the digest. Disposal cancels (per-operation registrations) and awaits in-flight spawns, and owns every launcher descriptor; a disposed port launches nothing.
 
-- Report gains an optional blocked array: [{teamId, reason: required-expert-archived, requires: {reactivate: [ids]}, message}], present only when non-empty.
-- The interaction model has no restore journey, so no model change or domainforge run was needed.
-- Full just verify remains pending (hosted CI).
-- The 13 skips are opt-in suites (real bwrap contained workspace; live SEA plus RealityTrace settlement); not exercised on the hosted runner
-- WP-23 operator controls can be refused while the bound run streams until the Cognate control-stream fix (Cognate PR #93) is released and bumped
+**Verified.** Real bwrap batch (unit, guard, authority, seccomp, env pattern, profile CLI, conformance, pathname-socket) 111/111 three times; server wiring plus child-run 24/24. Delta-1, delta-2 and delta-3 findings fixed.
 
-**Next:**
+**Limits.** Egress profiles carry no seccomp filter (#115: pre-connected fd, then filter all); runtime-root binaries are bound by path, so a root-owned replacement between the last digest check and bwrap's resolve is a declared residual (host root is trusted); no disk quota; `subprocess:false` refused; RLIMIT_AS fails allocations. Cognate folds `decisionRef` as `ledger_entry ?? decision_id`: ULID shape is the interim proof (TODO cognate ledgerEntry). Integration: Report gains an optional blocked array: [{teamId, reason: required-expert-archived, requires: {reactivate: [ids]}, message}], present only when non-empty. The interaction model has no restore journey, so no model change or domainforge run was needed. Full just verify remains pending (hosted CI). The 13 skips are opt-in suites (real bwrap contained workspace; live SEA plus RealityTrace settlement); not exercised on the hosted runner WP-23 operator controls can be refused while the bound run streams until the Cognate control-stream fix (Cognate PR #93) is released and bumped
 
-- Run the full integrated gate on hosted CI.
-- Review and merge the checkpoint branch.
+**Next.** Review and merge; #115; live SEA-Forge check.
 
-**Evidence:**
-
-- test/J-EXPERTS-restore-blocked.test.ts
-- test/J-EXPERTS-restore.test.ts
-- test/J-EXPERTS-restore-safe-mode.test.ts
-- src/experts/state.ts
-
-**Spec:** SEA-Forge #108 and #110
-
-**Plan:** 
+Plan: none. Spec: SEA-Forge #114. History: `.agents/CURRENT_STATUS.jsonl`.
