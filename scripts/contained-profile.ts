@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import type { ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
 import { computeExecutionProfile } from "../src/capabilities/containedProfile.ts";
+import { checkSpecShape, measureLauncherVersionSync } from "../src/capabilities/containedLaunch.ts";
 
 const args = process.argv.slice(2);
 const opt = (name: string): string | undefined => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
@@ -26,7 +27,10 @@ if (!configPath || !specPath) {
 try {
   const config = JSON.parse(readFileSync(configPath, "utf8")) as ContainedStdioPortConfig;
   const spec = JSON.parse(readFileSync(specPath, "utf8")) as StdioSpawnSpec;
-  const { profile, digest } = await computeExecutionProfile(config, spec);
+  const { profile, digest } = await (async () => {
+    checkSpecShape(spec);                                  // an invalid spec is refused before any launcher runs
+    return computeExecutionProfile(config, spec, { launcherVersion: measureLauncherVersionSync(config) });
+  })();
   if (args.includes("--json")) console.log(JSON.stringify({ executionProfileDigest: digest, profile }, null, 2));
   else console.log(digest);
 } catch (error) {

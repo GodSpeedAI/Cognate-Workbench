@@ -417,16 +417,21 @@ export interface BuildPlanInput {
  * the workspace and the egress socket so a retargeted path is a different plan. Throws the typed Cognate
  * refusal for anything the port cannot enforce; it never narrows silently.
  */
-export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: LaunchPlan; material: LaunchMaterial; profile: ExecutionProfile; profileDigest: string }> {
-  const { config, spec } = input;
-  validateConfig(config);
-  if (process.platform !== "linux") throw refuse("rlm-containment-unavailable", "the contained port requires Linux namespaces; there is no fallback");
+/** Validate the SHAPE of a spawn spec (types, unknown keys, argv) without touching the filesystem or any process. */
+export function checkSpecShape(spec: unknown): asserts spec is StdioSpawnSpec {
   checkShape(spec);
   rejectUnknown(spec, SPEC_KEYS, "spec");
   rejectUnknown(spec.restrictions, RESTRICTION_KEYS, "restriction");
   rejectUnknown(spec.restrictions.network, NETWORK_KEYS, "network restriction");
   rejectUnknown(spec.restrictions.caps, CAP_KEYS, "cap");
   if (spec.argv.length === 0 || spec.argv.some((arg) => typeof arg !== "string" || arg.includes("\0"))) throw refuse("rlm-port-unavailable", "invalid argv");
+}
+
+export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: LaunchPlan; material: LaunchMaterial; profile: ExecutionProfile; profileDigest: string }> {
+  const { config, spec } = input;
+  validateConfig(config);
+  if (process.platform !== "linux") throw refuse("rlm-containment-unavailable", "the contained port requires Linux namespaces; there is no fallback");
+  checkSpecShape(spec);
   parseFilesystem(spec);
   if (spec.restrictions.subprocess === false) throw refuse("rlm-containment-unavailable", "forbidding subprocesses cannot be enforced; descendants are contained, not forbidden");
   const network = parseNetwork(spec, config);

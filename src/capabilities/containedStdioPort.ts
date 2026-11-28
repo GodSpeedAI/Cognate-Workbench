@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StdioSpawnPort, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import { createHash } from "node:crypto";
-import { containedRun } from "./containedRunContext.ts";
+import { currentLease } from "./containedRunContext.ts";
 import { buildLaunchPlan, launchPlanDigest, measureLauncherVersionSync, refuse, validateConfig, verifyLauncherPath, type ContainedStdioPortConfig, type ExecutionProfile, type LaunchMaterial, type LaunchPlan } from "./containedLaunch.ts";
 
 const O_PATH = 0o10000000;
@@ -75,6 +75,8 @@ export interface ContainedStdioSpawnPort extends StdioSpawnPort {
    * port interface carries no caller identity, so the unguessable id remains the capability on the shared port.
    */
   forRun(ctx: RunBinding): StdioSpawnPort;
+  /** Test-only introspection: live cancellation registrations, and a barrier awaited inside launcher-handle acquisition. */
+  __debug(): { readonly registrations: number; barrier: (() => Promise<void>) | undefined };
   /** Close the port, then terminate every live sandbox. A spawn still waiting on its authority decision launches nothing. Idempotent. */
   dispose(): Promise<void>;
 }
@@ -151,13 +153,30 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   let closed = false;
   // Every in-flight spawn, so dispose() can close the port first, cancel what is waiting and then wait for it to settle (review M7).
   const pending = new Set<Promise<unknown>>();
-  let rejectClosing!: (reason: Error) => void;
-  const closing = new Promise<never>((_, reject) => { rejectClosing = reject; });
-  closing.catch(() => {});
-  const whileOpen = <T>(work: Promise<T>): Promise<T> => Promise.race([work, closing]);
+  // Cancellation is a per-operation registration, removed when that operation settles, so a long-lived port retains nothing (delta-3 #4).
+  const registrations = new Set<(reason: Error) => void>();
+  const debug: { readonly registrations: number; barrier: (() => Promise<void>) | undefined } = { get registrations() { return registrations.size; }, barrier: undefined };
+  const whileOpen = <T>(work: Promise<T>, abandon?: (value: T) => void): Promise<T> => new Promise<T>((resolve, reject) => {
+    if (closed) { reject(disposed()); if (abandon) work.then(abandon, () => {}); return; }
+    let settled = false;
+    const cancel = (reason: Error): void => {
+      if (settled) return;
+      settled = true; registrations.delete(cancel); reject(reason);
+      if (abandon) work.then(abandon, () => {});          // the result nobody will receive is released by whoever opened it
+    };
+    registrations.add(cancel);
+    work.then((value) => { if (settled) return; settled = true; registrations.delete(cancel); resolve(value); }, (error) => { if (settled) return; settled = true; registrations.delete(cancel); reject(error); });
+  });
+  // The launcher pin and its measured version are snapshotted HERE and used everywhere: a later mutation of the caller's config
+  // object (a re-pin, a flipped attestation) cannot make a cached version describe other bytes (delta-3 #5). Everything else
+  // still reads the live config, as before.
+  const authorize = config.authorize;
+  const pin = Object.freeze({ path: config.launcher.path, sha256: config.launcher.sha256 });
+  const attested = config.launcherPatchedAttested === true;
+  const cfg: ContainedStdioPortConfig = new Proxy(config, { get(target, key, receiver) { return key === "launcher" ? pin : key === "launcherPatchedAttested" ? attested : Reflect.get(target, key, receiver); } });
   // The launcher's version is measured ONCE, here, against the pinned digest, and cached: a spawn never runs the launcher
   // to learn it (review F9). A failure is kept and refused at spawn, so a broken configuration still builds a port.
-  const measured: { version: string } | { error: unknown } = (() => { try { return { version: measureLauncherVersionSync(config) }; } catch (error) { return { error }; } })();
+  const measured: { version: string } | { error: unknown } = (() => { try { return { version: measureLauncherVersionSync(cfg) }; } catch (error) { return { error }; } })();
 
   /**
    * The launcher, opened once: its path checks (writable roots, owner, directory chain) pass before it is ever executed,
@@ -165,15 +184,18 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
    * so the bytes that were hashed are the bytes that run. Close the handle when the process no longer needs it.
    */
   async function launcherHandle(): Promise<{ readonly exec: string; close(): void }> {
-    const path = await verifyLauncherPath(config);
+    const path = await verifyLauncherPath(cfg);
+    if (debug.barrier) await debug.barrier();
+    // Cancellation is checked BEFORE the descriptor is opened: a handle nobody will receive is never created (delta-3 #3).
+    if (closed) throw disposed();
     let fd: number;
-    try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); } catch { throw refuse("rlm-containment-unavailable", `bubblewrap launcher ${config.launcher.path} is missing`); }
+    try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); } catch { throw refuse("rlm-containment-unavailable", `bubblewrap launcher ${pin.path} is missing`); }
     const close = () => { try { closeSync(fd); } catch { /* already closed */ } };
     try {
       const info = fstatSync(fd);
       const at = lstatSync(path);
       if (info.dev !== at.dev || info.ino !== at.ino) throw refuse("rlm-containment-unavailable", "the launcher changed while it was being opened");
-      if (createHash("sha256").update(readFileSync(fd)).digest("hex") !== config.launcher.sha256) throw refuse("rlm-containment-unavailable", "the launcher digest does not match the host pin");
+      if (createHash("sha256").update(readFileSync(fd)).digest("hex") !== pin.sha256) throw refuse("rlm-containment-unavailable", "the launcher digest does not match the host pin");
     } catch (error) { close(); throw error; }
     return { exec: `/proc/${process.pid}/fd/${fd}`, close };
   }
@@ -185,14 +207,14 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
 
   async function resolve(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ plan: LaunchPlan; material: LaunchMaterial; digest: string; profile: ExecutionProfile; profileDigest: string }> {
     const version = await launcherVersion();
-    const built = await buildLaunchPlan({ config, spec, ctx, envKey, launcherVersion: version });
+    const built = await buildLaunchPlan({ config: cfg, spec, ctx, envKey, launcherVersion: version });
     return { ...built, digest: launchPlanDigest(built.plan) };
   }
 
   /** User namespaces and mounts must actually work here. A failure is a refusal, never a local run. */
   async function preflight(probeArgv: readonly string[]): Promise<void> {
     if (preflighted) return;
-    const handle = await whileOpen(launcherHandle());
+    const handle = await whileOpen(launcherHandle(), (h) => h.close());
     // Immediately before the launcher runs: a port closed while the handle was being verified must not start a sandbox.
     if (closed) { handle.close(); throw disposed(); }
     const probe = (() => { try { return Bun.spawnSync([handle.exec, ...probeArgv.slice(1)], { stdout: "pipe", stderr: "pipe", env: {} }); } finally { handle.close(); } })();
@@ -291,11 +313,14 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     return run;
   }
 
-  async function spawnOne(spec: StdioSpawnSpec, ctx: RunBinding): Promise<{ readonly id: string }> {
+  async function spawnOne(spec: StdioSpawnSpec, provided: RunBinding): Promise<{ readonly id: string }> {
     if (closed) throw disposed();
-    // M9: identity and reach come from the runtime's context for the admitted child run, never from arguments the provider chose.
-    const run = containedRun.getStore();
+    // M9: identity and reach come from the host's lease for the admitted child run, never from arguments the provider chose.
+    const run = currentLease();
     if (!run) throw refuse("rlm-containment-unavailable", "a contained spawn must run inside an admitted child run's context, and none is active");
+    if (!run.active) throw refuse("rlm-containment-unavailable", `the lease of run ${run.runId} has ended: its execution returned, so nothing more is launched for it`);
+    // The provider's object is read exactly once; from here the immutable binding is what planning, authorization, ownership and evidence use.
+    const ctx: RunBinding = Object.freeze({ intentId: String(provided.intentId), runId: String(provided.runId) });
     if (run.runId !== ctx.runId) throw refuse("rlm-containment-unavailable", `the spawn names run ${ctx.runId}, which is not the run ${run.runId} that is executing`);
     const first = await whileOpen(resolve(spec, ctx));
     if (closed) throw disposed();
@@ -303,8 +328,10 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       throw refuse("rlm-egress-uncontrolled", `the spawn asks for the host socket, but the operator declared network none for the provider of run ${run.runId}`);
     }
     // The decision comes first. No sandbox of any kind (the namespace preflight included) starts before SEA-Forge allows (review M5).
-    await whileOpen(config.authorize(first.plan, first.digest, ctx, first.profileDigest));
+    if (!run.active) throw refuse("rlm-containment-unavailable", `the lease of run ${run.runId} ended before the authority was asked`);
+    await whileOpen(authorize(first.plan, first.digest, ctx, first.profileDigest));
     if (closed) throw disposed();
+    if (!run.active) throw refuse("rlm-containment-unavailable", `the lease of run ${run.runId} ended while the authority was deciding`);
     await preflight(first.material.probeArgv);
     if (closed) throw disposed();
     const fds = openPinned(first.plan);
@@ -320,13 +347,14 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
       if (again.profileDigest !== first.profileDigest) throw refuse("rlm-containment-unavailable", `execution profile drifted before spawn (${first.profileDigest} -> ${again.profileDigest})`);
       if (again.digest !== first.digest) throw refuse("rlm-containment-unavailable", `launch plan drifted before spawn (${first.digest} -> ${again.digest})`);
       // Hash and exec through one descriptor, immediately before spawn.
-      launcher = await whileOpen(launcherHandle());
+      launcher = await whileOpen(launcherHandle(), (h) => h.close());
       const stdio: (string | number)[] = ["pipe", "pipe", "pipe", fds.workspace, argFd];
       if (fds.egress !== undefined || fds.executable !== undefined || filterFd !== undefined) stdio.push(fds.egress ?? "ignore");
       if (fds.executable !== undefined || filterFd !== undefined) stdio.push(fds.executable ?? "ignore");
       if (filterFd !== undefined) stdio.push(filterFd);
       // Disposal may have happened while the awaits above were pending: re-check immediately before the process exists (review M7).
       if (closed) throw disposed();
+      if (!run.active) throw refuse("rlm-containment-unavailable", `the lease of run ${run.runId} ended before launch`);
       proc = Bun.spawn([launcher.exec, ...first.plan.sandboxArgv.slice(1)], { env: {}, stdio: stdio as never, detached: true });
     } catch (error) {
       launcher?.close();
@@ -408,6 +436,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
   };
 
   const port: ContainedStdioSpawnPort = {
+    __debug: () => debug,
     plan: async (spec, ctx) => { const r = await resolve(spec, ctx); return { plan: r.plan, digest: r.digest, executionProfile: r.profile, executionProfileDigest: r.profileDigest }; },
     executionProfile: async (spec) => { const r = await resolve(spec, { intentId: "profile", runId: "profile" }); return { profile: r.profile, digest: r.profileDigest }; },
     spawn,
@@ -446,7 +475,7 @@ export function containedStdioSpawnPort(config: ContainedStdioPortConfig): Conta
     },
     async dispose() {
       closed = true; // first: every in-flight spawn is cancelled and re-checks this before it launches
-      rejectClosing(disposed());
+      for (const cancel of [...registrations]) cancel(disposed());
       await Promise.allSettled([...pending]); // a spawn that already reached Bun.spawn is in `live` by now, so it is torn down below
       await Promise.all([...live.values()].map(async (item) => { await teardown(item, { reason: "killed", detail: "dispose" }); await item.done; }));
     },

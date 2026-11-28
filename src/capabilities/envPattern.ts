@@ -6,7 +6,8 @@
 // Grammar (implicitly anchored at both ends; printable ASCII only):
 //   pattern  := atom*
 //   atom     := (literal | '\' escaped | '[' class ']') quantifier?
-//   quantifier := '?' | '*' | '+' | '{' m ',' n '}' | '{' n '}'      (n <= 256, m <= n)
+//   quantifier := '?' | '*' | '+' | '{' m ',' n '}'                  (0 <= m <= n <= 256; `{0,0}` is legal and matches nothing;
+//                                                                  the single-number form `{n}` is NOT in the grammar: write `{n,n}`)
 //   class    := (char | char '-' char | '\' escaped)+
 // There are no groups, alternation, backreferences, lookaround, anchors, dot or negated classes, and no quantifier on a
 // quantifier. The expanded NFA may hold at most MAX_PATTERN_STATES states.
@@ -78,9 +79,9 @@ export function compileEnvPattern(source: string): CompiledEnvPattern {
     else if (q === "{") {
       const close = source.indexOf("}", i);
       const body = close < 0 ? "" : source.slice(i + 1, close);
-      const m = /^(\d{1,3})(?:,(\d{1,3}))?$/.exec(body);
-      if (!m) bad("a malformed {m,n} quantifier");
-      min = Number(m![1]); max = m![2] === undefined ? min : Number(m![2]);
+      const m = /^(\d{1,3}),(\d{1,3})$/.exec(body);
+      if (!m) bad("a malformed quantifier: only {m,n} is accepted (write {n,n} for an exact count)");
+      min = Number(m![1]); max = Number(m![2]);
       if (max > MAX_REPEAT || min > max) bad(`a {m,n} quantifier needs m <= n <= ${MAX_REPEAT}`);
       i = close + 1;
     }
@@ -91,7 +92,6 @@ export function compileEnvPattern(source: string): CompiledEnvPattern {
     else for (let k = min; k < max; k += 1) nodes.push({ set, skip: true, loop: false });
     if (nodes.length > MAX_PATTERN_STATES) bad(`expands to more than ${MAX_PATTERN_STATES} states`);
   }
-  if (nodes.length === 0) bad("matches nothing but the empty string; name at least one atom");
   return { source, nodes, states: nodes.length };
 }
 

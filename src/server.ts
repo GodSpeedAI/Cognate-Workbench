@@ -48,7 +48,7 @@ import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from ".
 import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
 import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
 import { rlmAdmissionGuard } from "./capabilities/rlmAdmissionGuard.ts";
-import { containedRun } from "./capabilities/containedRunContext.ts";
+import { runInContainedLease } from "./capabilities/containedRunContext.ts";
 import { profileAuthorize, type ProfileAuthority, type ProfileAuthorization } from "./capabilities/containedProfileAuthority.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
@@ -560,6 +560,12 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   if (externalAuthority && options.rlmProfileAuthority) {
     throw new Error("rlmProfileAuthority is refused while SEA-Forge governance is configured: one authority must decide both the admission and the launch");
   }
+  // ONE canonical authority client decides both the parent's admission (`governance.authority`) and the contained launch. An
+  // ExternalAuthority that names a different client for the two is refused (delta-3 #6); with none named the runtime is handed the
+  // very client the launch uses, never a second one it would build on its own.
+  if (externalAuthority?.governance.authority && externalAuthority.governance.authority !== externalAuthority.client) {
+    throw new Error("the SEA-Forge governance.authority differs from the authority client used for contained launches: one client must decide both the admission and the launch");
+  }
   // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
   const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
   if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
@@ -818,7 +824,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     store,
     // P02: with an external authority, every capability invoke and consequential action is decided by
     // SEA-Forge; escalations wait for the operator's resolution there.
-    ...(externalAuthority ? { governance: externalAuthority.governance } : {}),
+    ...(externalAuthority ? { governance: { ...externalAuthority.governance, authority: externalAuthority.client } } : {}),
     // Preserve the serial compatibility path. Opt-in capacity uses only native SDK admission;
     // frozen intrinsic-return work may overlap, while every workspace-capable run shares a key.
     // An interrupted external effect is never silently repeated: a recovering owner records
@@ -842,7 +848,7 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
       const bound = { ...agent, async run(input: Parameters<typeof agent.run>[0], context: Parameters<typeof agent.run>[1]) {
         const providerId = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).providerId : undefined;
         const reach = typeof providerId === "string" ? rlmRegistry.get(providerId)?.portGovernance?.reach.network : undefined;
-        return containedRun.run({ runId: context.runId, reach: reach === "host-mediated" ? "host-socket" : "none" }, () => agent.run(input, context));
+        return runInContainedLease({ runId: context.runId, reach: reach === "host-mediated" ? "host-socket" : "none" }, () => agent.run(input, context));
       } };
       return rlmGuard.wrap(bound);
     })()],
