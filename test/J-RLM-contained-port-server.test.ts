@@ -8,6 +8,10 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { SeaForgeAuthority } from "@godspeedai/cognate-runtime-bun";
+import { createServer as createNetServer } from "node:net";
+import { ULID, WORLD, seaForge, type Answer } from "./support/seaForgeStandIn.ts";
+import type { ExternalAuthority } from "../src/capabilities/governance.ts";
 import type { Json } from "@godspeedai/cognate-events";
 import type { GovernedOperation } from "@godspeedai/cognate-runtime-bun";
 import type { InvocationView, ProviderFacts, RlmInvokeRequest, RlmProvider } from "@godspeedai/cognate-runtime-api";
@@ -22,7 +26,7 @@ const sha = (text: string): string => createHash("sha256").update(text).digest("
 
 interface Recorder { readonly invokes: RlmInvokeRequest[]; readonly spawns: string[] }
 
-function containedProvider(id: string, config: ContainedStdioPortConfig, exe: string, cwd: string): RlmProvider & Recorder {
+function containedProvider(id: string, config: ContainedStdioPortConfig, exe: string, cwd: string, options: { readonly spawnAs?: string } = {}): RlmProvider & Recorder {
   const facts: ProviderFacts = {
     capabilities: { maxDepth: 2, contextDecomposition: true, providerInternalSubagents: false, streaming: true, isolation: "process", resultDelivery: "return", cancellation: "process", paymentMetering: "unreported" },
     toolPolicy: "contained",
@@ -36,7 +40,8 @@ function containedProvider(id: string, config: ContainedStdioPortConfig, exe: st
     async invoke(req, spawn, ctx) {
       state.invokes.push(req);
       try {
-        await spawn.spawn({ argv: [exe], cwd, env: {}, restrictions: {} }, { intentId: ctx.runId, runId: ctx.runId });
+        const as = options.spawnAs ?? ctx.runId;
+        await spawn.spawn({ argv: [exe], cwd, env: {}, restrictions: {} }, { intentId: as, runId: as });
         state.spawns.push("spawned");
       } catch (error) { state.spawns.push(String((error as Error).message)); }
       views.set(ctx.runId, { status: "completed", evidence: [`${id}:done`], payment: { currency: "money", spent: "unknown", basis: "unmeasured" }, isolation: "process", lastEventAt: new Date().toISOString(), resultRef: `result:${id}` });
@@ -206,6 +211,89 @@ describe("J-RLM-contained-port wiring", () => {
         expect(provider.spawns[0]).toContain("rlm-profile-unauthorized");
         expect(await markerLines(f.marker)).toBe(0);
       }, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmProfileAuthority: denied.options.rlmProfileAuthority, rlmContainedPort: { ...denied.options.rlmContainedPort, authorize: async () => {} } as never });
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }, 120_000);
+
+
+  test("F6: an injected profile authority beside configured SEA-Forge governance is refused at startup (one authority decides admission and launch)", async () => {
+    const f = await fixture();
+    try {
+      const both = withAuthority(f.config, [f.profileDigest]);
+      const external = { governance: { mode: "sea-forge", worldRef: WORLD }, socketPath: join(f.root, "none.sock"), service: { actor_id: "cognate-service", role: "service" }, operator: { actor_id: "operator", role: "operator" }, client: new SeaForgeAuthority({ socketPath: join(f.root, "none.sock") }) } as unknown as ExternalAuthority;
+      await expect(withExpertApp(responder, async () => {}, { ...both.options, executionPosture: "contained", externalAuthority: external })).rejects.toThrow(/one authority|competing/);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }, 60_000);
+
+  test("F7: with external governance and the default launch wiring, admission and launch are two decisions on one SEA-Forge: allow+allow spawns, an admission deny never reaches launch, a launch deny spawns nothing", async () => {
+    const f = await fixture();
+    const sock = join(f.root, "sea.sock");
+    const seen = { claims: [] as unknown[], resources: [] as string[] };
+    let admission: "allow" | "deny" = "allow"; let launch: "allow" | "deny" = "allow";
+    const answer = (claimed: string | undefined, resource: string): Answer => {
+      if (resource === "rlm.invoke") return { kind: "plain", decision: admission };
+      if (resource === CONTAINED_SPAWN_CAPABILITY) return launch === "allow" && claimed === f.profileDigest ? { kind: "boundary", digests: [claimed] } : { kind: "plain", decision: "deny" };
+      return { kind: "plain", decision: "allow" };
+    };
+    const sea = await seaForge(sock, answer, seen);
+    const external = { governance: { mode: "sea-forge", worldRef: WORLD, approvalPollMs: 0 }, socketPath: sock, service: { actor_id: "cognate-service", role: "service" }, operator: { actor_id: "operator", role: "operator" }, client: new SeaForgeAuthority({ socketPath: sock, requestIdPrefix: "workbench", timeoutMs: 5000 }) } as unknown as ExternalAuthority;
+    (external.governance as { authority?: unknown }).authority = external.client;
+    try {
+      const provider = containedProvider("cp", f.config, f.exe, f.ws);
+      await withExpertApp(responder, async (t) => {
+        await configureDefaultRoutes(t);
+        const current = (await t.state()).experts["product-manager"]!;
+        await invoke(t, "expert.save", { expertId: "product-manager", name: current.name, specialization: current.definition.specialization, instructions: current.definition.instructions, tools: current.definition.tools, route: current.definition.route, budget: { contextTokens: 32000, maxOutputTokens: 400, maxCostUsd: 5, prices: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } } });
+        const run = async (name: string) => {
+          cases[name] = [{ id: "c1", args: { purpose: "Investigate recursively", acceptance: ["Report"], contextRefs: ["assignment"], tools: ["read"], budget: { limit: 0.5 } } }];
+          const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: `CASE:${name}`, requestId: `f7-${name}`, rlmProvider: "cp" }) as { assignmentId: string };
+          await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status), 90_000);
+        };
+        const sandboxes = async (): Promise<number> => (existsSync(f.marker) ? (await readFile(f.marker, "utf8")).split("\n").filter((l) => l.includes("--seccomp")).length : 0);
+        const asked = (resource: string): number => seen.resources.filter((r) => r === resource).length;
+
+        // 3. Admission allow, launch deny: refused with no spawn.
+        admission = "allow"; launch = "deny";
+        await run("f7c");
+        expect(asked("rlm.invoke")).toBeGreaterThanOrEqual(1);
+        expect(asked(CONTAINED_SPAWN_CAPABILITY)).toBe(1);
+        expect(provider.spawns.at(-1)).toContain("rlm-profile-unauthorized");
+        expect(await sandboxes()).toBe(0);
+
+        // 2. Admission deny: it never reaches launch.
+        const launchAsksBefore = asked(CONTAINED_SPAWN_CAPABILITY); const invokesBefore = provider.invokes.length;
+        admission = "deny"; launch = "allow";
+        await run("f7b");
+        expect(provider.invokes).toHaveLength(invokesBefore);
+        expect(asked(CONTAINED_SPAWN_CAPABILITY)).toBe(launchAsksBefore);
+        expect(await sandboxes()).toBe(0);
+
+        // 1. Admission allow, launch allow: spawns.
+        admission = "allow"; launch = "allow";
+        await run("f7a");
+        expect(asked(CONTAINED_SPAWN_CAPABILITY)).toBe(launchAsksBefore + 1);
+        expect(provider.spawns.at(-1)).toBe("spawned");
+        expect(await sandboxes()).toBe(1);
+      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmContainedPort: (({ authorize: _a, ...rest }) => rest)(f.config), executionPosture: "contained", externalAuthority: external });
+    } finally { await new Promise<void>((resolve) => sea.close(() => resolve())); await rm(f.root, { recursive: true, force: true }); }
+  }, 180_000);
+
+  test("M9: a no-network provider that passes another run's id to the port is refused before SEA-Forge is asked", async () => {
+    const f = await fixture();
+    try {
+      const provider = containedProvider("cp", f.config, f.exe, f.ws, { spawnAs: "some-other-run" });
+      const authority = withAuthority(f.config, [f.profileDigest]);
+      await withExpertApp(responder, async (t) => {
+        await configureDefaultRoutes(t);
+        const current = (await t.state()).experts["product-manager"]!;
+        await invoke(t, "expert.save", { expertId: "product-manager", name: current.name, specialization: current.definition.specialization, instructions: current.definition.instructions, tools: current.definition.tools, route: current.definition.route, budget: { contextTokens: 32000, maxOutputTokens: 400, maxCostUsd: 5, prices: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } } });
+        cases.spoof = [{ id: "c1", args: { purpose: "Investigate recursively", acceptance: ["Report"], contextRefs: ["assignment"], tools: ["read"], budget: { limit: 0.5 } } }];
+        const started = await invoke(t, "team.converse", { teamId: "cognate-team", workspaceId: t.workspaceId, message: "CASE:spoof", requestId: "contained-spoof", rlmProvider: "cp" }) as { assignmentId: string };
+        await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status), 90_000);
+        expect(provider.invokes).toHaveLength(1);
+        expect(provider.spawns[0]).toMatch(/not the run|disagrees|another run/);
+        expect(authority.asked).toEqual([]);                                   // refused before any authority request
+        expect(await markerLines(f.marker)).toBe(0);
+      }, { rlmProviders: [{ provider, label: "cp", portGovernance }], ...authority.options });
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 120_000);
 

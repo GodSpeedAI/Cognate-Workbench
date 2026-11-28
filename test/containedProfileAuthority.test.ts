@@ -4,7 +4,7 @@
 // client's decision parsing is part of what these tests exercise. Every refusal leaves the sandbox unspawned.
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync, readdirSync, readlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,11 +13,12 @@ import { RlmRefusedError, SeaForgeAuthority } from "@godspeedai/cognate-runtime-
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import type { ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
 import { containedStdioSpawnPort } from "../src/capabilities/containedStdioPort.ts";
+import { containedRun } from "../src/capabilities/containedRunContext.ts";
+import { scopedPort } from "./support/scopedPort.ts";
+import { ULID, WORLD, seaForge, type Answer } from "./support/seaForgeStandIn.ts";
 import { CONTAINED_SPAWN_CAPABILITY, checkProfileDecision, profileAuthorize, type ProfileAuthorization } from "../src/capabilities/containedProfileAuthority.ts";
 
 const sha = (text: string): string => createHash("sha256").update(text).digest("hex");
-const ULID = "01HZX3Q7M9K2N4P6R8T0VWXYZ1"; // a SEA ledger entry (entry_ulid)
-const WORLD = `world:test@sha256:${"a".repeat(64)}`;
 const ctx = { intentId: "i", runId: "run-116" };
 let root: string; let workspace: string; let marker: string; let config: ContainedStdioPortConfig; let spec: StdioSpawnSpec;
 let launcherText: string;
@@ -26,7 +27,7 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "profile-auth-"));
   workspace = join(root, "ws"); await mkdir(workspace); await mkdir(join(root, "bin"));
   marker = join(root, "launcher-ran");
-  launcherText = `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "bubblewrap 0.13.1"; exit 0; fi\necho "$@" >> ${marker}\nexit 0\n`;
+  launcherText = `#!/bin/sh\necho "$@" >> ${marker}\nif [ "$1" = "--version" ]; then echo "bubblewrap 0.13.1"; exit 0; fi\nexit 0\n`; // logs EVERY invocation, --version included
   const exeText = "#!/bin/sh\necho child\n";
   await writeFile(join(root, "bin", "bwrap"), launcherText); await chmod(join(root, "bin", "bwrap"), 0o755);
   await writeFile(join(root, "bin", "child"), exeText); await chmod(join(root, "bin", "child"), 0o755);
@@ -40,48 +41,6 @@ afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 const everyLaunch = async (): Promise<number> => (existsSync(marker) ? (await readFile(marker, "utf8")).split("\n").filter(Boolean).length : 0);
 const lines = async (): Promise<number> => (existsSync(marker) ? (await readFile(marker, "utf8")).split("\n").filter((l) => l.includes("--serve")).length : 0);
 
-/** What the stand-in SEA-Forge answers for one request. */
-type Answer =
-  | { kind: "boundary"; digests: string[]; extraConstraints?: { constraint_type: string; description: string }[]; noLedger?: boolean; decisionIdOnly?: boolean }
-  | { kind: "plain"; decision: "allow" | "deny" | "escalate" | "constrained_allow" }
-  | { kind: "malformed" } | { kind: "error" } | { kind: "silent" };
-
-/** A unix-socket SEA-Forge: the CEP authority_decision for the request it received, or a defect. */
-async function seaForge(path: string, answerFor: (digest: string | undefined, resource: string) => Answer, seen: { claims: unknown[]; resources: string[] }): Promise<Server> {
-  const server = createServer((socket) => {
-    let buffered = "";
-    socket.on("data", (chunk) => {
-      buffered += String(chunk);
-      if (!buffered.includes("\n")) return;
-      const request = JSON.parse(buffered.slice(0, buffered.indexOf("\n")));
-      const ext = request.envelope.extensions["godspeed.authority_request"];
-      seen.claims.push(ext.claims);
-      seen.resources.push(ext.resource_id);
-      const answer = answerFor(ext.claims?.execution_profile_digest, ext.resource_id);
-      if (answer.kind === "silent") return; // never answers: the client times out
-      if (answer.kind === "malformed") { socket.end("this is not json\n"); return; }
-      if (answer.kind === "error") { socket.end(JSON.stringify({ ok: false, error_class: "policy_unavailable", error: "no bundle" }) + "\n"); return; }
-      const decision = answer.kind === "boundary" ? "boundary" : answer.decision;
-      const constraints = answer.kind === "boundary"
-        ? [...answer.digests.map((d) => ({ constraint_type: "execution_profile", description: d })), ...(answer.extraConstraints ?? [])]
-        : [];
-      socket.end(JSON.stringify({
-        ok: true, final: true,
-        envelope: {
-          envelope_kind: "authority_decision", envelope_id: `dec-${request.request_id}`, lineage_refs: [request.envelope.envelope_id],
-          scope: { world_ref: WORLD }, constraints,
-          extensions: {
-            "cep.profile": { profile_id: "godspeed.authority_decision", profile_version: "1.0.0" },
-            "godspeed.authority_decision": { request_ref: request.envelope.envelope_id, operation_id: request.request_id, decision, ...(answer.kind === "boundary" && answer.noLedger ? {} : answer.kind === "boundary" && answer.decisionIdOnly ? { decision_id: "auth_01" } : { decision_id: `D-${request.request_id}`, ledger_entry: ULID }), ...(decision === "boundary" ? { policy_basis: ["rule:profile"] } : {}) },
-          },
-        },
-      }) + "\n");
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(path, resolve));
-  return server;
-}
-
 async function rig(answerFor: (digest: string | undefined, resource: string) => Answer, extra: Partial<ContainedStdioPortConfig> = {}, timeoutMs = 1500) {
   const socket = join(root, `sea-${Math.random().toString(36).slice(2)}.sock`);
   const seen = { claims: [] as unknown[], resources: [] as string[] };
@@ -89,7 +48,7 @@ async function rig(answerFor: (digest: string | undefined, resource: string) => 
   const records: ProfileAuthorization[] = [];
   const client = new SeaForgeAuthority({ socketPath: socket, timeoutMs, requestIdPrefix: "workbench" });
   const authorize = profileAuthorize({ authority: client, worldRef: WORLD, actor: { id: "system", kind: "system" }, tenant: "local", record: (r) => records.push(r) });
-  const port = containedStdioSpawnPort({ ...config, authorize, ...extra });
+  const port = scopedPort({ ...config, authorize, ...extra });
   return { port, records, seen, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
@@ -100,7 +59,7 @@ const refused = async (promise: Promise<unknown>): Promise<RlmRefusedError> => {
 
 describe("#116: the host asks SEA-Forge and launches only on the exact boundary allow", () => {
   test("a boundary allow carrying exactly the profile digest spawns, and the evidence holds digests and the decision id only", async () => {
-    const policy = (await containedStdioSpawnPort(config).executionProfile(spec)).digest; // what an operator wrote into policy
+    const policy = (await scopedPort(config).executionProfile(spec)).digest; // what an operator wrote into policy
     const r = await rig((claimed) => ({ kind: "boundary", digests: claimed === policy ? [policy] : [] }));
     try {
       const before = await lines();
@@ -153,21 +112,21 @@ describe("#116: the host asks SEA-Forge and launches only on the exact boundary 
   test("a port built without an authorize hook fails at construction, so no spawn can happen", async () => {
     const before = await lines();
     for (const bad of [undefined, null, "yes", {}]) {
-      expect(() => containedStdioSpawnPort({ ...config, authorize: bad } as unknown as ContainedStdioPortConfig)).toThrow(/authorize/);
+      expect(() => scopedPort({ ...config, authorize: bad } as unknown as ContainedStdioPortConfig)).toThrow(/authorize/);
     }
     expect(await lines()).toBe(before);
   });
 
   test("an unreachable SEA-Forge (no socket at all) refuses", async () => {
     const client = new SeaForgeAuthority({ socketPath: join(root, "absent.sock"), timeoutMs: 300 });
-    const port = containedStdioSpawnPort({ ...config, authorize: profileAuthorize({ authority: client, worldRef: WORLD, actor: { id: "system", kind: "system" }, tenant: "local" }) });
+    const port = scopedPort({ ...config, authorize: profileAuthorize({ authority: client, worldRef: WORLD, actor: { id: "system", kind: "system" }, tenant: "local" }) });
     const e = await refused(port.spawn(spec, ctx));
     expect(e.reason).toContain("rlm-profile-unauthorized");
     await port.dispose();
   });
 
   test("changing the profile after policy was written refuses: a different ceiling is a different digest", async () => {
-    const written = (await containedStdioSpawnPort(config).executionProfile(spec)).digest;
+    const written = (await scopedPort(config).executionProfile(spec)).digest;
     const r = await rig((claimed) => ({ kind: "boundary", digests: claimed === written ? [written] : [`sha256:${"d".repeat(64)}`] }), { ceilings: { outputBytes: 2048 } });
     try {
       const e = await refused(r.port.spawn(spec, ctx));
@@ -239,8 +198,9 @@ describe("#116 delta-1: the launch is its own policy target, started only after 
     let release!: () => void; let asked!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     const askedAt = new Promise<void>((resolve) => { asked = resolve; });
-    const authority = { decide: async () => { asked(); await held; return { disposition: "boundary" as const, reason: "ok", decisionRef: ULID, constraints: [{ type: "execution_profile", value: (await containedStdioSpawnPort(config).executionProfile(spec)).digest }] }; } };
-    const port = containedStdioSpawnPort({ ...config, authorize: profileAuthorize({ authority, worldRef: WORLD, actor: { id: "s", kind: "system" }, tenant: "t" }) });
+    const profile = (await scopedPort(config).executionProfile(spec)).digest;   // measured first: building a port runs the launcher once for its version
+    const authority = { decide: async () => { asked(); await held; return { disposition: "boundary" as const, reason: "ok", decisionRef: ULID, constraints: [{ type: "execution_profile", value: profile }] }; } };
+    const port = scopedPort({ ...config, authorize: profileAuthorize({ authority, worldRef: WORLD, actor: { id: "s", kind: "system" }, tenant: "t" }) });
     const before = await everyLaunch();
     const pending = port.spawn(spec, ctx).then(() => "spawned", (e) => (e instanceof RlmRefusedError ? "refused" : "error"));
     await askedAt;
@@ -253,7 +213,7 @@ describe("#116 delta-1: the launch is its own policy target, started only after 
   });
 });
 
-describe("#114 delta-1: the port is bound to the provider's declared reach, and pinned descriptors never leak", () => {
+describe("#114 delta-2: the run identity and reach come from the runtime, and pinned descriptors never leak", () => {
   let sockDir: string; let sockPath: string; let listener: Server;
   beforeAll(async () => {
     sockDir = await mkdtemp(join(tmpdir(), "profile-sock-"));
@@ -263,22 +223,24 @@ describe("#114 delta-1: the port is bound to the provider's declared reach, and 
   });
   afterAll(async () => { await new Promise<void>((resolve) => listener.close(() => resolve())); await rm(sockDir, { recursive: true, force: true }); });
   const egressSpec = (): StdioSpawnSpec => ({ ...spec, restrictions: { network: { outbound: [`host-socket:${sockPath}`] } } });
-  const declare = (port: unknown, runId: string, reach: "none" | "host-socket") => (port as { declareReach?: (r: string, v: string) => void }).declareReach?.(runId, reach);
 
-  test("M9: a provider that declared no network cannot launch with the host socket; one that declared it reaches the authority", async () => {
+  test("M9: the reach comes from the run store, not from arguments the provider passes; a provider naming another run is refused before authority", async () => {
     let asked = 0;
     const authorize = async () => { asked += 1; throw new RlmRefusedError("rlm-containment-unavailable", "rlm-profile-unauthorized: test stop"); };
     const port = containedStdioSpawnPort({ ...config, hostSocket: sockPath, authorize });
     try {
-      declare(port, "run-none", "none");
-      const denied = await refused(port.spawn(egressSpec(), { intentId: "i", runId: "run-none" }));
-      expect(denied.reason).toMatch(/declared/);
-      expect(asked).toBe(0);                                                          // refused BEFORE any authority request
-      const undeclared = await refused(port.spawn(egressSpec(), { intentId: "i", runId: "run-undeclared" }));
-      expect(undeclared.reason).toMatch(/declared/);                                  // no declaration is the most restrictive one
-      expect(asked).toBe(0);
-      declare(port, "run-sock", "host-socket");                                       // positive control: the same spec, declared, reaches the authority
-      const allowed = await refused(port.spawn(egressSpec(), { intentId: "i", runId: "run-sock" }));
+      const inRun = <T>(runId: string, reach: "none" | "host-socket", fn: () => T): T => containedRun.run({ runId, reach }, fn);
+      // No run context at all: refused.
+      expect((await refused(port.spawn(egressSpec(), { intentId: "i", runId: "run-sock" }))).reason).toMatch(/context/);
+      // A no-network provider that names the run id of a (retained) host-socket run: the runtime says it is run-none.
+      const spoof = await refused(inRun("run-none", "none", () => port.spawn(egressSpec(), { intentId: "i", runId: "run-sock" })));
+      expect(spoof.reason).toMatch(/not the run|disagrees|another run/);
+      // A no-network run asking for the host socket under its own id.
+      const own = await refused(inRun("run-none", "none", () => port.spawn(egressSpec(), { intentId: "i", runId: "run-none" })));
+      expect(own.reason).toMatch(/declared/);
+      expect(asked).toBe(0);                                                          // every refusal came BEFORE any authority request
+      // Positive control: a host-socket run asking for it under its own id reaches the authority.
+      const allowed = await refused(inRun("run-sock", "host-socket", () => port.spawn(egressSpec(), { intentId: "i", runId: "run-sock" })));
       expect(allowed.reason).toContain("test stop");
       expect(asked).toBe(1);
     } finally { await port.dispose(); }
@@ -287,21 +249,15 @@ describe("#114 delta-1: the port is bound to the provider's declared reach, and 
   test("L11: an egress socket that vanishes while authority is pending leaks no descriptor", async () => {
     const dir = await mkdtemp(join(tmpdir(), "profile-leak-"));
     const sock = join(dir, "e.sock");
-    const one = createServer(() => {});
-    await new Promise<void>((resolve) => one.listen(sock, resolve));
     // Descriptors on THIS test's pinned objects only: other files' sandboxes and pipes come and go in the same process, so a raw
     // fd total is not stable, but a leaked workspace or socket descriptor is exactly one more link to these paths.
     const count = (): number => readdirSync("/proc/self/fd").filter((fd) => { try { const link = readlinkSync(`/proc/self/fd/${fd}`); return link === workspace || link === sock; } catch { return false; } }).length;
     try {
-      const port = containedStdioSpawnPort({ ...config, hostSocket: sock, authorize: async () => { await new Promise<void>((resolve) => one.close(() => resolve())); await rm(sock, { force: true }); } });
-      declare(port, "run-leak", "host-socket");
       const sp = { ...spec, restrictions: { network: { outbound: [`host-socket:${sock}`] } } };
-      await refused(port.spawn(sp, { intentId: "i", runId: "run-leak" }));            // warm anything lazily opened, then measure
       const before = count();
       for (let i = 0; i < 3; i++) {
         const again = createServer(() => {}); await new Promise<void>((resolve) => again.listen(sock, resolve));
-        const p2 = containedStdioSpawnPort({ ...config, hostSocket: sock, authorize: async () => { await new Promise<void>((resolve) => again.close(() => resolve())); await rm(sock, { force: true }); } });
-        declare(p2, "run-leak", "host-socket");
+        const p2 = scopedPort({ ...config, hostSocket: sock, authorize: async () => { await new Promise<void>((resolve) => again.close(() => resolve())); await rm(sock, { force: true }); } });
         const e = await refused(p2.spawn(sp, { intentId: "i", runId: "run-leak" }));
         expect(e.reason).toMatch(/could not be opened|no longer/);
         await p2.dispose();
@@ -310,3 +266,53 @@ describe("#114 delta-1: the port is bound to the provider's declared reach, and 
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+describe("#114 delta-2: disposal during the launch path, and the version probe", () => {
+  test("M7: a disposal that lands while the launch is between its allow and its preflight starts no launcher", async () => {
+    // spawnSync blocks the event loop, so a launcher invocation is atomic: it either finished before dispose() was called or starts after.
+    // Count at the instant dispose() runs and again at the end; any difference is an invocation that began after the port closed.
+    const hops = [0, 1, 2, 3, 4, 6, 8, 12];
+    for (const hop of hops) for (const mode of ["micro", "timer", "immediate"] as const) {
+      let atDispose = -1;
+      const port = scopedPort({ ...config, authorize: async () => {
+        const dispose = (): void => { atDispose = readLaunchCount(); void port.dispose(); };
+        if (mode === "timer") setTimeout(dispose, hop % 3);
+        else if (mode === "immediate") setImmediate(dispose);
+        else { let p: Promise<void> = Promise.resolve(); for (let i = 0; i < hop; i++) p = p.then(() => {}); void p.then(dispose); }
+      } });
+      await port.spawn(spec, ctx).catch(() => {});
+      await Bun.sleep(30);
+      await port.dispose();
+      if (atDispose >= 0) expect([hop, mode, readLaunchCount() - atDispose]).toEqual([hop, mode, 0]);
+    }
+  });
+
+  test("M7: dispose awaits every in-flight spawn, and a spawn it cancelled does not launch when authority later answers", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void; const startedP = new Promise<void>((resolve) => { started = resolve; });
+    const port = scopedPort({ ...config, authorize: async () => { started(); await held; } });
+    const before = await everyLaunch();
+    const pending = port.spawn(spec, ctx).then(() => "spawned", () => "refused");
+    await startedP;
+    await port.dispose();                                    // returns although the authority has not answered
+    release();
+    expect(await pending).toBe("refused");
+    await Bun.sleep(100);
+    expect(await everyLaunch()).toBe(before);
+  });
+
+  test("F9: the launcher version is measured once, when the port is built; a cold denied spawn invokes nothing", async () => {
+    const before = await everyLaunch();
+    const r = await rig(() => ({ kind: "plain", decision: "deny" }), {}, 600);
+    try {
+      const afterBuild = await everyLaunch();
+      expect(afterBuild - before).toBe(1);                   // exactly one invocation: the version probe at construction
+      await refused(r.port.spawn(spec, ctx));
+      await refused(r.port.spawn(spec, ctx));
+      expect(await everyLaunch()).toBe(afterBuild);          // --version included: zero further invocations per denied spawn
+    } finally { await r.port.dispose(); await r.close(); }
+  });
+});
+
+function readLaunchCount(): number { return existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).length : 0; }

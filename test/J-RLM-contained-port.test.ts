@@ -20,7 +20,8 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import { launchPlanDigest } from "../src/capabilities/containedLaunch.ts";
-import { containedStdioSpawnPort, type ContainedStdioSpawnPort, type ExitRecord } from "../src/capabilities/containedStdioPort.ts";
+import type { ContainedStdioSpawnPort, ExitRecord } from "../src/capabilities/containedStdioPort.ts";
+import { scopedPort } from "./support/scopedPort.ts";
 
 const enabled = process.env.COGNATE_BWRAP_TESTS === "1" && process.platform === "linux";
 const realTest = enabled ? test : test.skip;
@@ -72,8 +73,6 @@ function udpListener(): Promise<Listener & { port: number }> {
 // ── a line session over the port ──
 interface Session { readonly id: string; readonly lines: Record<string, unknown>[]; readonly raw: string[]; ask(msg: Record<string, unknown>, ms?: number): Promise<Record<string, any>>; hostPid: number }
 async function open(port: ContainedStdioSpawnPort, spec: StdioSpawnSpec): Promise<Session> {
-  // Stands in for the server's declaration of the operator-declared reach of the admitted provider (review M9).
-  port.declareReach(ctx.runId, spec.restrictions.network?.outbound?.length ? "host-socket" : "none");
   const { id } = await port.spawn(spec, ctx);
   const lines: Record<string, unknown>[] = [];
   const raw: string[] = [];
@@ -132,8 +131,8 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
   const spec = (workspace: string, restrictions: StdioSpawnSpec["restrictions"] = {}): StdioSpawnSpec => ({
     argv: [python, "/workspace/child.py"], cwd: workspace, env: {}, restrictions: { filesystem: ["read-only"], subprocess: true, ...restrictions },
   });
-  const makePort = (workspace: string, extra: Partial<Parameters<typeof containedStdioSpawnPort>[0]> = {}) => {
-    const port = containedStdioSpawnPort({ authorize: async () => {}, launcher, executables: [pythonPin], workspaceRoot: workspace, writableRoots: [base], ...extra });
+  const makePort = (workspace: string, extra: Partial<Parameters<typeof scopedPort>[0]> = {}) => {
+    const port = scopedPort({ authorize: async () => {}, launcher, executables: [pythonPin], workspaceRoot: workspace, writableRoots: [base], ...extra });
     ports.push(port);
     return port;
   };
@@ -181,7 +180,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
       tcp.connections = 0; tcp.data.length = 0; udp.connections = 0; udp.data.length = 0; egress.connections = 0; egress.data.length = 0;
 
       // The contained run: host socket slot configured so egress is one reachable path and nothing else.
-      const port = makePort(f.workspace, { hostSocket: join(f.dir, "egress.sock"), envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: { FIXTURE_FLAG: "^[a-z]+$" } });
+      const port = makePort(f.workspace, { hostSocket: join(f.dir, "egress.sock"), envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: { FIXTURE_FLAG: "[a-z]+" } });
       const containedSpec = spec(f.workspace, { network: { outbound: [`host-socket:${join(f.dir, "egress.sock")}`] } });
       const { plan, digest, executionProfileDigest: profileDigest } = await port.plan({ ...containedSpec, env: { FIXTURE_FLAG: "on" } }, ctx);
       if (rep === 1) { manifestPlan = plan; manifestDigest = digest; expect(digest).toBe(launchPlanDigest(plan)); }
@@ -453,7 +452,7 @@ realTest("J-RLM-contained-port: real bubblewrap enforces filesystem, credential,
 
     // ════════ READ-ONLY WORKSPACE IS NOT AN ARTIFACT OF THE FIXTURE: wall of refusal before spawn on a real launcher ════════
     {
-      const bad = containedStdioSpawnPort({ authorize: async () => {}, launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace, writableRoots: [] });
+      const bad = scopedPort({ authorize: async () => {}, launcher: { ...launcher, sha256: "0".repeat(64) }, executables: [pythonPin], workspaceRoot: f.workspace, writableRoots: [] });
       const marker = join(f.dir, "must-not-exist");
       await expect(bad.spawn({ ...spec(f.workspace), argv: [python, "-c", `open('${marker}','w')`] }, ctx)).rejects.toMatchObject({ code: "rlm-containment-unavailable" });
       expect(existsSync(marker)).toBe(false);

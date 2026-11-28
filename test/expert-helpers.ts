@@ -47,7 +47,7 @@ export function collaborationResponder(route: ModelConfig, request: ModelRequest
   return Promise.resolve(completed(route.model, `${route.model} completed the objective.`));
 }
 
-export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: ExpertTestApp) => Promise<T>, options: { readonly runCapacity?: 1 | 2 | 4 | 8; readonly rlmProviders?: readonly RlmProviderRegistration[]; readonly rlmContainedPort?: Omit<ContainedStdioPortConfig, "authorize">; readonly rlmProfileAuthority?: { readonly authority: import("../src/capabilities/containedProfileAuthority.ts").ProfileAuthority; readonly worldRef: string } } = {}): Promise<T> {
+export async function withExpertApp<T>(responder: FakeResponder, fn: (testApp: ExpertTestApp) => Promise<T>, options: { readonly runCapacity?: 1 | 2 | 4 | 8; readonly rlmProviders?: readonly RlmProviderRegistration[]; readonly rlmContainedPort?: Omit<ContainedStdioPortConfig, "authorize">; readonly rlmProfileAuthority?: { readonly authority: import("../src/capabilities/containedProfileAuthority.ts").ProfileAuthority; readonly worldRef: string }; readonly executionPosture?: "contained" | "uncontained-local"; readonly externalAuthority?: import("../src/capabilities/governance.ts").ExternalAuthority } = {}): Promise<T> {
   const home = await mkdtemp(join(tmpdir(), "cognate-experts-test-"));
   const calls: { model: string; toolNames: readonly string[]; messages: readonly ModelMessage[] }[] = [];
   const providerFactory = (route: ModelConfig): ModelProvider => ({

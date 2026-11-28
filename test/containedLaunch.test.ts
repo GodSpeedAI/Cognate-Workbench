@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import { buildLaunchPlan, canonicalJson, isForbiddenEnvName, launchPlanDigest, type ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
-import { containedStdioSpawnPort } from "../src/capabilities/containedStdioPort.ts";
+import { scopedPort } from "./support/scopedPort.ts";
 import { providerRefusal } from "../src/capabilities/rlmGoverned.ts";
 
 const sha = (text: string): string => createHash("sha256").update(text).digest("hex");
@@ -42,7 +42,7 @@ beforeAll(async () => {
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
 const ctx = { intentId: "i", runId: "r" };
-const PAT = "^[A-Za-z0-9._-]{0,64}$";
+const PAT = "[A-Za-z0-9._-]{0,64}";
 const PATS = { FIXTURE_FLAG: PAT };
 const PATS2 = { FIXTURE_FLAG: PAT, OTHER: PAT };
 const KEY = new Uint8Array(32).fill(7);
@@ -155,7 +155,7 @@ describe("refusals happen before any spawn, with typed Cognate codes", () => {
   });
 
   test("a launcher that is missing, swapped, unpatched or inside a writable root is refused", async () => {
-    const port = (c: ContainedStdioPortConfig) => containedStdioSpawnPort(c);
+    const port = (c: ContainedStdioPortConfig) => scopedPort(c);
     const missing = { ...config, launcher: { path: join(root, "bin", "no-bwrap"), sha256: "0".repeat(64) } };
     expect((await refusal(port(missing).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
     const swapped = { ...config, launcher: { ...config.launcher, sha256: sha("something else") } };
@@ -171,7 +171,7 @@ describe("refusals happen before any spawn, with typed Cognate codes", () => {
   });
 
   test("unavailable user namespaces refuse; the executable never ran and there is no fallback", async () => {
-    await expect(refusal(containedStdioSpawnPort(config).spawn(spec(), ctx))).resolves.toMatchObject({ code: "rlm-containment-unavailable" });
+    await expect(refusal(scopedPort(config).spawn(spec(), ctx))).resolves.toMatchObject({ code: "rlm-containment-unavailable" });
     // The only launcher invocation was the namespace preflight, which failed; the child executable has no marker of its own.
     expect((await readFile(marker, "utf8")).split("\n").filter(Boolean)).toHaveLength(1);
     expect((await readFile(marker, "utf8"))).toContain("/usr/bin/true");
@@ -184,7 +184,7 @@ describe("refusals happen before any spawn, with typed Cognate codes", () => {
     await chmod(okLauncher, 0o755);
     const drifting = { ...config, launcher: { path: okLauncher, sha256: sha(okText) } };
     let authorized: string | undefined;
-    const port = containedStdioSpawnPort({
+    const port = scopedPort({
       ...drifting,
       authorize: async (_plan, digest) => { authorized = digest; await writeFile(executable, "#!/bin/sh\necho swapped\n"); },
     });
@@ -200,12 +200,12 @@ describe("refusals happen before any spawn, with typed Cognate codes", () => {
   test("an authority refusal stops the spawn", async () => {
     const okLauncher = join(root, "bin", "ok-bwrap");
     const okText = FAKE_LAUNCHER(join(root, "ok-ran"), true);
-    const port = containedStdioSpawnPort({ ...config, launcher: { path: okLauncher, sha256: sha(okText) }, authorize: async () => { throw new RlmRefusedError("rlm-posture-refused", "no authority decision binds this digest"); } });
+    const port = scopedPort({ ...config, launcher: { path: okLauncher, sha256: sha(okText) }, authorize: async () => { throw new RlmRefusedError("rlm-posture-refused", "no authority decision binds this digest"); } });
     expect((await refusal(port.spawn(spec(), ctx))).code).toBe("rlm-posture-refused");
   });
 
   test("an unknown contained id is not a process; kill is idempotent", async () => {
-    const port = containedStdioSpawnPort(config);
+    const port = scopedPort(config);
     await port.kill("nope", "x");
     await port.kill("nope", "x");
     await expect(port.write("nope", "x")).rejects.toThrow();
@@ -256,7 +256,7 @@ describe("H1: the workspace and the egress socket are pinned, not re-resolved", 
     const a = join(root, "swapA"); const b = join(root, "swapB"); const link = join(root, "swap-link");
     await mkdir(a); await mkdir(b); await symlink(a, link);
     const lc = await okLauncherFor("swap-bwrap", join(root, "swap-ran"));
-    const port = containedStdioSpawnPort({ ...config, launcher: lc, workspaceRoot: link, authorize: async () => { await rm(link); await symlink(b, link); } });
+    const port = scopedPort({ ...config, launcher: lc, workspaceRoot: link, authorize: async () => { await rm(link); await symlink(b, link); } });
     const error = await refusal(port.spawn(spec({ cwd: link }), ctx));
     expect(error.code).toBe("rlm-containment-unavailable");
     expect(error.reason).toContain("drifted");
@@ -267,7 +267,7 @@ describe("H1: the workspace and the egress socket are pinned, not re-resolved", 
   test("a workspace replaced after planning (new inode at the same path) is refused when opened", async () => {
     const dir = join(root, "replaced"); await mkdir(dir);
     const lc = await okLauncherFor("replace-bwrap", join(root, "replace-ran"));
-    const port = containedStdioSpawnPort({ ...config, launcher: lc, workspaceRoot: dir, authorize: async () => { await rename(dir, `${dir}.old`); await mkdir(dir); } });
+    const port = scopedPort({ ...config, launcher: lc, workspaceRoot: dir, authorize: async () => { await rename(dir, `${dir}.old`); await mkdir(dir); } });
     const error = await refusal(port.spawn(spec({ cwd: dir }), ctx));
     expect(error.code).toBe("rlm-containment-unavailable");
     expect(error.reason).toMatch(/no longer the object|could not be opened/);
@@ -326,7 +326,7 @@ describe("M4: a restriction or cap the port does not handle is refused, never dr
 describe("M6: binaries must be trusted, not merely pinned; writableRoots is explicit", () => {
   test("missing writableRoots is a configuration error", () => {
     const { writableRoots: _omitted, ...bad } = config;
-    expect(() => containedStdioSpawnPort(bad as ContainedStdioPortConfig)).toThrow(/writableRoots/);
+    expect(() => scopedPort(bad as ContainedStdioPortConfig)).toThrow(/writableRoots/);
   });
 
   test("a group-writable launcher or executable, or one in a world-writable directory, is refused despite a matching digest", async () => {
@@ -361,7 +361,7 @@ describe("L1/L3: probe argv is structural; environment values stay out of the pl
     // The authorize payload and inspect() carry the plan only.
     let seen = "";
     const lc = await okLauncherFor("env-bwrap", join(root, "env-ran"));
-    const port = containedStdioSpawnPort({ ...withEnv, launcher: lc, authorize: async (p, d) => { seen = JSON.stringify({ p, d }); } });
+    const port = scopedPort({ ...withEnv, launcher: lc, authorize: async (p, d) => { seen = JSON.stringify({ p, d }); } });
     const { id } = await port.spawn(s, ctx);
     expect(seen).not.toContain("s3cret-value-123");
     expect(JSON.stringify(port.inspect(id).plan)).not.toContain("s3cret-value-123");
@@ -374,7 +374,7 @@ describe("L2: drift between the two plan computations", () => {
     const lc = await okLauncherFor("drift2-bwrap", join(root, "drift2-ran"));
     let widened = false; // flipped by the authorize hook, i.e. between the two plan computations
     const flaky = { ...config, launcher: lc, get ceilings() { return widened ? { outputBytes: 8192 } : { outputBytes: 4096 }; }, authorize: async () => { widened = true; } } as ContainedStdioPortConfig;
-    const e = await refusal(containedStdioSpawnPort(flaky).spawn(spec(), ctx));
+    const e = await refusal(scopedPort(flaky).spawn(spec(), ctx));
     expect(e.code).toBe("rlm-containment-unavailable");
     expect(e.reason).toContain("drifted");
   });
@@ -390,7 +390,7 @@ describe("L4/L5/M1: run binding, retention, unknown namespace", () => {
 
   test("a run-bound view cannot write to, read from or kill another run's process", async () => {
     const lc = await okLauncherFor("run-bwrap", join(root, "run-ran"));
-    const port = containedStdioSpawnPort({ ...config, launcher: lc });
+    const port = scopedPort({ ...config, launcher: lc });
     const { id } = await port.spawn(spec(), ctx);
     const other = port.forRun({ intentId: "i", runId: "someone-else" });
     await expect(other.write(id, "x")).rejects.toThrow(/another run/);
@@ -404,7 +404,7 @@ describe("L4/L5/M1: run binding, retention, unknown namespace", () => {
 
   test("finished processes are pruned to a bounded retention; the oldest exit record is dropped", async () => {
     const lc = await okLauncherFor("prune-bwrap", join(root, "prune-ran"));
-    const port = containedStdioSpawnPort({ ...config, launcher: lc });
+    const port = scopedPort({ ...config, launcher: lc });
     const ids: string[] = [];
     for (let i = 0; i < 70; i++) { const { id } = await port.spawn(spec(), { intentId: "i", runId: `r${i}` }); ids.push(id); await port.exited(id); }
     expect(() => port.inspect(ids[0]!)).toThrow(/unknown/);
@@ -413,7 +413,7 @@ describe("L4/L5/M1: run binding, retention, unknown namespace", () => {
 
   test("a sandbox whose pid namespace was never identified is not reported as a clean teardown", async () => {
     const lc = await okLauncherFor("ns-bwrap", join(root, "ns-ran"));
-    const port = containedStdioSpawnPort({ ...config, launcher: lc });
+    const port = scopedPort({ ...config, launcher: lc });
     const { id } = await port.spawn(spec(), ctx);
     const exit = await port.exited(id);
     expect(exit.nsKnown).toBe(false);
@@ -429,7 +429,7 @@ describe("N2/N4/N5/N6", () => {
     expect(built.executable.ino).toMatch(/^\d+$/);
     expect(built.executable.bound).toBe("fd");
     const lc = await okLauncherFor("exe-bwrap", join(root, "exe-ran"));
-    const port = containedStdioSpawnPort({ ...pinned, launcher: lc, authorize: async () => { await writeFile(`${exe}.new`, EXE); await chmod(`${exe}.new`, 0o755); await rename(`${exe}.new`, exe); } });
+    const port = scopedPort({ ...pinned, launcher: lc, authorize: async () => { await writeFile(`${exe}.new`, EXE); await chmod(`${exe}.new`, 0o755); await rename(`${exe}.new`, exe); } });
     const e = await refusal(port.spawn(spec({ argv: [exe] }), ctx));
     expect(e.code).toBe("rlm-containment-unavailable");
     expect(e.reason).toMatch(/no longer the object|drifted/);
@@ -440,7 +440,7 @@ describe("N2/N4/N5/N6", () => {
     const lc = await okLauncherFor("hmac-bwrap", join(root, "hmac-ran"));
     const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: PATS };
     const s = spec({ env: { FIXTURE_FLAG: "low-entropy" } });
-    const a = containedStdioSpawnPort(withEnv); const b = containedStdioSpawnPort(withEnv);
+    const a = scopedPort(withEnv); const b = scopedPort(withEnv);
     const a1 = await a.plan(s, ctx); const a2 = await a.plan(s, ctx); const b1 = await b.plan(s, ctx);
     expect(a1.plan.userEnvHmac.FIXTURE_FLAG).toBe(a2.plan.userEnvHmac.FIXTURE_FLAG);
     expect(a1.digest).toBe(a2.digest);
@@ -470,22 +470,22 @@ describe("N2/N4/N5/N6", () => {
     const writableDir = join(root, "n6-writable"); await mkdir(writableDir);
     const inWritable = join(writableDir, "bwrap"); await writeFile(inWritable, text); await chmod(inWritable, 0o755);
     const pinned = { path: inWritable, sha256: sha(text) };
-    expect((await refusal(containedStdioSpawnPort({ ...config, launcher: pinned, writableRoots: [writableDir] }).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
+    expect((await refusal(scopedPort({ ...config, launcher: pinned, writableRoots: [writableDir] }).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
     await chmod(inWritable, 0o775);
-    expect((await refusal(containedStdioSpawnPort({ ...config, launcher: pinned }).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
+    expect((await refusal(scopedPort({ ...config, launcher: pinned }).spawn(spec(), ctx))).code).toBe("rlm-containment-unavailable");
     expect(existsSync(ran)).toBe(false);
   });
 });
 
 describe("execution profile: the operator-approved, launch-independent digest (#116)", () => {
-  const profileOf = async (c: ContainedStdioPortConfig, s: StdioSpawnSpec = spec()) => (await containedStdioSpawnPort(c).executionProfile(s)).digest;
+  const profileOf = async (c: ContainedStdioPortConfig, s: StdioSpawnSpec = spec()) => (await scopedPort(c).executionProfile(s)).digest;
   const okLauncher = async (name: string) => okLauncherFor(name, join(root, `${name}-ran`));
 
   test("two launches with different runs and workspaces: equal profile digest, different plan digests", async () => {
     const lc = await okLauncher("prof-a");
     const ws2 = join(root, "prof-ws2"); await mkdir(ws2);
-    const portA = containedStdioSpawnPort({ ...config, launcher: lc });
-    const portB = containedStdioSpawnPort({ ...config, launcher: lc, workspaceRoot: ws2 });
+    const portA = scopedPort({ ...config, launcher: lc });
+    const portB = scopedPort({ ...config, launcher: lc, workspaceRoot: ws2 });
     const a = await portA.plan(spec(), { intentId: "i1", runId: "r1" });
     const b = await portB.plan(spec({ cwd: ws2 }), { intentId: "i2", runId: "r2" });
     expect(a.executionProfileDigest).toBe(b.executionProfileDigest);
@@ -499,11 +499,11 @@ describe("execution profile: the operator-approved, launch-independent digest (#
   test("two port instances agree, including with allowlisted env values that differ", async () => {
     const lc = await okLauncher("prof-b");
     const withEnv = { ...config, launcher: lc, envAllowlist: ["FIXTURE_FLAG"], envValuePatterns: PATS };
-    const one = await containedStdioSpawnPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "x" } }), ctx);
-    const two = await containedStdioSpawnPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "y" } }), ctx);
+    const one = await scopedPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "x" } }), ctx);
+    const two = await scopedPort(withEnv).plan(spec({ env: { FIXTURE_FLAG: "y" } }), ctx);
     expect(one.executionProfileDigest).toBe(two.executionProfileDigest);   // env values are not part of the profile
     expect(one.digest).not.toBe(two.digest);                               // but they are part of the launch
-    const same = containedStdioSpawnPort(withEnv);
+    const same = scopedPort(withEnv);
     expect((await same.plan(spec({ env: { FIXTURE_FLAG: "x" } }), ctx)).executionProfileDigest).toBe(one.executionProfileDigest);
   });
 
@@ -539,7 +539,7 @@ describe("execution profile: the operator-approved, launch-independent digest (#
   test("authorize receives the plan digest and the profile digest, and the second computation confirms the profile", async () => {
     const lc = await okLauncher("prof-d");
     let seen: { digest: string; profile: string; planProfile: string } | undefined;
-    const port = containedStdioSpawnPort({ ...config, launcher: lc, authorize: async (plan, digest, _ctx, profileDigest) => { seen = { digest, profile: profileDigest, planProfile: plan.executionProfileDigest }; } });
+    const port = scopedPort({ ...config, launcher: lc, authorize: async (plan, digest, _ctx, profileDigest) => { seen = { digest, profile: profileDigest, planProfile: plan.executionProfileDigest }; } });
     const expected = await port.plan(spec(), ctx);
     await port.spawn(spec(), ctx);
     expect(seen).toEqual({ digest: expected.digest, profile: expected.executionProfileDigest, planProfile: expected.executionProfileDigest });
@@ -550,7 +550,7 @@ describe("execution profile: the operator-approved, launch-independent digest (#
     const lc = await okLauncher("prof-e");
     let widened = false;
     const flaky = { ...config, launcher: lc, get ceilings() { return widened ? { outputBytes: 8192 } : { outputBytes: 4096 }; }, authorize: async () => { widened = true; } } as ContainedStdioPortConfig;
-    const e = await refusal(containedStdioSpawnPort(flaky).spawn(spec(), ctx));
+    const e = await refusal(scopedPort(flaky).spawn(spec(), ctx));
     expect(e.reason).toContain("execution profile drifted");
   });
 });
@@ -563,7 +563,7 @@ describe("delta-2: egress socket in the profile, env names that change what runs
     const l1 = Bun.listen({ unix: s1, socket: { data() {} } }); const l2 = Bun.listen({ unix: s2, socket: { data() {} } });
     try {
       await symlink(s1, link);
-      const prof = async (path: string) => (await containedStdioSpawnPort({ ...config, launcher: lc, hostSocket: path }).plan(spec({ restrictions: { network: { outbound: [`host-socket:${path}`] } } }), ctx));
+      const prof = async (path: string) => (await scopedPort({ ...config, launcher: lc, hostSocket: path }).plan(spec({ restrictions: { network: { outbound: [`host-socket:${path}`] } } }), ctx));
       const one = await prof(s1); const two = await prof(s2); const viaLink = await prof(link);
       expect(one.executionProfile.mounts.egress).toEqual({ sandboxPath: "/run/egress.sock", hostPath: realpathSync(s1) });
       expect(one.executionProfileDigest).not.toBe(two.executionProfileDigest);        // another socket is another approval
@@ -583,10 +583,10 @@ describe("delta-2: egress socket in the profile, env names that change what runs
     ];
     for (const name of forbidden) {
       expect(isForbiddenEnvName(name)).toBe(true);
-      expect(() => containedStdioSpawnPort({ ...config, envAllowlist: [name], envValuePatterns: { [name]: PAT } }), name).toThrow(/cannot be allowlisted/);
+      expect(() => scopedPort({ ...config, envAllowlist: [name], envValuePatterns: { [name]: PAT } }), name).toThrow(/cannot be allowlisted/);
     }
     for (const fine of ["FIXTURE_FLAG", "LANG", "TZ", "MODEL_NAME", "SEA_REGION", "node_env", "Http_Proxy", "MYPROXY", "GITHUB_USER", "TMPDIR2"]) expect(isForbiddenEnvName(fine)).toBe(false);
-    expect(() => containedStdioSpawnPort({ ...config, envAllowlist: ["LANG", "TZ"], envValuePatterns: { LANG: PAT, TZ: PAT } })).not.toThrow();
+    expect(() => scopedPort({ ...config, envAllowlist: ["LANG", "TZ"], envValuePatterns: { LANG: PAT, TZ: PAT } })).not.toThrow();
   });
 
   test("A3: sparse argv, args and string arrays are malformed", async () => {
@@ -611,33 +611,33 @@ describe("M10: an allowlisted environment name declares the values it accepts, a
   const planWith = (c: ContainedStdioPortConfig, value: string) => buildLaunchPlan({ config: c, spec: spec({ env: { FIXTURE_FLAG: value } }), ctx, envKey: KEY, launcherVersion: "0.13.1" });
 
   test("an allowlisted name with no pattern, or an unanchored, oversized or invalid one, is refused at construction", () => {
-    expect(() => containedStdioSpawnPort(withEnv(undefined))).toThrow(/pattern/);
-    expect(() => containedStdioSpawnPort(withEnv({}))).toThrow(/FIXTURE_FLAG.*pattern|pattern.*FIXTURE_FLAG/);
-    for (const bad of ["[a-z]+", "^[a-z]+", "[a-z]+$", "^(a$", `^${"a".repeat(300)}$`, "^.*$|x"]) {
-      expect(() => containedStdioSpawnPort(withEnv({ FIXTURE_FLAG: bad })), bad).toThrow(/pattern/);
+    expect(() => scopedPort(withEnv(undefined))).toThrow(/pattern/);
+    expect(() => scopedPort(withEnv({}))).toThrow(/FIXTURE_FLAG.*pattern|pattern.*FIXTURE_FLAG/);
+    for (const bad of ["(a)", "a|b", "(a+)+", "a**", "^[a-z]+$", ".*", `${"a".repeat(300)}`, "[a-z]{300}"]) {
+      expect(() => scopedPort(withEnv({ FIXTURE_FLAG: bad })), bad).toThrow(/pattern/);
     }
-    expect(() => containedStdioSpawnPort(withEnv({ FIXTURE_FLAG: PAT, UNLISTED: PAT }))).toThrow(/not allowlisted|UNLISTED/);
-    expect(() => containedStdioSpawnPort(withEnv({ FIXTURE_FLAG: PAT }))).not.toThrow();
+    expect(() => scopedPort(withEnv({ FIXTURE_FLAG: PAT, UNLISTED: PAT }))).toThrow(/not allowlisted|UNLISTED/);
+    expect(() => scopedPort(withEnv({ FIXTURE_FLAG: PAT }))).not.toThrow();
   });
 
   test("a spawn value outside its pattern, or longer than the cap, is refused; one inside it plans (positive control)", async () => {
-    const c = withEnv({ FIXTURE_FLAG: "^(on|off)$" });
+    const c = withEnv({ FIXTURE_FLAG: "o[nf]f?" });
     await planWith(c, "on");                                              // control
     for (const value of ["--agent=/workspace/evil.jar", "ON", "on\n", "onoff", "", "on ", "o".repeat(5000)]) {
       const e = await refusal(planWith(c, value));
       expect(e.reason).toMatch(/FIXTURE_FLAG/);
     }
-    const capped = withEnv({ FIXTURE_FLAG: "^[a-z]*$" });
+    const capped = withEnv({ FIXTURE_FLAG: "[a-z]*" });
     await planWith(capped, "a".repeat(256));
     expect((await refusal(planWith(capped, "a".repeat(257)))).reason).toMatch(/FIXTURE_FLAG/);
   });
 
   test("the pattern is part of the execution profile: widening it is a different approval, and values stay out", async () => {
-    const profileOf = async (c: ContainedStdioPortConfig) => (await containedStdioSpawnPort(c).executionProfile(spec())).digest;
-    const narrow = await profileOf(withEnv({ FIXTURE_FLAG: "^(on|off)$" }));
-    expect(await profileOf(withEnv({ FIXTURE_FLAG: "^(on|off)$" }))).toBe(narrow);
-    expect(await profileOf(withEnv({ FIXTURE_FLAG: "^(on|off|maybe)$" }))).not.toBe(narrow);
-    const built = await buildLaunchPlan({ config: withEnv({ FIXTURE_FLAG: "^(on|off)$" }), spec: spec(), ctx, envKey: KEY, launcherVersion: "0.13.1" });
-    expect(built.profile.envPatterns).toEqual({ FIXTURE_FLAG: "^(on|off)$" });
+    const profileOf = async (c: ContainedStdioPortConfig) => (await scopedPort(c).executionProfile(spec())).digest;
+    const narrow = await profileOf(withEnv({ FIXTURE_FLAG: "o[nf]f?" }));
+    expect(await profileOf(withEnv({ FIXTURE_FLAG: "o[nf]f?" }))).toBe(narrow);
+    expect(await profileOf(withEnv({ FIXTURE_FLAG: "o[nfx]f?" }))).not.toBe(narrow);
+    const built = await buildLaunchPlan({ config: withEnv({ FIXTURE_FLAG: "o[nf]f?" }), spec: spec(), ctx, envKey: KEY, launcherVersion: "0.13.1" });
+    expect(built.profile.envPatterns).toEqual({ FIXTURE_FLAG: "o[nf]f?" });
   });
 });

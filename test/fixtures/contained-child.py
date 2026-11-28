@@ -57,6 +57,19 @@ def unix_create():
 def inet_create():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close(); return "created"
 
+def family(fam, typ, proto):
+    s = socket.socket(fam, typ, proto); s.close(); return "created"
+
+def pair_type(kind):
+    typ = {"stream": socket.SOCK_STREAM, "seqpacket": socket.SOCK_SEQPACKET, "dgram": socket.SOCK_DGRAM}[kind]
+    a, b = socket.socketpair(socket.AF_UNIX, typ); a.close(); b.close(); return "pair"
+
+def dgram_attack(path):
+    # A connected-less datagram endpoint obtained from socketpair can sendto() any host socket path it can see.
+    a, b = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try: a.sendto(b"DGRAM-ATTACK", path); return "sent"
+    finally: a.close(); b.close()
+
 def io_uring_setup():
     import ctypes
     libc = ctypes.CDLL(None, use_errno=True)
@@ -110,6 +123,9 @@ for raw in sys.stdin:
     elif op == "socketpair": say(op=op, **attempt(socketpair_ok))
     elif op == "unix_create": say(op=op, **attempt(unix_create))
     elif op == "inet_create": say(op=op, **attempt(inet_create))
+    elif op == "family": say(op=op, **attempt(lambda: family(m["family"], m["type"], m.get("proto", 0))))
+    elif op == "pair_type": say(op=op, **attempt(lambda: pair_type(m["kind"])))
+    elif op == "dgram_attack": say(op=op, **attempt(lambda: dgram_attack(m["path"])))
     elif op == "io_uring": say(op=op, **attempt(io_uring_setup))
     elif op == "caps": say(op=op, caps=caps(), userns=attempt(nested_userns))
     elif op == "filltmp": say(op=op, **attempt(lambda: fill_tmp(m["path"], m["chunk"], m["count"])))
