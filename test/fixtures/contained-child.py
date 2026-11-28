@@ -70,6 +70,10 @@ def dgram_attack(path):
     try: a.sendto(b"DGRAM-ATTACK", path); return "sent"
     finally: a.close(); b.close()
 
+def stat_socket(path):
+    import stat as st
+    return {"socket": st.S_ISSOCK(os.stat(path).st_mode)}
+
 def io_uring_setup():
     import ctypes
     libc = ctypes.CDLL(None, use_errno=True)
@@ -126,6 +130,7 @@ for raw in sys.stdin:
     elif op == "family": say(op=op, **attempt(lambda: family(m["family"], m["type"], m.get("proto", 0))))
     elif op == "pair_type": say(op=op, **attempt(lambda: pair_type(m["kind"])))
     elif op == "dgram_attack": say(op=op, **attempt(lambda: dgram_attack(m["path"])))
+    elif op == "stat": say(op=op, **attempt(lambda: stat_socket(m["path"])))
     elif op == "io_uring": say(op=op, **attempt(io_uring_setup))
     elif op == "caps": say(op=op, caps=caps(), userns=attempt(nested_userns))
     elif op == "filltmp": say(op=op, **attempt(lambda: fill_tmp(m["path"], m["chunk"], m["count"])))

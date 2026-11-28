@@ -2,6 +2,7 @@
 // configuration (no authorize hook, which JSON cannot carry), identical to the profile the running port computes.
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -10,11 +11,15 @@ import { scopedPort } from "./support/scopedPort.ts";
 
 const sha = (text: string): string => createHash("sha256").update(text).digest("hex");
 let root: string; let configPath: string; let specPath: string; let config: Record<string, unknown>; let spec: Record<string, unknown>;
-const LAUNCHER = `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "bubblewrap 0.13.1"; exit 0; fi\nexit 0\n`;
+let marker: string;
+const launcherText = (log: string): string => `#!/bin/sh\necho "$@" >> ${log}\nif [ "$1" = "--version" ]; then echo "bubblewrap 0.13.1"; exit 0; fi\nexit 0\n`;
+let LAUNCHER: string;
 const EXE = "#!/bin/sh\necho child\n";
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "profile-cli-"));
+  marker = join(root, "launcher-invocations");
+  LAUNCHER = launcherText(marker);   // logs EVERY invocation, --version included
   await mkdir(join(root, "bin")); await mkdir(join(root, "ws"));
   await writeFile(join(root, "bin", "bwrap"), LAUNCHER); await chmod(join(root, "bin", "bwrap"), 0o755);
   await writeFile(join(root, "bin", "child"), EXE); await chmod(join(root, "bin", "child"), 0o755);
@@ -35,7 +40,7 @@ test("the CLI prints the profile digest for a JSON configuration, equal to the d
   expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
   const live = await scopedPort({ ...config, authorize: async () => {} } as never).executionProfile(spec as never);
   expect(digest).toBe(live.digest);
-  expect((await computeExecutionProfile(config as never, spec as never)).digest).toBe(digest);
+  expect((await computeExecutionProfile(config as never, spec as never, { launcherVersion: "0.13.1" })).digest).toBe(digest);
 });
 
 test("--json prints the profile itself, including the env value patterns and the seccomp filter id the operator approves", () => {
@@ -54,4 +59,26 @@ test("a configuration the port would refuse is a clear error and a non-zero exit
   expect(bad.stderr.toString()).toMatch(/pattern/);
   expect(bad.stdout.toString()).toBe("");
   await writeFile(configPath, JSON.stringify(config));
+});
+
+const invocations = (): number => (existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).length : 0);
+
+test("10: computeExecutionProfile is pure: given the measured launcher version it runs no subprocess", async () => {
+  const before = invocations();
+  const { digest } = await computeExecutionProfile(config as never, spec as never, { launcherVersion: "0.13.1" });
+  expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  expect(invocations()).toBe(before);
+});
+
+test("10: an invalid spawn spec is refused before the launcher is ever measured; a valid one measures it exactly once", async () => {
+  const bad = join(root, "bad-spec.json");
+  await writeFile(bad, JSON.stringify({ ...spec, restrictions: { network: { outbound: [] }, surprise: true } }));
+  const before = invocations();
+  const refusedRun = Bun.spawnSync(["bun", join(import.meta.dir, "..", "scripts", "contained-profile.ts"), "--config", configPath, "--spec", bad], { stdout: "pipe", stderr: "pipe" });
+  expect(refusedRun.exitCode).toBe(1);
+  expect(refusedRun.stderr.toString()).toMatch(/not enforced|malformed/);
+  expect(invocations()).toBe(before);                                  // zero launcher invocations, --version included
+  const good = cli();
+  expect(good.exitCode).toBe(0);
+  expect(invocations()).toBe(before + 1);                              // the one measurement
 });

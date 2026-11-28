@@ -13,7 +13,8 @@ import { RlmRefusedError, SeaForgeAuthority } from "@godspeedai/cognate-runtime-
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import type { ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
 import { containedStdioSpawnPort } from "../src/capabilities/containedStdioPort.ts";
-import { containedRun } from "../src/capabilities/containedRunContext.ts";
+import * as runContext from "../src/capabilities/containedRunContext.ts";
+import { runInContainedLease } from "../src/capabilities/containedRunContext.ts";
 import { scopedPort } from "./support/scopedPort.ts";
 import { ULID, WORLD, seaForge, type Answer } from "./support/seaForgeStandIn.ts";
 import { CONTAINED_SPAWN_CAPABILITY, checkProfileDecision, profileAuthorize, type ProfileAuthorization } from "../src/capabilities/containedProfileAuthority.ts";
@@ -229,7 +230,7 @@ describe("#114 delta-2: the run identity and reach come from the runtime, and pi
     const authorize = async () => { asked += 1; throw new RlmRefusedError("rlm-containment-unavailable", "rlm-profile-unauthorized: test stop"); };
     const port = containedStdioSpawnPort({ ...config, hostSocket: sockPath, authorize });
     try {
-      const inRun = <T>(runId: string, reach: "none" | "host-socket", fn: () => T): T => containedRun.run({ runId, reach }, fn);
+      const inRun = <T>(runId: string, reach: "none" | "host-socket", fn: () => T): T => runInContainedLease({ runId, reach }, fn) as unknown as T;
       // No run context at all: refused.
       expect((await refused(port.spawn(egressSpec(), { intentId: "i", runId: "run-sock" }))).reason).toMatch(/context/);
       // A no-network provider that names the run id of a (retained) host-socket run: the runtime says it is run-none.
@@ -316,3 +317,97 @@ describe("#114 delta-2: disposal during the launch path, and the version probe",
 });
 
 function readLaunchCount(): number { return existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).length : 0; }
+
+describe("#114 delta-3: the run lease is host-owned and revoked, the binding is immutable, and the port owns its descriptors", () => {
+  const egress = async (): Promise<{ sock: string; close: () => Promise<void> }> => {
+    const dir = await mkdtemp(join(tmpdir(), "profile-lease-"));
+    const sock = join(dir, "e.sock");
+    const one = createServer(() => {});
+    await new Promise<void>((resolve) => one.listen(sock, resolve));
+    return { sock, close: async () => { await new Promise<void>((resolve) => one.close(() => resolve())); await rm(dir, { recursive: true, force: true }); } };
+  };
+
+  test("1: the context module exports no writable store; only the server-facing runner and the port's reader", () => {
+    expect(Object.keys(runContext).sort()).toEqual(["currentLease", "runInContainedLease"]);
+  });
+
+  test("1: a callback that outlives its run cannot spawn: the lease is revoked when the run returns, before any authority request", async () => {
+    const e = await egress();
+    let asked = 0;
+    const port = containedStdioSpawnPort({ ...config, hostSocket: e.sock, authorize: async () => { asked += 1; throw new RlmRefusedError("rlm-containment-unavailable", "rlm-profile-unauthorized: test stop"); } });
+    try {
+      const sp: StdioSpawnSpec = { ...spec, restrictions: { network: { outbound: [`host-socket:${e.sock}`] } } };
+      let later: Promise<unknown> = Promise.resolve();
+      // Positive control inside the run: the same spawn reaches the authority.
+      await runInContainedLease({ runId: "r-live", reach: "host-socket" }, async () => {
+        setTimeout(() => { later = port.spawn(sp, { intentId: "i", runId: "r-live" }).then(() => "spawned", (error) => error); }, 30);
+        const inside = await refused(port.spawn(sp, { intentId: "i", runId: "r-live" }));
+        expect(inside.reason).toContain("test stop");
+      });
+      expect(asked).toBe(1);
+      await Bun.sleep(100);                                              // the timer fires after the run has returned
+      const outcome = await later as RlmRefusedError;
+      expect(outcome).toBeInstanceOf(RlmRefusedError);
+      expect(outcome.reason).toMatch(/lease|ended|revoked/);
+      expect(asked).toBe(1);                                             // no further authority request
+    } finally { await port.dispose(); await e.close(); }
+  });
+
+  test("2: a provider that changes ctx.runId or ctx.intentId after entry changes nothing: the authority sees the binding snapshotted at entry", async () => {
+    const seenByAuthority: { runId: string; intentId: string }[] = [];
+    const port = containedStdioSpawnPort({ ...config, authorize: async (_plan, _digest, ctxSeen) => { seenByAuthority.push({ runId: ctxSeen.runId, intentId: ctxSeen.intentId }); throw new RlmRefusedError("rlm-containment-unavailable", "rlm-profile-unauthorized: test stop"); } });
+    try {
+      let runReads = 0; let intentReads = 0;
+      const shifty = { get runId() { return runReads++ === 0 ? "run-a" : "run-b"; }, get intentId() { return intentReads++ === 0 ? "intent-a" : "intent-b"; } };
+      await refused(runInContainedLease({ runId: "run-a", reach: "none" }, () => port.spawn(spec, shifty)));
+      expect(seenByAuthority).toEqual([{ runId: "run-a", intentId: "intent-a" }]);
+      expect(runReads).toBe(1);                                          // read exactly once: the rest of the path uses the immutable binding
+      expect(intentReads).toBe(1);
+    } finally { await port.dispose(); }
+  });
+
+  test("3: disposal while the launcher handle is being acquired leaves no launcher descriptor and starts no launcher", async () => {
+    const launcherReal = join(root, "bin", "bwrap");
+    const launcherFds = (): number => readdirSync("/proc/self/fd").filter((fd) => { try { return readlinkSync(`/proc/self/fd/${fd}`) === launcherReal; } catch { return false; } }).length;
+    const port = scopedPort({ ...config, authorize: async () => {} });
+    const debug = port.__debug();
+    let reached!: () => void; const reachedP = new Promise<void>((resolve) => { reached = resolve; });
+    let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
+    debug.barrier = async () => { reached(); await held; };
+    const launches = readLaunchCount(); const fds = launcherFds();
+    const pending = port.spawn(spec, ctx).then(() => "spawned", () => "refused");
+    await reachedP;                                                      // the handle is being acquired: verified, not yet opened
+    await port.dispose();
+    release();
+    expect(await pending).toBe("refused");
+    await Bun.sleep(80);
+    expect(readLaunchCount()).toBe(launches);
+    expect(launcherFds()).toBe(fds);
+  });
+
+  test("4: cancellation registrations are removed as operations settle: none remain after completed and refused spawns", async () => {
+    const r = await rig(() => ({ kind: "plain", decision: "deny" }), {}, 600);
+    try {
+      for (let i = 0; i < 5; i++) await refused(r.port.spawn(spec, ctx));
+      expect(r.port.__debug().registrations).toBe(0);
+    } finally { await r.port.dispose(); await r.close(); }
+    const ok = scopedPort({ ...config, authorize: async () => {} });
+    try {
+      for (let i = 0; i < 3; i++) await ok.spawn(spec, { intentId: `i${i}`, runId: `run-${i}` });
+      expect(ok.__debug().registrations).toBe(0);
+    } finally { await ok.dispose(); }
+  });
+
+  test("5: the launcher pin and its measured version are snapshotted at construction; mutating the config later changes nothing", async () => {
+    const live = { ...config, launcher: { ...config.launcher } } as ContainedStdioPortConfig & { launcher: { path: string; sha256: string } };
+    const port = scopedPort(live);
+    const before = await port.plan(spec, ctx);
+    live.launcher.sha256 = "0".repeat(64);                               // an in-place re-pin
+    (live as { launcher: unknown }).launcher = { path: "/nonexistent/bwrap", sha256: "1".repeat(64) }; // and a replaced one
+    (live as { launcherPatchedAttested?: boolean }).launcherPatchedAttested = true;
+    const after = await port.plan(spec, ctx);
+    expect(after.plan.launcher).toEqual(before.plan.launcher);
+    expect(after.executionProfileDigest).toBe(before.executionProfileDigest);
+    await port.dispose();
+  });
+});

@@ -126,7 +126,11 @@ while True:
       for (let i = 0; i < 400; i++) { const hit = rep2.slice(from).find((r) => r.op === msg.op); if (hit) return hit; await Bun.sleep(15); }
       throw new Error(`no reply to ${JSON.stringify(msg)}`);
     };
-    for (const probe of probes) expect([probe.op, await ask2(probe)]).toEqual([probe.op, expect.objectContaining({ ok: false, errno: 13 })]);
+    // The sandbox sees the receiver at /workspace/dgram.sock (its own /tmp is private): prove the node is reachable by path, then attack that path.
+    const SANDBOX_DGRAM = "/workspace/dgram.sock";
+    expect(await ask2({ op: "stat", path: SANDBOX_DGRAM })).toMatchObject({ ok: true, value: { socket: true } });
+    expect(await ask2({ op: "dgram_attack", path: SANDBOX_DGRAM })).toMatchObject({ ok: false, errno: 13 });
+    for (const probe of probes.filter((p) => p.op !== "dgram_attack")) expect([probe.op, await ask2(probe)]).toEqual([probe.op, expect.objectContaining({ ok: false, errno: 13 })]);
     // Positive controls inside the same sandbox: what an empty network namespace legitimately offers still works.
     expect(await ask2({ op: "family", family: 2, type: 1, proto: 0 })).toMatchObject({ ok: true });       // AF_INET
     expect(await ask2({ op: "family", family: 10, type: 2, proto: 0 })).toMatchObject({ ok: true });      // AF_INET6

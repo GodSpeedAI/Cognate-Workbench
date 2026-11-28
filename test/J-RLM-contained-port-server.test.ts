@@ -224,6 +224,23 @@ describe("J-RLM-contained-port wiring", () => {
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 60_000);
 
+  test("6: one canonical authority client: a governance.authority that differs from the launch client is refused at startup; the aliased configuration is accepted", async () => {
+    const f = await fixture();
+    const sock = join(f.root, "sea6.sock");
+    const sea = await seaForge(sock, () => ({ kind: "plain", decision: "allow" }), { claims: [], resources: [] });
+    const make = (alias: boolean): ExternalAuthority => {
+      const client = new SeaForgeAuthority({ socketPath: sock, requestIdPrefix: "workbench", timeoutMs: 5000 });
+      const governance = { mode: "sea-forge", worldRef: WORLD, approvalPollMs: 0, authority: alias ? client : new SeaForgeAuthority({ socketPath: sock, requestIdPrefix: "other", timeoutMs: 5000 }) };
+      return { governance, socketPath: sock, service: { actor_id: "cognate-service", role: "service" }, operator: { actor_id: "operator", role: "operator" }, client } as unknown as ExternalAuthority;
+    };
+    try {
+      const provider = containedProvider("cp", f.config, f.exe, f.ws);
+      const { authorize: _a, ...port } = f.config;
+      await expect(withExpertApp(responder, async () => {}, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmContainedPort: port, executionPosture: "contained", externalAuthority: make(false) })).rejects.toThrow(/one authority|same client|differs/);
+      await withExpertApp(responder, async () => {}, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmContainedPort: port, executionPosture: "contained", externalAuthority: make(true) });
+    } finally { await new Promise<void>((resolve) => sea.close(() => resolve())); await rm(f.root, { recursive: true, force: true }); }
+  }, 120_000);
+
   test("F7: with external governance and the default launch wiring, admission and launch are two decisions on one SEA-Forge: allow+allow spawns, an admission deny never reaches launch, a launch deny spawns nothing", async () => {
     const f = await fixture();
     const sock = join(f.root, "sea.sock");
@@ -236,7 +253,7 @@ describe("J-RLM-contained-port wiring", () => {
     };
     const sea = await seaForge(sock, answer, seen);
     const external = { governance: { mode: "sea-forge", worldRef: WORLD, approvalPollMs: 0 }, socketPath: sock, service: { actor_id: "cognate-service", role: "service" }, operator: { actor_id: "operator", role: "operator" }, client: new SeaForgeAuthority({ socketPath: sock, requestIdPrefix: "workbench", timeoutMs: 5000 }) } as unknown as ExternalAuthority;
-    (external.governance as { authority?: unknown }).authority = external.client;
+    (external.governance as { authority?: unknown }).authority = external.client;  // aliased: ONE client decides admission and launch
     try {
       const provider = containedProvider("cp", f.config, f.exe, f.ws);
       await withExpertApp(responder, async (t) => {
@@ -249,29 +266,33 @@ describe("J-RLM-contained-port wiring", () => {
           await waitForAssignment(t, started.assignmentId, (a) => !!a.handoff && !["queued", "running", "waiting"].includes(a.status), 90_000);
         };
         const sandboxes = async (): Promise<number> => (existsSync(f.marker) ? (await readFile(f.marker, "utf8")).split("\n").filter((l) => l.includes("--seccomp")).length : 0);
-        const asked = (resource: string): number => seen.resources.filter((r) => r === resource).length;
 
-        // 3. Admission allow, launch deny: refused with no spawn.
-        admission = "allow"; launch = "deny";
-        await run("f7c");
-        expect(asked("rlm.invoke")).toBeGreaterThanOrEqual(1);
-        expect(asked(CONTAINED_SPAWN_CAPABILITY)).toBe(1);
+        const targets = (): string[] => seen.resources.filter((r) => r === "rlm.invoke" || r === CONTAINED_SPAWN_CAPABILITY);
+        const launches = (): Promise<number> => markerLines(f.marker);
+        const settle = async (): Promise<void> => { await Bun.sleep(300); };
+        const reset = (): void => { seen.resources.length = 0; };
+
+        // Launch deny: both decisions, in order, then nothing starts (no launcher invocation of any kind).
+        admission = "allow"; launch = "deny"; reset();
+        await run("f7c"); await settle();
+        expect(targets()).toEqual(["rlm.invoke", CONTAINED_SPAWN_CAPABILITY]);
         expect(provider.spawns.at(-1)).toContain("rlm-profile-unauthorized");
-        expect(await sandboxes()).toBe(0);
+        expect(await launches()).toBe(0);
 
-        // 2. Admission deny: it never reaches launch.
-        const launchAsksBefore = asked(CONTAINED_SPAWN_CAPABILITY); const invokesBefore = provider.invokes.length;
-        admission = "deny"; launch = "allow";
-        await run("f7b");
+        // Admission deny: exactly the admission decision, never a launch decision, no launcher.
+        const invokesBefore = provider.invokes.length;
+        admission = "deny"; launch = "allow"; reset();
+        await run("f7b"); await settle();
+        expect(targets()).toEqual(["rlm.invoke"]);
         expect(provider.invokes).toHaveLength(invokesBefore);
-        expect(asked(CONTAINED_SPAWN_CAPABILITY)).toBe(launchAsksBefore);
-        expect(await sandboxes()).toBe(0);
+        expect(await launches()).toBe(0);
 
-        // 1. Admission allow, launch allow: spawns.
-        admission = "allow"; launch = "allow";
+        // Allow: both decisions, in order, and the launcher ran (its marker is written after spawn returns).
+        admission = "allow"; launch = "allow"; reset();
         await run("f7a");
-        expect(asked(CONTAINED_SPAWN_CAPABILITY)).toBe(launchAsksBefore + 1);
+        expect(targets()).toEqual(["rlm.invoke", CONTAINED_SPAWN_CAPABILITY]);
         expect(provider.spawns.at(-1)).toBe("spawned");
+        for (let i = 0; i < 100 && (await sandboxes()) < 1; i++) await Bun.sleep(50);
         expect(await sandboxes()).toBe(1);
       }, { rlmProviders: [{ provider, label: "cp", portGovernance }], rlmContainedPort: (({ authorize: _a, ...rest }) => rest)(f.config), executionPosture: "contained", externalAuthority: external });
     } finally { await new Promise<void>((resolve) => sea.close(() => resolve())); await rm(f.root, { recursive: true, force: true }); }

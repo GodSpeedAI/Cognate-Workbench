@@ -47,4 +47,3 @@ export async function seaForge(path: string, answerFor: (digest: string | undefi
   await new Promise<void>((resolve) => server.listen(path, resolve));
   return server;
 }
-
