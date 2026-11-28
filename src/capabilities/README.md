@@ -124,30 +124,36 @@ returning a Cognate `Component`; many also export their input/result types and c
   it, `authorize(plan, digest, ctx, executionProfileDigest)` receives both, and the pre-spawn recompute confirms both.
   The egress socket's resolved path is in the profile (fixed deployment configuration); the workspace is not: it is per
   case, SEA authorizes it as the governed request's case resource, and the plan digest pins the exact directory by
-  dev/inode. Every allowlisted env name declares an anchored, length-capped value pattern
-  (`envValuePatterns`) that is part of the profile, and a spawn value outside it is refused; names that control loading,
+  dev/inode. Every allowlisted env name declares a value pattern (`envValuePatterns`, restricted grammar
+  and linear-time matcher in [envPattern.ts:compileEnvPattern]: atoms with `? * + {m,n}`, no groups or alternation) that is
+  part of the profile, and a spawn value outside it is refused; names that control loading,
   interpretation or traffic (LD_*, DYLD_*, NODE_*, BUN_*, DENO_*, npm_config_*, PYTHON*, RUBY*, PERL*, GEM_*, BUNDLE_*,
   GIT_*, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, JDK_JAVA_OPTIONS, CLASSPATH, JAVA_HOME, BASH_ENV, ENV, GCONV_PATH, LOCPATH,
   NLSPATH, SSL_CERT_FILE, SSL_CERT_DIR, *_proxy, *_PROXY, PATH, HOME, TMPDIR, BASH_FUNC_*) are refused at construction.
   [containedSeccomp.ts:noUnixSocketFilter] — with network `none` the sandbox loads a hand-assembled BPF filter
-  (`--seccomp 7`): architecture check (x86_64, aarch64; anything else, x32 included, is killed), `socket(AF_UNIX)` is
-  EACCES, `io_uring_setup` is EPERM, the rest is allowed (socketpair stays). Its id and sha256 are in the profile. This
-  closes pathname unix sockets under the workspace bind; egress profiles cannot take it yet (#115: hand the child a
-  pre-connected fd, then filter every profile).
-  `bun scripts/contained-profile.ts --config <port.json> --spec <spec.json>` prints it without launching anything.
+  (`--seccomp 7`) that allow-lists socket creation: architecture check (x86_64, aarch64; anything else, x32 and the legacy
+  512-547 range included, is killed); `socket()` only for AF_INET, AF_INET6 and AF_NETLINK/NETLINK_ROUTE; `socketpair()` only
+  for AF_UNIX stream and seqpacket; everything else is EACCES; `io_uring_setup` is EPERM. Its id and sha256 are in the profile.
+  This closes pathname unix sockets (stream and datagram) under the workspace bind and AF_VSOCK. Egress profiles cannot take it
+  yet (#115: hand the child a pre-connected fd, then filter every profile).
+  [containedProfile.ts:computeExecutionProfile] — the profile and its digest from a plain configuration, with no port and no
+  authorize hook; `scripts/contained-profile.ts` uses it. The launcher `--version` is measured once, when the port is built.
+  [containedRunContext.ts:containedRun] — the admitted child run's id and operator-declared reach, set by the server around the
+  child's execution; the port reads them from it and refuses a spawn outside it or naming another run.
   [containedProfileAuthority.ts:profileAuthorize] — #116 host half: the port's `authorize` hook asks SEA-Forge (the
   existing `SeaForgeAuthority.decide` route, claim `execution_profile_digest`) and launches only on a `boundary` allow
   carrying exactly one `execution_profile` constraint equal to the profile digest, with a plan that embeds it; every
   other answer, an unreachable or malformed one included, refuses before spawn (`rlm-containment-unavailable`,
   reason `rlm-profile-unauthorized: ...`). `startServer` always composes it, from the external authority or an injected
-  `rlmProfileAuthority` (tests); a bare hook is not accepted, and with neither it refuses at startup. The decision must be
+  `rlmProfileAuthority` (tests, refused when SEA-Forge governance is also configured: one authority decides admission and launch);
+  a bare hook is not accepted, and with neither it refuses at startup. The decision must be
   a `boundary` allow with exactly one `execution_profile` constraint (any other constraint type refuses) and a SEA ledger
   entry (a 26-character ULID). Policy authors: the launch asks about its OWN target, `workbench.rlm.contained-spawn`
   (`CONTAINED_SPAWN_CAPABILITY`), carrying `claims.execution_profile_digest`; the parent's `rlm.invoke` admission is a
   separate request with no claim. Write the profile rule on the launch target and an ordinary rule on `rlm.invoke`; a rule
   on one never decides the other. The port requests authority before ANY bubblewrap starts (the namespace preflight runs
   after the allow), refuses to launch once disposed, and refuses a spawn whose network exceeds the reach the operator
-  declared for the admitted provider (`declareReach`, called by the server from the registration's `portGovernance`).
+  declared for the admitted provider (carried by `containedRun`, from the registration's `portGovernance`).
   Evidence keeps digests and the decision id only.
   [rlmAdmissionGuard.ts:rlmAdmissionGuard] — only a child admitted by the governed `rlm.invoke` may reach the port: exact input digest, claimed once by one run, started as the parent's agent principal, expiring if unclaimed, never re-armed by a repeat invoke, disarmed if dispatch fails.
 

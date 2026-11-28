@@ -5,14 +5,14 @@
 //   bun scripts/contained-profile.ts --config port-config.json --spec spawn-spec.json [--json]
 //
 // port-config.json is a ContainedStdioPortConfig (launcher and executables with sha256 pins, workspaceRoot,
-// writableRoots, optional hostSocket/ceilings/envAllowlist/runtimeRoots); spawn-spec.json is the StdioSpawnSpec the
+// writableRoots, optional hostSocket/ceilings/runtimeRoots, and envAllowlist with its envValuePatterns); spawn-spec.json is the StdioSpawnSpec the
 // provider will use (argv, cwd inside the workspace, env, restrictions). The digest is identical across runs,
 // workspaces, port instances and host restarts for the same configuration. It reads and hashes the pinned files, so run
 // it on the host that will launch (the launcher is executed once, with --version, after its path checks).
 import { readFileSync } from "node:fs";
 import type { StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 import type { ContainedStdioPortConfig } from "../src/capabilities/containedLaunch.ts";
-import { containedStdioSpawnPort } from "../src/capabilities/containedStdioPort.ts";
+import { computeExecutionProfile } from "../src/capabilities/containedProfile.ts";
 
 const args = process.argv.slice(2);
 const opt = (name: string): string | undefined => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
@@ -26,7 +26,7 @@ if (!configPath || !specPath) {
 try {
   const config = JSON.parse(readFileSync(configPath, "utf8")) as ContainedStdioPortConfig;
   const spec = JSON.parse(readFileSync(specPath, "utf8")) as StdioSpawnSpec;
-  const { profile, digest } = await containedStdioSpawnPort(config).executionProfile(spec);
+  const { profile, digest } = await computeExecutionProfile(config, spec);
   if (args.includes("--json")) console.log(JSON.stringify({ executionProfileDigest: digest, profile }, null, 2));
   else console.log(digest);
 } catch (error) {

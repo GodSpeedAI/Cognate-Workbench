@@ -48,6 +48,7 @@ import { expertModelGenerateComponent, type ExpertModelGenerateOptions } from ".
 import { containedStdioSpawnPort } from "./capabilities/containedStdioPort.ts";
 import type { ContainedStdioPortConfig } from "./capabilities/containedLaunch.ts";
 import { rlmAdmissionGuard } from "./capabilities/rlmAdmissionGuard.ts";
+import { containedRun } from "./capabilities/containedRunContext.ts";
 import { profileAuthorize, type ProfileAuthority, type ProfileAuthorization } from "./capabilities/containedProfileAuthority.ts";
 import { containedWorkspaceComponent, validateContainmentConfig, type ContainmentConfig } from "./capabilities/containedWorkspace.ts";
 import { runtimeExecutionComponent, RUNTIME_EXECUTION_INSPECT } from "./capabilities/runtimeExecution.ts";
@@ -554,6 +555,11 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
   if (externalAuthority && executionPosture !== "contained") {
     throw new Error("SEA-Forge governance requires COGNATE_EXECUTION_POSTURE=contained: under uncontained-local an agent could reach the SEA-Forge socket and approve its own escalation");
   }
+  // One authority decides both the parent's admission and the contained launch: an injected profile authority beside configured SEA-Forge
+  // governance would let a launch be decided by a different client or world than the admission it follows (review finding 6).
+  if (externalAuthority && options.rlmProfileAuthority) {
+    throw new Error("rlmProfileAuthority is refused while SEA-Forge governance is configured: one authority must decide both the admission and the launch");
+  }
   // P03: settlement needs SEA-Forge to settle and host containment to run the proof; no partial setup.
   const realitytrace = options.realitytrace === null ? undefined : options.realitytrace ?? realityTraceFromEnv(process.env);
   if (realitytrace && !externalAuthority) throw new Error("governed settlement (COGNATE_REALITYTRACE_*) requires COGNATE_GOVERNANCE=sea-forge");
@@ -831,12 +837,12 @@ export async function startServer(options: ServerOptions): Promise<AppServer> {
     agents: [agentConfigAgent, capabilityAwareCoding, agentHarnessAgent, agentCognitiveAgent, createAgentExpert(capabilityAwareCoding), (() => {
       const agent = createRlmAgent({ registry: rlmRegistry, ...(rlmSpawnPort ? { spawnPort: rlmSpawnPort } : {}) });
       if (!rlmSpawnPort || !rlmGuard) return agent;
-      // M9: before the child runs, bind the port to the reach the OPERATOR declared for the admitted provider (never the provider's own facts).
+      // M9: the admitted child runs inside a context that carries ITS run id and the reach the OPERATOR declared for its provider
+      // (never the provider's own facts). The port reads both from here, not from the arguments a provider passes to spawn.
       const bound = { ...agent, async run(input: Parameters<typeof agent.run>[0], context: Parameters<typeof agent.run>[1]) {
         const providerId = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).providerId : undefined;
         const reach = typeof providerId === "string" ? rlmRegistry.get(providerId)?.portGovernance?.reach.network : undefined;
-        rlmSpawnPort.declareReach(context.runId, reach === "host-mediated" ? "host-socket" : "none");
-        return agent.run(input, context);
+        return containedRun.run({ runId: context.runId, reach: reach === "host-mediated" ? "host-socket" : "none" }, () => agent.run(input, context));
       } };
       return rlmGuard.wrap(bound);
     })()],

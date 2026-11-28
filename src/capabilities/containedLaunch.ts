@@ -7,10 +7,11 @@
 // Everything here is host-owned and pure of side effects except `hashFile`/`realpath` reads. Nothing
 // is taken from a request except the spec the port validates against trusted host configuration.
 import { createHash, createHmac } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import { noUnixSocketFilter } from "./containedSeccomp.ts";
+import { compileEnvPattern, matchEnvPattern, type CompiledEnvPattern } from "./envPattern.ts";
 import { RlmRefusedError } from "@godspeedai/cognate-runtime-bun";
 import type { RlmRefusalCode, StdioSpawnSpec } from "@godspeedai/cognate-runtime-api";
 
@@ -49,8 +50,8 @@ export interface ContainedStdioPortConfig {
   readonly runtimeRoots?: readonly string[];
   /** Environment names a spec may set. Everything else is refused. Each name must have a value pattern in `envValuePatterns`. */
   readonly envAllowlist?: readonly string[];
-  /** Per allowlisted name, the anchored regex (`^...$`, at most 200 characters) its value must match; values are also capped
-   *  at 256 characters. The pattern is part of the execution profile, so an operator approves WHICH values may be set, not
+  /** Per allowlisted name, the pattern its value must match, in the restricted grammar of envPattern.ts (implicitly anchored,
+   *  no groups or alternation, matched in linear time); values are also capped at 256 characters. The pattern is part of the execution profile, so an operator approves WHICH values may be set, not
    *  only which names. A name that selects code (an agent path, a config file) can then only ever name what was approved. */
   readonly envValuePatterns?: Readonly<Record<string, string>>;
   /** The one host-owned unix socket the sandbox may reach (the #115 metering proxy); network is otherwise unshared. */
@@ -124,8 +125,9 @@ export interface ExecutionProfile {
   readonly flagTemplate: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly envAllowlist: readonly string[];
-  /** The value pattern of each allowlisted environment name. */
+  /** The value pattern of each allowlisted environment name (grammar: envPattern.ts, linear-time matching). */
   readonly envPatterns: Readonly<Record<string, string>>;
+  readonly envPatternGrammar: "linear-v1";
   /** The seccomp filter loaded into the sandbox (id and digest of its bytes), or null when none applies (egress profiles). */
   readonly seccomp: { readonly id: string; readonly sha256: string } | null;
 }
@@ -258,9 +260,14 @@ export function validateConfig(config: ContainedStdioPortConfig): void {
   for (const [key, value] of Object.entries(ceilings)) if (!Number.isSafeInteger(value) || value < 1) throw new Error(`contained port: ceiling ${key} must be a positive integer`);
 }
 
-/** Longest env value, and longest pattern source, the port accepts. */
+/** Longest env value the port accepts (patterns have their own grammar and limits: envPattern.ts). */
 const MAX_ENV_VALUE = 256;
-const MAX_ENV_PATTERN = 200;
+const compiledPatterns = new Map<string, CompiledEnvPattern>();
+const patternFor = (source: string): CompiledEnvPattern => {
+  let compiled = compiledPatterns.get(source);
+  if (!compiled) { compiled = compileEnvPattern(source); if (compiledPatterns.size > 256) compiledPatterns.clear(); compiledPatterns.set(source, compiled); }
+  return compiled;
+};
 
 function validateEnvPatterns(config: ContainedStdioPortConfig): void {
   const allowed = new Set(config.envAllowlist ?? []);
@@ -268,26 +275,39 @@ function validateEnvPatterns(config: ContainedStdioPortConfig): void {
   for (const name of allowed) {
     const pattern = patterns[name];
     if (typeof pattern !== "string") throw new Error(`contained port: envAllowlist name ${name} needs a value pattern in envValuePatterns`);
-    if (pattern.length > MAX_ENV_PATTERN || !pattern.startsWith("^") || !pattern.endsWith("$") || pattern.endsWith("\\$")) throw new Error(`contained port: the value pattern of ${name} must be an anchored regex (^...$) of at most ${MAX_ENV_PATTERN} characters`);
-    try { new RegExp(pattern); } catch { throw new Error(`contained port: the value pattern of ${name} is not a valid regular expression`); }
-    // An alternation at the top level would let "^a$|b" match unanchored text: every alternative must be anchored, so refuse any top-level "|".
-    if (hasTopLevelAlternation(pattern)) throw new Error(`contained port: the value pattern of ${name} must not use a top-level alternation; group it: ^(a|b)$`);
+    try { patternFor(pattern); } catch (error) { throw new Error(`contained port: the value pattern of ${name} is refused: ${error instanceof Error ? error.message : String(error)}`); }
   }
   for (const name of Object.keys(patterns)) if (!allowed.has(name)) throw new Error(`contained port: envValuePatterns names ${name}, which is not allowlisted`);
 }
 
-function hasTopLevelAlternation(pattern: string): boolean {
-  let depth = 0; let inClass = false;
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i]!;
-    if (c === "\\") { i += 1; continue; }
-    if (inClass) { if (c === "]") inClass = false; continue; }
-    if (c === "[") inClass = true;
-    else if (c === "(") depth += 1;
-    else if (c === ")") depth -= 1;
-    else if (c === "|" && depth === 0) return true;
-  }
-  return false;
+/**
+ * Run the pinned launcher's `--version` once, after the same path and digest checks the port applies before it executes the launcher
+ * for any reason (review F9: the version is measured when the port is built, never per spawn). The launcher is executed through the
+ * descriptor it was hashed from. Synchronous so a port can measure at construction.
+ */
+export function measureLauncherVersionSync(config: ContainedStdioPortConfig): string {
+  const code = "rlm-containment-unavailable" as const;
+  validateConfig(config);
+  let path: string;
+  try { path = realpathSync(config.launcher.path); if (!statSync(path).isFile()) throw new Error("not a regular file"); } catch { throw refuse(code, `launcher ${config.launcher.path} is missing or not a regular file`); }
+  let workspace = config.workspaceRoot;
+  try { workspace = realpathSync(config.workspaceRoot); } catch { /* reported by the planner */ }
+  const writable = [workspace, ...config.writableRoots.map((root) => { try { return realpathSync(root); } catch { return root; } })];
+  if (writable.some((root) => inside(root, path))) throw refuse(code, "the launcher must be outside every writable root");
+  assertTrustedPath(path, "launcher", code, false);
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); } catch { throw refuse(code, `bubblewrap launcher ${config.launcher.path} is missing`); }
+  try {
+    const info = fstatSync(fd); const at = lstatSync(path);
+    if (info.dev !== at.dev || info.ino !== at.ino) throw refuse(code, "the launcher changed while it was being opened");
+    if (createHash("sha256").update(readFileSync(fd)).digest("hex") !== config.launcher.sha256) throw refuse(code, "the launcher digest does not match the host pin");
+    const result = Bun.spawnSync([`/proc/${process.pid}/fd/${fd}`, "--version"], { stdout: "pipe", stderr: "pipe", env: {} });
+    const version = result.stdout.toString().trim().replace(/^bubblewrap\s+/, "");
+    if (result.exitCode !== 0 || !/^\d+\.\d+\.\d+/.test(version)) throw refuse(code, "the launcher did not report a bubblewrap version");
+    const parts = version.split(".").map((p) => Number.parseInt(p, 10));
+    if (!(config.launcherPatchedAttested === true || parts[0]! > 0 || parts[1]! >= 12)) throw refuse(code, `bubblewrap ${version} predates the CVE-2026-87766 fix and is not attested as patched`);
+    return version;
+  } finally { try { closeSync(fd); } catch { /* closed */ } }
 }
 
 export function resolveCeilings(config: ContainedStdioPortConfig): ContainedCeilings {
@@ -478,7 +498,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
   for (const [name, value] of Object.entries(spec.env)) {
     if (!allowlist.includes(name)) throw refuse("rlm-containment-unavailable", `environment variable ${name} is not in the host allowlist`);
     if (typeof value !== "string" || value.includes("\0")) throw refuse("rlm-containment-unavailable", `environment variable ${name} has an invalid value`);
-    if (value.length > MAX_ENV_VALUE || !new RegExp(config.envValuePatterns![name]!).test(value)) throw refuse("rlm-containment-unavailable", `environment variable ${name} has a value outside the pattern the operator approved for it`);
+    if (value.length > MAX_ENV_VALUE || !matchEnvPattern(patternFor(config.envValuePatterns![name]!), value).matched) throw refuse("rlm-containment-unavailable", `environment variable ${name} has a value outside the pattern the operator approved for it`);
     userEnv[name] = value;
   }
   const envPatterns: Record<string, string> = Object.fromEntries(allowlist.map((name) => [name, config.envValuePatterns![name]!]));
@@ -534,6 +554,7 @@ export async function buildLaunchPlan(input: BuildPlanInput): Promise<{ plan: La
     env: fixedEnv,
     envAllowlist: allowlist,
     envPatterns,
+    envPatternGrammar: "linear-v1",
     seccomp: seccomp ? { id: seccomp.id, sha256: seccomp.sha256 } : null,
   };
   const profileDigest = executionProfileDigest(profile);
